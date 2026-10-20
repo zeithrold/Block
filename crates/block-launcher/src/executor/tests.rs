@@ -84,9 +84,10 @@ fn concurrent_shared_runtime_publication_never_replaces_an_open_binary() -> anyh
     })?;
     let mut running_binary = fs::File::open(&destination)?;
     // A subsequent preparer must preserve the published binary even if the
-    // object pathname was replaced while this process still has the view open.
+    // object pathname changed while this process still has the view open.
+    // Integrity validation rejects the changed source without replacing the binary.
     fs::write(&source, vec![0xa5; bytes.len()])?;
-    copy_immutable(&source, &destination, true)?;
+    assert!(copy_immutable(&source, &destination, true).is_err());
     let mut opened_bytes = Vec::new();
     running_binary.read_to_end(&mut opened_bytes)?;
     assert_eq!(opened_bytes, bytes);
@@ -329,5 +330,104 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
         Some(super::ExecutionEvent::Exited { code: None })
     ));
     drop(events);
+    Ok(())
+}
+
+#[test]
+fn same_size_view_corruption_is_detected_without_changing_either_file() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let source = root.path().join("verified");
+    let view = root.path().join("view");
+    fs::write(&source, b"original")?;
+    fs::write(&view, b"tampered")?;
+    assert!(copy_immutable(&source, &view, false).is_err());
+    assert_eq!(fs::read(&source)?, b"original");
+    assert_eq!(fs::read(&view)?, b"tampered");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_logs()
+-> anyhow::Result<()> {
+    use crate::{
+        catalog::GameDirectoryGuard,
+        launch::{LaunchExecutor, LaunchPlan},
+        session::GameSession,
+    };
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    let store_directory = tempfile::tempdir()?;
+    let root = store_directory.path().canonicalize()?;
+    let mutable = tempfile::tempdir()?;
+    let game = mutable.path().canonicalize()?;
+    let java = root.join("fake-java");
+    fs::write(
+        &java,
+        "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$BLOCK_TEST_RENDERER\" \"$2\"\nexit 0\n",
+    )?;
+    super::set_executable(&java, true)?;
+    let mut plan = plan(Vec::new());
+    plan.command.java = JavaExecutable::Local { path: java };
+    plan.command.game_args = vec!["${auth_access_token}".into()];
+    let prepared = super::PreparedInstance {
+        plan,
+        root: root.clone(),
+        run_id: "resolved-test".into(),
+        _lock: fs::File::create(root.join("lock"))?,
+    };
+    let session = GameSession {
+        username: "Player".into(),
+        uuid: "123456781234123412341234567890ab".into(),
+        access_token: "synthetic-sensitive-access-token".into(),
+        user_type: "msa".into(),
+        xuid: String::new(),
+        client_id: String::new(),
+    };
+    let directory = GameDirectoryGuard::acquire(&game)?;
+    let invocation = LaunchPlan::resolve(
+        prepared,
+        &session,
+        directory,
+        BTreeMap::from([("BLOCK_TEST_RENDERER".into(), "software-test".into())]),
+    )?;
+    assert_eq!(invocation.preview().cwd, game);
+    assert!(!format!("{invocation:?}").contains("synthetic-sensitive-access-token"));
+    let lock_was_held = Arc::new(AtomicBool::new(false));
+    let observed = lock_was_held.clone();
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let sink = captured.clone();
+    let locked_directory = game.clone();
+    let status = LaunchExecutor::run(
+        invocation,
+        Arc::new(move |event| {
+            if matches!(event, super::ExecutionEvent::Started { .. }) {
+                observed.store(
+                    GameDirectoryGuard::acquire(&locked_directory).is_err(),
+                    Ordering::SeqCst,
+                );
+            }
+            if let Ok(mut events) = sink.lock() {
+                events.push(event);
+            }
+        }),
+        &CancellationToken::new(),
+    )
+    .await?;
+    assert_eq!(status, Some(0));
+    assert!(lock_was_held.load(Ordering::SeqCst));
+    assert!(GameDirectoryGuard::acquire(&game).is_ok());
+    let log = fs::read_to_string(game.join(".block-runs/resolved-test/stdout.log"))?;
+    assert!(
+        log.contains(
+            game.to_str()
+                .ok_or_else(|| anyhow::anyhow!("nonUTF8 path"))?
+        )
+    );
+    assert!(log.contains("software-test"));
+    assert!(log.contains("<redacted>"));
+    assert!(!log.contains("synthetic-sensitive-access-token"));
     Ok(())
 }

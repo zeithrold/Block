@@ -23,6 +23,9 @@ fn main() {
     Application::new().run(move |cx: &mut App| {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        // GPUI's Linux backends stop their loop when the final window is dropped.
+        // Calling quit inside their close callback reborrows the active X11 client.
+        #[cfg(not(target_os = "linux"))]
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

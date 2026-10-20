@@ -78,3 +78,35 @@ impl SessionProvider for OfflineSession {
         })
     }
 }
+
+impl GameSession {
+    /// Validate the final identity independently of installation metadata.
+    /// # Errors
+    /// Rejects unusable or inconsistent player/session fields.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        OfflineSession::Offline {
+            username: self.username.clone(),
+        }
+        .validate()?;
+        ensure!(
+            self.uuid.len() == 32 && self.uuid.bytes().all(|b| b.is_ascii_hexdigit()),
+            "invalid player UUID"
+        );
+        ensure!(
+            !self.access_token.is_empty() && !self.access_token.chars().any(char::is_control),
+            "invalid game access token"
+        );
+        ensure!(
+            self.user_type == "msa" || self.user_type == "mojang",
+            "unsupported game identity type"
+        );
+        Ok(())
+    }
+}
+
+impl SessionProvider for GameSession {
+    fn session(&self) -> anyhow::Result<GameSession> {
+        self.validate()?;
+        Ok(self.clone())
+    }
+}

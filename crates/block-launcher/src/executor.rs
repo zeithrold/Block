@@ -1,5 +1,6 @@
 use std::{
     fmt, fs, io,
+    io::Read as _,
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -68,6 +69,26 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PreparedInstance> {
+        self.prepare_inner(plan, cancel, false).await
+    }
+
+    /// Explicitly repair declared immutable views, retaining corrupt bytes for diagnosis.
+    /// # Errors
+    /// Fails on locks, invalid metadata, unsafe paths or unavailable verified resources.
+    pub async fn prepare_repair(
+        &self,
+        plan: ExecutionPlan,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<PreparedInstance> {
+        self.prepare_inner(plan, cancel, true).await
+    }
+
+    async fn prepare_inner(
+        &self,
+        plan: ExecutionPlan,
+        cancel: &CancellationToken,
+        repair: bool,
+    ) -> anyhow::Result<PreparedInstance> {
         ensure!(
             plan.schema_version == 1,
             "unsupported execution-plan schema"
@@ -98,24 +119,7 @@ impl Executor {
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
         });
-        let run_id = uuid::Uuid::new_v4().to_string();
-        let materialization = (
-            plan.clone(),
-            root.clone(),
-            run_id.clone(),
-            self.store.clone(),
-            cancel.clone(),
-        );
-        tokio::task::spawn_blocking(move || {
-            materialize(
-                &materialization.0,
-                &materialization.1,
-                &materialization.2,
-                &materialization.3,
-                &materialization.4,
-            )
-        })
-        .await??;
+        let run_id = materialize_async(&plan, &root, &self.store, cancel, repair).await?;
         if let JavaExecutable::Managed { path } = &plan.command.java {
             probe_java(&confined_path(&root, path)?, &plan).await?;
         }
@@ -159,48 +163,94 @@ impl Executor {
         )?;
         ensure_write_path(&prepared.root, &logs)?;
         tokio::fs::create_dir_all(&logs).await?;
-        tokio::fs::write(
-            logs.join("command.json"),
-            serde_json::to_vec_pretty(&command.preview())?,
-        )
-        .await?;
-        let mut process = command.process();
-        process
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        let mut child = process.spawn().context("failed to spawn Java")?;
-        (self.events)(ExecutionEvent::Started {
-            pid: child.id().context("Java process has no PID")?,
-        });
-        let stdout = child.stdout.take().context("missing game stdout")?;
-        let stderr = child.stderr.take().context("missing game stderr")?;
-        let out = tokio::spawn(drain(
-            stdout,
-            logs.join("stdout.log"),
-            command.clone(),
-            self.events.clone(),
-            false,
-        ));
-        let err = tokio::spawn(drain(
-            stderr,
-            logs.join("stderr.log"),
-            command,
-            self.events.clone(),
-            true,
-        ));
-        let status = tokio::select! {
-            status = child.wait() => status?,
-            () = cancel.cancelled() => { child.kill().await?; child.wait().await? },
-        };
-        out.await??;
-        err.await??;
-        (self.events)(ExecutionEvent::Exited {
-            code: status.code(),
-        });
-        Ok(status.code())
+        supervise(command, logs, self.events.clone(), cancel).await
     }
+}
+
+async fn materialize_async(
+    plan: &ExecutionPlan,
+    root: &Path,
+    store: &Store,
+    cancel: &CancellationToken,
+    repair: bool,
+) -> anyhow::Result<String> {
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let materialization = (
+        plan.clone(),
+        root.to_owned(),
+        run_id.clone(),
+        store.clone(),
+        cancel.clone(),
+        repair,
+    );
+    tokio::task::spawn_blocking(move || {
+        if materialization.5 {
+            crate::repair::quarantine_corrupt_copies(
+                &materialization.3,
+                &materialization.0,
+                &materialization.2,
+                &materialization.4,
+            )?;
+        }
+        materialize(
+            &materialization.0,
+            &materialization.1,
+            &materialization.2,
+            &materialization.3,
+            &materialization.4,
+        )
+    })
+    .await??;
+    Ok(run_id)
+}
+
+pub(crate) async fn supervise(
+    command: JavaCommand,
+    logs: PathBuf,
+    events: ExecutionSink,
+    cancel: &CancellationToken,
+) -> anyhow::Result<Option<i32>> {
+    tokio::fs::write(
+        logs.join("command.json"),
+        serde_json::to_vec_pretty(&command.preview())?,
+    )
+    .await?;
+    let mut process = command.process();
+    process
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = process.spawn().context("failed to spawn Java")?;
+    (events)(ExecutionEvent::Started {
+        pid: child.id().context("Java process has no PID")?,
+    });
+    let stdout = child.stdout.take().context("missing game stdout")?;
+    let stderr = child.stderr.take().context("missing game stderr")?;
+    let out = tokio::spawn(drain(
+        stdout,
+        logs.join("stdout.log"),
+        command.clone(),
+        events.clone(),
+        false,
+    ));
+    let err = tokio::spawn(drain(
+        stderr,
+        logs.join("stderr.log"),
+        command,
+        events.clone(),
+        true,
+    ));
+    let status = tokio::select! {
+        status = child.wait() => status?,
+        () = cancel.cancelled() => { child.kill().await?; child.wait().await? },
+    };
+    out.await??;
+    err.await??;
+    (events)(ExecutionEvent::Exited {
+        code: status.code(),
+    });
+    Ok(status.code())
 }
 
 /// Join an untrusted portable relative path, rejecting Windows escape syntax even on Unix.
@@ -221,7 +271,7 @@ pub fn confined_path(root: &Path, relative: &str) -> anyhow::Result<PathBuf> {
     Ok(root.join(path))
 }
 
-fn ensure_write_path(root: &Path, path: &Path) -> anyhow::Result<()> {
+pub(crate) fn ensure_write_path(root: &Path, path: &Path) -> anyhow::Result<()> {
     let relative = path.strip_prefix(root)?;
     let mut current = root.to_owned();
     for component in relative.components() {
@@ -305,8 +355,9 @@ fn copy_immutable(source: &Path, destination: &Path, executable: bool) -> anyhow
     let expected_size = fs::metadata(source)?.len();
     if destination.exists() {
         ensure!(
-            fs::metadata(destination)?.len() == expected_size,
-            "immutable view is corrupt; remove it before preparing again: {}",
+            fs::metadata(destination)?.len() == expected_size
+                && identical_files(source, destination)?,
+            "immutable view is corrupt; choose Repair before playing: {}",
             destination.display()
         );
         return Ok(());
@@ -327,12 +378,37 @@ fn copy_immutable(source: &Path, destination: &Path, executable: bool) -> anyhow
         Ok(_) => Ok(()),
         Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
             ensure!(
-                fs::metadata(destination)?.len() == expected_size,
-                "concurrent immutable view has an incorrect size"
+                fs::metadata(destination)?.len() == expected_size
+                    && identical_files(source, destination)?,
+                "concurrent immutable view is corrupt; choose Repair"
             );
             Ok(())
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+fn identical_files(left: &Path, right: &Path) -> anyhow::Result<bool> {
+    let mut left = io::BufReader::new(fs::File::open(left)?);
+    let mut right = io::BufReader::new(fs::File::open(right)?);
+    let mut a = vec![0_u8; 65536];
+    let mut b = vec![0_u8; 65536];
+    loop {
+        let count = left.read(&mut a)?;
+        let mut other = 0;
+        while other < count {
+            let read = right.read(&mut b[other..count])?;
+            if read == 0 {
+                return Ok(false);
+            }
+            other += read;
+        }
+        if a[..count] != b[..count] {
+            return Ok(false);
+        }
+        if count == 0 {
+            return Ok(right.read(&mut b[..1])? == 0);
+        }
     }
 }
 

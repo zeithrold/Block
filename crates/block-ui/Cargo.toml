@@ -7,6 +7,9 @@ publish.workspace = true
 [dependencies]
 gpui.workspace = true
 anyhow.workspace = true
+block-auth.workspace = true
+unicode-segmentation.workspace = true
+tempfile.workspace = true
 block-launcher.workspace = true
 directories.workspace = true
 minecraft-manifest.workspace = true

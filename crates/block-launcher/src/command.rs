@@ -32,6 +32,7 @@ pub struct JavaCommand {
     pub cwd: PathBuf,
     arguments: Vec<Argument>,
     secrets: Vec<String>,
+    environment: BTreeMap<String, String>,
 }
 
 impl fmt::Debug for JavaCommand {
@@ -58,7 +59,21 @@ impl JavaCommand {
         run_id: &str,
         provider: &dyn SessionProvider,
     ) -> anyhow::Result<Self> {
+        Self::bind_for_directory(plan, root, run_id, provider, None)
+    }
+
+    /// Resolve mutable game data separately from the shared installation cache.
+    /// # Errors
+    /// Fails on invalid identity, unsupported paths, or missing substitutions.
+    pub fn bind_for_directory(
+        plan: &ExecutionPlan,
+        root: &Path,
+        run_id: &str,
+        provider: &dyn SessionProvider,
+        game_directory: Option<&Path>,
+    ) -> anyhow::Result<Self> {
         let session = provider.session()?;
+        session.validate()?;
         let secrets = if session.access_token == "0" {
             Vec::new()
         } else {
@@ -89,6 +104,16 @@ impl JavaCommand {
                 java_path(confined_path(root, &path)?, plan.target.os)?
                     .to_str()
                     .context("Java requires UTF-8 argument paths")?
+                    .into(),
+            );
+        }
+        if let Some(directory) = game_directory {
+            let directory = java_path(directory.to_owned(), plan.target.os)?;
+            variables.insert(
+                "game_directory".into(),
+                directory
+                    .to_str()
+                    .context("game directory must be UTF-8")?
                     .into(),
             );
         }
@@ -129,9 +154,16 @@ impl JavaCommand {
         };
         Ok(Self {
             program: java_path(program, plan.target.os)?,
-            cwd: java_path(confined_path(root, &template.cwd)?, plan.target.os)?,
+            cwd: java_path(
+                game_directory.map_or_else(
+                    || confined_path(root, &template.cwd),
+                    |path| Ok(path.to_owned()),
+                )?,
+                plan.target.os,
+            )?,
             arguments,
             secrets,
+            environment: BTreeMap::new(),
         })
     }
 
@@ -154,12 +186,35 @@ impl JavaCommand {
         }
     }
 
+    /// Set explicit process-local host overrides on this transient invocation.
+    /// # Errors
+    /// Rejects invalid environment names and values.
+    pub fn set_environment(&mut self, environment: BTreeMap<String, String>) -> anyhow::Result<()> {
+        ensure!(
+            environment.iter().all(|(key, value)| !key.is_empty()
+                && !key.contains(['=', '\0'])
+                && !value.contains('\0')
+                && !key.to_ascii_uppercase().contains("TOKEN")
+                && !key.to_ascii_uppercase().contains("SECRET")),
+            "invalid or credential-bearing game environment override"
+        );
+        self.environment = environment;
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn environment(&self) -> &BTreeMap<String, String> {
+        &self.environment
+    }
+
     #[must_use]
     pub fn process(&self) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.program);
         command
             .current_dir(&self.cwd)
-            .args(self.arguments.iter().map(|arg| &arg.value));
+            .args(self.arguments.iter().map(|arg| &arg.value))
+            .envs(&self.environment)
+            .env_remove("MICROSOFT_CLIENT_SECRET");
         command
     }
 

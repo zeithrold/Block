@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli"]
+members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth"]
 default-members = ["crates/block-app"]
 resolver = "3"
 exclude = ["vendor/xattr"]
@@ -13,6 +13,8 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+block-auth = { path = "crates/block-auth" }
+unicode-segmentation = "1"
 block-ui = { path = "crates/block-ui" }
 gpui = "0.2.2"
 anyhow = "1"

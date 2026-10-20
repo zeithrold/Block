@@ -242,7 +242,7 @@ fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> an
         fn session(&self) -> anyhow::Result<block_launcher::session::GameSession> {
             Ok(block_launcher::session::GameSession {
                 username: "Player".into(),
-                uuid: "uuid".into(),
+                uuid: "123456781234123412341234567890ab".into(),
                 access_token: "SENSITIVE_SESSION_TOKEN".into(),
                 user_type: "msa".into(),
                 xuid: "0".into(),
