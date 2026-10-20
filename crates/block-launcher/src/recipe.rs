@@ -57,6 +57,9 @@ pub enum Compatibility {
     Official,
     /// Replace only selected LWJGL 3 Linux native artifacts with matching ARM64 classifiers.
     LinuxArm64Lwjgl3,
+    /// Replace the affected macOS JNA core/platform pair together with JNA 5.13.0.
+    #[serde(rename = "macos_jna_5_13")]
+    MacosJna513,
 }
 
 #[derive(Debug, Clone)]

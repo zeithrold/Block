@@ -100,7 +100,7 @@ fn all_919_versions_compile_for_the_three_x64_os_families() -> anyhow::Result<()
                     .ok_or_else(|| anyhow::anyhow!("missing asset fixture"))?
                     .clone(),
                 runtime: None,
-                native_overrides: BTreeMap::new(),
+                library_overrides: BTreeMap::new(),
             };
             let plan = compile(&recipe, &metadata)
                 .map_err(|error| anyhow::anyhow!("{} / {os:?}: {error:#}", entry.id))?;
@@ -163,7 +163,7 @@ fn saved_plans_bind_identity_late_and_preserve_argument_boundaries() -> anyhow::
             map_to_resources: None,
         },
         runtime: None,
-        native_overrides: BTreeMap::new(),
+        library_overrides: BTreeMap::new(),
     };
     let plan = compile(&recipe, &metadata)?;
     let serialized = serde_json::to_string(&plan)?;
@@ -263,7 +263,7 @@ fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> an
             map_to_resources: None,
         },
         runtime: None,
-        native_overrides: BTreeMap::new(),
+        library_overrides: BTreeMap::new(),
     };
     let mut plan = compile(&recipe()?, &metadata)?;
     plan.command.game_args = vec!["${auth_session}".into()];

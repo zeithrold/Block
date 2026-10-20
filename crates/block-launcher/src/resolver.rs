@@ -90,12 +90,18 @@ impl RecipeParser for LocalManifestParser {
 }
 
 #[derive(Debug, Clone)]
+pub struct LibraryOverride {
+    pub resource: Resource,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ResolvedMetadata {
     pub parsed: ParsedRecipe,
     pub target: Target,
     pub assets: AssetObjects,
     pub runtime: Option<(String, RuntimeManifest)>,
-    pub native_overrides: BTreeMap<String, Resource>,
+    pub library_overrides: BTreeMap<String, LibraryOverride>,
 }
 
 /// Resolve typed metadata before compiling a deterministic resource/command plan.
@@ -103,6 +109,17 @@ pub struct ResolvedMetadata {
 /// # Errors
 /// Fails for invalid recipes, unavailable metadata/runtimes, or unsupported compatibility.
 pub async fn resolve(
+    recipe: &LaunchRecipe,
+    context: &ResolveContext,
+) -> anyhow::Result<ResolvedMetadata> {
+    tokio::select! {
+        biased;
+        () = context.cancel.cancelled() => anyhow::bail!("resolution cancelled"),
+        result = resolve_inner(recipe, context) => result,
+    }
+}
+
+async fn resolve_inner(
     recipe: &LaunchRecipe,
     context: &ResolveContext,
 ) -> anyhow::Result<ResolvedMetadata> {
@@ -147,26 +164,38 @@ pub async fn resolve(
     } else {
         None
     };
-    let native_overrides = native_overrides(recipe, &parsed, &target, context).await?;
+    let library_overrides = compatibility_overrides(recipe, &parsed, &target, context).await?;
     Ok(ResolvedMetadata {
         parsed,
         target,
         assets,
         runtime,
-        native_overrides,
+        library_overrides,
     })
 }
 
-async fn native_overrides(
+async fn compatibility_overrides(
     recipe: &LaunchRecipe,
     parsed: &ParsedRecipe,
     target: &Target,
     context: &ResolveContext,
-) -> anyhow::Result<BTreeMap<String, Resource>> {
-    let mut replacements = BTreeMap::new();
-    if recipe.compatibility != Compatibility::LinuxArm64Lwjgl3 {
-        return Ok(replacements);
+) -> anyhow::Result<BTreeMap<String, LibraryOverride>> {
+    match recipe.compatibility {
+        Compatibility::Official => Ok(BTreeMap::new()),
+        Compatibility::LinuxArm64Lwjgl3 => {
+            linux_native_overrides(recipe, parsed, target, context).await
+        }
+        Compatibility::MacosJna513 => macos_jna_overrides(recipe, parsed, target, context).await,
     }
+}
+
+async fn linux_native_overrides(
+    recipe: &LaunchRecipe,
+    parsed: &ParsedRecipe,
+    target: &Target,
+    context: &ResolveContext,
+) -> anyhow::Result<BTreeMap<String, LibraryOverride>> {
+    let mut replacements = BTreeMap::new();
     ensure!(
         target.os == OperatingSystem::Linux && target.arch == Architecture::Aarch64,
         "linux_arm64_lwjgl3 requires a Linux ARM64 target"
@@ -177,13 +206,17 @@ async fn native_overrides(
         }
         let parts: Vec<_> = library.name.split(':').collect();
         if parts.len() == 4 && parts[0] == "org.lwjgl" && parts[3] == "natives-linux" {
+            let filename = format!("{}-{}-natives-linux-arm64.jar", parts[1], parts[2]);
             let url = format!(
-                "https://repo.maven.apache.org/maven2/org/lwjgl/{}/{}/{}-{}-natives-linux-arm64.jar",
-                parts[1], parts[2], parts[1], parts[2]
+                "https://repo.maven.apache.org/maven2/org/lwjgl/{}/{}/{filename}",
+                parts[1], parts[2]
             );
             replacements.insert(
                 library.name.clone(),
-                context.store.describe_maven(&url).await?,
+                LibraryOverride {
+                    resource: context.store.describe_maven(&url).await?,
+                    filename,
+                },
             );
         }
     }
@@ -191,6 +224,64 @@ async fn native_overrides(
         !replacements.is_empty(),
         "this version has no replaceable LWJGL 3 Linux classifiers"
     );
+    Ok(replacements)
+}
+
+async fn macos_jna_overrides(
+    recipe: &LaunchRecipe,
+    parsed: &ParsedRecipe,
+    target: &Target,
+    context: &ResolveContext,
+) -> anyhow::Result<BTreeMap<String, LibraryOverride>> {
+    ensure!(
+        target.os == OperatingSystem::Macos,
+        "macos_jna_5_13 requires a macOS target"
+    );
+    let mut originals = BTreeMap::new();
+    for library in &parsed.manifest.libraries {
+        if !crate::rules::allowed(library.rules.as_deref(), target, &recipe.features)? {
+            continue;
+        }
+        let mut parts = library.name.split(':');
+        if let (
+            Some("net.java.dev.jna"),
+            Some(artifact @ ("jna" | "jna-platform")),
+            Some(version),
+            None,
+        ) = (parts.next(), parts.next(), parts.next(), parts.next())
+        {
+            ensure!(
+                ["5.8.0", "5.9.0", "5.10.0", "5.11.0", "5.12.0", "5.12.1"].contains(&version),
+                "macos_jna_5_13 only supports the affected JNA 5.8.0 through 5.12.1 releases"
+            );
+            ensure!(
+                originals
+                    .insert(artifact, (&library.name, version))
+                    .is_none(),
+                "multiple selected versions of {artifact}"
+            );
+        }
+    }
+    ensure!(
+        originals.len() == 2
+            && originals.get("jna").map(|(_, version)| version)
+                == originals.get("jna-platform").map(|(_, version)| version),
+        "macos_jna_5_13 requires a matching affected JNA core/platform pair"
+    );
+    let mut replacements = BTreeMap::new();
+    for (artifact, (original, _)) in originals {
+        let filename = format!("{artifact}-5.13.0.jar");
+        let url = format!(
+            "https://repo.maven.apache.org/maven2/net/java/dev/jna/{artifact}/5.13.0/{filename}"
+        );
+        replacements.insert(
+            original.clone(),
+            LibraryOverride {
+                resource: context.store.describe_maven(&url).await?,
+                filename,
+            },
+        );
+    }
     Ok(replacements)
 }
 

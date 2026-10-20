@@ -27,8 +27,8 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
     reason = "The parent view needs these types, but engine internals are not public API."
 )]
 pub(crate) enum Message {
-    Versions(Vec<VersionEntry>),
-    Recipe(LaunchRecipe),
+    Versions(Result<Vec<VersionEntry>, String>),
+    Recipe(Result<LaunchRecipe, String>),
     Status(String),
     Progress(usize),
     Log(String),
@@ -90,18 +90,11 @@ impl Engine {
                 Ok::<_, anyhow::Error>(index.versions)
             }
             .await;
-            match result {
-                Ok(versions) => {
-                    let _ = sender.send(Message::Versions(versions)).await;
-                }
-                Err(error) => {
-                    let _ = sender
-                        .send(Message::Status(format!(
-                            "Version list unavailable: {error:#}"
-                        )))
-                        .await;
-                }
-            }
+            let _ = sender
+                .send(Message::Versions(
+                    result.map_err(|error| format!("{error:#}")),
+                ))
+                .await;
         });
     }
 
@@ -113,16 +106,11 @@ impl Engine {
                 Ok::<_, anyhow::Error>(recipe)
             }
             .await;
-            match result {
-                Ok(recipe) => {
-                    let _ = sender.send(Message::Recipe(recipe)).await;
-                }
-                Err(error) => {
-                    let _ = sender
-                        .send(Message::Status(format!("Invalid recipe: {error:#}")))
-                        .await;
-                }
-            }
+            let _ = sender
+                .send(Message::Recipe(
+                    result.map_err(|error| format!("{error:#}")),
+                ))
+                .await;
         });
     }
 

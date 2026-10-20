@@ -9,6 +9,9 @@ use serde::Serialize;
 
 const RUN_ID_TOKEN: &str = "${run_id}";
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     executor::confined_path,
     plan::{ExecutionPlan, JavaExecutable},
@@ -83,7 +86,7 @@ impl JavaCommand {
             let path = path.replace(RUN_ID_TOKEN, run_id);
             variables.insert(
                 name.clone(),
-                confined_path(root, &path)?
+                java_path(confined_path(root, &path)?, plan.target.os)?
                     .to_str()
                     .context("Java requires UTF-8 argument paths")?
                     .into(),
@@ -98,7 +101,7 @@ impl JavaCommand {
             .classpath
             .iter()
             .map(|path| {
-                Ok(confined_path(root, path)?
+                Ok(java_path(confined_path(root, path)?, plan.target.os)?
                     .to_str()
                     .context("classpath is not UTF-8")?
                     .to_owned())
@@ -125,8 +128,8 @@ impl JavaCommand {
                 .with_context(|| format!("Java not found: {}", path.display()))?,
         };
         Ok(Self {
-            program,
-            cwd: confined_path(root, &template.cwd)?,
+            program: java_path(program, plan.target.os)?,
+            cwd: java_path(confined_path(root, &template.cwd)?, plan.target.os)?,
             arguments,
             secrets,
         })
@@ -175,6 +178,30 @@ impl JavaCommand {
         }
         line
     }
+}
+
+fn java_path(path: PathBuf, os: OperatingSystem) -> anyhow::Result<PathBuf> {
+    if os != OperatingSystem::Windows {
+        return Ok(path);
+    }
+    let value = path.to_str().context("Java requires UTF-8 Windows paths")?;
+    Ok(windows_java_path(value).into())
+}
+
+// Rust canonical paths use the Win32 verbatim namespace. Java's class loader
+// treats its question mark as URL syntax and silently skips these JAR paths.
+// Keep canonical paths for filesystem confinement; adapt only the Java command.
+fn windows_java_path(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    if let Some(drive) = path.strip_prefix(r"\\?\")
+        && drive.as_bytes().get(1) == Some(&b':')
+        && drive.as_bytes().get(2) == Some(&b'\\')
+    {
+        return drive.to_owned();
+    }
+    path.to_owned()
 }
 
 fn substitute(template: &str, variables: &BTreeMap<String, String>) -> anyhow::Result<Argument> {

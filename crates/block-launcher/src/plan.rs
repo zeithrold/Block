@@ -128,28 +128,28 @@ fn plan_libraries(
                 && library.name.ends_with(":natives-linux")
             {
                 ensure!(
-                    metadata.native_overrides.contains_key(&library.name),
+                    metadata.library_overrides.contains_key(&library.name),
                     "Linux ARM64 requires the explicit linux_arm64_lwjgl3 compatibility recipe"
                 );
             }
-            let resource = metadata
-                .native_overrides
-                .get(&library.name)
-                .cloned()
-                .unwrap_or_else(|| Resource {
-                    sha1: artifact.sha1.clone(),
-                    size: artifact.size,
-                    url: artifact.url.clone(),
-                });
-            let path = format!(
-                "{library_root}/{}-{}",
-                resource.sha1,
-                artifact
-                    .path
-                    .rsplit('/')
-                    .next()
-                    .context("empty artifact path")?
-            );
+            let (resource, filename) =
+                if let Some(replacement) = metadata.library_overrides.get(&library.name) {
+                    (replacement.resource.clone(), replacement.filename.as_str())
+                } else {
+                    (
+                        Resource {
+                            sha1: artifact.sha1.clone(),
+                            size: artifact.size,
+                            url: artifact.url.clone(),
+                        },
+                        artifact
+                            .path
+                            .rsplit('/')
+                            .next()
+                            .context("empty artifact path")?,
+                    )
+                };
+            let path = format!("{library_root}/{}-{filename}", resource.sha1);
             add_copy(
                 &mut files.resources,
                 &mut files.actions,

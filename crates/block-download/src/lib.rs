@@ -234,7 +234,8 @@ impl Store {
         loop {
             match fs2::FileExt::try_lock_exclusive(&lock) {
                 Ok(()) => break,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error)
+                    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {}
                 Err(error) => return Err(error.into()),
             }
             tokio::select! { () = cancel.cancelled() => bail!("download cancelled"), () = tokio::time::sleep(Duration::from_millis(50)) => {} }

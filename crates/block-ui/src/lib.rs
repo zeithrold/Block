@@ -67,7 +67,33 @@ pub struct Block {
     logs: VecDeque<String>,
     command: Option<String>,
     show_command: bool,
-    launch_on_load: bool,
+    recipe_load: RecipeLoadState,
+}
+
+/// Keeps a pending recipe distinct from the previously displayed launch input.
+#[derive(Debug, Default)]
+struct RecipeLoadState {
+    launch_after_load: Option<bool>,
+}
+
+impl RecipeLoadState {
+    const fn start(&mut self, busy: bool, launch_after_load: bool) -> bool {
+        if busy || self.is_loading() {
+            return false;
+        }
+        self.launch_after_load = Some(launch_after_load);
+        true
+    }
+
+    const fn is_loading(&self) -> bool {
+        self.launch_after_load.is_some()
+    }
+
+    fn finish(&mut self, success: bool) -> bool {
+        self.launch_after_load
+            .take()
+            .is_some_and(|launch| launch && success)
+    }
 }
 
 impl Drop for Block {
@@ -92,11 +118,7 @@ impl Block {
         let (engine, messages, status) = match Engine::new() {
             Ok((engine, messages)) => {
                 engine.load_versions();
-                (
-                    Some(engine),
-                    Some(messages),
-                    "Ready · loading version catalog".into(),
-                )
+                (Some(engine), Some(messages), "Ready".into())
             }
             Err(error) => (None, None, format!("Engine unavailable: {error:#}")),
         };
@@ -111,10 +133,6 @@ impl Block {
             }
         })
         .detach();
-        let has_startup_recipe = options.recipe.is_some();
-        if let (Some(engine), Some(path)) = (&engine, options.recipe) {
-            engine.load_recipe(path);
-        }
         let mut view = Self {
             recipe: default_recipe(),
             versions: ["1.20.6", "1.20.1", "26.3"]
@@ -136,9 +154,11 @@ impl Block {
             logs: VecDeque::new(),
             command: None,
             show_command: false,
-            launch_on_load: has_startup_recipe && options.launch,
+            recipe_load: RecipeLoadState::default(),
         };
-        if options.launch && !has_startup_recipe {
+        if let Some(path) = options.recipe {
+            view.load_recipe(path, options.launch, cx);
+        } else if options.launch {
             view.launch(cx);
         }
         view
@@ -155,10 +175,13 @@ impl Block {
             return;
         }
         for message in messages {
-            let should_launch = matches!(&message, Message::Recipe(_)) && self.launch_on_load;
+            let should_launch = if let Message::Recipe(result) = &message {
+                self.recipe_load.finish(result.is_ok())
+            } else {
+                false
+            };
             self.apply_message(message);
             if should_launch {
-                self.launch_on_load = false;
                 self.launch(cx);
             }
         }
@@ -167,7 +190,7 @@ impl Block {
 
     fn apply_message(&mut self, message: Message) {
         match message {
-            Message::Versions(versions) => {
+            Message::Versions(Ok(versions)) => {
                 self.versions = versions
                     .into_iter()
                     .map(|entry| VersionRow {
@@ -184,11 +207,15 @@ impl Block {
                     self.scroll
                         .scroll_to_item_strict(self.selected, ScrollStrategy::Center);
                 }
-                if !self.busy {
-                    self.status = "Ready".into();
-                }
             }
-            Message::Recipe(recipe) => {
+            Message::Versions(Err(error)) => {
+                self.push_log(format!("Version list unavailable: {error}"));
+            }
+            Message::Recipe(Err(error)) => {
+                self.status = format!("Invalid recipe: {error}");
+                self.push_log(self.status.clone());
+            }
+            Message::Recipe(Ok(recipe)) => {
                 self.recipe = recipe;
                 self.status = "Recipe loaded · ready".into();
                 self.command = None;
@@ -205,12 +232,7 @@ impl Block {
             Message::Status(status) => self.status = status,
             Message::Progress(count) => self.completed = count,
             Message::Command(command) => self.command = Some(command),
-            Message::Log(line) => {
-                if self.logs.len() == 200 {
-                    self.logs.pop_front();
-                }
-                self.logs.push_back(line);
-            }
+            Message::Log(line) => self.push_log(line),
             Message::Finished(result) => {
                 self.busy = false;
                 self.status = match result {
@@ -218,7 +240,7 @@ impl Block {
                     Ok(code) => format!("Minecraft exited · {code:?}"),
                     Err(_) if self.cancel.is_cancelled() => "Cancelled".into(),
                     Err(error) => {
-                        self.logs.push_back(error.clone());
+                        self.push_log(error.clone());
                         format!("Launch failed: {error}")
                     }
                 };
@@ -226,8 +248,15 @@ impl Block {
         }
     }
 
+    fn push_log(&mut self, line: String) {
+        if self.logs.len() >= 200 {
+            self.logs.pop_front();
+        }
+        self.logs.push_back(line);
+    }
+
     fn launch(&mut self, cx: &mut Context<'_, Self>) {
-        if self.busy {
+        if self.busy || self.recipe_load.is_loading() {
             return;
         }
         if let Some(engine) = &self.engine {
@@ -252,7 +281,7 @@ impl Block {
     }
 
     fn select(&mut self, index: usize, cx: &mut Context<'_, Self>) {
-        if self.busy {
+        if self.busy || self.recipe_load.is_loading() {
             return;
         }
         if let Some(row) = self.versions.get(index) {
@@ -275,8 +304,23 @@ impl Block {
         }
     }
 
+    fn load_recipe(
+        &mut self,
+        path: std::path::PathBuf,
+        launch_after_load: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(engine) = &self.engine
+            && self.recipe_load.start(self.busy, launch_after_load)
+        {
+            engine.load_recipe(path);
+            self.status = "Reading launch recipe".into();
+            cx.notify();
+        }
+    }
+
     fn open_recipe(&self, cx: &Context<'_, Self>) {
-        if self.busy {
+        if self.busy || self.recipe_load.is_loading() {
             return;
         }
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -289,18 +333,16 @@ impl Block {
             Ok(Ok(Some(paths))) => {
                 if let Some(path) = paths.into_iter().next() {
                     let _ = view.update(cx, |view, cx| {
-                        if let Some(engine) = &view.engine {
-                            engine.load_recipe(path);
-                            view.status = "Reading launch recipe".into();
-                            cx.notify();
-                        }
+                        view.load_recipe(path, false, cx);
                     });
                 }
             }
             Ok(Err(error)) => {
                 let _ = view.update(cx, |view, cx| {
-                    view.status = format!("File picker failed: {error}");
-                    cx.notify();
+                    if !view.busy && !view.recipe_load.is_loading() {
+                        view.status = format!("File picker failed: {error}");
+                        cx.notify();
+                    }
                 });
             }
             _ => {}
@@ -406,6 +448,7 @@ impl Block {
 
     fn controls(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         let OfflineSession::Offline { username } = &self.recipe.session;
+        let unavailable = self.busy || self.recipe_load.is_loading();
         let runtime_label = match self.recipe.runtime {
             RuntimeSelection::Managed => "Automatic Java",
             RuntimeSelection::Local { .. } => "Custom Java",
@@ -451,10 +494,16 @@ impl Block {
                             .px_4()
                             .py_3()
                             .rounded_md()
-                            .bg(rgb(if self.busy { 0x0036_4b49 } else { 0x003b_8c72 }))
+                            .bg(rgb(if unavailable {
+                                0x0036_4b49
+                            } else {
+                                0x003b_8c72
+                            }))
                             .cursor_pointer()
                             .on_click(cx.listener(|view, _, _, cx| view.launch(cx)))
-                            .child(if self.busy {
+                            .child(if self.recipe_load.is_loading() {
+                                "Reading recipe…"
+                            } else if self.busy {
                                 "Preparing / running"
                             } else {
                                 "Launch offline"
@@ -618,5 +667,39 @@ fn default_recipe() -> LaunchRecipe {
         memory_mib: 2048,
         jvm_args: Vec::new(),
         features: BTreeMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecipeLoadState;
+
+    #[test]
+    fn pending_recipe_blocks_another_import_and_autolaunches_once_after_success() {
+        let mut state = RecipeLoadState::default();
+        assert!(state.start(false, true));
+        assert!(state.is_loading());
+        assert!(!state.start(false, false));
+        assert!(state.finish(true));
+        assert!(!state.is_loading());
+        assert!(!state.finish(true));
+    }
+
+    #[test]
+    fn failed_startup_recipe_does_not_autolaunch_a_later_manual_import() {
+        let mut state = RecipeLoadState::default();
+        assert!(state.start(false, true));
+        assert!(!state.finish(false));
+        assert!(!state.is_loading());
+        assert!(state.start(false, false));
+        assert!(!state.finish(true));
+    }
+
+    #[test]
+    fn file_picker_result_cannot_start_recipe_loading_during_a_run() {
+        let mut state = RecipeLoadState::default();
+        assert!(!state.start(true, false));
+        assert!(!state.is_loading());
+        assert!(!state.finish(true));
     }
 }

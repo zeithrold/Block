@@ -59,7 +59,7 @@ See the JSON files in `examples/` for complete input. Schema version 1 supports:
 | `memory_mib` | Heap limit; defaults to 2048 MiB |
 | `jvm_args` | Additional argument-array entries; each entry remains a single process argument |
 | `features` | Explicit boolean launch capabilities used by manifest rules |
-| `compatibility` | `official` (default), or the explicit `linux_arm64_lwjgl3` resource transformation |
+| `compatibility` | `official` (default), `linux_arm64_lwjgl3`, or `macos_jna_5_13`; compatibility profiles explicitly transform selected library resources |
 
 The compiler preserves library/classpath and conditional argument order, selects only the target's native classifiers, resolves both legacy and modern argument generations, and constructs legacy virtual/resources asset views. Managed runtime manifests provide file trees, executable flags, and scoped links. Runtime probes require the Java major selected by the version metadata and the target CPU architecture. A plan targeting a different execution OS/architecture can be inspected but is rejected by the local executor. CPU emulation is not configured automatically.
 
@@ -75,6 +75,16 @@ cargo run --locked -p block-cli --bin block-launch -- launch \
 ```
 
 Adjust the local Java path for the machine. This compatibility profile deliberately rejects versions without replaceable LWJGL 3 classifiers. Legacy LWJGL 2 ARM64 and further native-library compatibility require additional tested recipes. Missing managed Java combinations produce an explicit error instead of silently selecting an incompatible JDK.
+
+## macOS and older JNA libraries
+
+Some older versions, including Minecraft 1.20.1, ship JNA releases that can abort during native-library loading on modern macOS. An explicit compatibility recipe replaces the matching JNA core/platform pair with 5.13.0:
+
+```sh
+just launch examples/macos-arm64-1.20.1-offline.json
+```
+
+The profile accepts affected JNA versions from 5.8.0 through 5.12.1, requires macOS, and refuses mixed or newer pairs. It preserves the original version manifest and records the replacement resources and filenames in the execution plan. The default `official` profile uses the original libraries. See the [upstream JNA fix](https://github.com/java-native-access/jna/blob/5.13.0/CHANGES.md) and [Minecraft launcher compatibility issue](https://github.com/PrismLauncher/PrismLauncher/issues/3446).
 
 ## Tests and CI
 
