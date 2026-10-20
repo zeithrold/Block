@@ -75,6 +75,30 @@ pub trait RecipeParser: Send + Sync {
 }
 
 impl LaunchRecipe {
+    /// Read a recipe with file and Java paths relative to the recipe document.
+    ///
+    /// # Errors
+    /// Fails on IO, an invalid schema, or invalid launch options.
+    pub async fn load(path: &std::path::Path) -> anyhow::Result<Self> {
+        let path = path.canonicalize()?;
+        let directory = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("recipe has no parent directory"))?;
+        let mut recipe: Self = serde_json::from_slice(&tokio::fs::read(&path).await?)?;
+        if let RecipeSource::LocalManifest { path } = &mut recipe.source
+            && path.is_relative()
+        {
+            *path = directory.join(&*path);
+        }
+        if let RuntimeSelection::Local { java } = &mut recipe.runtime
+            && java.is_relative()
+        {
+            *java = directory.join(&*java);
+        }
+        recipe.validate()?;
+        Ok(recipe)
+    }
+
     /// Validate the input independently of IO or account providers.
     ///
     /// # Errors

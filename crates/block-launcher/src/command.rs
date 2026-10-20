@@ -28,6 +28,7 @@ pub struct JavaCommand {
     pub program: PathBuf,
     pub cwd: PathBuf,
     arguments: Vec<Argument>,
+    secrets: Vec<String>,
 }
 
 impl fmt::Debug for JavaCommand {
@@ -55,6 +56,11 @@ impl JavaCommand {
         provider: &dyn SessionProvider,
     ) -> anyhow::Result<Self> {
         let session = provider.session()?;
+        let secrets = if session.access_token == "0" {
+            Vec::new()
+        } else {
+            vec![session.access_token.clone()]
+        };
         let template = &plan.command;
         let mut variables = template.variables.clone();
         variables.extend([
@@ -122,6 +128,7 @@ impl JavaCommand {
             program,
             cwd: confined_path(root, &template.cwd)?,
             arguments,
+            secrets,
         })
     }
 
@@ -159,6 +166,11 @@ impl JavaCommand {
         for argument in &self.arguments {
             if argument.secret && argument.value.len() > 1 {
                 line = line.replace(&argument.value, "<redacted>");
+            }
+        }
+        for secret in &self.secrets {
+            if !secret.is_empty() {
+                line = line.replace(secret, "<redacted>");
             }
         }
         line

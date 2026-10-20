@@ -210,3 +210,70 @@ fn offline_uuid_matches_java_name_uuid_and_paths_reject_cross_platform_escapes()
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn recipe_relative_paths_resolve_against_the_document_not_process_cwd() -> anyhow::Result<()>
+{
+    let root = tempfile::tempdir()?;
+    let document = root.path().join("launch.json");
+    let value = json!({
+        "schema_version":1,"instance":"relative",
+        "source":{"kind":"local_manifest","path":"version.json"},
+        "runtime":{"kind":"local","java":"runtime/bin/java"},
+        "session":{"kind":"offline","username":"Player"}
+    });
+    tokio::fs::write(&document, serde_json::to_vec(&value)?).await?;
+    let recipe = LaunchRecipe::load(&document).await?;
+    let RecipeSource::LocalManifest { path } = recipe.source else {
+        anyhow::bail!("wrong source");
+    };
+    let RuntimeSelection::Local { java } = recipe.runtime else {
+        anyhow::bail!("wrong runtime");
+    };
+    assert_eq!(path, root.path().canonicalize()?.join("version.json"));
+    assert_eq!(java, root.path().canonicalize()?.join("runtime/bin/java"));
+    Ok(())
+}
+
+#[test]
+fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> anyhow::Result<()> {
+    struct Provider;
+    impl block_launcher::session::SessionProvider for Provider {
+        fn session(&self) -> anyhow::Result<block_launcher::session::GameSession> {
+            Ok(block_launcher::session::GameSession {
+                username: "Player".into(),
+                uuid: "uuid".into(),
+                access_token: "SENSITIVE_SESSION_TOKEN".into(),
+                user_type: "msa".into(),
+                xuid: "0".into(),
+                client_id: String::new(),
+            })
+        }
+    }
+    let manifest: VersionManifest = decode(&fs::read(fixtures().join("1.12.2.json"))?)?;
+    let metadata = ResolvedMetadata {
+        parsed: ParsedRecipe {
+            manifest,
+            manifest_sha1: "fixture".into(),
+        },
+        target: target(OperatingSystem::Linux),
+        assets: AssetObjects {
+            objects: BTreeMap::new(),
+            virtual_layout: None,
+            map_to_resources: None,
+        },
+        runtime: None,
+        native_overrides: BTreeMap::new(),
+    };
+    let mut plan = compile(&recipe()?, &metadata)?;
+    plan.command.game_args = vec!["${auth_session}".into()];
+    let root = tempfile::tempdir()?;
+    let command = JavaCommand::bind(&plan, root.path(), "run", &Provider)?;
+    assert!(!format!("{command:?}").contains("SENSITIVE_SESSION_TOKEN"));
+    assert_eq!(
+        command.redact("token is SENSITIVE_SESSION_TOKEN"),
+        "token is <redacted>"
+    );
+    assert!(!serde_json::to_string(&command.preview())?.contains("SENSITIVE_SESSION_TOKEN"));
+    Ok(())
+}

@@ -75,7 +75,9 @@ impl Executor {
         plan.target.validate_execution()?;
         let root = self.store.root().canonicalize()?;
         let instance = confined_path(&root, &format!("instances/{}", plan.instance))?;
+        ensure_write_path(&root, &instance)?;
         fs::create_dir_all(&instance)?;
+        ensure_write_path(&root, &instance.join("instance.lock"))?;
         let lock = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -154,6 +156,7 @@ impl Executor {
                 prepared.plan.instance, prepared.run_id
             ),
         )?;
+        ensure_write_path(&prepared.root, &logs)?;
         tokio::fs::create_dir_all(&logs).await?;
         tokio::fs::write(
             logs.join("command.json"),
@@ -256,8 +259,7 @@ fn materialize(
                         .parent()
                         .context("copy destination has no parent")?,
                 )?;
-                fs::copy(store.object_path(sha1)?, &destination)?;
-                set_executable(&destination, *executable)?;
+                copy_immutable(&store.object_path(sha1)?, &destination, *executable)?;
             }
             PrepareAction::Directory { path } => {
                 let path = confined_path(root, &path.replace(RUN_ID_TOKEN, run_id))?;
@@ -279,10 +281,58 @@ fn materialize(
             } => links.push((path, target, scope)),
         }
     }
-    for (path, target, scope) in links {
-        runtime_link(root, path, target, scope)?;
+    while !links.is_empty() {
+        let mut deferred = Vec::new();
+        let mut progress = false;
+        for (path, target, scope) in links {
+            let destination = confined_path(root, path)?;
+            let parent = destination.parent().context("link has no parent")?;
+            if parent.join(target).exists() {
+                runtime_link(root, path, target, scope)?;
+                progress = true;
+            } else {
+                deferred.push((path, target, scope));
+            }
+        }
+        ensure!(progress, "runtime links are cyclic or have missing targets");
+        links = deferred;
     }
     Ok(())
+}
+
+fn copy_immutable(source: &Path, destination: &Path, executable: bool) -> anyhow::Result<()> {
+    let expected_size = fs::metadata(source)?.len();
+    if destination.exists() {
+        ensure!(
+            fs::metadata(destination)?.len() == expected_size,
+            "immutable view is corrupt; remove it before preparing again: {}",
+            destination.display()
+        );
+        return Ok(());
+    }
+    let directory = destination.parent().context("view file has no parent")?;
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    io::copy(&mut fs::File::open(source)?, temporary.as_file_mut())?;
+    set_executable(temporary.path(), executable)?;
+    // Windows readonly attributes also prevent deleting a losing publication's
+    // temporary file. The no-clobber operation provides the publication guarantee.
+    #[cfg(unix)]
+    {
+        let mut permissions = temporary.as_file().metadata()?.permissions();
+        permissions.set_readonly(true);
+        temporary.as_file().set_permissions(permissions)?;
+    }
+    match temporary.persist_noclobber(destination) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            ensure!(
+                fs::metadata(destination)?.len() == expected_size,
+                "concurrent immutable view has an incorrect size"
+            );
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn extract(
@@ -291,6 +341,7 @@ fn extract(
     directory: &Path,
     excludes: &[String],
 ) -> anyhow::Result<()> {
+    ensure_write_path(root, directory)?;
     fs::create_dir_all(directory)?;
     let mut archive = zip::ZipArchive::new(fs::File::open(source)?)?;
     for i in 0..archive.len() {
@@ -347,6 +398,10 @@ fn runtime_link(root: &Path, path: &str, target: &str, scope: &str) -> anyhow::R
         resolved.starts_with(&scope),
         "runtime link escapes its installation"
     );
+    ensure!(
+        resolved.canonicalize()?.starts_with(scope.canonicalize()?),
+        "runtime link resolves outside its installation"
+    );
     ensure_write_path(root, path.parent().context("link has no parent")?)?;
     fs::create_dir_all(path.parent().context("link has no parent")?)?;
     if let Ok(previous) = fs::read_link(&path) {
@@ -357,19 +412,29 @@ fn runtime_link(root: &Path, path: &str, target: &str, scope: &str) -> anyhow::R
         return Ok(());
     }
     #[cfg(unix)]
-    std::os::unix::fs::symlink(target, &path)?;
+    if let Err(error) = std::os::unix::fs::symlink(target, &path) {
+        ensure!(
+            error.kind() == io::ErrorKind::AlreadyExists
+                && fs::read_link(&path)? == Path::new(target),
+            "could not publish runtime link: {error}"
+        );
+    }
     #[cfg(windows)]
     {
         ensure!(
             resolved.is_file(),
             "runtime directory links require a supported Windows runtime"
         );
-        fs::copy(resolved, path)?;
+        copy_immutable(&resolved, &path, false)?;
     }
     Ok(())
 }
 
 fn set_executable(path: &Path, executable: bool) -> anyhow::Result<()> {
+    ensure!(
+        fs::metadata(path)?.is_file(),
+        "executable target must be a regular file"
+    );
     #[cfg(unix)]
     if executable {
         use std::os::unix::fs::PermissionsExt as _;
@@ -385,6 +450,7 @@ async fn probe_java(path: &Path, plan: &ExecutionPlan) -> anyhow::Result<()> {
         Duration::from_secs(15),
         tokio::process::Command::new(path)
             .args(["-XshowSettings:properties", "-version"])
+            .kill_on_drop(true)
             .output(),
     )
     .await??;
@@ -427,6 +493,9 @@ async fn probe_java(path: &Path, plan: &ExecutionPlan) -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
 
 async fn drain(
     reader: impl tokio::io::AsyncRead + Unpin,

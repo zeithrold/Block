@@ -162,7 +162,7 @@ async fn compile_recipe(
     store: Store,
     cancel: CancellationToken,
 ) -> anyhow::Result<(LaunchRecipe, ExecutionPlan)> {
-    let recipe: LaunchRecipe = serde_json::from_slice(&tokio::fs::read(path).await?)?;
+    let recipe = LaunchRecipe::load(&path).await?;
     eprintln!("Resolving recipe for instance {}", recipe.instance);
     let context = ResolveContext { store, cancel };
     let metadata = resolve(&recipe, &context).await?;

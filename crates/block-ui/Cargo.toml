@@ -6,6 +6,12 @@ publish.workspace = true
 
 [dependencies]
 gpui.workspace = true
+anyhow.workspace = true
+block-launcher.workspace = true
+directories.workspace = true
+minecraft-manifest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

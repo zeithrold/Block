@@ -10,6 +10,16 @@ OAuth will supply a different `SessionProvider` at the final binding boundary. O
 
 ## Quick start
 
+The native UI starts with `just run`: choose a version, press Enter or click **Launch offline**, and use **Stop** to stop the running instance. The initial profile is `Player`. **Open recipe…** loads an explicit JSON configuration, including its username and instance. The interface shows preparation progress, game output, and the Java program, working directory, and argument array with secret fields redacted. You can also open and start a recipe directly:
+
+```sh
+cargo run --locked -p block-app -- --recipe examples/vanilla-offline.json --launch
+```
+
+`BLOCK_DATA_DIR` selects the native UI's external data directory when a custom location is needed. Recipe-relative manifest/Java paths resolve against the recipe document's directory, consistently in the UI and CLI.
+
+The current native interface uses online metadata resolution and downloads. Use the CLI for an explicit cache-only run or to inspect/save an execution plan.
+
 ```sh
 cargo run --locked -p block-cli --bin block-launch -- launch --recipe examples/vanilla-offline.json
 ```
@@ -30,7 +40,9 @@ cargo run --locked -p block-cli --bin block-launch -- --cache-only launch \
   --recipe examples/vanilla-offline.json
 ```
 
-`plan` can fetch small source/asset/runtime metadata to discover the resource graph. `prepare` executes preparation without starting the game. `launch` resolves, prepares, prints the command preview, then supervises the game. `execute` consumes a saved plan without resolving its recipe again. Ctrl+C stops preparation or the running Java process. The optional `--run-for-seconds` limit force-stops a launch for explicit smoke checks; it is not a clean-save mechanism.
+`plan` can fetch source, asset-index, and runtime metadata to discover the resource graph; it does not download the full game payload. `prepare` executes preparation without starting the game. `launch` resolves, prepares, prints the command preview, then supervises the game. `execute` consumes a saved plan without resolving its recipe again. A saved plan is portable across data directories for its target, but an explicit local Java path must exist on the execution machine.
+
+Ctrl+C stops preparation or the running Java process. **Stop**, Ctrl+C, and the optional `--run-for-seconds` limit terminate the process; use Minecraft's own quit flow when you need a clean world save.
 
 ## Recipe fields
 
@@ -38,6 +50,7 @@ See the JSON files in `examples/` for complete input. Schema version 1 supports:
 
 | Field | Meaning |
 | --- | --- |
+| `schema_version` | Required recipe format version, currently `1` |
 | `instance` | Stable ASCII instance ID; each instance gets a separate game directory and exclusive run/preparation lock |
 | `source` | `mojang` with `version`, or `local_manifest` with `path` |
 | `session` | `offline` with a validated Java player `username` |
@@ -48,11 +61,13 @@ See the JSON files in `examples/` for complete input. Schema version 1 supports:
 | `features` | Explicit boolean launch capabilities used by manifest rules |
 | `compatibility` | `official` (default), or the explicit `linux_arm64_lwjgl3` resource transformation |
 
-The compiler preserves library/classpath and conditional argument order, selects only the target's native classifiers, resolves both legacy and modern argument generations, and constructs legacy virtual/resources asset views. Managed runtime manifests provide file trees, executable flags, and scoped links. Runtime probes reject a mismatched Java major or CPU architecture. A plan targeting a different execution OS/architecture can be inspected but is rejected by the local executor.
+The compiler preserves library/classpath and conditional argument order, selects only the target's native classifiers, resolves both legacy and modern argument generations, and constructs legacy virtual/resources asset views. Managed runtime manifests provide file trees, executable flags, and scoped links. Runtime probes require the Java major selected by the version metadata and the target CPU architecture. A plan targeting a different execution OS/architecture can be inspected but is rejected by the local executor. CPU emulation is not configured automatically.
+
+`local_manifest` accepts a complete official-format version document. Mod-loader inheritance, custom installers, and version patches do not have parsers in this MVP. Treat recipes and saved plans as executable configuration: they select downloaded Java code, local executables, and JVM arguments.
 
 ## Linux ARM64
 
-The official Java catalog does not supply Linux ARM64 runtimes, and Mojang's selected LWJGL 3 Linux classifiers are x64. `examples/linux-arm64-offline.json` demonstrates a reviewed compatibility recipe using a separately installed Java 21 and the matching LWJGL 3 ARM64 classifier artifacts from Maven Central. Versions/artifacts are preserved; this is not a blanket LWJGL upgrade.
+The official Java catalog does not supply Linux ARM64 runtimes, and the supported version manifests select x64 LWJGL 3 Linux classifiers. `examples/linux-arm64-offline.json` uses a separately installed Java 21 and matching LWJGL 3 ARM64 classifier artifacts from Maven Central. The transformation preserves artifact versions.
 
 ```sh
 cargo run --locked -p block-cli --bin block-launch -- launch \

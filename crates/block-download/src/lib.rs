@@ -202,15 +202,12 @@ impl Store {
                 );
             }
         }
-        futures_util::stream::iter(
-            unique
-                .values()
-                .copied()
-                .map(|resource| self.fetch(resource, cancel)),
-        )
-        .buffer_unordered(8)
-        .try_collect::<Vec<_>>()
-        .await?;
+        let resources: Vec<Resource> = unique.into_values().cloned().collect();
+        futures_util::stream::iter(resources)
+            .map(|resource| async move { self.fetch(&resource, cancel).await })
+            .buffer_unordered(8)
+            .try_collect::<Vec<_>>()
+            .await?;
         Ok(())
     }
 

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 block-ui.workspace = true
 gpui.workspace = true
+clap.workspace = true
 
 [lints]
 workspace = true

@@ -47,4 +47,7 @@ jobs:
       - name: Ensure macOS Metal compiler is available
         if: runner.os == 'macOS'
         run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Test Linux xattr compatibility patch
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path vendor/xattr/Cargo.toml
       - run: cargo check --locked -p block-app --all-targets
