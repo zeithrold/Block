@@ -1,0 +1,11 @@
+[package]
+name = "block-ui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui.workspace = true
+
+[lints]
+workspace = true

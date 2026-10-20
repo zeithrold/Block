@@ -1,0 +1,16 @@
+[package]
+name = "block-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "block"
+path = "src/main.rs"
+
+[dependencies]
+block-ui.workspace = true
+gpui.workspace = true
+
+[lints]
+workspace = true
