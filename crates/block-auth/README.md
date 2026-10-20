@@ -41,12 +41,15 @@ not verified offline. No offline grace period is implemented by this crate.
 ## Application registration
 
 Use a personal-account-capable **Mobile and desktop applications** registration
-with `http://localhost/callback`. The previous diagnostic used
-`http://localhost:8766/callback`; Microsoft's localhost matching ignores the port
-but preserves the path. A successful confidential Web flow using a secret does
-not establish that the public desktop registration is configured correctly.
-Do not register Web and native variants differing only in localhost port:
-Microsoft may pick either registration. The API routes are explicitly
+with `http://localhost/block/callback`. This dedicated path must belong only to
+the desktop platform. Microsoft ignores the ephemeral localhost port but
+preserves the path. Existing Web/SPA callbacks can remain registered at different
+paths; adding a native callback with only a different port does not separate them.
+An observed registration had `/callback` under all three platforms and rejected
+the public desktop token exchange. Block now uses its own path to avoid that
+ambiguity without removing existing callbacks. A successful confidential Web
+flow using a secret does not validate public desktop registration.
+The API routes are explicitly
 `authentication/login_with_xbox` and `entitlements/mcstore`, without silent
 fallback to another route.
 

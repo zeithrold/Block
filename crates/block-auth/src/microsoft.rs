@@ -64,7 +64,7 @@ impl MicrosoftAuth {
     }
 
     /// Bind a one-use localhost callback and prepare a PKCE URL for the system browser.
-    /// Register `http://localhost/callback` as a Mobile/Desktop application redirect.
+    /// Register `http://localhost/block/callback` as a Mobile/Desktop application redirect.
     /// Microsoft ignores the ephemeral port for localhost desktop redirects.
     ///
     /// # Errors

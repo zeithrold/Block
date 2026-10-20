@@ -17,6 +17,7 @@ use crate::{AuthError, Result, SecretString};
 use crate::MICROSOFT_SCOPE as SCOPE;
 const AUTHORIZE: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
 const CALLBACK_SECONDS: u64 = 600;
+const CALLBACK_PATH: &str = "/block/callback";
 
 /// One-use browser authorization, bound to a loopback listener and PKCE verifier.
 /// Dropping it closes the listener. Debug never reveals the URL, state or verifier.
@@ -60,7 +61,7 @@ impl PendingSignIn {
             .local_addr()
             .map_err(|_| AuthError::CallbackUnavailable)?
             .port();
-        let redirect_uri = format!("http://localhost:{port}/callback");
+        let redirect_uri = format!("http://localhost:{port}{CALLBACK_PATH}");
         let verifier = random_secret()?;
         let state = random_secret()?;
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.expose().as_bytes()));
@@ -167,7 +168,7 @@ fn parse_callback(request: &str, expected_state: &str) -> Result<Result<SecretSt
         return Err(AuthError::InvalidCallback);
     }
     let target = parts.next().ok_or(AuthError::InvalidCallback)?;
-    if !target.starts_with("/callback?") {
+    if !target.starts_with(&format!("{CALLBACK_PATH}?")) {
         return Err(AuthError::InvalidCallback);
     }
     let url =
@@ -202,10 +203,11 @@ mod tests {
     #[test]
     fn callback_rejects_state_substitution_duplicates_and_wrong_path() {
         for request in [
-            "GET /callback?state=wrong&code=test HTTP/1.1",
-            "GET /callback?state=expected&state=expected&code=test HTTP/1.1",
+            "GET /block/callback?state=wrong&code=test HTTP/1.1",
+            "GET /block/callback?state=expected&state=expected&code=test HTTP/1.1",
             "GET /wrong?state=expected&code=test HTTP/1.1",
-            "GET /callback?state=expected&code=one&code=two HTTP/1.1",
+            "GET /callback?state=expected&code=test HTTP/1.1",
+            "GET /block/callback?state=expected&code=one&code=two HTTP/1.1",
         ] {
             assert_eq!(
                 parse_callback(request, "expected").err(),
@@ -217,13 +219,13 @@ mod tests {
     #[test]
     fn callback_accepts_only_matching_state_and_handles_denial() -> Result<()> {
         let code = parse_callback(
-            "GET /callback?state=expected&code=test-code HTTP/1.1",
+            "GET /block/callback?state=expected&code=test-code HTTP/1.1",
             "expected",
         )??;
         assert_eq!(code.expose(), "test-code");
         assert_eq!(
             parse_callback(
-                "GET /callback?state=expected&error=access_denied HTTP/1.1",
+                "GET /block/callback?state=expected&error=access_denied HTTP/1.1",
                 "expected"
             )?
             .err(),
@@ -237,7 +239,14 @@ mod tests {
         let pending = PendingSignIn::new("00000000-0000-0000-0000-000000000001").await?;
         let url =
             Url::parse(pending.authorization_url()).map_err(|_| AuthError::InvalidCallback)?;
+        let redirect =
+            Url::parse(pending.redirect_uri()).map_err(|_| AuthError::InvalidCallback)?;
+        assert_eq!(redirect.path(), "/block/callback");
         let fields: std::collections::HashMap<_, _> = url.query_pairs().collect();
+        assert_eq!(
+            fields.get("redirect_uri").map(AsRef::as_ref),
+            Some(pending.redirect_uri())
+        );
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.expose()));
         assert_eq!(
             fields.get("code_challenge").map(AsRef::as_ref),
@@ -264,15 +273,21 @@ mod tests {
         let receiver =
             tokio::spawn(async move { pending.receive_code(&CancellationToken::new()).await });
         let client = reqwest::Client::builder().no_proxy().build()?;
+        let legacy = client
+            .get(format!("http://127.0.0.1:{port}/callback"))
+            .query(&[("state", state.as_str()), ("code", "synthetic-legacy")])
+            .send()
+            .await?;
+        assert_eq!(legacy.status(), reqwest::StatusCode::BAD_REQUEST);
         let invalid = client
             .get(format!(
-                "http://127.0.0.1:{port}/callback?state=wrong&code=synthetic"
+                "http://127.0.0.1:{port}/block/callback?state=wrong&code=synthetic"
             ))
             .send()
             .await?;
         assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
         let accepted = client
-            .get(format!("http://127.0.0.1:{port}/callback"))
+            .get(format!("http://127.0.0.1:{port}/block/callback"))
             .query(&[("state", state.as_str()), ("code", "synthetic-code")])
             .send()
             .await?;

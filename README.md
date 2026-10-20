@@ -39,7 +39,7 @@ Development builds need the application's public Microsoft client ID, either at 
 MICROSOFT_CLIENT_ID="your-public-application-id" just run
 ```
 
-Use a personal-account-capable Mobile/Desktop application registration with `http://localhost/callback`. No Client Secret is required or supported. Do not distribute a secret or copy credentials between hosts. Refresh tokens use macOS Keychain, Windows Credential Manager, or Linux Secret Service; an unavailable/locked secure backend fails explicitly. See [authentication setup](crates/block-auth/README.md).
+Use a personal-account-capable Mobile/Desktop application registration with `http://localhost/block/callback`. No Client Secret is required or supported. Do not distribute a secret or copy credentials between hosts. Refresh tokens use macOS Keychain, Windows Credential Manager, or Linux Secret Service; an unavailable/locked secure backend fails explicitly. See [authentication setup](crates/block-auth/README.md).
 
 Offline recipes remain an explicit development interface, separate from Microsoft authentication acceptance:
 
