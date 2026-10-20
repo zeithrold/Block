@@ -1,0 +1,22 @@
+{
+  "audited_at_unix_seconds": 1792491246,
+  "source": "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+  "index_v1_sha1": "20c7d2dd973dcc13fa7c98548214b113eb83a88a",
+  "index_v2_sha1": "f9e02be69ab99dcd2626c25fc4263cbe3276c285",
+  "indexed_versions": 919,
+  "passed": 919,
+  "total_json_bytes": 23772351,
+  "by_type": {
+    "release": 103,
+    "snapshot": 755,
+    "old_beta": 26,
+    "old_alpha": 35
+  },
+  "legacy_arguments": 349,
+  "modern_arguments": 570,
+  "default_user_jvm": 60,
+  "without_java_version": 18,
+  "without_logging": 114,
+  "libraries": 53896,
+  "failures": []
+}

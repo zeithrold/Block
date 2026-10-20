@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/block-app", "crates/block-ui"]
+members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest"]
 default-members = ["crates/block-app"]
 resolver = "3"
 
@@ -11,6 +11,14 @@ publish = false
 [workspace.dependencies]
 block-ui = { path = "crates/block-ui" }
 gpui = "0.2.2"
+anyhow = "1"
+rayon = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"
+sha1 = "0.10"
+tempfile = "3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

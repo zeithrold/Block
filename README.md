@@ -40,8 +40,14 @@ The first build downloads and compiles GPUI dependencies. Subsequent builds reus
 └── crates/
     ├── block-app/          # Desktop entry point and window lifecycle
     │   └── src/main.rs
-    └── block-ui/           # GPUI views and presentation
-        └── src/lib.rs
+    ├── block-ui/           # GPUI views and presentation
+    │   └── src/lib.rs
+    └── minecraft-manifest/ # Official Minecraft metadata parsing experiment
+        ├── src/model.rs
+        ├── src/bin/manifest-audit.rs
+        └── tests/
+            ├── official_manifests.rs
+            └── fixtures/official/ # Complete captured corpus, available offline
 ```
 
 `block-app` depends on `block-ui`. Both crates inherit package metadata, GPUI versions, and lint settings from the root manifest. Keep application startup in `block-app` and reusable views in `block-ui`.
@@ -57,8 +63,11 @@ The first build downloads and compiles GPUI dependencies. Subsequent builds reus
 | `just fmt-check` | Verify formatting |
 | `just check-code` | Type-check all targets and features |
 | `just clippy` | Run strict Clippy checks |
-| `just test` | Run workspace tests and documentation tests |
+| `just test` | Run workspace tests, including the full official Minecraft corpus |
 | `just check` | Run formatting, type checks, Clippy, and tests in order |
+| `just manifest-fetch` | Download the current official Minecraft metadata |
+| `just manifest-fetch-snapshot` | Download metadata from the recorded index snapshot |
+| `just manifest-verify` | Run the full official-corpus Cargo integration tests offline |
 
 Verification and build commands use `--locked` to prevent implicit dependency updates.
 
@@ -67,3 +76,7 @@ Verification and build commands use `--locked` to prevent implicit dependency up
 The workspace enables Clippy's `all`, `pedantic`, and `nursery` groups. Additional restrictions reject `unwrap`, `expect`, explicit panics, `dbg!`, `todo!`, `unimplemented!`, and wildcard imports. Unsafe code is forbidden in workspace crates.
 
 `just clippy` checks all workspace crates, targets, and features with `-D warnings`. Both Rust and Clippy warnings in project code fail the check. Third-party dependencies are not held to the workspace lint policy. Prefer fixing a diagnostic; if an exception is necessary, use a narrowly scoped `#[expect(..., reason = "...")]` with a concrete explanation.
+
+## Minecraft manifest experiment
+
+See [the experiment notes](experiments/minecraft-manifests/README.md) for the schema coverage, recorded full-corpus results, and reproduction steps. The parser is a separate workspace crate; the desktop application remains the default member.
