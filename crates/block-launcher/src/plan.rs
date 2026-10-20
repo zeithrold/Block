@@ -91,6 +91,12 @@ pub fn compile(
     metadata: &ResolvedMetadata,
 ) -> anyhow::Result<ExecutionPlan> {
     recipe.validate()?;
+    crate::support::manifest_support(
+        &metadata.parsed.manifest,
+        &metadata.target,
+        &recipe.features,
+    )?
+    .require()?;
     let mut files = PlanFiles::default();
     plan_libraries(recipe, metadata, &mut files)?;
     plan_assets(metadata, &recipe.instance, &mut files)?;

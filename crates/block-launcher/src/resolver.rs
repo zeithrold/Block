@@ -131,6 +131,7 @@ async fn resolve_inner(
         }
     };
     let target = recipe.target.clone().map_or_else(Target::host, Ok)?;
+    crate::support::manifest_support(&parsed.manifest, &target, &recipe.features)?.require()?;
     let asset = &parsed.manifest.asset_index;
     let resource = Resource {
         sha1: asset.sha1.clone(),

@@ -8,6 +8,7 @@ pub mod recipe;
 pub mod resolver;
 pub mod rules;
 pub mod session;
+pub mod support;
 
 pub use block_download::{DownloadEvent, EventSink, Store};
 pub use tokio_util::sync::CancellationToken;

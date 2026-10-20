@@ -51,3 +51,5 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test --manifest-path vendor/xattr/Cargo.toml
       - run: cargo check --locked -p block-app --all-targets
+      - name: Test native UI state and GPUI framework interactions
+        run: cargo test --locked -p block-ui --lib --test gpui_framework

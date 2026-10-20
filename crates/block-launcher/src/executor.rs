@@ -72,6 +72,7 @@ impl Executor {
             plan.schema_version == 1,
             "unsupported execution-plan schema"
         );
+        crate::support::plan_support(&plan).require()?;
         plan.target.validate_execution()?;
         let root = self.store.root().canonicalize()?;
         let instance = confined_path(&root, &format!("instances/{}", plan.instance))?;

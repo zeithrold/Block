@@ -65,6 +65,12 @@ The compiler preserves library/classpath and conditional argument order, selects
 
 `local_manifest` accepts a complete official-format version document. Mod-loader inheritance, custom installers, and version patches do not have parsers in this MVP. Treat recipes and saved plans as executable configuration: they select downloaded Java code, local executables, and JVM arguments.
 
+## macOS ARM64 native support
+
+Native architecture eligibility is a shared policy in the resolver, plan compiler, and saved-plan executor. Each selected LWJGL module/version must have a selected `natives-macos-arm64` counterpart, including LWJGL core and its GLFW or SDL window backend. Legacy LWJGL 2 and x64-only native metadata are rejected before game resources, runtimes, or instance files are prepared. A saved plan is checked again at execution.
+
+This is an artifact-based support wall, not a version-number guess. Native artifact availability is necessary but does not establish compatibility of arbitrary mods. There is no automatic Rosetta, CPU emulation, or replacement-native fallback. Windows is the primary target for legacy Minecraft and legacy loaders. A separately reviewed native loader profile must still pass the same policy.
+
 ## Linux ARM64
 
 The official Java catalog does not supply Linux ARM64 runtimes, and the supported version manifests select x64 LWJGL 3 Linux classifiers. `examples/linux-arm64-offline.json` uses a separately installed Java 21 and matching LWJGL 3 ARM64 classifier artifacts from Maven Central. The transformation preserves artifact versions.
