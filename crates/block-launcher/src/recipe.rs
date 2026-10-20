@@ -1,0 +1,104 @@
+use std::{collections::BTreeMap, path::PathBuf};
+
+use anyhow::ensure;
+use futures_util::future::BoxFuture;
+use minecraft_manifest::model::VersionManifest;
+use serde::{Deserialize, Serialize};
+
+use crate::{platform::Target, resolver::ResolveContext, session::OfflineSession};
+
+/// Declarative launch input. Recipes never contain access or refresh tokens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchRecipe {
+    pub schema_version: u32,
+    pub instance: String,
+    pub source: RecipeSource,
+    pub session: OfflineSession,
+    #[serde(default)]
+    pub runtime: RuntimeSelection,
+    #[serde(default)]
+    pub target: Option<Target>,
+    #[serde(default)]
+    pub compatibility: Compatibility,
+    #[serde(default = "default_memory")]
+    pub memory_mib: u32,
+    #[serde(default)]
+    pub jvm_args: Vec<String>,
+    #[serde(default)]
+    pub features: BTreeMap<String, bool>,
+}
+
+const fn default_memory() -> u32 {
+    2048
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RecipeSource {
+    Mojang { version: String },
+    LocalManifest { path: PathBuf },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RuntimeSelection {
+    #[default]
+    Managed,
+    Local {
+        java: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Compatibility {
+    #[default]
+    Official,
+    /// Replace only selected LWJGL 3 Linux native artifacts with matching ARM64 classifiers.
+    LinuxArm64Lwjgl3,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedRecipe {
+    pub manifest: VersionManifest,
+    pub manifest_sha1: String,
+}
+
+/// Source adapters resolve recipes; no adapter spawns a process or modifies game files.
+pub trait RecipeParser: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        source: &'a RecipeSource,
+        context: &'a ResolveContext,
+    ) -> BoxFuture<'a, anyhow::Result<ParsedRecipe>>;
+}
+
+impl LaunchRecipe {
+    /// Validate the input independently of IO or account providers.
+    ///
+    /// # Errors
+    /// Fails on unsupported schemas, invalid instance IDs, or invalid options.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.schema_version == 1,
+            "unsupported recipe schema: {}",
+            self.schema_version
+        );
+        ensure!(
+            !self.instance.is_empty()
+                && self.instance.len() <= 64
+                && self
+                    .instance
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "instance ID must contain 1..64 ASCII letters, digits, underscores or hyphens"
+        );
+        ensure!(
+            (256..=65536).contains(&self.memory_mib),
+            "memory_mib must be between 256 and 65536"
+        );
+        self.session.validate()?;
+        Ok(())
+    }
+}

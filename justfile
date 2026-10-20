@@ -8,6 +8,14 @@ default:
 run *args:
     cargo run --locked --package block-app --bin block -- "$@"
 
+# Compile a launch recipe into an inspectable execution plan.
+plan recipe="examples/vanilla-offline.json":
+    cargo run --locked --package block-cli --bin block-launch -- plan --recipe "$1"
+
+# Prepare and run an offline game instance from a recipe.
+launch recipe="examples/vanilla-offline.json":
+    cargo run --locked --package block-cli --bin block-launch -- launch --recipe "$1"
+
 # Build every workspace target.
 build:
     cargo build --locked --workspace --all-targets

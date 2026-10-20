@@ -5,6 +5,7 @@
 //! preserve their original spelling; parsing does not interpret launch rules.
 
 pub mod model;
+pub mod resources;
 
 use serde::de::DeserializeOwned;
 

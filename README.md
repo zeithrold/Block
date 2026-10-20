@@ -2,6 +2,8 @@
 
 A minimal desktop application built with Rust and [GPUI](https://gpui.rs/).
 
+The launcher MVP compiles declarative launch recipes into verified resource plans and complete Java commands. It supports offline player profiles while keeping authentication behind a replaceable session interface. See [launch recipes](docs/recipes.md) for CLI usage and platform compatibility.
+
 ## Prerequisites
 
 - Stable Rust with the `rustfmt` and `clippy` components.

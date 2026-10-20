@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "instance": "vanilla-1_20_6",
+  "source": { "kind": "mojang", "version": "1.20.6" },
+  "session": { "kind": "offline", "username": "Player" },
+  "runtime": { "kind": "managed" },
+  "memory_mib": 2048
+}
