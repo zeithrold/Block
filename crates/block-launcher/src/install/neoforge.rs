@@ -483,7 +483,9 @@ async fn install_staged(
         &serde_json::json!({"profiles":{}, "settings":{}, "version":3}),
     )?;
     if !legacy {
-        run_installer(java, installer, stage, &context.cancel).await?;
+        let inputs =
+            prepare_processor_inputs(base, &profile, stage, context, PROCESSOR_INDEX).await?;
+        run_installer(java, installer, stage, &inputs, &context.cancel).await?;
     }
     let artifacts = import_libraries(&libraries, &expected, context)?;
     for required in generated {
@@ -547,21 +549,164 @@ pub(crate) fn coordinate_path(coordinate: &str) -> anyhow::Result<String> {
     Ok(path)
 }
 
+const INSTALLER_CACHE_AGENT: &[u8] =
+    include_bytes!("../../assets/installer-cache/installer-cache.jar");
+const PROCESSOR_INDEX: &str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
+
+async fn prepare_processor_inputs(
+    base: &VersionManifest,
+    profile: &InstallerProfile,
+    stage: &Path,
+    context: &ResolveContext,
+    index_url: &str,
+) -> anyhow::Result<PathBuf> {
+    let mut inputs = BTreeMap::new();
+    if profile
+        .data
+        .get("MOJMAPS")
+        .and_then(|value| value.client.as_ref())
+        .is_some()
+    {
+        let origin = reqwest::Url::parse(index_url)?.origin();
+        let key = format!(
+            "installer-game-index-{:x}.json",
+            Sha1::digest(index_url.as_bytes())
+        );
+        let index = tokio::select! {biased;
+            () = context.cancel.cancelled() => anyhow::bail!("Installer metadata cancelled"),
+            result = tokio::time::timeout(Duration::from_secs(45), context.store.metadata_pinned(&key, index_url)) => result.context("Installer metadata timed out")??,
+        };
+        ensure!(
+            index.len() <= 8 * 1024 * 1024,
+            "Installer game index is too large"
+        );
+        let parsed: serde_json::Value = serde_json::from_slice(&index)?;
+        let versions = parsed["versions"]
+            .as_array()
+            .context("Missing installer game versions")?;
+        ensure!(
+            versions.len() <= 65536,
+            "Installer game index has too many versions"
+        );
+        let mut entries = versions
+            .iter()
+            .filter(|entry| entry["id"].as_str() == Some(base.id.as_str()));
+        let entry = entries
+            .next()
+            .context("Selected game is missing from the official installer index")?;
+        ensure!(entries.next().is_none(), "Duplicate installer game version");
+        let version_url = entry["url"]
+            .as_str()
+            .context("Missing installer game metadata URL")?;
+        let allowed = |url: &str| -> anyhow::Result<()> {
+            let url = reqwest::Url::parse(url)?;
+            ensure!(
+                url.username().is_empty()
+                    && url.password().is_none()
+                    && (url.origin() == origin
+                        || (url.scheme() == "https"
+                            && matches!(
+                                url.host_str(),
+                                Some(
+                                    "piston-meta.mojang.com"
+                                        | "piston-data.mojang.com"
+                                        | "launchermeta.mojang.com"
+                                        | "launcher.mojang.com"
+                                )
+                            ))),
+                "Unexpected installer game metadata origin"
+            );
+            Ok(())
+        };
+        allowed(version_url)?;
+        let key = format!(
+            "installer-game-version-{:x}.json",
+            Sha1::digest(version_url.as_bytes())
+        );
+        let version = tokio::select! {biased;
+            () = context.cancel.cancelled() => anyhow::bail!("Installer metadata cancelled"),
+            result = tokio::time::timeout(Duration::from_secs(45), context.store.metadata_pinned(&key, version_url)) => result.context("Installer metadata timed out")??,
+        };
+        ensure!(
+            version.len() <= 4 * 1024 * 1024,
+            "Installer game metadata is too large"
+        );
+        let parsed: VersionManifest = serde_json::from_slice(&version)?;
+        ensure!(
+            parsed == *base,
+            "Installer metadata differs from the verified selected game"
+        );
+        let mappings = base
+            .downloads
+            .client_mappings
+            .as_ref()
+            .context("Selected game has no official client mappings")?;
+        allowed(&mappings.url)?;
+        ensure!(
+            mappings.size > 0 && mappings.size <= 128 * 1024 * 1024,
+            "Invalid installer mappings size"
+        );
+        let mappings_path = context
+            .store
+            .fetch(&download_resource(mappings), &context.cancel)
+            .await?;
+        let index_path = stage.join("processor-game-index.json");
+        let version_path = stage.join("processor-game-version.json");
+        let input_path = stage.join("processor-mappings.txt");
+        tokio::fs::write(&index_path, &index).await?;
+        tokio::fs::write(&version_path, &version).await?;
+        copy_object(&mappings_path, &input_path).await?;
+        inputs.insert(index_url.to_owned(), index_path);
+        inputs.insert(version_url.to_owned(), version_path);
+        inputs.insert(mappings.url.clone(), input_path);
+    }
+    ensure!(
+        !context.cancel.is_cancelled(),
+        "Installer preparation cancelled"
+    );
+    let path = stage.join("processor-inputs.bin");
+    let mut file = File::create(&path)?;
+    file.write_all(&u32::try_from(inputs.len())?.to_be_bytes())?;
+    for (url, path) in inputs {
+        for value in [
+            url.as_str(),
+            path.to_str().context("Non-UTF8 installer input path")?,
+        ] {
+            ensure!(
+                value.len() <= 1024 * 1024,
+                "Installer input path is too long"
+            );
+            file.write_all(&u32::try_from(value.len())?.to_be_bytes())?;
+            file.write_all(value.as_bytes())?;
+        }
+    }
+    file.sync_all()?;
+    Ok(path)
+}
+
 async fn run_installer(
     java: &Path,
     installer: &Path,
     stage: &Path,
+    inputs: &Path,
     cancel: &crate::CancellationToken,
 ) -> anyhow::Result<()> {
+    let agent = stage.join("installer-cache.jar");
+    tokio::fs::write(&agent, INSTALLER_CACHE_AGENT).await?;
     let home = stage.join("home");
     tokio::fs::create_dir_all(&home).await?;
     let log_path = stage.join("installer.log");
     let log = File::create(&log_path)?;
     let mut child = tokio::process::Command::new(java)
         .arg("-Djava.awt.headless=true")
+        .arg(format!(
+            "-javaagent:installer-cache.jar={}",
+            inputs.strip_prefix(stage)?.display()
+        ))
         .arg(format!("-Duser.home={}", home.display()))
         .arg("-jar")
         .arg(installer)
+        .arg("--offline")
         .arg("--installClient")
         .arg(stage)
         .current_dir(stage)

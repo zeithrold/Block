@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use anyhow::Context as _;
 use minecraft_manifest::{model::VersionIndex, resources::AssetObjects};
 use serde_json::json;
+use sha1::Digest as _;
 
 use super::{
     InstalledArtifact, InstalledLoader, MINECRAFT_VERSION, VERSION, adapt_plan,
@@ -617,5 +618,207 @@ async fn catalog_timeout_and_cancellation_interrupt_stalled_io() -> anyhow::Resu
             tokio::time::resume();
         }
     }
+    Ok(())
+}
+
+async fn processor_fixture(
+    mode: u8,
+) -> anyhow::Result<(
+    minecraft_manifest::model::VersionManifest,
+    super::InstallerProfile,
+    String,
+    tokio::task::JoinHandle<anyhow::Result<usize>>,
+)> {
+    use tokio::io::AsyncWriteExt as _;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let origin = format!("http://{}/", listener.local_addr()?);
+    let mut manifest = base()?;
+    let mappings = b"official mapping fixture";
+    manifest.downloads.client_mappings = Some(minecraft_manifest::model::Download {
+        url: format!("{origin}mappings"),
+        sha1: format!("{:x}", sha1::Sha1::digest(mappings)),
+        size: mappings.len() as u64,
+    });
+    let version_url = if mode == 2 {
+        "https://untrusted.invalid/version".into()
+    } else {
+        format!("{origin}version")
+    };
+    let index = serde_json::to_vec(&json!({"versions":[{"id":manifest.id,"url":version_url}]}))?;
+    let mut supplied = manifest.clone();
+    if mode == 1 {
+        supplied.id = "wrong-game".into();
+    }
+    let mut responses = vec![
+        (200, index),
+        (200, serde_json::to_vec(&supplied)?),
+        (
+            200,
+            if mode == 3 {
+                b"corrupt mapping fixture!".to_vec()
+            } else {
+                mappings.to_vec()
+            },
+        ),
+    ];
+    if mode == 1 {
+        responses.truncate(2);
+    }
+    if mode == 2 {
+        responses.truncate(1);
+    }
+    if mode == 4 {
+        responses.insert(0, (429, Vec::new()));
+    }
+    let task = tokio::spawn(async move {
+        let count = responses.len();
+        for (status, body) in responses {
+            let (mut stream, _) = listener.accept().await?;
+            read_catalog_request(&mut stream).await?;
+            stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nRetry-After: 0\r\nConnection: close\r\n\r\n",body.len()).as_bytes()).await?;
+            stream.write_all(&body).await?;
+        }
+        Ok(count)
+    });
+    let profile = serde_json::from_value(
+        json!({"minecraft":manifest.id,"libraries":[],"data":{"MOJMAPS":{"client":"[net.minecraft:client:fixture:mappings@txt]"}}}),
+    )?;
+    Ok((manifest, profile, format!("{origin}index"), task))
+}
+
+#[tokio::test]
+async fn processor_inputs_use_verified_game_metadata_and_mappings_with_real_retries()
+-> anyhow::Result<()> {
+    use std::io::Read as _;
+    for mode in [0, 4] {
+        let root = tempfile::tempdir()?;
+        let stage = root.path().join("stage");
+        std::fs::create_dir(&stage)?;
+        let context = catalog_context(root.path(), false, 1)?;
+        let (manifest, profile, url, task) = processor_fixture(mode).await?;
+        let inputs =
+            super::prepare_processor_inputs(&manifest, &profile, &stage, &context, &url).await?;
+        assert_eq!(task.await??, if mode == 4 { 4 } else { 3 });
+        let mut input = std::io::Cursor::new(std::fs::read(inputs)?);
+        let mut count = [0; 4];
+        input.read_exact(&mut count)?;
+        assert_eq!(u32::from_be_bytes(count), 3);
+        let mut paths = Vec::new();
+        for _ in 0..3 {
+            let mut values = Vec::new();
+            for _ in 0..2 {
+                input.read_exact(&mut count)?;
+                let mut bytes = vec![0; usize::try_from(u32::from_be_bytes(count))?];
+                input.read_exact(&mut bytes)?;
+                values.push(String::from_utf8(bytes)?);
+            }
+            paths.push(values);
+        }
+        let mappings_url = &manifest
+            .downloads
+            .client_mappings
+            .as_ref()
+            .context("mappings")?
+            .url;
+        assert!(paths.iter().any(|pair| &pair[0] == mappings_url));
+        for pair in paths {
+            assert!(Path::new(&pair[1]).is_file());
+        }
+        assert_eq!(
+            std::fs::read(stage.join("processor-mappings.txt"))?,
+            b"official mapping fixture"
+        );
+        assert_eq!(
+            format!(
+                "{:x}",
+                sha1::Sha1::digest(std::fs::read(stage.join("processor-mappings.txt"))?)
+            ),
+            manifest.downloads.client_mappings.context("mappings")?.sha1
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn processor_inputs_reject_different_game_foreign_origins_and_corrupt_mapping_bytes()
+-> anyhow::Result<()> {
+    for mode in [1, 2, 3] {
+        let root = tempfile::tempdir()?;
+        let stage = root.path().join("stage");
+        std::fs::create_dir(&stage)?;
+        let context = catalog_context(root.path(), false, 0)?;
+        let (manifest, profile, url, task) = processor_fixture(mode).await?;
+        assert!(
+            super::prepare_processor_inputs(&manifest, &profile, &stage, &context, &url)
+                .await
+                .is_err()
+        );
+        task.await??;
+        assert!(!stage.join("processor-inputs.bin").exists());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn processor_metadata_cancel_and_deadline_never_publish_inputs() -> anyhow::Result<()> {
+    for timeout in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/index", listener.local_addr()?);
+        let root = tempfile::tempdir()?;
+        let stage = root.path().join("stage");
+        std::fs::create_dir(&stage)?;
+        let context = catalog_context(root.path(), false, 0)?;
+        let cancel = context.cancel.clone();
+        let manifest = base()?;
+        let profile = serde_json::from_value(
+            json!({"minecraft":manifest.id,"libraries":[],"data":{"MOJMAPS":{"client":"[net.minecraft:client:fixture:mappings@txt]"}}}),
+        )?;
+        let destination = stage.join("processor-inputs.bin");
+        let pending = tokio::spawn(async move {
+            super::prepare_processor_inputs(&manifest, &profile, &stage, &context, &url).await
+        });
+        let (mut stream, _) = listener.accept().await?;
+        read_catalog_request(&mut stream).await?;
+        if timeout {
+            tokio::time::pause();
+            tokio::time::advance(std::time::Duration::from_secs(46)).await;
+        } else {
+            cancel.cancel();
+        }
+        let error = pending.await?.err().context("Expected bounded failure")?;
+        assert!(
+            error
+                .to_string()
+                .contains(if timeout { "timed out" } else { "cancelled" })
+        );
+        assert!(!destination.exists());
+        if timeout {
+            tokio::time::resume();
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn processor_generation_without_mappings_needs_no_network_and_honors_cancel()
+-> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let stage = root.path().join("space=cache");
+    std::fs::create_dir(&stage)?;
+    let context = catalog_context(root.path(), true, 0)?;
+    let profile =
+        serde_json::from_value(json!({"minecraft":MINECRAFT_VERSION,"libraries":[],"data":{}}))?;
+    let path =
+        super::prepare_processor_inputs(&base()?, &profile, &stage, &context, "not-a-network-url")
+            .await?;
+    assert_eq!(std::fs::read(&path)?, [0, 0, 0, 0]);
+    std::fs::remove_file(&path)?;
+    context.cancel.cancel();
+    assert!(
+        super::prepare_processor_inputs(&base()?, &profile, &stage, &context, "not-a-network-url")
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
     Ok(())
 }
