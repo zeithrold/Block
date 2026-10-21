@@ -7,6 +7,7 @@ fn reservation_survives_dropped_guard_and_blocks_shared_profiles_and_aliases() -
 {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
     let (instance, mut profile) =
         catalog.create_instance("Test".into(), "1.20.6".into(), None, None)?;
     profile.data_policy = DataPolicy::Shared;

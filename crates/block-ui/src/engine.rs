@@ -195,6 +195,13 @@ impl Engine {
         );
     }
 
+    pub(super) fn separate_profiles(&self) {
+        self.catalog_change(
+            |catalog| catalog.separate_profiles(),
+            "Separated profile mode enabled",
+        );
+    }
+
     pub(super) fn create_profile(&self, instance: String, name: String) {
         self.catalog_change(
             move |catalog| catalog.create_profile(&instance, name).map(|_| ()),

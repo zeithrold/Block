@@ -14,8 +14,25 @@ pub use storage::{Catalog, GameDirectoryGuard};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    /// New catalogs bundle one Profile with each Instance. Existing catalogs
+    /// without a mode retain their original ability to share Instances.
+    #[serde(default = "legacy_profile_mode")]
+    pub profile_mode: ProfileMode,
     pub instances: Vec<Instance>,
     pub profiles: Vec<Profile>,
+}
+
+/// Product-level relationship between installations and their launch settings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileMode {
+    #[default]
+    Bundled,
+    Separated,
+}
+
+const fn legacy_profile_mode() -> ProfileMode {
+    ProfileMode::Separated
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

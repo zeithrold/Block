@@ -24,6 +24,7 @@ tempfile.workspace = true
 interprocess.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+same-file = "1"
 widestring = "1"
 
 [target.'cfg(unix)'.dependencies]

@@ -404,7 +404,11 @@ async fn java_probe_failure_is_a_launch_error_without_old_crash_attachments() ->
     );
     let report = session_host::read_crash(&fixture.root, &id)?;
     assert!(report.attachments.is_empty());
-    assert!(report.sanitized_tail.contains("requires Java 21"));
+    assert!(
+        report.sanitized_tail.contains("requires Java 21"),
+        "unexpected launch diagnostic: {}",
+        report.sanitized_tail
+    );
     assert!(!serde_json::to_string(&report)?.contains(TOKEN));
     wait_host_exit(&fixture.root, &id).await?;
     assert!(!fixture.game.join(".block-session.json").exists());

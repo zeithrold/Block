@@ -481,7 +481,7 @@ impl ReportFingerprint {
         self.device == other.device && self.inode == other.inode
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     fn same_identity(&self, other: &Self) -> bool {
         self.created == other.created
     }
@@ -491,7 +491,12 @@ impl ReportFingerprint {
 #[derive(Debug, Clone)]
 pub struct ReportBaseline {
     root: PathBuf,
+    #[cfg(not(windows))]
     root_identity: ReportFingerprint,
+    // Retain the handle: Windows creation times can survive directory replacement
+    // through NTFS tunneling, and a closed file ID can later be reused.
+    #[cfg(windows)]
+    root_identity: std::sync::Arc<same_file::Handle>,
     files: BTreeMap<PathBuf, ReportFingerprint>,
 }
 
@@ -508,7 +513,10 @@ pub fn snapshot_reports(game_directory: &Path) -> anyhow::Result<ReportBaseline>
         "game directory must not be a symlink"
     );
     let root = game_directory.canonicalize()?;
+    #[cfg(not(windows))]
     let root_identity = ReportFingerprint::from_metadata(&fs::metadata(&root)?);
+    #[cfg(windows)]
+    let root_identity = std::sync::Arc::new(same_file::Handle::from_path(&root)?);
     let mut files = BTreeMap::new();
     for (path, _) in candidates(&root)? {
         if let Ok(metadata) = safe_metadata(&root, &path) {
@@ -547,12 +555,18 @@ pub fn collect_fresh_reports(
         game_directory.canonicalize()? == baseline.root,
         "game directory changed during the session"
     );
+    #[cfg(not(windows))]
     ensure!(
         baseline
             .root_identity
             .same_identity(&ReportFingerprint::from_metadata(&fs::metadata(
                 &baseline.root
             )?)),
+        "game directory was replaced during the session"
+    );
+    #[cfg(windows)]
+    ensure!(
+        *baseline.root_identity == same_file::Handle::from_path(&baseline.root)?,
         "game directory was replaced during the session"
     );
     let mut fresh = candidates(&baseline.root)?

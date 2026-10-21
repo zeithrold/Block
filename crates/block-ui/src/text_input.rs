@@ -680,7 +680,15 @@ impl Render for TextInput {
                     .px_3()
                     .py_2()
                     .rounded_md()
-                    .bg(rgb(0x0010_1923))
+                    .border_1()
+                    .border_color(rgb(cx
+                        .try_global::<super::Palette>()
+                        .map_or(super::Palette::DARK.border, |palette| palette.border)))
+                    .bg(rgb(cx
+                        .try_global::<super::Palette>()
+                        .map_or(super::Palette::DARK.surface, |palette| {
+                            palette.surface
+                        })))
                     .child(TextElement { input: cx.entity() }),
             )
     }

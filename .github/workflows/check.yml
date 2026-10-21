@@ -9,36 +9,33 @@ permissions:
   contents: read
 
 jobs:
-  core:
-    name: Core / ${{ matrix.os }}
+  native:
+    name: Native / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+        # Linux ARM64 is tested independently; it is not a CI job.
+        include:
+          - os: ubuntu-24.04
+            platform: linux-amd64
+          - os: windows-2022
+            platform: windows-amd64
+          - os: macos-15
+            platform: macos-arm64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked -p minecraft-manifest -p block-download -p block-launcher -p block-auth -p block-cli --all-targets --all-features -- -D warnings
-      - run: cargo test --locked -p minecraft-manifest -p block-download -p block-launcher -p block-auth -p block-cli --all-features
-
-  desktop:
-    name: Desktop build / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Verify runner and Rust host architecture
+        run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --verify-host-only --evidence-dir target/platform-host
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
@@ -47,11 +44,15 @@ jobs:
       - name: Ensure macOS Metal compiler is available
         if: runner.os == 'macOS'
         run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
-      - name: Test Linux xattr compatibility patch
-        if: runner.os == 'Linux'
-        run: cargo test --manifest-path vendor/xattr/Cargo.toml
-      - run: cargo check --locked -p block-app --all-targets
-      - name: Test native UI state and GPUI framework interactions
-        run: cargo test --locked -p block-ui --lib --test gpui_framework
-      - name: Test detached session supervision with synthetic game processes
-        run: cargo test --locked -p block-app --test session_supervisor
+      - name: Verify core, desktop, framework interactions, and session supervision
+        run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --evidence-dir target/platform-verification
+      - name: Upload native verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ matrix.platform }}
+          path: |
+            target/platform-host
+            target/platform-verification
+          if-no-files-found: warn
+          retention-days: 14

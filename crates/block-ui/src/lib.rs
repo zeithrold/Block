@@ -1,7 +1,9 @@
 //! A native launcher with persistent installations, launch profiles and Microsoft accounts.
 
+mod appearance;
 mod crash_view;
 mod engine;
+mod shell;
 mod text_input;
 
 pub use crash_view::CrashView;
@@ -18,7 +20,7 @@ use block_launcher::{
     CancellationToken,
     catalog::{DataPolicy, InstallStatus, Instance, LoaderKind, Profile, Snapshot},
     crash::CrashReport,
-    recipe::{LaunchRecipe, RecipeSource, RuntimeSelection},
+    recipe::{LaunchRecipe, RuntimeSelection},
     session_host::{self, RunRecord, RunState},
 };
 use gpui::{
@@ -28,7 +30,9 @@ use gpui::{
 };
 use tokio::sync::mpsc::Receiver;
 
+use appearance::{Appearance, Palette, Preferences};
 use engine::{Engine, Message};
+use shell::{Drawer, ShellState};
 use text_input::TextInput;
 
 /// Explicit development recipe input. Normal startup uses the persisted library.
@@ -43,14 +47,24 @@ pub struct LaunchOptions {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Tab {
     #[default]
+    Home,
     Instances,
     Profiles,
     Accounts,
+    Settings,
+    About,
 }
 
 #[derive(Clone, Debug)]
 enum UiAction {
     Tab(Tab),
+    Drawer(Option<Drawer>),
+    SetAppearance(Appearance),
+    ReduceMotion,
+    SavePreferences,
+    ResetPreferences,
+    ConfirmSeparate(bool),
+    SeparateProfiles,
     SelectInstance(String),
     SelectProfile(String),
     SelectAccount(String),
@@ -124,6 +138,10 @@ enum Form {
 /// The GPUI view owns only public account metadata and editable settings.
 #[derive(Debug)]
 pub struct Block {
+    shell: ShellState,
+    preferences: Preferences,
+    saved_preferences: Preferences,
+    palette: Palette,
     snapshot: Snapshot,
     accounts: Vec<Account>,
     versions: Vec<String>,
@@ -217,7 +235,22 @@ impl Block {
             }
         })
         .detach();
+        let preferences = engine
+            .as_ref()
+            .map(|engine| Preferences::load(&engine.root))
+            .transpose();
+        let (preferences, status) = match preferences {
+            Ok(value) => (value.unwrap_or_default(), status),
+            Err(error) => (
+                Preferences::default(),
+                format!("Could not read preferences: {error}"),
+            ),
+        };
         let mut view = Self {
+            shell: ShellState::default(),
+            saved_preferences: preferences.clone(),
+            palette: preferences.palette(window.appearance()),
+            preferences,
             snapshot: Snapshot::default(),
             accounts: Vec::new(),
             versions: vec!["1.20.6".into(), "1.20.1".into(), "26.3".into()],
@@ -225,7 +258,7 @@ impl Block {
             selected_profile: None,
             pending_profile: options.profile,
             selected_account: None,
-            tab: Tab::Instances,
+            tab: Tab::Home,
             form: None,
             engine,
             messages,
@@ -572,6 +605,11 @@ impl Block {
                 action,
                 UiAction::Stop
                     | UiAction::Tab(_)
+                    | UiAction::Drawer(_)
+                    | UiAction::SetAppearance(_)
+                    | UiAction::ReduceMotion
+                    | UiAction::SavePreferences
+                    | UiAction::ResetPreferences
                     | UiAction::ToggleOutput
                     | UiAction::ToggleCommand
             )
@@ -579,10 +617,57 @@ impl Block {
             return;
         }
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
+        let previous_page = (self.tab, self.form.is_some());
         match action {
             UiAction::Tab(tab) => {
+                if self.tab == Tab::Settings && tab != Tab::Settings {
+                    self.preferences = self.saved_preferences.clone();
+                }
                 self.tab = tab;
                 self.form = None;
+                self.shell.drawer = None;
+                window.resize(if tab == Tab::Home {
+                    gpui::size(px(432.), px(768.))
+                } else {
+                    gpui::size(px(960.), px(600.))
+                });
+            }
+            UiAction::Drawer(drawer) => {
+                if drawer.is_some() {
+                    self.shell.return_focus = window.focused(cx);
+                    let focus = cx.focus_handle();
+                    focus.focus(window);
+                    self.shell.drawer_focus = Some(focus);
+                }
+                self.shell.drawer = drawer;
+                self.shell.drawer_revision = self.shell.drawer_revision.wrapping_add(1);
+            }
+            UiAction::SetAppearance(appearance) => self.preferences.appearance = appearance,
+            UiAction::ReduceMotion => {
+                self.preferences.reduce_motion = !self.preferences.reduce_motion;
+            }
+            UiAction::ResetPreferences => self.preferences = Preferences::default(),
+            UiAction::SavePreferences => {
+                match self
+                    .engine
+                    .as_ref()
+                    .map(|engine| self.preferences.save(&engine.root))
+                {
+                    Some(Ok(())) => {
+                        self.saved_preferences = self.preferences.clone();
+                        self.status = "Settings saved".into();
+                    }
+                    Some(Err(error)) => self.report(format!("Could not save settings: {error}")),
+                    None => self.report("Settings could not be saved: engine unavailable".into()),
+                }
+            }
+            UiAction::ConfirmSeparate(confirm) => self.shell.confirm_separation = confirm,
+            UiAction::SeparateProfiles => {
+                self.shell.confirm_separation = false;
+                self.begin("Enabling separated profiles");
+                if let Some(engine) = &self.engine {
+                    engine.separate_profiles();
+                }
             }
             UiAction::SelectInstance(id) => {
                 self.selected_instance = Some(id);
@@ -591,11 +676,23 @@ impl Block {
                 self.normalize_selection();
             }
             UiAction::SelectProfile(id) => {
-                self.selected_profile = Some(id);
+                if let Some(profile) = self
+                    .snapshot
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.id == id)
+                {
+                    self.selected_instance = Some(profile.instance_id.clone());
+                    self.selected_profile = Some(id);
+                }
+                self.shell.drawer = None;
                 self.form = None;
                 self.apply_profile_account();
             }
-            UiAction::SelectAccount(id) => self.selected_account = Some(id),
+            UiAction::SelectAccount(id) => {
+                self.selected_account = Some(id);
+                self.shell.drawer = None;
+            }
             UiAction::CreateInstance => {
                 self.tab = Tab::Instances;
                 self.form = Some(Form::Instance(InstanceForm {
@@ -723,8 +820,26 @@ impl Block {
             UiAction::OpenRecipe => self.open_recipe(cx),
             UiAction::LaunchRecipe => self.launch_recipe(cx),
         }
-        if self.form.is_none() {
-            self.focus.focus(window);
+        if previous_page != (self.tab, self.form.is_some()) {
+            if self.form.is_some() {
+                window.resize(gpui::size(px(960.), px(600.)));
+            }
+            self.shell.backwards = self.tab == Tab::Home || self.form.is_none() && previous_page.1;
+            self.shell.revision = self.shell.revision.wrapping_add(1);
+        }
+        if let Some(focus) = self
+            .shell
+            .drawer
+            .as_ref()
+            .and(self.shell.drawer_focus.as_ref())
+        {
+            focus.focus(window);
+        } else if self.form.is_none() {
+            self.shell
+                .return_focus
+                .take()
+                .unwrap_or_else(|| self.focus.clone())
+                .focus(window);
         } else if focus_first {
             self.focus_field(false, window, cx);
         }
@@ -742,7 +857,14 @@ impl Block {
                 fields.extend([&form.jvm, &form.game]);
                 fields
             }
-            _ => return,
+            _ => {
+                if backwards {
+                    window.focus_prev();
+                } else {
+                    window.focus_next();
+                }
+                return;
+            }
         };
         let selected = fields
             .iter()
@@ -965,77 +1087,30 @@ impl Block {
         div()
             .id(id)
             .debug_selector(move || selector)
+            .tab_index(0)
+            .focus(|style| style.border_color(rgb(0x0080_8080)))
+            .on_key_down({
+                let action = action.clone();
+                cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        view.handle(action.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                })
+            })
             .px_3()
             .py_2()
             .rounded_md()
-            .bg(rgb(if self.busy { 0x0022_303a } else { 0x0029_3c4a }))
+            .bg(rgb(self.palette.surface))
+            .border_1()
+            .border_color(rgb(self.palette.border))
             .text_sm()
             .cursor_pointer()
-            .hover(|style| style.bg(rgb(0x0036_5363)))
+            .hover(|style| style.opacity(0.75))
             .on_click(
                 cx.listener(move |view, _, window, cx| view.handle(action.clone(), window, cx)),
             )
             .child(label.into())
-    }
-
-    fn sidebar(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
-        div()
-            .flex()
-            .flex_col()
-            .w(px(230.))
-            .flex_shrink_0()
-            .bg(rgb(0x0010_1923))
-            .p_4()
-            .gap_3()
-            .child(div().text_xl().child("Block"))
-            .child(note("Minecraft: Java Edition"))
-            .child(self.button(
-                "tab-instances",
-                "Instances",
-                UiAction::Tab(Tab::Instances),
-                cx,
-            ))
-            .child(self.button("tab-profiles", "Profiles", UiAction::Tab(Tab::Profiles), cx))
-            .child(self.button("tab-accounts", "Accounts", UiAction::Tab(Tab::Accounts), cx))
-            .child(div().mt_4().text_xs().child("YOUR INSTALLATIONS"))
-            .child(
-                div()
-                    .id("instance-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(self.snapshot.instances.iter().map(|instance| {
-                        let label = format!(
-                            "{}{}",
-                            if Some(&instance.id) == self.selected_instance.as_ref() {
-                                "● "
-                            } else {
-                                ""
-                            },
-                            instance.name
-                        );
-                        self.button(
-                            format!("instance-{}", instance.id),
-                            label,
-                            UiAction::SelectInstance(instance.id.clone()),
-                            cx,
-                        )
-                    })),
-            )
-            .child(self.button(
-                "create-instance",
-                "+ New instance",
-                UiAction::CreateInstance,
-                cx,
-            ))
-            .child(note(format!(
-                "{} / {}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            )))
     }
 
     fn welcome(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
@@ -1053,7 +1128,7 @@ impl Block {
             .child(self.button("sign-in", "Sign in with Microsoft", UiAction::SignIn, cx))
             .children(self.accounts.iter().map(|account| {
                 let id = account_id(account);
-                panel().gap_2().bg(rgb(0x0010_1923)).child(div().text_lg().child(account.player_name.clone()))
+                panel().gap_2().bg(rgb(self.palette.surface)).child(div().text_lg().child(account.player_name.clone()))
                     .child(note(format!("Microsoft · {}", account.reference.player_id)))
                     .child(note("Ownership verified at sign-in · credentials in system secure storage"))
                     .child(div().flex().flex_wrap().gap_2()
@@ -1093,7 +1168,7 @@ impl Block {
     fn profile_choices(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         panel()
             .gap_2()
-            .bg(rgb(0x0010_1923))
+            .bg(rgb(self.palette.surface))
             .child(div().text_sm().child("Profiles"))
             .children(
                 self.snapshot
@@ -1119,16 +1194,30 @@ impl Block {
                         )
                     }),
             )
-            .child(
-                div()
+            .child({
+                let mut actions = div()
                     .flex()
                     .flex_wrap()
                     .gap_2()
-                    .child(self.button("new-profile", "+ New profile", UiAction::NewProfile, cx))
                     .child(self.button("edit-profile", "Edit", UiAction::EditProfile, cx))
-                    .child(self.button("copy-profile", "Copy settings", UiAction::CopyProfile, cx))
-                    .child(self.button("delete-profile", "Delete", UiAction::DeleteProfile, cx)),
-            )
+                    .child(self.button("delete-profile", "Delete", UiAction::DeleteProfile, cx));
+                if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Separated {
+                    actions = actions
+                        .child(self.button(
+                            "new-profile",
+                            "+ New profile",
+                            UiAction::NewProfile,
+                            cx,
+                        ))
+                        .child(self.button(
+                            "copy-profile",
+                            "Copy settings",
+                            UiAction::CopyProfile,
+                            cx,
+                        ));
+                }
+                actions
+            })
     }
 
     fn profiles_page(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
@@ -1157,7 +1246,7 @@ impl Block {
     fn launch_controls(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         panel()
             .gap_3()
-            .bg(rgb(0x0017_352f))
+            .bg(rgb(self.palette.surface))
             .child(div().text_sm().child(format!(
                     "Account: {}",
                     self.accounts
@@ -1280,7 +1369,7 @@ impl Block {
                     .id("game-output")
                     .h(px(210.))
                     .overflow_y_scroll()
-                    .bg(rgb(0x000b_1219))
+                    .bg(rgb(self.palette.surface))
                     .p_3()
                     .text_xs()
                     .children(lines.into_iter().map(|line| div().mb_1().child(line))),
@@ -1294,99 +1383,9 @@ impl Render for Block {
         if let Some(help) = &self.crash_help {
             return div().size_full().child(help.clone()).into_any_element();
         }
-        let main = match &self.form {
-            Some(Form::Instance(form)) => self.instance_form(form, cx).into_any_element(),
-            Some(Form::Profile(form)) => self.profile_form(form, cx).into_any_element(),
-            Some(Form::Delete(_)) => panel().gap_4().child(div().text_xl().child("Delete this profile?"))
-                .child(note("Only launch settings will be removed. All worlds, game data and shared installation files will remain on disk. Copying a profile copies settings only; isolated profiles start with an empty game directory."))
-                .child(div().flex().flex_wrap().gap_2().child(self.button("confirm-delete", "Delete profile", UiAction::ConfirmDelete, cx))
-                    .child(self.button("cancel-delete", "Keep profile", UiAction::CancelForm, cx))).into_any_element(),
-            None => match self.tab { Tab::Instances => self.instance_page(cx).into_any_element(), Tab::Profiles => self.profiles_page(cx).into_any_element(), Tab::Accounts => self.accounts_page(cx).into_any_element() },
-        };
-        let mut content = div()
-            .id("main-content")
-            .flex_1()
-            .min_w_0()
-            .overflow_y_scroll()
-            .p_6()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                panel()
-                    .gap_1()
-                    .child(div().text_sm().child(self.status.clone()))
-                    .child(note(if self.busy {
-                        format!(
-                            "{} resource objects verified · Stop cancels the current operation",
-                            self.completed
-                        )
-                    } else {
-                        "Ready · account credentials are never stored in profiles".into()
-                    })),
-            )
-            .child(main)
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(self.button(
-                        "show-output",
-                        if self.show_output {
-                            "Hide output"
-                        } else {
-                            "View output"
-                        },
-                        UiAction::ToggleOutput,
-                        cx,
-                    ))
-                    .child(self.button(
-                        "open-recipe",
-                        "Open development recipe…",
-                        UiAction::OpenRecipe,
-                        cx,
-                    )),
-            );
-        if self.busy {
-            content = content.child(self.button(
-                "operation-stop",
-                "Stop current operation",
-                UiAction::Stop,
-                cx,
-            ));
-        }
-        if let Some(recipe) = &self.recipe {
-            let title = match &recipe.source {
-                RecipeSource::Mojang { version } => version.as_str(),
-                RecipeSource::LocalManifest { .. } => "local manifest",
-            };
-            content = content.child(self.button(
-                "launch-recipe",
-                format!("Launch development recipe · {title}"),
-                UiAction::LaunchRecipe,
-                cx,
-            ));
-        }
-        if self.show_output {
-            content = content.child(self.output(cx));
-        }
-        div()
-            .key_context("LauncherForm")
-            .on_action(
-                cx.listener(|view, _: &NextField, window, cx| view.focus_field(false, window, cx)),
-            )
-            .on_action(cx.listener(|view, _: &PreviousField, window, cx| {
-                view.focus_field(true, window, cx);
-            }))
-            .track_focus(&self.focus)
-            .size_full()
-            .flex()
-            .bg(rgb(0x0017_232d))
-            .text_color(rgb(0x00e9_f0f4))
-            .child(self.sidebar(cx))
-            .child(content)
-            .into_any_element()
+        self.palette = self.preferences.palette(window.appearance());
+        cx.set_global(self.palette);
+        self.render_shell(window, cx).into_any_element()
     }
 }
 
@@ -1396,12 +1395,14 @@ fn panel() -> gpui::Div {
         .flex_col()
         .p_4()
         .rounded_md()
-        .bg(rgb(0x001d_2d39))
+        .border_1()
+        .border_color(rgb(0x0073_7373))
+        .bg(gpui::transparent_black())
 }
 fn note(text: impl Into<SharedString>) -> gpui::Div {
     div()
         .text_xs()
-        .text_color(rgb(0x00a3_b7c7))
+        .text_color(rgb(0x0080_8080))
         .child(text.into())
 }
 fn field(label: &'static str, input: &Entity<TextInput>) -> gpui::Div {
@@ -1535,6 +1536,10 @@ mod tests {
             Some("LauncherForm"),
         )]);
         super::Block {
+            shell: super::ShellState::default(),
+            preferences: super::Preferences::default(),
+            saved_preferences: super::Preferences::default(),
+            palette: super::Palette::LIGHT,
             snapshot: block_launcher::catalog::Snapshot::default(),
             accounts: Vec::new(),
             versions: vec!["1.20.6".into()],
@@ -1565,6 +1570,74 @@ mod tests {
             recipe: None,
             recipe_load: RecipeLoadState::default(),
         }
+    }
+
+    fn click_selector(cx: &mut gpui::VisualTestContext, selector: &'static str) {
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds(selector);
+        assert!(bounds.is_some(), "missing selector: {selector}");
+        if let Some(bounds) = bounds {
+            cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        }
+    }
+
+    #[gpui::test]
+    fn native_home_menu_settings_preview_cancel_and_escape(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(super::UiAction::Tab(super::Tab::Home), window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_resize(gpui::size(gpui::px(432.), gpui::px(768.)));
+        click_selector(cx, "app-menu");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.drawer),
+            Some(super::Drawer::Menu)
+        );
+        click_selector(cx, "menu-settings");
+        assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Settings);
+        cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
+        click_selector(cx, "appearance-dark");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.preferences.appearance),
+            super::Appearance::Dark
+        );
+        click_selector(cx, "reduce-motion");
+        assert!(view.read_with(cx, |view, _| view.preferences.reduce_motion));
+        click_selector(cx, "back-home");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.preferences.clone()),
+            super::Preferences::default()
+        );
+        click_selector(cx, "home-profiles");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.drawer),
+            Some(super::Drawer::Profiles)
+        );
+        cx.simulate_keystrokes("escape");
+        assert!(view.read_with(cx, |view, _| view.shell.drawer.is_none()));
+        assert!(!view.read_with(cx, |view, _| view.busy));
+    }
+
+    #[gpui::test]
+    fn native_menu_is_keyboard_operable_without_replaying_page_animation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(test_view);
+        let revision = view.read_with(cx, |view, _| view.shell.revision);
+        cx.simulate_keystrokes("tab enter");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.drawer),
+            Some(super::Drawer::Menu)
+        );
+        assert_eq!(view.read_with(cx, |view, _| view.shell.revision), revision);
+        cx.simulate_keystrokes("escape");
+        assert!(view.read_with(cx, |view, _| view.shell.drawer.is_none()));
     }
 
     fn supervised_record() -> block_launcher::session_host::RunRecord {

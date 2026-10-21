@@ -5,6 +5,7 @@ use std::{fs, sync::Arc};
 fn installations_own_multiple_persistent_profiles() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
     let (instance, first) = catalog.create_instance(
         "Survival".into(),
         "1.20.6".into(),
@@ -32,6 +33,7 @@ fn installations_own_multiple_persistent_profiles() -> anyhow::Result<()> {
 fn isolated_copy_changes_data_path_and_shared_profiles_reuse_one_directory() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
     let (instance, mut original) =
         catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     let copy = catalog.copy_profile(&original.id, "Copy settings".into())?;
@@ -53,6 +55,7 @@ fn isolated_copy_changes_data_path_and_shared_profiles_reuse_one_directory() -> 
 fn deleting_profile_keeps_shared_resources_worlds_and_other_profiles() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
     let (instance, profile) =
         catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     let copy = catalog.copy_profile(&profile.id, "Other".into())?;
@@ -159,6 +162,7 @@ fn existing_installation_root_cannot_be_reused_by_another_instance() -> anyhow::
 fn isolated_profile_cannot_alias_another_profile_with_a_symlink() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
     let (instance, first) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     let second = catalog.copy_profile(&first.id, "Other".into())?;
     let original = first.game_directory(&instance)?;

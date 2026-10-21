@@ -95,20 +95,25 @@ fn configure_application(cx: &mut App) {
 }
 
 fn window_options(cx: &App, title: &str) -> WindowOptions {
-    let bounds = Bounds::centered(None, size(px(1040.0), px(720.0)), cx);
+    let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
     WindowOptions {
         titlebar: Some(TitlebarOptions {
             title: Some(title.to_owned().into()),
             ..Default::default()
         }),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(760.0), px(560.0))),
+        window_min_size: Some(size(px(360.0), px(540.0))),
         ..Default::default()
     }
 }
 
 fn open_launcher(cx: &mut App, options: LaunchOptions) -> anyhow::Result<()> {
-    let window_options = window_options(cx, "Block");
+    let mut window_options = window_options(cx, "Block");
+    window_options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(
+        None,
+        size(px(432.0), px(768.0)),
+        cx,
+    )));
     cx.open_window(window_options, |window, cx| {
         cx.new(|cx| Block::new(window, cx, options))
     })?;
