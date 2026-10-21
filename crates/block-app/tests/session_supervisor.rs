@@ -470,6 +470,16 @@ async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<(
     let running = wait_for(&fixture.root, &id, RunState::Running).await?;
     let host = running.supervisor_pid.context("supervisor PID missing")?;
     let java = running.java_pid.context("fixture PID missing")?;
+    // Running means spawned. Let the fixture finish its initial pipe writes
+    // before killing their reader, so a broken pipe cannot end the test child.
+    let ready_deadline = Instant::now() + Duration::from_secs(5);
+    while !fixture.tools.join("java.ready").exists() {
+        ensure!(
+            Instant::now() < ready_deadline,
+            "fixture did not become ready"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
     // Both identities come from the live private endpoint of this newly created run.
     assert_eq!(
         session_host::status(&fixture.root, &id)

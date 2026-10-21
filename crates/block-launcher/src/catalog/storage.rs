@@ -44,6 +44,35 @@ pub struct GameDirectoryGuard {
     _lock: File,
 }
 
+impl Drop for GameDirectoryGuard {
+    fn drop(&mut self) {
+        // A concurrent process spawn can briefly inherit the open description
+        // before exec closes it. Release ownership when this guard ends.
+        let _ = fs2::FileExt::unlock(&self._lock);
+    }
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+mod guard_tests {
+    use super::GameDirectoryGuard;
+
+    #[test]
+    fn releasing_directory_ownership_unlocks_inherited_file_descriptions() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let guard = GameDirectoryGuard::acquire(directory.path())?;
+        let inherited = guard._lock.try_clone()?;
+        assert!(GameDirectoryGuard::acquire(directory.path()).is_err());
+        drop(guard);
+        let next_owner = GameDirectoryGuard::acquire(directory.path())?;
+        drop(inherited);
+        assert!(GameDirectoryGuard::acquire(directory.path()).is_err());
+        drop(next_owner);
+        assert!(GameDirectoryGuard::acquire(directory.path()).is_ok());
+        Ok(())
+    }
+}
+
 impl GameDirectoryGuard {
     /// # Errors
     /// Rejects concurrent game access, sticky session reservations and symlinked lock files.

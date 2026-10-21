@@ -41,6 +41,7 @@ fn run() -> std::io::Result<ExitCode> {
     fs::write(directory.join("java.pid"), std::process::id().to_string())?;
     println!("Fixture stdout token={token}");
     eprintln!("Fixture stderr token={token}");
+    fs::write(directory.join("java.ready"), b"output complete")?;
     if !wait_for_release(directory) {
         // Failed tests must not leave an endless orphan or open a help window.
         fs::write(directory.join("java.exited"), b"watchdog")?;
