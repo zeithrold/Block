@@ -235,7 +235,6 @@ impl AuthlibAuth {
                 .ok_or(AuthError::ProviderIdentityChanged)?;
             let reply = self.token_request("refresh",&serde_json::json!({"accessToken":pending.reply.access_token.expose(),"clientToken":pending.reply.client_token.expose(),"requestUser":true,"selectedProfile":{"id":profile.id.simple().to_string(),"name":profile.name}}),cancel).await?;
             if reply.client_token.expose() != pending.reply.client_token.expose()
-                || user_changed(pending.reply.user.as_ref(), reply.user.as_ref())
                 || reply.selected_profile.as_ref().is_none_or(|p| p.id != id)
             {
                 return Err(AuthError::ProviderIdentityChanged);
@@ -328,7 +327,6 @@ impl AuthlibAuth {
                 .as_ref()
                 .ok_or(AuthError::ProviderIdentityChanged)?;
             if profile.id != account.reference.player_id
-                || user_changed(tokens.user.as_ref(), reply.user.as_ref())
                 || reply.client_token.expose() != tokens.client_token.expose()
             {
                 return Err(AuthError::ProviderIdentityChanged);
@@ -565,12 +563,6 @@ fn legacy_properties(user: Option<&AuthlibUser>) -> Result<SecretString> {
         return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
     }
     Ok(SecretString::new(json))
-}
-
-fn user_changed(old: Option<&AuthlibUser>, new: Option<&AuthlibUser>) -> bool {
-    old.and_then(|user| user.id)
-        .zip(new.and_then(|user| user.id))
-        .is_some_and(|(old, new)| old != new)
 }
 
 fn session_from_tokens(account: Account, tokens: &TokenBundle) -> Result<AuthenticatedSession> {
@@ -1205,7 +1197,10 @@ mod tests {
             chosen.clone(),
             serde_json::json!([chosen]),
         );
-        let rotated = token_reply("ROTATED_SECRET", renamed, serde_json::json!([]));
+        let mut rotated = token_reply("ROTATED_SECRET", renamed, serde_json::json!([]));
+        rotated["user"]["id"] = serde_json::json!(Uuid::from_u128(789).simple().to_string());
+        rotated["user"]["properties"] =
+            serde_json::json!([{"name":"preferredLanguage","value":"en"}]);
         let empty = || (204, String::new(), String::new());
         let (url, task) = server(vec![
             json_step(&initial),
@@ -1275,9 +1270,15 @@ mod tests {
         assert_eq!(refreshed.expose_access_token(), "ROTATED_SECRET");
         assert_eq!(refreshed.account.player_name, "Renamed");
         assert_eq!(refreshed.account.identity_key(), account.identity_key());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(refreshed.expose_user_properties())?,
+            serde_json::json!({"preferredLanguage":["en"]})
+        );
         let stored = credentials::load(&account).await?;
         assert!(stored.expose().contains("ROTATED_SECRET"));
         assert!(!stored.expose().contains("ASSIGNED_SECRET"));
+        let stored_user: serde_json::Value = serde_json::from_str(stored.expose())?;
+        assert_eq!(stored_user["user"]["id"], Uuid::from_u128(789).to_string());
         auth.invalidate(&refreshed.account, &cancel).await?;
         auth.signout(
             "fixture@example.test",
@@ -1535,7 +1536,7 @@ mod tests {
     #[tokio::test]
     async fn yggdrasil_changed_or_revoked_refresh_preserves_local_tokens_and_never_reauthenticates()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
-        for changed_user in [false, true] {
+        for changed_client in [false, true] {
             let valid = token_reply(
                 "ORIGINAL_SECRET",
                 profile(1, "Player"),
@@ -1543,12 +1544,11 @@ mod tests {
             );
             let mut changed = token_reply(
                 "NEW_SECRET",
-                profile(if changed_user { 1 } else { 2 }, "Player"),
+                profile(if changed_client { 1 } else { 2 }, "Player"),
                 serde_json::json!([]),
             );
-            if changed_user {
-                changed["user"]["id"] =
-                    serde_json::json!(Uuid::from_u128(789).simple().to_string());
+            if changed_client {
+                changed["clientToken"] = serde_json::json!("UNEXPECTED_CLIENT");
             }
             let (url, task) = server(vec![
                 json_step(&valid),

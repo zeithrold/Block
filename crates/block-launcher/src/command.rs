@@ -93,6 +93,8 @@ impl JavaCommand {
                 "auth_session".into(),
                 if offline {
                     "0".into()
+                } else if session.user_type == "mojang" {
+                    session.access_token.clone()
                 } else {
                     format!("token:{}:{}", session.access_token, session.uuid)
                 },

@@ -13,7 +13,7 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
     let session = GameSession {
         username: "山与海".into(),
         uuid: "123456781234123412341234567890ab".into(),
-        access_token: "0".into(),
+        access_token: "EXTERNAL_TOKEN".into(),
         user_type: "mojang".into(),
         xuid: String::new(),
         client_id: String::new(),
@@ -57,12 +57,13 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         command
             .arguments
             .iter()
-            .any(|arg| arg.value == "token:0:123456781234123412341234567890ab")
+            .any(|arg| arg.value == "EXTERNAL_TOKEN" && arg.secret)
     );
     assert!(command.arguments.iter().any(|arg| arg.value == "山与海"));
     assert!(command.preview().arguments.contains(&"mojang".into()));
     assert!(!serde_json::to_string(&plan)?.contains("SYNTHETIC_PROPERTY"));
     assert!(!serde_json::to_string(&command.preview())?.contains("SYNTHETIC_PROPERTY"));
+    assert!(!serde_json::to_string(&command.preview())?.contains("EXTERNAL_TOKEN"));
     assert!(!format!("{command:?} {session:?}").contains("SYNTHETIC_PROPERTY"));
     assert_eq!(
         command.redact(&format!("properties={properties}")),
@@ -73,6 +74,10 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         invalid_session.user_properties = invalid.into();
         assert!(JavaCommand::bind(&plan, root.path(), "run", &invalid_session).is_err());
     }
+    let mut opaque = session.clone();
+    opaque.access_token = "0".into();
+    let opaque = JavaCommand::bind(&plan, root.path(), "run", &opaque)?;
+    assert_eq!(opaque.redact("token=0"), "token=<redacted>");
     let mut offline = session;
     offline.user_type = "msa".into();
     assert!(offline.validate().is_err());
