@@ -694,6 +694,7 @@ async fn processor_inputs_use_verified_game_metadata_and_mappings_with_real_retr
         let root = tempfile::tempdir()?;
         let stage = root.path().join("stage");
         std::fs::create_dir(&stage)?;
+        let stage = stage.canonicalize()?;
         let context = catalog_context(root.path(), false, 1)?;
         let (manifest, profile, url, task) = processor_fixture(mode).await?;
         let inputs =
@@ -723,6 +724,10 @@ async fn processor_inputs_use_verified_game_metadata_and_mappings_with_real_retr
         assert!(paths.iter().any(|pair| &pair[0] == mappings_url));
         for pair in paths {
             assert!(Path::new(&pair[1]).is_file());
+            assert!(
+                !pair[1].starts_with(r"\\?\"),
+                "Java inputs must use ordinary Windows paths"
+            );
         }
         assert_eq!(
             std::fs::read(stage.join("processor-mappings.txt"))?,

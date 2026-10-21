@@ -281,7 +281,7 @@ impl JavaCommand {
     }
 }
 
-fn java_path(path: PathBuf, os: OperatingSystem) -> anyhow::Result<PathBuf> {
+pub(crate) fn java_path(path: PathBuf, os: OperatingSystem) -> anyhow::Result<PathBuf> {
     if os != OperatingSystem::Windows {
         return Ok(path);
     }

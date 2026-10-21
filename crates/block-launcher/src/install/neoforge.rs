@@ -667,7 +667,9 @@ async fn prepare_processor_inputs(
     let path = stage.join("processor-inputs.bin");
     let mut file = File::create(&path)?;
     file.write_all(&u32::try_from(inputs.len())?.to_be_bytes())?;
+    let os = crate::platform::Target::host()?.os;
     for (url, path) in inputs {
+        let path = crate::command::java_path(path, os)?;
         for value in [
             url.as_str(),
             path.to_str().context("Non-UTF8 installer input path")?,
@@ -695,6 +697,11 @@ async fn run_installer(
     tokio::fs::write(&agent, INSTALLER_CACHE_AGENT).await?;
     let home = stage.join("home");
     tokio::fs::create_dir_all(&home).await?;
+    let os = crate::platform::Target::host()?.os;
+    let java = crate::command::java_path(java.to_owned(), os)?;
+    let installer = crate::command::java_path(installer.to_owned(), os)?;
+    let java_stage = crate::command::java_path(stage.to_owned(), os)?;
+    let home = crate::command::java_path(home, os)?;
     let log_path = stage.join("installer.log");
     let log = File::create(&log_path)?;
     let mut child = tokio::process::Command::new(java)
@@ -708,7 +715,7 @@ async fn run_installer(
         .arg(installer)
         .arg("--offline")
         .arg("--installClient")
-        .arg(stage)
+        .arg(java_stage)
         .current_dir(stage)
         .env_remove("MICROSOFT_CLIENT_SECRET")
         .stdin(Stdio::null())
