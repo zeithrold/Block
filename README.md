@@ -111,4 +111,4 @@ The workspace enables Clippy's `all`, `pedantic`, and `nursery` groups. Addition
 
 See [the experiment notes](experiments/minecraft-manifests/README.md) for the schema coverage, recorded full-corpus results, and reproduction steps. The parser is a separate workspace crate; the desktop application remains the default member.
 
-Native experience migration and platform receipts: [GPUI product progress](docs/gpui-product-progress.md). Desktop packaging and the `one.ztd.block` product identity: [packaging](packaging/README.md).
+Current pilot implementation and pending acceptance: [Pilot status](docs/STATUS.md). Desktop packaging and the `one.ztd.block` product identity: [packaging](packaging/README.md).
