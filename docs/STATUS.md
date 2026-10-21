@@ -95,7 +95,7 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Microsoft authorization `9ecc1fd` passed three-platform CI run `39640688731`. Offline accounts passed full `just check` (332 tests) and release compilation; their CI remains pending.
+- Microsoft authorization `9ecc1fd` passed three-platform CI run `39640688731`. Offline `8b6a136` passed full local `just check` (332 tests), release compilation and macOS/Linux CI; Windows session-supervisor verification remains under investigation.
 - Old ui-parity evidence was removed before staging. `gpui-product-progress.md` already existed in earlier history; its current-tree deletion does not rewrite those prior commits.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
 - Native screenshots cover 48 debug UI scenarios in both themes (148 primary/child images), including Microsoft method choice/device request/waiting/saving and Offline information/error/review/detail. `scripts/parity-board` builds `target/parity-shots/index.html`. Fixture codes are not live authorization codes; release compilation excludes scenario flags/fixtures.
@@ -103,8 +103,10 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 - All three remote hosts completed actual Home → Games → native version-picker smoke, with visible screenshots under `target/parity-shots/{linux-arm64,windows-amd64,linux-amd64}/`. ARM64/Windows used pushed `d97206d`; Linux AMD64 used `def4a1b`. These establish the P1 window baseline, not current-page parity or P5 game verification.
 - Linux ARM64 KDE uses Xwayland `:1` plus session Xauthority and Spectacle; scrot returns black pixels there. Linux AMD64 X11 needs ImageMagick screen-based window capture. Windows captures run in an interactive scheduled task and enumerate visible windows by process ID. Test tasks were removed and the AMD64 VM was stopped softly after capture.
 - Required supported launches: macOS Vanilla/Fabric/Quilt/Forge/NeoForge/OptiFine plus Authlib injection; three remote hosts Vanilla/Fabric/modern Forge.
+- macOS ARM64 Vanilla 1.20.6: official managed Java/game installation, explicit Offline recipe, actual main menu captured at `target/parity-shots/macos-arm64/vanilla-1.20.6-menu.png`, then launcher cancellation stopped Java. This verifies the CLI-backed install/launch path; Desktop selection/Play and live-account smoke remain required.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.
+- Detached supervisors retain ordinary stderr in their private run directory; process tests include persisted status, child-exit markers and bounded/redacted stderr when a lifecycle wait fails. Diagnostic retention is not a claim that the intermittent Windows failure is fixed.
 - Local auth fixtures and UI scenarios are separate from live-provider sign-in and actual game acceptance.
 - Eight Device Code loopback tests cover the complete ownership chain, poll intervals, slow_down/429, timeout backoff, cancellation during I/O, expiry, malformed links and controlled error mapping. UI regressions cover prepared-versus-saved state, method changes, orphan URLs and parent drafts after delayed save completion.
 - Microsoft preparation does not write account metadata or refresh credentials; final confirmation writes both. First-run's combined new-account/game commit remains required Welcome work. No live device request has been started. The public client ID is present in local .env and must be passed privately to the test app's environment.

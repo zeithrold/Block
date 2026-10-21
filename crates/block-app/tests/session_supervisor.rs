@@ -2,6 +2,7 @@
 
 use std::{
     fs::{self, File, OpenOptions},
+    io::Read as _,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
@@ -182,11 +183,23 @@ async fn wait_for(root: &Path, run_id: &str, desired: RunState) -> anyhow::Resul
             "session finished before {desired:?}: {}",
             record.status
         );
-        ensure!(
-            Instant::now() < deadline,
-            "session did not reach {desired:?}: {}",
-            record.status
-        );
+        if Instant::now() >= deadline {
+            let directory = session_host::report_directory(root, run_id)?;
+            let persisted = session_host::read_run(root, run_id)?;
+            let mut diagnostic = Vec::new();
+            if let Ok(file) = File::open(directory.join("supervisor.log")) {
+                file.take(16 * 1024).read_to_end(&mut diagnostic)?;
+            }
+            anyhow::bail!(
+                "session did not reach {desired:?}: {}; persisted={:?}, outcome={:?}, warnings={:?}, fixture_exited={}, supervisor_diagnostic={}",
+                record.status,
+                persisted.state,
+                persisted.outcome,
+                persisted.capture_warnings,
+                root.join("fixture/java.exited").exists(),
+                String::from_utf8_lossy(&diagnostic).replace(TOKEN, "<redacted>")
+            );
+        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
@@ -283,6 +296,7 @@ async fn abnormal_exit_collects_only_fresh_sanitized_evidence_and_retains_unread
     for path in [
         directory.join("session.json"),
         directory.join("crash.json"),
+        directory.join("supervisor.log"),
         fixture
             .game
             .join(".block-runs")

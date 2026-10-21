@@ -76,6 +76,12 @@ pub async fn spawn_session(
     let (catalog, record, fingerprint) = starting_record(root, profile_id)?;
     bootstrap.profile_fingerprint = fingerprint;
     let id = record.context.run_id.clone();
+    // Detached owners have no terminal. Keep startup/finalization errors with
+    // their run so a lost monitor does not discard the only useful diagnostic.
+    let diagnostic = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(storage::report_directory(catalog.root(), &id)?.join("supervisor.log"))?;
     let mut command = tokio::process::Command::new(executable);
     command
         .arg("--supervise")
@@ -84,7 +90,7 @@ pub async fn spawn_session(
         .arg(catalog.root())
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(diagnostic))
         .env_remove("MICROSOFT_CLIENT_SECRET")
         .kill_on_drop(false);
     #[cfg(unix)]
