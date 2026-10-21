@@ -2118,6 +2118,13 @@ impl Block {
     ) -> impl IntoElement + use<> {
         self.reconcile_wizard_disclosure(cx);
         let version = form.version.read(cx).value();
+        let version_kind = self
+            .version_catalog
+            .iter()
+            .find(|entry| entry.id == version.trim())
+            .map_or("Exact version ID", |entry| {
+                Self::wizard_version_kind(entry.kind)
+            });
         let configuration = self.wizard_configuration_summary(cx);
         div()
             .flex()
@@ -2147,14 +2154,14 @@ impl Block {
                     .child(self.wizard_component(
                         "version",
                         "Minecraft version",
-                        &version,
+                        (&version, version_kind),
                         WizardPage::Version,
                         cx,
                     ))
                     .child(self.wizard_component(
                         "loader",
                         "Mod loader",
-                        &form.loader_label(),
+                        (form.loader.name(), form.loader_version.as_deref().unwrap_or("Original game")),
                         WizardPage::Loader,
                         cx,
                     ))
@@ -2167,7 +2174,7 @@ impl Block {
                     .child(self.wizard_component(
                         "location",
                         "Configuration",
-                        &configuration,
+                        (&configuration.0, &configuration.1),
                         WizardPage::Location,
                         cx,
                     )),
@@ -2181,23 +2188,25 @@ impl Block {
             }))
     }
 
-    pub(super) fn wizard_configuration_summary(&self, cx: &gpui::App) -> String {
+    pub(super) fn wizard_configuration_summary(&self, cx: &gpui::App) -> (String, String) {
         self.shell.wizard.profile.as_ref().map_or_else(
-            || "Managed Java · Default window".to_owned(),
+            || ("Automatic Java".to_owned(), "Default window".to_owned()),
             |profile| {
-                format!(
-                    "{} · {} × {}{}",
+                (
                     if profile.managed {
-                        "Managed Java"
+                        "Automatic Java"
                     } else {
                         "Custom Java"
-                    },
-                    profile.width.read(cx).value(),
-                    profile.height.read(cx).value(),
+                    }
+                    .to_owned(),
                     if profile.fullscreen {
-                        " · Fullscreen"
+                        "Fullscreen".to_owned()
                     } else {
-                        ""
+                        format!(
+                            "{} × {}",
+                            profile.width.read(cx).value(),
+                            profile.height.read(cx).value()
+                        )
                     },
                 )
             },
@@ -2208,10 +2217,11 @@ impl Block {
         &self,
         id: &str,
         title: &str,
-        value: &str,
+        summary: (&str, &str),
         page: WizardPage,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
+        let (value, detail) = summary;
         let icon = match page {
             WizardPage::Version => Icon::Games,
             WizardPage::Loader => Icon::Download,
@@ -2261,14 +2271,25 @@ impl Block {
                 .child(note(title.to_owned()))
                 .child(
                     div()
+                        .w_full()
+                        .min_w_0()
                         .text_sm()
-                        .whitespace_normal()
-                        .line_clamp(3)
+                        .truncate()
                         .child(value.to_owned()),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .text_size(px(10.))
+                        .line_height(px(14.))
+                        .text_color(rgb(self.palette.muted))
+                        .truncate()
+                        .child(detail.to_owned()),
                 ),
         );
         card.style().aspect_ratio = Some(1.);
-        card
+        super::tooltip::trigger(card, format!("{title}: {value} · {detail}"), cx)
     }
 
     pub(super) fn wizard_unavailable(
@@ -2535,7 +2556,9 @@ impl Block {
             .child(note(source))
     }
 
-    const fn wizard_version_kind(kind: minecraft_manifest::model::VersionType) -> &'static str {
+    pub(super) const fn wizard_version_kind(
+        kind: minecraft_manifest::model::VersionType,
+    ) -> &'static str {
         use minecraft_manifest::model::VersionType;
         match kind {
             VersionType::Release => "Stable release",

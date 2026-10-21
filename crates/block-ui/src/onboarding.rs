@@ -319,6 +319,13 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let version = form.version.read(cx).value();
+        let version_kind = self
+            .version_catalog
+            .iter()
+            .find(|entry| entry.id == version.trim())
+            .map_or("Exact version ID", |entry| {
+                Self::wizard_version_kind(entry.kind)
+            });
         let configuration = self.wizard_configuration_summary(cx);
         let name = patterns::reveal_field(
             components::field_with(
@@ -351,10 +358,10 @@ impl Block {
             .children(self.onboarding_game_ready(cx).then(|| components::badge("Game configuration ready", self.palette, BadgeVariant::Success)))
             .child(name)
             .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(if compact { 2 } else { 4 }).gap_3()
-                .child(self.wizard_component("version", "Minecraft", &version, WizardPage::Version, cx))
-                .child(self.wizard_component("loader", "Mod loader", &form.loader_label(), WizardPage::Loader, cx))
+                .child(self.wizard_component("version", "Minecraft", (&version, version_kind), WizardPage::Version, cx))
+                .child(self.wizard_component("loader", "Mod loader", (form.loader.name(), form.loader_version.as_deref().unwrap_or("Original game")), WizardPage::Loader, cx))
                 .child(self.wizard_unavailable("optifine", "OptiFine", "Installation is not supported yet.", true))
-                .child(self.wizard_component("location", "Configuration", &configuration, WizardPage::Location, cx)))
+                .child(self.wizard_component("location", "Configuration", (&configuration.0, &configuration.1), WizardPage::Location, cx)))
             .child(self.setup_caption("Your choices remain a draft until you create the game. Java and required files are downloaded from verified sources.").id("onboarding-draft-note").debug_selector(|| "onboarding-draft-note".into()))
             .into_any_element()
     }

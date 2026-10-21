@@ -353,7 +353,10 @@ fn styled_control(
     if state.busy {
         control = control.child(Icon::Loading.render(14., foreground));
     }
-    control.child(label)
+    if !label.is_empty() {
+        control = control.child(label);
+    }
+    control
 }
 
 /// A real listbox option shares the button event gate and visible focus.

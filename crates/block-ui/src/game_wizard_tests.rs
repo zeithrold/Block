@@ -844,7 +844,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         );
         assert_eq!(
             view.wizard_configuration_summary(cx),
-            "Custom Java · 1600 × 900 · Fullscreen"
+            ("Custom Java".to_owned(), "Fullscreen".to_owned())
         );
         let original = view.shell.wizard.profile.as_ref().map(|profile| {
             (
