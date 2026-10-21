@@ -1,0 +1,21 @@
+Block
+https://block.ztd.one
+Application identifier: one.ztd.block
+
+The Block project does not currently declare a project-wide source license.
+This package does not assign one. Its brand artwork comes from the companion
+Block-Icon project, icon-v4; source asset hashes accompany the package.
+
+The launcher includes text-input code adapted from GPUI examples by
+Zed Industries, Inc. The supplied GPUI-LICENSE-APACHE preserves its notice
+and Apache License, Version 2.0 text.
+
+The patched xattr dependency is distributed under MIT OR Apache-2.0.
+Both upstream license texts are included in the licenses directory.
+
+These are the repository's supplied license notices, not a complete audit
+of every transitive dependency. Complete the distribution license inventory
+before publishing a release.
+
+Minecraft is a trademark of Mojang AB. This project is not affiliated with
+or endorsed by Mojang or Microsoft.

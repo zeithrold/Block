@@ -15,7 +15,109 @@ use futures_util::{StreamExt as _, TryStreamExt as _};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
 use tokio::io::AsyncWriteExt as _;
+use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
+
+/// Explicit proxy behavior for all HTTP requests made by a [`Store`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProxyMode {
+    /// Preserve reqwest's environment/system proxy discovery.
+    #[default]
+    System,
+    /// Bypass proxies, including environment proxy variables.
+    Direct,
+    /// Use an HTTP or HTTPS proxy. Authentication and SOCKS are not supported.
+    Http { url: String },
+}
+
+/// Object-transfer settings; proxy selection also applies to metadata requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DownloadOptions {
+    /// Maximum simultaneous object transfers, shared by clones. Must be 1..=16.
+    pub max_concurrent: usize,
+    /// Additional attempts after the first request. Must be 0..=10.
+    pub max_retries: u32,
+    /// Aggregate object-body bytes per second, shared by clones. None is unlimited.
+    pub bytes_per_second: Option<u64>,
+    pub proxy: ProxyMode,
+}
+
+impl Default for DownloadOptions {
+    fn default() -> Self {
+        Self {
+            max_concurrent: 8,
+            max_retries: 2,
+            bytes_per_second: None,
+            proxy: ProxyMode::System,
+        }
+    }
+}
+
+impl DownloadOptions {
+    /// Validate settings before saving or constructing a download store.
+    ///
+    /// # Errors
+    /// Rejects out-of-range limits, zero rates, unsupported proxy schemes,
+    /// credentials, or proxy URLs with paths, queries, or fragments.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            (1..=16).contains(&self.max_concurrent),
+            "download concurrency must be 1..=16"
+        );
+        ensure!(self.max_retries <= 10, "download retries must be 0..=10");
+        ensure!(
+            self.bytes_per_second != Some(0),
+            "download rate must be positive or unlimited"
+        );
+        if let ProxyMode::Http { url } = &self.proxy {
+            let proxy = reqwest::Url::parse(url).context("invalid proxy URL")?;
+            ensure!(
+                matches!(proxy.scheme(), "http" | "https"),
+                "proxy scheme must be http or https"
+            );
+            ensure!(proxy.host_str().is_some(), "proxy URL requires a host");
+            ensure!(
+                proxy.username().is_empty() && proxy.password().is_none(),
+                "proxy credentials are not supported"
+            );
+            ensure!(
+                matches!(proxy.path(), "" | "/")
+                    && proxy.query().is_none()
+                    && proxy.fragment().is_none(),
+                "proxy URL must contain only a scheme, host, and optional port"
+            );
+        }
+        Ok(())
+    }
+}
+
+struct RateLimiter {
+    bytes_per_second: u64,
+    last_chunk: Mutex<tokio::time::Instant>,
+}
+
+impl RateLimiter {
+    async fn wait(&self, bytes: u64, cancel: &CancellationToken) -> anyhow::Result<()> {
+        let mut last = tokio::select! {
+            () = cancel.cancelled() => bail!("download cancelled"),
+            last = self.last_chunk.lock() => last,
+        };
+        let nanos = (u128::from(bytes % self.bytes_per_second) * 1_000_000_000)
+            .div_ceil(u128::from(self.bytes_per_second));
+        let duration = Duration::from_secs(bytes / self.bytes_per_second)
+            + Duration::from_nanos(u64::try_from(nanos)?);
+        let deadline = (*last).max(tokio::time::Instant::now()) + duration;
+        tokio::select! {
+            () = cancel.cancelled() => bail!("download cancelled"),
+            () = tokio::time::sleep_until(deadline) => {},
+        }
+        *last = deadline;
+        drop(last);
+        Ok(())
+    }
+}
 
 /// An upstream-verified object. SHA-1 is mandated by Minecraft metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +145,9 @@ pub struct Store {
     client: reqwest::Client,
     events: EventSink,
     offline: bool,
+    options: DownloadOptions,
+    transfers: Arc<Semaphore>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl fmt::Debug for Store {
@@ -60,17 +165,57 @@ impl Store {
     /// # Errors
     /// Returns errors configuring HTTP/TLS or creating the data directory.
     pub fn new(root: PathBuf, offline: bool, events: EventSink) -> anyhow::Result<Self> {
+        Self::with_options(root, offline, events, DownloadOptions::default())
+    }
+
+    /// Create a store with validated transfer settings and a shared HTTP client.
+    ///
+    /// # Errors
+    /// Rejects invalid settings and failures configuring HTTP/TLS or cache storage.
+    pub fn with_options(
+        root: PathBuf,
+        offline: bool,
+        events: EventSink,
+        options: DownloadOptions,
+    ) -> anyhow::Result<Self> {
+        options.validate()?;
+        let mut client = reqwest::Client::builder()
+            .user_agent("Block/0.1 Minecraft launcher")
+            .connect_timeout(Duration::from_secs(20));
+        // Throttled transfers may legitimately take more than three minutes.
+        // Keep network-stall detection without charging deliberate rate waits
+        // against a total request deadline. Metadata keeps its total deadline.
+        client = if options.bytes_per_second.is_some() {
+            client.read_timeout(Duration::from_secs(180))
+        } else {
+            client.timeout(Duration::from_secs(180))
+        };
+        client = match &options.proxy {
+            ProxyMode::System => client,
+            ProxyMode::Direct => client.no_proxy(),
+            ProxyMode::Http { url } => client.no_proxy().proxy(reqwest::Proxy::all(url)?),
+        };
+        let client = client.build()?;
         std::fs::create_dir_all(&root)?;
         Ok(Self {
             root,
-            client: reqwest::Client::builder()
-                .user_agent("Block/0.1 Minecraft launcher")
-                .connect_timeout(Duration::from_secs(20))
-                .timeout(Duration::from_secs(180))
-                .build()?,
+            client,
             events,
             offline,
+            transfers: Arc::new(Semaphore::new(options.max_concurrent)),
+            rate_limiter: options.bytes_per_second.map(|bytes_per_second| {
+                Arc::new(RateLimiter {
+                    bytes_per_second,
+                    last_chunk: Mutex::new(tokio::time::Instant::now()),
+                })
+            }),
+            options,
         })
+    }
+
+    #[must_use]
+    pub const fn options(&self) -> &DownloadOptions {
+        &self.options
     }
 
     #[must_use]
@@ -97,6 +242,7 @@ impl Store {
         let digest = self
             .client
             .get(format!("{url}.sha1"))
+            .timeout(Duration::from_secs(180))
             .send()
             .await?
             .error_for_status()?
@@ -108,7 +254,13 @@ impl Store {
             .context("empty Maven SHA-1")?
             .to_owned();
         self.object_path(&sha1)?;
-        let response = self.client.head(url).send().await?.error_for_status()?;
+        let response = self
+            .client
+            .head(url)
+            .timeout(Duration::from_secs(180))
+            .send()
+            .await?
+            .error_for_status()?;
         // A HEAD response has a zero-byte body even when its Content-Length
         // describes a nonempty GET representation. Read the header explicitly.
         let size = response
@@ -163,7 +315,13 @@ impl Store {
                 .await
                 .with_context(|| format!("missing offline metadata: {}", path.display()));
         }
-        let response = self.client.get(url).send().await?.error_for_status()?;
+        let response = self
+            .client
+            .get(url)
+            .timeout(Duration::from_secs(180))
+            .send()
+            .await?
+            .error_for_status()?;
         ensure!(
             response.content_length().unwrap_or(0) <= 16 * 1024 * 1024,
             "root metadata is too large"
@@ -205,7 +363,7 @@ impl Store {
         let resources: Vec<Resource> = unique.into_values().cloned().collect();
         futures_util::stream::iter(resources)
             .map(|resource| async move { self.fetch(&resource, cancel).await })
-            .buffer_unordered(8)
+            .buffer_unordered(self.options.max_concurrent)
             .try_collect::<Vec<_>>()
             .await?;
         Ok(())
@@ -257,14 +415,18 @@ impl Store {
             resource.sha1,
             resource.url
         );
+        let _permit = tokio::select! {
+            () = cancel.cancelled() => bail!("download cancelled"),
+            permit = self.transfers.acquire() => permit?,
+        };
         (self.events)(DownloadEvent::Started {
             sha1: resource.sha1.clone(),
             size: resource.size,
         });
-        for attempt in 0..3 {
+        for attempt in 0..=self.options.max_retries {
             let result = tokio::select! {
                 () = cancel.cancelled() => bail!("download cancelled"),
-                result = self.transfer(resource, directory) => result,
+                result = self.transfer(resource, directory, cancel) => result,
             };
             match result {
                 Ok(temporary) => {
@@ -284,7 +446,7 @@ impl Store {
                                 && status.as_u16() != 408
                                 && status.as_u16() != 429
                         });
-                    if permanent || attempt == 2 {
+                    if permanent || attempt == self.options.max_retries {
                         return Err(error).with_context(|| resource.url.clone());
                     }
                     (self.events)(DownloadEvent::Retry {
@@ -302,6 +464,7 @@ impl Store {
         &self,
         resource: &Resource,
         directory: &Path,
+        cancel: &CancellationToken,
     ) -> anyhow::Result<tempfile::NamedTempFile> {
         let response = self
             .client
@@ -317,6 +480,9 @@ impl Store {
         while let Some(bytes) = stream.try_next().await? {
             received += bytes.len() as u64;
             ensure!(received <= resource.size, "resource exceeds declared size");
+            if let Some(limiter) = &self.rate_limiter {
+                limiter.wait(bytes.len() as u64, cancel).await?;
+            }
             hasher.update(&bytes);
             file.write_all(&bytes).await?;
             (self.events)(DownloadEvent::Bytes {

@@ -8,7 +8,7 @@ use anyhow::{Context as _, ensure};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, Snapshot,
+    DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, ProfileMode, Snapshot,
     validate_directory, validate_id, validate_name,
 };
 use crate::recipe::{Compatibility, RuntimeSelection};
@@ -260,6 +260,23 @@ impl Catalog {
         self.transaction(false, |state| Ok(state.clone()))
     }
 
+    /// Permanently allow multiple Profiles to reuse one Instance.
+    ///
+    /// Only catalog metadata changes. Installed resources, worlds and profile
+    /// directories remain in place. There is deliberately no reverse operation.
+    /// # Errors
+    /// Rejects repeated conversion or an invalid catalog, preserving its contents.
+    pub fn separate_profiles(&self) -> anyhow::Result<()> {
+        self.transaction(true, |state| {
+            ensure!(
+                state.profile_mode == ProfileMode::Bundled,
+                "Separated Profile is already enabled; conversion cannot be reversed"
+            );
+            state.profile_mode = ProfileMode::Separated;
+            Ok(())
+        })
+    }
+
     /// Create an installation and its first independent launch recipe atomically.
     /// # Errors
     /// Rejects invalid names, unsupported pins and overlapping installation roots.
@@ -318,6 +335,9 @@ impl Catalog {
         let mut profile = new_profile(&instance, "Default".into());
         profile.target_id = target_id;
         self.transaction(true, |state| {
+            if state.profile_mode == ProfileMode::Bundled {
+                profile.name.clone_from(&instance.name);
+            }
             ensure!(
                 !state
                     .instances
@@ -337,6 +357,10 @@ impl Catalog {
     pub fn create_profile(&self, instance_id: &str, name: String) -> anyhow::Result<Profile> {
         validate_name(&name)?;
         self.transaction(true, |state| {
+            ensure!(
+                state.profile_mode == ProfileMode::Separated,
+                "Bundled Profile requires a new Instance; convert to Separated Profile to reuse one"
+            );
             let instance = state
                 .instances
                 .iter()
@@ -382,6 +406,10 @@ impl Catalog {
     pub fn copy_profile(&self, id: &str, name: String) -> anyhow::Result<Profile> {
         validate_name(&name)?;
         self.transaction(true, |state| {
+            ensure!(
+                state.profile_mode == ProfileMode::Separated,
+                "Bundled Profile cannot share an Instance; convert to Separated Profile before copying"
+            );
             let mut profile = state
                 .profiles
                 .iter()
@@ -395,16 +423,25 @@ impl Catalog {
         })
     }
 
-    /// Remove only metadata. Shared resources and every user-data directory remain intact.
+    /// Remove only metadata. Bundled mode also removes the associated Instance
+    /// metadata; shared resources and every user-data directory remain intact.
     /// # Errors
     /// Fails if the selected profile no longer exists.
     pub fn delete_profile(&self, id: &str) -> anyhow::Result<()> {
         self.transaction(true, |state| {
-            ensure!(
-                state.profiles.iter().any(|p| p.id == id),
-                "profile no longer exists"
-            );
+            let instance_id = state
+                .profiles
+                .iter()
+                .find(|p| p.id == id)
+                .context("profile no longer exists")?
+                .instance_id
+                .clone();
             state.profiles.retain(|p| p.id != id);
+            if state.profile_mode == ProfileMode::Bundled {
+                state
+                    .instances
+                    .retain(|instance| instance.id != instance_id);
+            }
             Ok(())
         })
     }
@@ -531,10 +568,23 @@ fn validate_snapshot(state: &Snapshot) -> anyhow::Result<()> {
         }
     }
     let mut profile_ids = std::collections::BTreeSet::new();
+    let mut profiled_instances = std::collections::BTreeSet::new();
     for profile in &state.profiles {
         profile.validate()?;
         ensure!(profile_ids.insert(&profile.id), "duplicate profile ID");
         state.selection(&profile.id)?;
+        if state.profile_mode == ProfileMode::Bundled {
+            ensure!(
+                profiled_instances.insert(&profile.instance_id),
+                "Bundled Profile requires exactly one Profile per Instance"
+            );
+        }
+    }
+    if state.profile_mode == ProfileMode::Bundled {
+        ensure!(
+            profiled_instances.len() == state.instances.len(),
+            "Bundled Profile requires exactly one Profile per Instance"
+        );
     }
     Ok(())
 }

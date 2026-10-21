@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Block
+Comment=Minecraft Java Edition launcher
+Exec=block
+Icon=one.ztd.block
+Terminal=false
+Categories=Game;
+StartupNotify=true
+StartupWMClass=one.ztd.block
+X-Website=https://block.ztd.one

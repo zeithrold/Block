@@ -12,7 +12,7 @@ use crate::{
     session::{OfflineSession, SessionProvider},
 };
 use anyhow::{Context as _, ensure};
-use block_download::{EventSink, Store};
+use block_download::{DownloadOptions, EventSink, Store};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -31,8 +31,23 @@ impl Library {
     /// # Errors
     /// Fails if the catalog/cache cannot be opened.
     pub fn new(root: PathBuf, downloads: EventSink, events: ExecutionSink) -> anyhow::Result<Self> {
+        Self::with_options(root, downloads, events, DownloadOptions::default())
+    }
+
+    /// Open the library with a download policy used by installs and repairs.
+    ///
+    /// # Errors
+    /// Rejects invalid settings before opening the catalog, and reports cache,
+    /// catalog, and HTTP-client initialization failures.
+    pub fn with_options(
+        root: PathBuf,
+        downloads: EventSink,
+        events: ExecutionSink,
+        options: DownloadOptions,
+    ) -> anyhow::Result<Self> {
+        options.validate()?;
         let catalog = Catalog::open(root.clone())?;
-        let store = Store::new(root, false, downloads)?;
+        let store = Store::with_options(root, false, downloads, options)?;
         Ok(Self {
             catalog,
             executor: Executor::new(store.clone(), events.clone()),
@@ -43,6 +58,11 @@ impl Library {
     #[must_use]
     pub const fn catalog(&self) -> &Catalog {
         &self.catalog
+    }
+
+    #[must_use]
+    pub const fn download_options(&self) -> &DownloadOptions {
+        self.store.options()
     }
 
     /// Retry/repair checks original content hashes and only publishes ready targets after success.
@@ -197,10 +217,11 @@ impl Library {
                 path: manifest.clone(),
             },
         );
-        let offline = Store::new(
+        let offline = Store::with_options(
             self.store.root().to_owned(),
             true,
             std::sync::Arc::new(|_| {}),
+            self.store.options().clone(),
         )?;
         let context = ResolveContext {
             store: offline.clone(),
