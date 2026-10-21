@@ -259,6 +259,12 @@ async fn show_help(root: &Path, run_id: &str) -> anyhow::Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // An existing help view owns this report. Do not start another presenter
+    // that could outlive the supervisor and race that view's eventual close.
+    let Some(presentation) = storage::claim_help(root, run_id)? else {
+        return Ok(());
+    };
+    drop(presentation);
     let mut command = tokio::process::Command::new(std::env::current_exe()?);
     command
         .arg("--crash")

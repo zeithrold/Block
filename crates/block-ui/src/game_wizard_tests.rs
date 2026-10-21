@@ -160,6 +160,8 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
 
 #[gpui::test]
 fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &mut TestAppContext) {
+    let directory = std::env::temp_dir().join("block-new-game");
+    let directory = directory.to_string_lossy().into_owned();
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -174,7 +176,7 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
             form.version
                 .update(cx, |field, cx| field.set_value("1.20.6", cx));
             form.directory
-                .update(cx, |field, cx| field.set_value("/tmp/new-game", cx));
+                .update(cx, |field, cx| field.set_value(&directory, cx));
             form.neoforge = true;
         }
         view.back_game_wizard(cx);
@@ -194,13 +196,13 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
         assert!(view.shell.wizard.error.is_some());
         if let Some(Form::Instance(form)) = &view.form {
             form.directory
-                .update(cx, |field, cx| field.set_value("/tmp/new-game", cx));
+                .update(cx, |field, cx| field.set_value(&directory, cx));
         }
         view.advance_game_wizard(cx);
         assert_eq!(view.shell.wizard.page, None);
         assert!(view.shell.wizard.error.is_none());
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.directory.read(cx).value(), "/tmp/new-game");
+            assert_eq!(form.directory.read(cx).value(), directory);
         }
         assert_eq!(view.snapshot.instances.len(), 1);
         assert_eq!(view.snapshot.profiles.len(), 1);
@@ -786,6 +788,8 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
 fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_entities(
     cx: &mut TestAppContext,
 ) {
+    let java = std::env::temp_dir().join(format!("java{}", std::env::consts::EXE_SUFFIX));
+    let java = java.to_string_lossy().into_owned();
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -799,7 +803,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
             profile.managed = false;
             profile
                 .java
-                .update(cx, |field, cx| field.set_value("/usr/bin/java", cx));
+                .update(cx, |field, cx| field.set_value(&java, cx));
             profile
                 .width
                 .update(cx, |field, cx| field.set_value("invalid", cx));

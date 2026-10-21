@@ -90,7 +90,7 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Baseline `5c634fe`: local full `just check` passed 381 tests. Current upstream/native-window implementation passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests. CI and remote UI smoke remain pending.
+- Baseline `5c634fe`: local full `just check` passed 381 tests. Current upstream/native-window implementation and cross-platform fixes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests. macOS CI passed; Windows/Linux fixes await CI. Remote UI smoke remains pending.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
 - Required supported launches: macOS Vanilla/Fabric/Quilt/Forge/NeoForge/OptiFine plus Authlib injection; three remote hosts Vanilla/Fabric/modern Forge.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
