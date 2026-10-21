@@ -1730,7 +1730,7 @@ impl Block {
                         let id = target.id.clone();
                         let name = target.loader_version.as_ref().map_or_else(
                             || "Vanilla".to_owned(),
-                            |version| format!("NeoForge {version}"),
+                            |version| format!("{} {version}", target.kind.name()),
                         );
                         group.item(
                             &target.id,
@@ -2696,7 +2696,7 @@ impl Block {
                     |target| {
                         target.loader_version.as_ref().map_or_else(
                             || "Vanilla".to_owned(),
-                            |version| format!("NeoForge {version}"),
+                            |version| format!("{} {version}", target.kind.name()),
                         )
                     },
                 )

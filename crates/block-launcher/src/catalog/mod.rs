@@ -59,6 +59,20 @@ pub struct Instance {
 pub enum LoaderKind {
     Vanilla,
     NeoForge,
+    Fabric,
+    Quilt,
+}
+
+impl LoaderKind {
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Vanilla => "Vanilla",
+            Self::NeoForge => "NeoForge",
+            Self::Fabric => "Fabric",
+            Self::Quilt => "Quilt",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

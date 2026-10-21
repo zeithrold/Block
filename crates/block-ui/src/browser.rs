@@ -1792,6 +1792,12 @@ fn loader_value(instance: &Instance, profile: Option<&Profile>) -> String {
                 "NeoForge {}",
                 target.loader_version.as_deref().unwrap_or("")
             ),
+            LoaderKind::Fabric => {
+                format!("Fabric {}", target.loader_version.as_deref().unwrap_or(""))
+            }
+            LoaderKind::Quilt => {
+                format!("Quilt {}", target.loader_version.as_deref().unwrap_or(""))
+            }
         },
     )
 }

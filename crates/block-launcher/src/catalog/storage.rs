@@ -319,6 +319,26 @@ impl Catalog {
         loader_version: Option<String>,
         configuration: ProfileConfiguration,
     ) -> anyhow::Result<(Instance, Profile)> {
+        self.create_instance_with_loader(
+            name,
+            minecraft_version,
+            directory,
+            loader_version.map(|version| (LoaderKind::NeoForge, version)),
+            configuration,
+        )
+    }
+
+    /// Create an Instance with an explicit loader and a configured first Profile.
+    /// Compatibility is verified against the official catalog during installation.
+    /// Invalid loader identities fail before any game directories are created.
+    pub fn create_instance_with_loader(
+        &self,
+        name: String,
+        minecraft_version: String,
+        directory: Option<PathBuf>,
+        loader: Option<(LoaderKind, String)>,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<(Instance, Profile)> {
         validate_name(&name)?;
         ensure!(
             !minecraft_version.is_empty()
@@ -326,11 +346,17 @@ impl Catalog {
                 && !minecraft_version.chars().any(char::is_control),
             "invalid Minecraft version"
         );
-        if let Some(version) = &loader_version {
-            ensure!(
-                minecraft_version == "1.20.6" && version == "20.6.144",
-                "this MVP supports NeoForge20.6.144 with Minecraft1.20.6"
-            );
+        if let Some((kind, version)) = &loader {
+            match kind {
+                LoaderKind::NeoForge => ensure!(
+                    minecraft_version == "1.20.6" && version == "20.6.144",
+                    "NeoForge 20.6.144 requires Minecraft 1.20.6"
+                ),
+                LoaderKind::Fabric | LoaderKind::Quilt => {
+                    crate::install::fabric::validate_version(version)?
+                }
+                LoaderKind::Vanilla => anyhow::bail!("Vanilla does not have a loader version"),
+            }
         }
         let id = uuid::Uuid::new_v4().to_string();
         let directory = directory.unwrap_or_else(|| self.root.join("instances").join(&id));
@@ -349,10 +375,15 @@ impl Catalog {
             }],
             settings: None,
         };
-        if let Some(version) = loader_version {
+        if let Some((kind, version)) = loader {
+            let prefix = match kind {
+                LoaderKind::Fabric => "fabric",
+                LoaderKind::Quilt => "quilt",
+                _ => "neoforge",
+            };
             instance.targets.push(LaunchTarget {
-                id: format!("neoforge-{version}"),
-                kind: LoaderKind::NeoForge,
+                id: format!("{prefix}-{version}"),
+                kind,
                 loader_version: Some(version),
                 manifest: None,
                 status: InstallStatus::Pending,

@@ -2,6 +2,70 @@ use block_launcher::catalog::{Catalog, DataPolicy, GameDirectoryGuard};
 use std::{fs, sync::Arc};
 
 #[test]
+fn explicit_fabric_and_quilt_targets_survive_reopen_and_profile_selection() -> anyhow::Result<()> {
+    use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    for (kind, prefix) in [(LoaderKind::Fabric, "fabric"), (LoaderKind::Quilt, "quilt")] {
+        let target_id = format!("{prefix}-0.16.14");
+        let (instance, profile) = catalog.create_instance_with_loader(
+            format!("{prefix} test"),
+            "1.20.6".into(),
+            None,
+            Some((kind.clone(), "0.16.14".into())),
+            ProfileConfiguration {
+                name: "Default".into(),
+                target_id: target_id.clone(),
+                ..Default::default()
+            },
+        )?;
+        let state = Catalog::open(root.path())?.snapshot()?;
+        let (saved_instance, saved_profile, target) = state.selection(&profile.id)?;
+        assert_eq!(saved_instance.id, instance.id);
+        assert_eq!(saved_instance.targets.len(), 2);
+        assert_eq!(saved_profile.target_id, target_id);
+        assert_eq!(target.kind, kind);
+        assert_eq!(target.loader_version.as_deref(), Some("0.16.14"));
+        assert_eq!(
+            target.status,
+            block_launcher::catalog::InstallStatus::Pending
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_loader_identity_creates_no_instance_directory_or_catalog_entry() -> anyhow::Result<()> {
+    use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    for (kind, version) in [
+        (LoaderKind::Fabric, "../escape"),
+        (LoaderKind::Quilt, "bad/version"),
+        (LoaderKind::Vanilla, "1"),
+    ] {
+        let directory = root.path().join("must-not-exist");
+        assert!(
+            catalog
+                .create_instance_with_loader(
+                    "Invalid".into(),
+                    "1.20.6".into(),
+                    Some(directory.clone()),
+                    Some((kind, version.into())),
+                    ProfileConfiguration {
+                        name: "Default".into(),
+                        ..Default::default()
+                    }
+                )
+                .is_err()
+        );
+        assert!(!directory.exists());
+        assert!(catalog.snapshot()?.instances.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
 fn installations_own_multiple_persistent_profiles() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;

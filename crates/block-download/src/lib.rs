@@ -373,13 +373,47 @@ impl Store {
                 .await
                 .with_context(|| format!("missing offline metadata: {}", path.display()));
         }
-        let response = self
-            .client
-            .get(url)
-            .timeout(Duration::from_secs(180))
-            .send()
-            .await?
-            .error_for_status()?;
+        let mut attempt = 0;
+        let response = loop {
+            let response = self
+                .client
+                .get(url)
+                .timeout(Duration::from_secs(180))
+                .send()
+                .await;
+            let retryable = match &response {
+                Ok(response) => {
+                    response.status().as_u16() == 429 || response.status().is_server_error()
+                }
+                Err(error) => error.is_timeout() || error.is_connect(),
+            };
+            if !retryable || attempt >= self.options.max_retries {
+                break response?.error_for_status()?;
+            }
+            let retry_after = response.as_ref().ok().and_then(|response| {
+                response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)?
+                    .to_str()
+                    .ok()
+            });
+            let delay = retry_after
+                .and_then(|value| {
+                    value
+                        .parse::<u64>()
+                        .ok()
+                        .map(Duration::from_secs)
+                        .or_else(|| {
+                            httpdate::parse_http_date(value).ok().map(|date| {
+                                date.duration_since(std::time::SystemTime::now())
+                                    .unwrap_or_default()
+                            })
+                        })
+                })
+                .unwrap_or_else(|| Duration::from_secs(u64::from(attempt + 1)));
+            tokio::time::sleep(delay.min(Duration::from_secs(86400))).await;
+            attempt += 1;
+        };
         if pin_origin {
             ensure!(
                 response.url().origin() == reqwest::Url::parse(url)?.origin(),

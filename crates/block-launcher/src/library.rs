@@ -143,6 +143,17 @@ impl Library {
             neoforge::install(&metadata.parsed.manifest, &java, &context)
                 .await?
                 .manifest_path
+        } else if matches!(target.kind, LoaderKind::Fabric | LoaderKind::Quilt) {
+            crate::install::fabric::install(
+                &target.kind,
+                target
+                    .loader_version
+                    .as_deref()
+                    .context("Loader build missing")?,
+                &metadata.parsed.manifest,
+                &context,
+            )
+            .await?
         } else {
             let directory = self.store.root().join("installations").join(&instance.id);
             tokio::fs::create_dir_all(&directory).await?;

@@ -740,6 +740,12 @@ impl Block {
                     |version| format!("NeoForge {version}"),
                 )
             }
+            block_launcher::catalog::LoaderKind::Fabric => {
+                format!("Fabric {}", target.loader_version.as_deref().unwrap_or(""))
+            }
+            block_launcher::catalog::LoaderKind::Quilt => {
+                format!("Quilt {}", target.loader_version.as_deref().unwrap_or(""))
+            }
         };
         let description = format!(
             "Minecraft {} · {release} · {loader}{}",
