@@ -48,9 +48,13 @@ async fn fixture(
         let mut requests = Vec::new();
         for (status, headers, body) in responses {
             let (mut stream, _) = listener.accept().await?;
-            requests.push(read_request(&mut stream).await?);
+            let request = read_request(&mut stream).await?;
+            let head = request.starts_with("HEAD ");
+            requests.push(request);
             stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n", body.len()).as_bytes()).await?;
-            stream.write_all(&body).await?;
+            if !head {
+                stream.write_all(&body).await?;
+            }
         }
         Ok(requests)
     });
@@ -224,7 +228,7 @@ fn installer(version: &str, game: &str, old: bool, corrupt: bool) -> anyhow::Res
     let profile = if old {
         json!({"install":{"minecraft":game,"path":coordinate,"target":id,"filePath":"universal.jar"}, "versionInfo":overlay})
     } else {
-        json!({"minecraft":game,"path":null,"version":id,"libraries":overlay["libraries"],"data":{},"processors":[]})
+        json!({"minecraft":game,"path":format!("{coordinate}:shim"),"version":id,"libraries":overlay["libraries"],"data":{},"processors":[]})
     };
     let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default();
@@ -371,5 +375,49 @@ async fn installer_rejects_wrong_game_and_build_before_network() -> anyhow::Resu
             .await
             .is_err()
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn current_installers_bind_null_and_shim_paths_to_the_exact_forge_coordinate()
+-> anyhow::Result<()> {
+    use std::io::{Read as _, Write as _};
+    let root = tempfile::tempdir()?;
+    let context = context(root.path(), false, 0)?;
+    for (path_value, valid) in [
+        (serde_json::Value::Null, true),
+        (
+            json!("net.minecraftforge:forge:1.12.2-14.23.5.2860:shim"),
+            true,
+        ),
+        (
+            json!("net.minecraftforge:forge:1.12.2-14.23.5.2859:shim"),
+            false,
+        ),
+    ] {
+        let bytes = installer("1.12.2-14.23.5.2860", "1.12.2", false, false)?;
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
+        let path = root.path().join("variant.jar");
+        let mut output = zip::ZipWriter::new(std::fs::File::create(&path)?);
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+            if entry.name() == "install_profile.json" {
+                let mut profile: serde_json::Value = serde_json::from_slice(&bytes)?;
+                profile["path"] = path_value.clone();
+                bytes = serde_json::to_vec(&profile)?;
+            }
+            output.start_file(entry.name(), zip::write::SimpleFileOptions::default())?;
+            output.write_all(&bytes)?;
+        }
+        output.finish()?;
+        assert_eq!(
+            super::read_installer(&path, "1.12.2-14.23.5.2860", "1.12.2", &context)
+                .await
+                .is_ok(),
+            valid
+        );
+    }
     Ok(())
 }

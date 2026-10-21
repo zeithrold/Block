@@ -154,7 +154,8 @@ pub(crate) async fn read_installer(
         });
     ensure!(
         identity.get("minecraft").and_then(Value::as_str) == Some(minecraft)
-            && declared_path.map_or(embedded_coordinate, |path| path == coordinate),
+            && declared_path.map_or(embedded_coordinate, |path| path == coordinate
+                || path == format!("{coordinate}:shim")),
         "Forge installer identity does not match the selected game/build"
     );
     let mut overlay: Value = if let Some(value) = profile.get("versionInfo") {

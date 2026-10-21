@@ -431,6 +431,10 @@ async fn install_staged(
     // verified installer instead of publishing a download URL for them.
     let mut archive = zip::ZipArchive::new(File::open(installer)?)?;
     for (path, resource) in &expected {
+        // Patched clients are verified after processor execution, not extracted.
+        if generated.contains(path) {
+            continue;
+        }
         if resource.url.is_empty() {
             let entry_path = super::forge::embedded_path(&mut archive, path)?;
             let mut entry = archive
@@ -457,6 +461,9 @@ async fn install_staged(
         .collect();
     context.store.fetch_all(&resources, &context.cancel).await?;
     for (path, resource) in &expected {
+        if generated.contains(path) {
+            continue;
+        }
         copy_object(
             &context.store.object_path(&resource.sha1)?,
             &libraries.join(path),

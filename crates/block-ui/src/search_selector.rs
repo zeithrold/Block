@@ -532,8 +532,8 @@ impl Block {
                                     .find(|target| target.id == profile.target_id)
                                 {
                                     badges.push(target.loader_version.as_ref().map_or_else(
-                                        || "Vanilla".into(),
-                                        |version| format!("NeoForge {version}"),
+                                        || target.kind.name().into(),
+                                        |version| format!("{} {version}", target.kind.name()),
                                     ));
                                 }
                                 badges
