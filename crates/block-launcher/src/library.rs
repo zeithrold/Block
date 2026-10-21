@@ -25,6 +25,7 @@ pub struct Library {
     store: Store,
     executor: Executor,
     events: ExecutionSink,
+    storage: crate::storage::StorageUse,
 }
 
 impl Library {
@@ -46,13 +47,15 @@ impl Library {
         options: DownloadOptions,
     ) -> anyhow::Result<Self> {
         options.validate()?;
-        let catalog = Catalog::open(root.clone())?;
-        let store = Store::with_options(root, false, downloads, options)?;
+        let catalog = Catalog::open(&root)?;
+        let storage = crate::storage::acquire(catalog.root())?;
+        let store = Store::with_options(storage.cache.clone(), false, downloads, options)?;
         Ok(Self {
             catalog,
             executor: Executor::new(store.clone(), events.clone()),
             store,
             events,
+            storage,
         })
     }
     #[must_use]
@@ -266,7 +269,8 @@ impl Library {
             None => executor.prepare(plan, cancel).await,
         }
         .context("installation integrity check failed; choose Repair")?;
-        let launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
+        let mut launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
+        launch.storage = Some(self.storage.lease.clone());
         Ok(launch)
     }
 }

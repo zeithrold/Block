@@ -40,6 +40,7 @@ impl Preferences {
 
     pub(super) fn save(&self, root: &Path) -> anyhow::Result<()> {
         self.validate()?;
+        let _storage = block_launcher::storage::acquire(root)?;
         std::fs::create_dir_all(root)?;
         let mut file = tempfile::NamedTempFile::new_in(root)?;
         file.write_all(&serde_json::to_vec_pretty(self)?)?;

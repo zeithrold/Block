@@ -121,8 +121,9 @@ fn save_failure_keeps_all_drafts_and_preview_without_changing_disk(cx: &mut gpui
     let result = (|| -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let root = directory.path().join("blocked");
-        std::fs::write(&root, b"not a directory")?;
         let (engine, messages) = crate::engine::Engine::with_root(root.clone())?;
+        std::fs::remove_dir_all(&root)?;
+        std::fs::write(&root, b"not a directory")?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {

@@ -16,6 +16,7 @@ pub struct LaunchPlan {
     logs: PathBuf,
     _installation: PreparedInstance,
     game_directory: GameDirectoryGuard,
+    pub(crate) storage: Option<std::sync::Arc<std::fs::File>>,
 }
 
 impl LaunchPlan {
@@ -46,6 +47,7 @@ impl LaunchPlan {
             logs,
             _installation: prepared,
             game_directory: directory,
+            storage: None,
         })
     }
 

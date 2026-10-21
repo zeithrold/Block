@@ -368,6 +368,7 @@ impl Catalog {
         loader: Option<(LoaderKind, String)>,
         configuration: ProfileConfiguration,
     ) -> anyhow::Result<(Instance, Profile)> {
+        let storage = crate::storage::acquire(&self.root)?;
         validate_name(&name)?;
         ensure!(
             !minecraft_version.is_empty()
@@ -390,7 +391,7 @@ impl Catalog {
             }
         }
         let id = uuid::Uuid::new_v4().to_string();
-        let directory = directory.unwrap_or_else(|| self.root.join("instances").join(&id));
+        let directory = directory.unwrap_or_else(|| storage.library.join(&id));
         validate_directory(&directory)?;
         let mut instance = Instance {
             id,
@@ -618,6 +619,11 @@ impl Catalog {
         write: bool,
         operation: impl FnOnce(&mut Snapshot) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
+        let _storage = if write {
+            Some(crate::storage::acquire(&self.root)?)
+        } else {
+            None
+        };
         let lock = open_lock(&self.root.join("catalog.lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
         let path = self.root.join("catalog.json");

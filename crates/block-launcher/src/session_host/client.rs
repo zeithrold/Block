@@ -71,6 +71,7 @@ pub async fn spawn_session(
     game: &GameSession,
     expires_at: SystemTime,
 ) -> anyhow::Result<RunRecord> {
+    let _storage = crate::storage::acquire(root)?;
     let mut bootstrap = wire::Bootstrap::new(profile_id, game, expires_at)?;
     bootstrap.session()?;
     let (catalog, record, fingerprint) = starting_record(root, profile_id)?;

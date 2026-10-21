@@ -79,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Ok,
     )?;
+    let _storage = block_launcher::storage::acquire(&root)?;
     let completed = Arc::new(AtomicUsize::new(0));
     let store = Store::new(
         root,

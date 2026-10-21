@@ -17,6 +17,7 @@ pub mod runtime;
 pub mod session;
 pub mod session_host;
 mod session_ipc;
+pub mod storage;
 pub mod support;
 
 pub use block_download::{DownloadEvent, DownloadOptions, EventSink, ProxyMode, Store};

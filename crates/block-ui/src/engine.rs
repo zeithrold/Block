@@ -213,6 +213,7 @@ impl Engine {
     }
 
     pub(super) fn with_root(root: PathBuf) -> anyhow::Result<(Self, Receiver<Message>)> {
+        block_launcher::storage::recover(&root)?;
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -267,8 +268,9 @@ impl Engine {
         let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
             let result = async {
+                let storage = block_launcher::storage::acquire(&root)?;
                 let store = Store::with_options(
-                    root.join("cache"),
+                    storage.cache.clone(),
                     false,
                     Arc::new(|_| {}),
                     request.options.clone(),
@@ -312,7 +314,9 @@ impl Engine {
         self.runtime.spawn(async move {
             let result = async {
                 let options = Preferences::load(&root)?.downloads;
-                let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
+                let storage = block_launcher::storage::acquire(&root)?;
+                let store =
+                    Store::with_options(storage.cache.clone(), false, Arc::new(|_| {}), options)?;
                 let context = ResolveContext { store, cancel };
                 match kind {
                     LoaderKind::Forge => {
@@ -936,8 +940,9 @@ impl Engine {
                         let tracker =
                             Arc::new(Mutex::new(super::tasks::DownloadTracker::default()));
                         let _ = sender.send(Message::Downloads(tracker.clone())).await;
+                        let storage = block_launcher::storage::acquire(&root)?;
                         let store = Store::with_options(
-                            root.clone(),
+                            storage.cache.clone(),
                             false,
                             Arc::new(move |event| {
                                 tracker
@@ -1134,7 +1139,8 @@ async fn library(root: PathBuf, sender: &EventSender) -> anyhow::Result<Library>
 
 async fn version_index(root: PathBuf, url: &str) -> anyhow::Result<Vec<VersionEntry>> {
     let options = Preferences::load(&root)?.downloads;
-    let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
+    let storage = block_launcher::storage::acquire(&root)?;
+    let store = Store::with_options(storage.cache.clone(), false, Arc::new(|_| {}), options)?;
     let bytes = store.metadata("version_manifest_v2.json", url).await?;
     let index: VersionIndex = decode(&bytes)?;
     Ok(index.versions)
@@ -1486,6 +1492,7 @@ async fn run_recipe(
     sender: EventSender,
     cancel: CancellationToken,
 ) -> anyhow::Result<Option<i32>> {
+    let _storage = block_launcher::storage::acquire(&root)?;
     let options = Preferences::load(&root)?.downloads;
     let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
     let metadata = resolve(
