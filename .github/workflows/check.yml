@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
-        # Linux ARM64 is tested independently; it is not a CI job.
+        # Linux ARM64 is not covered by this matrix. No manual remote run is implied.
         include:
           - os: ubuntu-24.04
             platform: linux-amd64
@@ -35,7 +35,7 @@ jobs:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
       - name: Verify runner and Rust host architecture
-        run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --verify-host-only --evidence-dir target/platform-host
+        run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --verify-host-only
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
@@ -45,14 +45,4 @@ jobs:
         if: runner.os == 'macOS'
         run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Verify core, desktop, framework interactions, and session supervision
-        run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --evidence-dir target/platform-verification
-      - name: Upload native verification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: verification-${{ matrix.platform }}
-          path: |
-            target/platform-host
-            target/platform-verification
-          if-no-files-found: warn
-          retention-days: 14
+        run: python scripts/verify-platform.py --platform ${{ matrix.platform }}

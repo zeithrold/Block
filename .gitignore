@@ -2,8 +2,6 @@
 .DS_Store
 /experiments/minecraft-manifests/cache/
 .env
-/vendor/xattr/Cargo.lock
-/vendor/xattr/target/
 
 __pycache__/
 *.py[cod]

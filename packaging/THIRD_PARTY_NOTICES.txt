@@ -7,15 +7,22 @@ This package does not assign one. Its brand artwork comes from the companion
 Block-Icon project, icon-v4; source asset hashes accompany the package.
 
 The launcher includes text-input code adapted from GPUI examples by
-Zed Industries, Inc. The supplied GPUI-LICENSE-APACHE preserves its notice
-and Apache License, Version 2.0 text.
+Zed Industries, Inc. The supplied GPUI-LICENSE-APACHE preserves that notice
+and the Apache License, Version 2.0 text. The same license bytes cover the
+supplied gpui-pre 0.3.9 core and split platform/Apple UI dependencies.
 
-The patched xattr dependency is distributed under MIT OR Apache-2.0.
-Both upstream license texts are included in the licenses directory.
+gpui-base 0.8.0 is Copyright 2024 - 2026 Longbridge and licensed under
+Apache-2.0. Its distinct copyright and license text are preserved in
+GPUI-BASE-LICENSE-APACHE.
 
-These are the repository's supplied license notices, not a complete audit
-of every transitive dependency. Complete the distribution license inventory
-before publishing a release.
+The bundled Inter fonts retain their SIL Open Font License 1.1 in
+Inter-OFL.txt. The bundled Lucide vector icons retain ISC and inherited
+Feather MIT copyright and permission notices in Lucide-LICENSE.
+
+These files and their source versions/hashes are indexed in licenses/SOURCES.md.
+They are the explicitly supplied UI dependency and asset notices, not a complete
+audit of every transitive dependency. Complete the distribution license
+inventory before publishing a release.
 
 Minecraft is a trademark of Mojang AB. This project is not affiliated with
 or endorsed by Mojang or Microsoft.

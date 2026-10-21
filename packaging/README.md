@@ -74,7 +74,21 @@ The package is not an installer and does not provide an Authenticode signature.
 ## License status
 
 The repository currently has no project-wide `LICENSE`. The script preserves
-the supplied GPUI and xattr notices without labeling the entire product as
-Apache-2.0 or MIT. `THIRD_PARTY_NOTICES.txt` describes their scope. A project
-license decision and complete transitive dependency notice inventory remain
-release prerequisites.
+the supplied UI dependency and asset notices without labeling the entire
+product as Apache-2.0, MIT, ISC or OFL. The package contains:
+
+| License file under `licenses/` | Source |
+| --- | --- |
+| `GPUI-LICENSE-APACHE` | Existing TextInput adaptation and the gpui-pre 0.3.9 Zed family; the original adaptation notice remains intact |
+| `GPUI-BASE-LICENSE-APACHE` | gpui-base 0.8.0, including its separate Longbridge copyright |
+| `Inter-OFL.txt` | Bundled Inter fonts |
+| `Lucide-LICENSE` | Bundled Lucide icons, including inherited Feather MIT notices |
+| `SOURCES.md` | Explicit supplied UI dependency/asset versions and license source paths |
+
+[License sources](licenses/SOURCES.md) are repository-local, so packaging needs
+no Cargo registry, prototype checkout or Node tools. The obsolete xattr patch
+is not in the resolved dependency graph and is no longer a packaging input.
+`THIRD_PARTY_NOTICES.txt` describes the notices' scope. A project license
+decision and complete transitive dependency notice inventory remain release
+prerequisites. This wiring change does not claim a new package/build smoke
+has passed; the upgraded binary and package verification remain pending.

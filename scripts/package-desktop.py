@@ -65,8 +65,10 @@ def write(path, text):
 def notices(destination):
     for source, name in (
         ("crates/block-ui/GPUI-LICENSE-APACHE", "GPUI-LICENSE-APACHE"),
-        ("vendor/xattr/LICENSE-MIT", "xattr-LICENSE-MIT"),
-        ("vendor/xattr/LICENSE-APACHE", "xattr-LICENSE-APACHE"),
+        ("packaging/licenses/GPUI-BASE-LICENSE-APACHE", "GPUI-BASE-LICENSE-APACHE"),
+        ("crates/block-ui/assets/fonts/OFL.txt", "Inter-OFL.txt"),
+        ("crates/block-ui/assets/icons/LICENSE", "Lucide-LICENSE"),
+        ("packaging/licenses/SOURCES.md", "SOURCES.md"),
     ):
         copy(ROOT / source, destination / "licenses" / name)
     for source, name in (
