@@ -500,6 +500,7 @@ impl Surface {
             Self::RemoveAccount(_) => "Remove account",
             Self::RemoveProvider(_) => "Remove provider",
             Self::SeparateProfiles => "Enable separated profiles",
+            Self::StorageCleanup(_) => "Remove retained storage copy",
             Self::GamesHelp => "Instances and Profiles",
             Self::GuideInformation(super::Tab::Settings) => "Settings",
             Self::GuideInformation(_) => "About Block",
@@ -520,6 +521,7 @@ impl Surface {
             Self::Auth => (960., 600.),
             Self::AuthProviderAdd => (460., 520.),
             Self::Drawer(Drawer::Downloads) | Self::DownloadFiles(_) => (600., 460.),
+            Self::StorageCleanup(_) => (560., 460.),
             Self::Drawer(_) => (432., 600.),
             _ => (460., 300.),
         };

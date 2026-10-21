@@ -306,6 +306,7 @@ impl ShellState {
         Self {
             home: self.home.clone(),
             connection: self.connection.clone(),
+            storage: self.storage.clone(),
             surfaces: self.surfaces.snapshot(),
             home_scroll: frozen_scroll(&self.home_scroll),
             about_scroll: frozen_scroll(&self.about_scroll),

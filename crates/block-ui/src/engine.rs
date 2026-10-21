@@ -106,6 +106,8 @@ pub(crate) enum Message {
     },
     AuthStage(block_auth::SignInStage),
     ConnectionTest(super::connection_test::Request, Result<u16, String>),
+    StorageProgress(uuid::Uuid, block_launcher::storage::Progress),
+    StorageFinished(Box<super::settings::StorageFinished>),
     Browser(String),
     Created {
         instance: String,
@@ -282,6 +284,75 @@ impl Engine {
             .await
             .map_err(|error: anyhow::Error| format!("{error:#}"));
             let _ = sender.send(Message::ConnectionTest(request, result)).await;
+        });
+    }
+
+    pub(super) fn relocate_storage(
+        &self,
+        request: super::settings::StorageRequest,
+        locations: block_launcher::storage::Locations,
+        move_games: bool,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let copy_root = root.clone();
+            let events = sender.clone();
+            let id = request.id;
+            let result = tokio::task::spawn_blocking(move || {
+                let last = std::cell::RefCell::new((std::time::Instant::now(), ""));
+                block_launcher::storage::apply(
+                    &copy_root,
+                    locations,
+                    move_games,
+                    &cancel,
+                    &|progress| {
+                        let mut last = last.borrow_mut();
+                        if last.1 != progress.phase
+                            || last.0.elapsed() >= Duration::from_millis(100)
+                            || progress.completed_bytes == progress.total_bytes
+                        {
+                            *last = (std::time::Instant::now(), progress.phase);
+                            let _ = events.try_send(Message::StorageProgress(id, progress));
+                        }
+                    },
+                )
+                .map(|cleanup| {
+                    if cleanup.is_some() {
+                        "Storage updated. The previous copy is retained for your review.".to_owned()
+                    } else {
+                        "Storage folders saved. Existing game folders stay in place.".to_owned()
+                    }
+                })
+            })
+            .await;
+            let result = result.unwrap_or_else(|error| Err(error.into()));
+            send_storage_finished(root, request, result, sender).await;
+        });
+    }
+
+    pub(super) fn cleanup_storage(
+        &self,
+        request: super::settings::StorageRequest,
+        id: uuid::Uuid,
+        remove: bool,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let cleanup_root = root.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                block_launcher::storage::finish_cleanup(&cleanup_root, id, remove)?;
+                anyhow::Ok(if remove {
+                    "The confirmed retained copy was removed.".to_owned()
+                } else {
+                    "The retained copy was kept. It is no longer scheduled for cleanup.".to_owned()
+                })
+            })
+            .await
+            .unwrap_or_else(|error| Err(error.into()));
+            send_storage_finished(root, request, result, sender).await;
         });
     }
 
@@ -1312,6 +1383,41 @@ async fn send_catalog(root: &Path, sender: &EventSender) {
         .send(Message::Catalog(
             result.map_err(|error| format!("{error:#}")),
         ))
+        .await;
+}
+
+async fn send_storage_finished(
+    root: PathBuf,
+    request: super::settings::StorageRequest,
+    result: anyhow::Result<String>,
+    sender: EventSender,
+) {
+    let state_root = root.clone();
+    let state = tokio::task::spawn_blocking(move || {
+        let locations = block_launcher::storage::Locations::load(&state_root)
+            .and_then(|value| value.validate(&state_root))
+            .map_err(|error| format!("{error:#}"));
+        let cleanup = block_launcher::storage::cleanup_status(&state_root)
+            .map_err(|error| format!("{error:#}"));
+        let preferences = Preferences::load(&state_root).map_err(|error| format!("{error:#}"));
+        (locations, cleanup, preferences)
+    })
+    .await;
+    let (locations, cleanup, preferences) = state.unwrap_or_else(|error| {
+        let error = error.to_string();
+        (Err(error.clone()), Err(error.clone()), Err(error))
+    });
+    send_catalog(&root, &sender).await;
+    let _ = sender
+        .send(Message::StorageFinished(Box::new(
+            super::settings::StorageFinished {
+                request,
+                result: result.map_err(|error| format!("{error:#}")),
+                locations,
+                cleanup,
+                preferences,
+            },
+        )))
         .await;
 }
 

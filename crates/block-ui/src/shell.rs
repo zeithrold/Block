@@ -38,6 +38,7 @@ pub(super) enum Surface {
     RemoveAccount(String),
     RemoveProvider(String),
     SeparateProfiles,
+    StorageCleanup(uuid::Uuid),
     GamesHelp,
     GuideInformation(Tab),
     OnboardingSection(super::WizardPage),
@@ -51,6 +52,7 @@ pub(super) enum Surface {
 pub(super) struct ShellState {
     pub surfaces: super::window_surfaces::SurfaceWindows,
     pub connection: super::connection_test::State,
+    pub storage: super::settings::StorageState,
     pub downloads: super::downloads::State,
     pub home_scroll: gpui::ScrollHandle,
     pub home: RefCell<HomeState>,
@@ -117,6 +119,7 @@ impl ShellState {
             | Surface::RemoveAccount(_)
             | Surface::RemoveProvider(_)
             | Surface::SeparateProfiles
+            | Surface::StorageCleanup(_)
             | Surface::GamesHelp
             | Surface::GuideInformation(_)
             | Surface::OnboardingSection(_)
@@ -952,6 +955,7 @@ impl Block {
                 .child(note("This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored."))
                 .child(self.button("confirm-separate", "Enable separated profiles", UiAction::SeparateProfiles, cx))
                 .child(self.button("cancel-separate", "Keep bundled mode", UiAction::ConfirmSeparate(false), cx)),
+            Surface::StorageCleanup(id) => content.child(self.render_storage_confirmation(*id, cx)),
             Surface::GamesHelp => content.child(self.render_games_help(cx)),
             Surface::GuideInformation(tab) => content.p_0().child(div().h_full().w_full().min_h_0()
                 .child(if *tab == Tab::Settings { self.render_settings(window, cx).into_any_element() } else { self.render_about(window, cx).into_any_element() })),

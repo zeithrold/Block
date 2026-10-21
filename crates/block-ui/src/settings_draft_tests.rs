@@ -18,6 +18,287 @@ fn decimal_megabytes_preserve_backend_bytes_without_float_rounding() -> anyhow::
     Ok(())
 }
 
+fn wait_storage(
+    view: &gpui::Entity<crate::Block>,
+    cx: &mut gpui::VisualTestContext,
+) -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while view.read_with(cx, |view, _| view.shell.storage.pending.is_some()) {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "Storage worker did not finish"
+        );
+        view.update(cx, crate::Block::poll);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    Ok(())
+}
+
+#[gpui::test]
+fn unreadable_or_unrelated_storage_results_cannot_claim_success(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    view.update(cx, |view, cx| {
+        let request = super::StorageRequest {
+            id: uuid::Uuid::new_v4(),
+            operation: view.operation_revision,
+            draft: 0,
+            library: String::new(),
+            cache: String::new(),
+            preferences: view.saved_preferences.clone(),
+        };
+        view.shell.storage.pending = Some(request.clone());
+        view.busy = true;
+        view.status = "Still relocating".into();
+        let mut unrelated = request.clone();
+        unrelated.id = uuid::Uuid::new_v4();
+        view.storage_finished(
+            super::StorageFinished {
+                request: unrelated,
+                result: Ok("Wrong task".into()),
+                locations: Ok(Default::default()),
+                cleanup: Ok(None),
+                preferences: Ok(view.saved_preferences.clone()),
+            },
+            cx,
+        );
+        assert!(view.busy && view.shell.storage.pending.is_some());
+        assert_eq!(view.status, "Still relocating");
+        view.storage_finished(
+            super::StorageFinished {
+                request,
+                result: Ok("Worker ended".into()),
+                locations: Err("Unreadable saved locations".into()),
+                cleanup: Ok(None),
+                preferences: Ok(view.saved_preferences.clone()),
+            },
+            cx,
+        );
+        assert!(!view.busy && view.shell.storage.locations.is_err());
+        assert!(
+            view.shell
+                .storage
+                .error
+                .as_ref()
+                .is_some_and(|error| error.contains("could not be read"))
+        );
+        assert!(
+            view.shell
+                .toast
+                .as_ref()
+                .is_some_and(|toast| matches!(toast.kind, crate::feedback::ToastKind::Error))
+        );
+    });
+}
+
+#[gpui::test]
+fn corrupt_storage_configuration_stays_visible_and_is_never_reset_by_settings_save(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        Preferences::default().save(root.path())?;
+        let original_preferences = std::fs::read(root.path().join("preferences.json"))?;
+        std::fs::write(
+            root.path().join("storage.json"),
+            b"not valid location settings",
+        )?;
+        let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.tab = Tab::Settings;
+                view.open_settings(cx);
+                view.select_settings_page(4, window, cx);
+                view.save_settings(window, cx);
+                assert!(view.shell.storage.locations.is_err());
+                assert!(view.shell.storage.pending.is_none());
+                assert!(
+                    view.settings_form
+                        .as_ref()
+                        .is_some_and(|draft| draft.error.is_some())
+                );
+            })
+        });
+        assert_eq!(
+            std::fs::read(root.path().join("storage.json"))?,
+            b"not valid location settings"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("preferences.json"))?,
+            original_preferences
+        );
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn storage_worker_saves_real_locations_preserves_edited_drafts_and_keeps_old_copies(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let parent = directory.path().canonicalize()?;
+        let root = parent.join("control");
+        let catalog = block_launcher::catalog::Catalog::open(&root)?;
+        let (old, _) = catalog.create_instance("Existing".into(), "1.20.6".into(), None, None)?;
+        std::fs::create_dir(root.join("objects"))?;
+        std::fs::write(root.join("objects/synthetic"), b"reusable cache fixture")?;
+        let cache = parent.join("cache");
+        let library = parent.join("games");
+        let later = parent.join("later-draft");
+        let (engine, messages) = crate::engine::Engine::with_root(root.clone())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.snapshot = catalog.snapshot().unwrap_or_default();
+                view.tab = Tab::Settings;
+                view.open_settings(cx);
+                view.select_settings_page(4, window, cx);
+                if let Some(draft) = &view.settings_form {
+                    draft.library.update(cx, |field, cx| {
+                        field.set_value(&library.display().to_string(), cx)
+                    });
+                    draft.cache.update(cx, |field, cx| {
+                        field.set_value(&cache.display().to_string(), cx)
+                    });
+                }
+                assert!(view.storage_dirty(cx));
+                view.save_settings(window, cx);
+                assert!(view.busy && view.shell.storage.pending.is_some());
+                if let Some(draft) = &view.settings_form {
+                    draft.library.update(cx, |field, cx| {
+                        field.set_value(&later.display().to_string(), cx)
+                    });
+                }
+            })
+        });
+        wait_storage(&view, cx)?;
+        assert!(view.read_with(cx, |view, cx| !view.busy
+            && view.shell.storage.error.is_none()
+            && view.shell.storage.cleanup.is_some()
+            && view.storage_dirty(cx)
+            && view.settings_form.as_ref().is_some_and(
+                |draft| draft.library.read(cx).value() == later.display().to_string()
+            )));
+        let saved = block_launcher::storage::Locations::load(&root)?;
+        assert_eq!(saved.library, Some(library.clone()));
+        assert_eq!(saved.cache, Some(cache.clone()));
+        assert_eq!(
+            std::fs::read(cache.join("objects/synthetic"))?,
+            b"reusable cache fixture"
+        );
+        assert!(root.join("objects/synthetic").exists());
+        assert_eq!(catalog.snapshot()?.instances[0].directory, old.directory);
+        let (new, _) = catalog.create_instance("New".into(), "1.20.6".into(), None, None)?;
+        assert!(new.directory.starts_with(&library));
+        let (reopened, reopened_messages) = crate::engine::Engine::with_root(root.clone())?;
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.engine = Some(reopened);
+                view.messages = Some(reopened_messages);
+                view.handle(UiAction::Tab(Tab::Home), window, cx);
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                assert!(!view.storage_dirty(cx));
+                if let Some(cleanup) = &view.shell.storage.cleanup {
+                    view.clean_storage(cleanup.id, false, window, cx);
+                }
+            })
+        });
+        wait_storage(&view, cx)?;
+        assert!(
+            view.read_with(cx, |view, _| view.shell.storage.cleanup.is_none()
+                && !view.busy)
+        );
+        assert!(root.join("objects/synthetic").exists());
+        assert!(block_launcher::storage::cleanup_status(&root)?.is_none());
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn storage_errors_cancel_and_late_completion_preserve_current_drafts_and_real_state(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.tab = Tab::Settings;
+            view.open_settings(cx);
+            view.select_settings_page(4, window, cx);
+            if let Some(draft) = &view.settings_form {
+                draft
+                    .cache
+                    .update(cx, |field, cx| field.set_value("relative/cache", cx));
+            }
+            view.apply_storage(false, window, cx);
+            assert!(view.shell.storage.pending.is_none());
+            assert!(
+                view.settings_form
+                    .as_ref()
+                    .is_some_and(|draft| draft.storage_paths(cx).is_err())
+            );
+            let request = super::StorageRequest {
+                id: uuid::Uuid::new_v4(),
+                operation: view.operation_revision,
+                draft: view
+                    .settings_form
+                    .as_ref()
+                    .map_or(0, |draft| draft.library.entity_id().as_u64()),
+                library: String::new(),
+                cache: "relative/cache".into(),
+                preferences: view.saved_preferences.clone(),
+            };
+            view.shell.storage.pending = Some(request.clone());
+            view.busy = true;
+            view.operation_cancellable = true;
+            view.handle(UiAction::Stop, window, cx);
+            assert!(view.cancel.is_cancelled());
+            view.handle(UiAction::Tab(Tab::Home), window, cx);
+            view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            if let Some(draft) = &view.settings_form {
+                draft
+                    .library
+                    .update(cx, |field, cx| field.set_value("/new-draft", cx));
+            }
+            let identity = view
+                .settings_form
+                .as_ref()
+                .map(|draft| draft.library.entity_id());
+            view.storage_finished(
+                super::StorageFinished {
+                    request,
+                    result: Err("Storage relocation cancelled".into()),
+                    locations: Ok(Default::default()),
+                    cleanup: Ok(None),
+                    preferences: Ok(view.saved_preferences.clone()),
+                },
+                cx,
+            );
+            assert!(!view.busy);
+            assert!(
+                view.shell
+                    .storage
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.contains("cancelled"))
+            );
+            assert!(
+                view.settings_form
+                    .as_ref()
+                    .is_some_and(|draft| Some(draft.library.entity_id()) == identity
+                        && draft.library.read(cx).value() == "/new-draft")
+            );
+            assert_eq!(view.tab, Tab::Settings);
+        })
+    });
+}
+
 #[gpui::test]
 fn restore_only_current_section_and_cancel_restore_the_saved_preview(
     cx: &mut gpui::TestAppContext,

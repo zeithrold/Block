@@ -445,7 +445,11 @@ fn internal_and_external_links_are_preserved_without_copying_external_data() -> 
     put(&external, b"not copied")?;
     std::os::unix::fs::symlink("java", root.join("runtimes/bin/internal"))?;
     std::os::unix::fs::symlink(&external, root.join("runtimes/bin/external"))?;
-    let destination = temp_path.join("cache");
+    std::os::unix::fs::symlink(
+        "../../../external",
+        root.join("runtimes/bin/relative-external"),
+    )?;
+    let destination = temp_path.join("nested/cache");
     apply(
         &root,
         requested(None, Some(destination.clone())),
@@ -455,10 +459,14 @@ fn internal_and_external_links_are_preserved_without_copying_external_data() -> 
     )?;
     assert_eq!(
         fs::read_link(destination.join("runtimes/bin/internal"))?,
-        destination.join("runtimes/bin/java")
+        PathBuf::from("java")
     );
     assert_eq!(
         fs::read_link(destination.join("runtimes/bin/external"))?,
+        external
+    );
+    assert_eq!(
+        fs::read_link(destination.join("runtimes/bin/relative-external"))?,
         external
     );
     finish_retained(&root, true)?;

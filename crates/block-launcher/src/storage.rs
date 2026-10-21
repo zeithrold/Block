@@ -387,13 +387,7 @@ fn rewrite_arguments(value: &mut serde_json::Value, trees: &[Tree]) {
         _ => {}
     }
 }
-fn link_target(source: &Path, target: &Path, trees: &[Tree]) -> anyhow::Result<PathBuf> {
-    let path = if target.is_absolute() {
-        target.to_owned()
-    } else {
-        source.parent().context("Invalid link parent")?.join(target)
-    };
-    // Canonicalize the existing parent; keep a missing final target as a link.
+fn normalize_link(path: &Path) -> anyhow::Result<PathBuf> {
     let mut normalized = PathBuf::new();
     for part in path.components() {
         match part {
@@ -404,7 +398,28 @@ fn link_target(source: &Path, target: &Path, trees: &[Tree]) -> anyhow::Result<P
             other => normalized.push(other.as_os_str()),
         }
     }
-    Ok(rebase(&normalized, trees))
+    Ok(normalized)
+}
+fn link_target(source: &Path, target: &Path, trees: &[Tree]) -> anyhow::Result<PathBuf> {
+    let path = if target.is_absolute() {
+        target.to_owned()
+    } else {
+        source.parent().context("Invalid link parent")?.join(target)
+    };
+    let rebased = rebase(&normalize_link(&path)?, trees);
+    if target.is_relative() {
+        let destination = rebase(source, trees);
+        let relative = destination
+            .parent()
+            .context("Invalid copied link parent")?
+            .join(target);
+        // Managed Java verifies the exact relative link from its manifest.
+        // Preserve it whenever the copied layout keeps the same destination.
+        if normalize_link(&relative)? == rebased {
+            return Ok(target.to_owned());
+        }
+    }
+    Ok(rebased)
 }
 fn create_link(target: &Path, path: &Path, source: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
@@ -414,7 +429,9 @@ fn create_link(target: &Path, path: &Path, source: &Path) -> anyhow::Result<()> 
     }
     #[cfg(windows)]
     {
-        if source.is_dir() {
+        if std::os::windows::fs::FileTypeExt::is_symlink_dir(
+            &fs::symlink_metadata(source)?.file_type(),
+        ) {
             std::os::windows::fs::symlink_dir(target, path)?;
         } else {
             std::os::windows::fs::symlink_file(target, path)?;
@@ -765,6 +782,11 @@ pub fn apply(
             fs2::available_space(path)?,
         )?;
     }
+    progress(Progress {
+        phase: "Checking",
+        completed_bytes: 0,
+        total_bytes: 0,
+    });
     let source_digest = tree_digest(&trees, cancel)?;
     let mut state = Journal {
         id,
@@ -782,12 +804,22 @@ pub fn apply(
             copy_tree(tree, &state.trees, cancel, total, &mut done, progress)?;
         }
         verify(&state.trees, cancel, total, progress)?;
+        progress(Progress {
+            phase: "Checking",
+            completed_bytes: 0,
+            total_bytes: 0,
+        });
         ensure!(
             tree_digest(&state.trees, cancel)? == state.source_digest,
             "Source data changed during relocation"
         );
         state.phase = Phase::Published;
         save(&root, &state, JOURNAL)?;
+        progress(Progress {
+            phase: "Finalizing",
+            completed_bytes: 0,
+            total_bytes: 0,
+        });
         rewrite_documents(&root, &state)?;
         ensure!(!cancel.is_cancelled(), "Storage relocation cancelled");
         save(&root, &state.after, "storage.json")?;
