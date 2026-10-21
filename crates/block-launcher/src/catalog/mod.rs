@@ -59,6 +59,7 @@ pub struct Instance {
 pub enum LoaderKind {
     Vanilla,
     NeoForge,
+    Forge,
     Fabric,
     Quilt,
 }
@@ -69,6 +70,7 @@ impl LoaderKind {
         match self {
             Self::Vanilla => "Vanilla",
             Self::NeoForge => "NeoForge",
+            Self::Forge => "Forge",
             Self::Fabric => "Fabric",
             Self::Quilt => "Quilt",
         }

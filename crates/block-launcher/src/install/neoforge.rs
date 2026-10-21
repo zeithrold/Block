@@ -51,15 +51,18 @@ pub struct InstalledLoader {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Overlay {
+pub(crate) struct Overlay {
     id: String,
     inherits_from: String,
     main_class: String,
+    #[serde(default)]
     arguments: OverlayArguments,
+    #[serde(rename = "minecraftArguments")]
+    minecraft_arguments: Option<String>,
     libraries: Vec<Library>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct OverlayArguments {
     #[serde(default)]
     game: Vec<Argument>,
@@ -68,8 +71,9 @@ struct OverlayArguments {
 }
 
 #[derive(Debug, Deserialize)]
-struct InstallerProfile {
+pub(crate) struct InstallerProfile {
     minecraft: String,
+    #[serde(default)]
     libraries: Vec<Library>,
     #[serde(default)]
     data: BTreeMap<String, SideData>,
@@ -254,10 +258,26 @@ async fn install_from(
     context: &ResolveContext,
     maven: &str,
 ) -> anyhow::Result<InstalledLoader> {
-    validate_version(&base.id, version)?;
+    install_from_kind(base, version, java, context, maven, false).await
+}
+
+pub(crate) async fn install_from_kind(
+    base: &VersionManifest,
+    version: &str,
+    java: &Path,
+    context: &ResolveContext,
+    maven: &str,
+    forge: bool,
+) -> anyhow::Result<InstalledLoader> {
+    if forge {
+        super::forge::validate_version(&base.id, version)?;
+    } else {
+        validate_version(&base.id, version)?;
+    }
+    let kind = if forge { "forge" } else { "neoforge" };
     ensure!(!context.cancel.is_cancelled(), "installation cancelled");
     let root = context.store.root().canonicalize()?;
-    let destination = root.join("loaders/neoforge").join(version);
+    let destination = root.join("loaders").join(kind).join(version);
     tokio::fs::create_dir_all(&destination).await?;
     let _installation_lock = acquire_installation_lock(&destination, &context.cancel).await?;
     let receipt = destination.join("installed.json");
@@ -272,35 +292,46 @@ async fn install_from(
     {
         return Ok(installed);
     }
+    let builds = if forge {
+        super::forge::versions_from(&base.id, context, maven).await?
+    } else {
+        versions_from(&base.id, context, maven).await?
+    };
     ensure!(
-        versions_from(&base.id, context, maven)
-            .await?
-            .iter()
-            .any(|build| build.version == version),
-        "NeoForge build is no longer available for this Minecraft version"
+        builds.iter().any(|build| build.version == version),
+        "The selected loader build is no longer available for this Minecraft version"
     );
-    let artifact = artifact(version);
+    let artifact = if forge { "forge" } else { artifact(version) };
+    let group = if forge {
+        "net/minecraftforge"
+    } else {
+        "net/neoforged"
+    };
     let installer_url =
-        format!("{maven}net/neoforged/{artifact}/{version}/{artifact}-{version}-installer.jar");
+        format!("{maven}{group}/{artifact}/{version}/{artifact}-{version}-installer.jar");
     let installer_resource = tokio::select! {biased;
-        () = context.cancel.cancelled() => anyhow::bail!("NeoForge installation cancelled"),
-        result = tokio::time::timeout(Duration::from_secs(45), context.store.describe_maven(&installer_url)) => result.context("NeoForge installer metadata timed out")??,
+        () = context.cancel.cancelled() => anyhow::bail!("Loader installation cancelled"),
+        result = tokio::time::timeout(Duration::from_secs(45), context.store.describe_maven(&installer_url)) => result.context("Loader installer metadata timed out")??,
     };
     ensure!(
         installer_resource.size > 0 && installer_resource.size <= MAX_ARTIFACT_SIZE,
-        "Invalid NeoForge installer size"
+        "Invalid loader installer size"
     );
     let archive_path = context
         .store
         .fetch(&installer_resource, &context.cancel)
         .await?;
-    let (overlay, profile) = read_installer(&archive_path)?;
+    let (overlay, profile) = if forge {
+        super::forge::read_installer(&archive_path, version, &base.id, context).await?
+    } else {
+        read_installer(&archive_path)?
+    };
     ensure!(
         profile.minecraft == base.id && overlay.inherits_from == base.id,
         "installer game version does not match selected version"
     );
     ensure!(
-        overlay.id == manifest_id(version),
+        forge || overlay.id == manifest_id(version),
         "unexpected NeoForge launch target"
     );
     let stage = root
@@ -311,7 +342,7 @@ async fn install_from(
         .await
         .with_context(|| {
             format!(
-                "NeoForge installation failed; diagnostic directory: {}",
+                "Loader installation failed; diagnostic directory: {}",
                 stage.display()
             )
         })?;
@@ -347,7 +378,7 @@ async fn acquire_installation_lock(
             Err(error) => return Err(error.into()),
         }
         tokio::select! {
-            () = cancel.cancelled() => anyhow::bail!("installation cancelled while waiting for NeoForge installer lock"),
+            () = cancel.cancelled() => anyhow::bail!("installation cancelled while waiting for loader installer lock"),
             () = tokio::time::sleep(Duration::from_millis(50)) => {},
         }
     }
@@ -362,7 +393,12 @@ async fn install_staged(
     overlay: Overlay,
     profile: InstallerProfile,
 ) -> anyhow::Result<(VersionManifest, Vec<InstalledArtifact>)> {
-    let generated = generated_client_paths(&profile)?;
+    let legacy = overlay.main_class == "net.minecraft.launchwrapper.Launch";
+    let generated = if legacy {
+        Vec::new()
+    } else {
+        generated_client_paths(&profile)?
+    };
     let libraries = stage.join("libraries");
     let mut expected = BTreeMap::new();
     for library in profile.libraries.iter().chain(&overlay.libraries) {
@@ -374,7 +410,7 @@ async fn install_staged(
                 url: artifact.url.clone(),
             };
             ensure!(
-                resource.url.starts_with("https://"),
+                resource.url.is_empty() || resource.url.starts_with("https://"),
                 "installer library requires HTTPS: {}",
                 artifact.path
             );
@@ -391,7 +427,34 @@ async fn install_staged(
             }
         }
     }
-    let resources: Vec<_> = expected.values().cloned().collect();
+    // Some Forge generations ship their universal/client libraries inside the
+    // verified installer instead of publishing a download URL for them.
+    let mut archive = zip::ZipArchive::new(File::open(installer)?)?;
+    for (path, resource) in &expected {
+        if resource.url.is_empty() {
+            let entry_path = super::forge::embedded_path(&mut archive, path)?;
+            let mut entry = archive
+                .by_name(&entry_path)
+                .with_context(|| format!("Installer omitted embedded library: {path}"))?;
+            ensure!(
+                entry.size() == resource.size && entry.size() <= MAX_ARTIFACT_SIZE,
+                "Invalid embedded installer library size"
+            );
+            let mut temporary = tempfile::NamedTempFile::new_in(stage)?;
+            std::io::copy(&mut entry, &mut temporary)?;
+            ensure!(
+                file_digest(temporary.path())? == resource.sha1,
+                "Embedded installer library checksum mismatch"
+            );
+            publish_object(temporary.path(), resource, context)?;
+        }
+    }
+    drop(archive);
+    let resources: Vec<_> = expected
+        .values()
+        .filter(|resource| !resource.url.is_empty())
+        .cloned()
+        .collect();
     context.store.fetch_all(&resources, &context.cancel).await?;
     for (path, resource) in &expected {
         copy_object(
@@ -412,7 +475,9 @@ async fn install_staged(
         &stage.join("launcher_profiles.json"),
         &serde_json::json!({"profiles":{}, "settings":{}, "version":3}),
     )?;
-    run_installer(java, installer, stage, &context.cancel).await?;
+    if !legacy {
+        run_installer(java, installer, stage, &context.cancel).await?;
+    }
     let artifacts = import_libraries(&libraries, &expected, context)?;
     for required in generated {
         ensure!(
@@ -449,7 +514,7 @@ fn generated_client_paths(profile: &InstallerProfile) -> anyhow::Result<Vec<Stri
     Ok(paths)
 }
 
-fn coordinate_path(coordinate: &str) -> anyhow::Result<String> {
+pub(crate) fn coordinate_path(coordinate: &str) -> anyhow::Result<String> {
     let (coordinate, extension) = coordinate.split_once('@').unwrap_or((coordinate, "jar"));
     ensure!(
         !extension.is_empty() && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()),
@@ -499,7 +564,7 @@ async fn run_installer(
         .stderr(log)
         .kill_on_drop(true)
         .spawn()
-        .context("cannot start the prepared Java runtime for NeoForge installer")?;
+        .context("cannot start the prepared Java runtime for loader installer")?;
     let status = tokio::select! {
         () = cancel.cancelled() => {
             child.kill().await?;
@@ -529,7 +594,7 @@ fn read_installer(path: &Path) -> anyhow::Result<(Overlay, InstallerProfile)> {
     Ok((overlay, profile))
 }
 
-fn read_zip_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_zip_json<T: serde::de::DeserializeOwned>(
     archive: &mut zip::ZipArchive<File>,
     name: &str,
 ) -> anyhow::Result<T> {
@@ -558,10 +623,15 @@ fn merge_manifest(base: &VersionManifest, overlay: Overlay) -> anyhow::Result<Ve
     merged.libraries.extend(overlay.libraries);
     merged.id = overlay.id;
     merged.main_class = overlay.main_class;
+    if let Some(arguments) = overlay.minecraft_arguments {
+        merged.minecraft_arguments = Some(arguments);
+        merged.arguments = None;
+        return Ok(merged);
+    }
     let arguments = merged
         .arguments
         .as_mut()
-        .context("NeoForge requires modern game arguments")?;
+        .context("Loader requires modern game arguments")?;
     arguments.game.extend(overlay.arguments.game);
     arguments.jvm.extend(overlay.arguments.jvm);
     Ok(merged)
@@ -756,15 +826,29 @@ pub fn adapt_plan(
     manifest: &VersionManifest,
     installed: &InstalledLoader,
 ) -> anyhow::Result<()> {
+    adapt_plan_kind(plan, manifest, installed, false)
+}
+
+pub(crate) fn adapt_plan_kind(
+    plan: &mut ExecutionPlan,
+    manifest: &VersionManifest,
+    installed: &InstalledLoader,
+    forge: bool,
+) -> anyhow::Result<()> {
+    if forge {
+        super::forge::validate_version(&installed.minecraft_version, &installed.version)?;
+    }
     ensure!(
-        version_details(&installed.version)
-            .is_some_and(|(minecraft, _)| minecraft == installed.minecraft_version)
-            && manifest.id == manifest_id(&installed.version)
+        (forge
+            || (version_details(&installed.version)
+                .is_some_and(|(minecraft, _)| minecraft == installed.minecraft_version)
+                && manifest.id == manifest_id(&installed.version)))
             && plan.version == manifest.id
             && plan.manifest_sha1 == installed.manifest_sha1,
-        "NeoForge installation/plan mismatch"
+        "Loader installation/plan mismatch"
     );
-    let library_root = format!("views/neoforge/{}/libraries", plan.manifest_sha1);
+    let kind = if forge { "forge" } else { "neoforge" };
+    let library_root = format!("views/{kind}/{}/libraries", plan.manifest_sha1);
     let mut mappings = BTreeMap::new();
     let descriptors: BTreeMap<_, _> = manifest
         .libraries

@@ -76,6 +76,7 @@ pub const SCENARIOS: &[&str] = &[
     "wizard-fabric-picker",
     "wizard-quilt-picker",
     "wizard-neoforge-picker",
+    "wizard-forge-picker",
     "wizard-loader-loading",
     "wizard-loader-error",
     "wizard-loader-empty",
@@ -237,6 +238,7 @@ impl Block {
                 | "wizard-fabric-picker"
                 | "wizard-quilt-picker"
                 | "wizard-neoforge-picker"
+                | "wizard-forge-picker"
                 | "wizard-loader-loading"
                 | "wizard-loader-error"
                 | "wizard-loader-empty" => Some(WizardPage::Loader),
@@ -251,18 +253,23 @@ impl Block {
                 "wizard-fabric-picker"
                     | "wizard-quilt-picker"
                     | "wizard-neoforge-picker"
+                    | "wizard-forge-picker"
                     | "wizard-loader-loading"
                     | "wizard-loader-error"
                     | "wizard-loader-empty"
             ) {
-                let kind = if name == "wizard-quilt-picker" {
+                let kind = if name == "wizard-forge-picker" {
+                    LoaderKind::Forge
+                } else if name == "wizard-quilt-picker" {
                     LoaderKind::Quilt
                 } else if name == "wizard-neoforge-picker" {
                     LoaderKind::NeoForge
                 } else {
                     LoaderKind::Fabric
                 };
-                let version = if kind == LoaderKind::Quilt {
+                let version = if kind == LoaderKind::Forge {
+                    "1.21.1-52.1.3"
+                } else if kind == LoaderKind::Quilt {
                     "0.29.2"
                 } else if kind == LoaderKind::NeoForge {
                     "21.1.219"
@@ -279,7 +286,7 @@ impl Block {
                     self.shell.wizard.loader_catalog = Some(super::game_wizard::LoaderCatalog {
                         request: uuid::Uuid::new_v4(), minecraft: form.version.read(cx).value(), kind,
                         builds: if matches!(name, "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty") { Vec::new() } else {
-                            vec![block_launcher::install::fabric::LoaderVersion {version: version.into(), stable: true}, block_launcher::install::fabric::LoaderVersion { version: if name == "wizard-neoforge-picker" {"21.1.1-beta".into()} else {"0.16.0-beta.1".into()}, stable: false }]
+                            vec![block_launcher::install::fabric::LoaderVersion {version: version.into(), stable: true}, block_launcher::install::fabric::LoaderVersion { version: if name == "wizard-forge-picker" {"1.21.1-52.1.2".into()} else if name == "wizard-neoforge-picker" {"21.1.1-beta".into()} else {"0.16.0-beta.1".into()}, stable: name == "wizard-forge-picker" }]
                         },
                         load: match name {
                             "wizard-loader-loading" => CollectionLoad::Loading,

@@ -740,6 +740,9 @@ impl Block {
                     |version| format!("NeoForge {version}"),
                 )
             }
+            block_launcher::catalog::LoaderKind::Forge => {
+                format!("Forge {}", target.loader_version.as_deref().unwrap_or(""))
+            }
             block_launcher::catalog::LoaderKind::Fabric => {
                 format!("Fabric {}", target.loader_version.as_deref().unwrap_or(""))
             }

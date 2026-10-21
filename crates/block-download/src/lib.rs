@@ -296,7 +296,30 @@ impl Store {
             .next()
             .context("empty Maven SHA-1")?
             .to_owned();
-        self.object_path(&sha1)?;
+        self.describe_maven_with_sha1(url, &sha1).await
+    }
+
+    /// Describe an artifact whose digest is already supplied by verified installer metadata.
+    /// Repositories need not publish a separate checksum file for this path.
+    /// # Errors
+    /// Rejects invalid digests, missing offline metadata and invalid HTTP length responses.
+    pub async fn describe_maven_with_sha1(
+        &self,
+        url: &str,
+        sha1: &str,
+    ) -> anyhow::Result<Resource> {
+        self.object_path(sha1)?;
+        let directory = self.root.join("metadata");
+        tokio::fs::create_dir_all(&directory).await?;
+        let key = format!("{:x}", Sha1::digest(url.as_bytes()));
+        let path = directory.join(format!("maven-{key}.json"));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            let resource: Resource = serde_json::from_slice(&bytes)?;
+            if resource.size > 0 && resource.sha1 == sha1 && resource.url == url {
+                return Ok(resource);
+            }
+        }
+        ensure!(!self.offline, "missing offline Maven descriptor: {url}");
         let response = self
             .client
             .head(url)
@@ -313,7 +336,7 @@ impl Store {
             .to_str()?
             .parse()?;
         let resource = Resource {
-            sha1,
+            sha1: sha1.into(),
             size,
             url: url.into(),
         };

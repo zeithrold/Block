@@ -206,3 +206,51 @@ async fn maven_head_uses_representation_length_instead_of_empty_head_body() -> a
     task.await??;
     Ok(())
 }
+
+#[tokio::test]
+async fn installer_digest_describes_artifact_without_a_sidecar_and_binds_offline_cache()
+-> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/legacy.jar", listener.local_addr()?);
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await?;
+        let mut request = [0; 4096];
+        let n = socket.read(&mut request).await?;
+        assert!(String::from_utf8_lossy(&request[..n]).starts_with("HEAD /legacy.jar "));
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 123\r\nConnection: close\r\n\r\n")
+            .await?;
+        Ok::<_, anyhow::Error>(())
+    });
+    let root = tempfile::tempdir()?;
+    let digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let descriptor = store(root.path(), false)?
+        .describe_maven_with_sha1(&url, digest)
+        .await?;
+    assert_eq!(descriptor.size, 123);
+    task.await??;
+    let offline = store(root.path(), true)?;
+    assert_eq!(
+        offline.describe_maven_with_sha1(&url, digest).await?,
+        descriptor
+    );
+    assert!(
+        offline
+            .describe_maven_with_sha1(&url, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            .await
+            .is_err()
+    );
+    assert!(
+        offline
+            .describe_maven_with_sha1("http://127.0.0.1:1/other.jar", digest)
+            .await
+            .is_err()
+    );
+    assert!(
+        offline
+            .describe_maven_with_sha1(&url, "invalid")
+            .await
+            .is_err()
+    );
+    Ok(())
+}

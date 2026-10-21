@@ -926,7 +926,7 @@ impl Block {
         self.shell.wizard.loader_request = None;
         match result {
             Ok(mut builds) => {
-                if form.loader != LoaderKind::NeoForge {
+                if !matches!(form.loader, LoaderKind::NeoForge | LoaderKind::Forge) {
                     builds.sort_by(|left, right| {
                         match (
                             semver::Version::parse(&left.version),
@@ -2707,7 +2707,7 @@ impl Block {
             ("Vanilla", Some(LoaderKind::Vanilla)),
             ("NeoForge", Some(LoaderKind::NeoForge)),
             ("Fabric", Some(LoaderKind::Fabric)),
-            ("Forge", None),
+            ("Forge", Some(LoaderKind::Forge)),
             ("Quilt", Some(LoaderKind::Quilt)),
         ];
         let group = self.wizard_radio_group(

@@ -142,24 +142,24 @@ impl Library {
                 ),
             });
         }
-        let manifest = if target.kind == LoaderKind::NeoForge {
+        let manifest = if matches!(target.kind, LoaderKind::NeoForge | LoaderKind::Forge) {
             let java = match &prepared.plan.command.java {
                 JavaExecutable::Managed { path } => {
                     crate::executor::confined_path(&prepared.root, path)?
                 }
                 JavaExecutable::Local { path } => path.clone(),
             };
-            neoforge::install(
-                &metadata.parsed.manifest,
-                target
-                    .loader_version
-                    .as_deref()
-                    .context("NeoForge build missing")?,
-                &java,
-                &context,
-            )
-            .await?
-            .manifest_path
+            let version = target
+                .loader_version
+                .as_deref()
+                .context("Loader build missing")?;
+            let installed = if target.kind == LoaderKind::Forge {
+                crate::install::forge::install(&metadata.parsed.manifest, version, &java, &context)
+                    .await?
+            } else {
+                neoforge::install(&metadata.parsed.manifest, version, &java, &context).await?
+            };
+            installed.manifest_path
         } else if matches!(target.kind, LoaderKind::Fabric | LoaderKind::Quilt) {
             crate::install::fabric::install(
                 &target.kind,
@@ -308,7 +308,7 @@ fn adapt(
     target: &LaunchTarget,
     path: &Path,
 ) -> anyhow::Result<()> {
-    if target.kind == LoaderKind::NeoForge {
+    if matches!(target.kind, LoaderKind::NeoForge | LoaderKind::Forge) {
         let receipt = path
             .parent()
             .context("loader metadata has no directory")?
@@ -319,9 +319,13 @@ fn adapt(
         ensure!(
             target.loader_version.as_deref() == Some(installed.version.as_str())
                 && installed.manifest_path == path,
-            "Installed NeoForge target does not match the selected build; choose Repair"
+            "Installed loader target does not match the selected build; choose Repair"
         );
-        neoforge::adapt_plan(plan, manifest, &installed)?;
+        if target.kind == LoaderKind::Forge {
+            crate::install::forge::adapt_plan(plan, manifest, &installed)?;
+        } else {
+            neoforge::adapt_plan(plan, manifest, &installed)?;
+        }
     }
     Ok(())
 }

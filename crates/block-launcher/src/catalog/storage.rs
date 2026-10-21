@@ -351,6 +351,9 @@ impl Catalog {
                 LoaderKind::NeoForge => {
                     crate::install::neoforge::validate_version(&minecraft_version, version)?
                 }
+                LoaderKind::Forge => {
+                    crate::install::forge::validate_version(&minecraft_version, version)?
+                }
                 LoaderKind::Fabric | LoaderKind::Quilt => {
                     crate::install::fabric::validate_version(version)?
                 }
@@ -376,6 +379,7 @@ impl Catalog {
         };
         if let Some((kind, version)) = loader {
             let prefix = match kind {
+                LoaderKind::Forge => "forge",
                 LoaderKind::Fabric => "fabric",
                 LoaderKind::Quilt => "quilt",
                 _ => "neoforge",

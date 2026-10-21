@@ -315,6 +315,9 @@ impl Engine {
                 let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
                 let context = ResolveContext { store, cancel };
                 match kind {
+                    LoaderKind::Forge => {
+                        block_launcher::install::forge::versions(&minecraft, &context).await
+                    }
                     LoaderKind::NeoForge => {
                         block_launcher::install::neoforge::versions(&minecraft, &context).await
                     }
@@ -1990,6 +1993,7 @@ mod tests {
             (super::LoaderKind::Fabric, "0.16.14", "1.20.6"),
             (super::LoaderKind::Quilt, "0.29.2", "1.20.6"),
             (super::LoaderKind::NeoForge, "21.1.219", "1.21.1"),
+            (super::LoaderKind::Forge, "1.20.1-47.4.13", "1.20.1"),
         ] {
             let cancel = super::CancellationToken::new();
             cancel.cancel();
