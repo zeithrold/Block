@@ -8,6 +8,7 @@ mod onboarding;
 mod settings;
 mod shell;
 mod text_input;
+mod window_geometry;
 
 pub use crash_view::CrashView;
 
@@ -273,7 +274,7 @@ impl Block {
             Tab::Onboarding
         };
         if tab == Tab::Home {
-            window.resize(gpui::size(px(432.), px(768.)));
+            window.resize(window_geometry::home_size(window, cx));
         }
         let mut view = Self {
             shell: ShellState {
@@ -715,7 +716,7 @@ impl Block {
                 self.form = None;
                 self.shell.drawer = None;
                 window.resize(if tab == Tab::Home {
-                    gpui::size(px(432.), px(768.))
+                    window_geometry::home_size(window, cx)
                 } else {
                     gpui::size(px(960.), px(600.))
                 });
@@ -1573,7 +1574,11 @@ impl Render for Block {
             return div().size_full().child(help.clone()).into_any_element();
         }
         if let Some(size) = self.pending_window_size.take() {
-            window.resize(size);
+            window.resize(if self.tab == Tab::Home {
+                window_geometry::home_size(window, cx)
+            } else {
+                size
+            });
         }
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);

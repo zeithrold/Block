@@ -44,6 +44,13 @@ Local Stage 3 `just check` passed with exit 0 and 183 tests after the first-run 
 
 Stage 2 CI [39545112536](https://github.com/zeithrold/Block/actions/runs/39545112536) passed all three jobs. Separate Windows verification of Stage 1 passed 152 platform-specific tests and a native build. Stage 2 GUI acceptance passed initial/portrait sizing, minimize/restore/close, first-run completion and reopening on Windows AMD64 and Linux ARM64. Windows motion frames confirmed fade/slide progression. Both hosts' custom drag failures remain recorded; fallback acceptance belongs to the newer build. Linux ARM64 used XWayland and CPU llvmpipe; its short desktop clamped Home height to 756 px. These older receipts do not establish acceptance of the newer Account/Game/Review flow.
 
+
+## Short-display follow-up
+
+Independent Stage 3 graphical acceptance found that the 432×768 Home client plus system decorations could exceed an Xfce 1280×800 desktop. Home startup, navigation and onboarding completion now fit the portrait size to the current display and window position, reserving space for desktop panels and decorations. Large screens retain 432×768; the minimum usable size remains 360×540. Geometry and rendered-control regression tests cover the measured short display, negative monitor coordinates and both navigation/completion paths. Local full `just check` passed 189 tests with strict Clippy. Native verification of the follow-up is recorded separately from the earlier full source-stamped receipts.
+
+GPUI exposes full display bounds rather than the desktop work area, and cannot reposition a window through its public API. The policy therefore uses conservative margins; an unusually small display or an already off-screen window can still require manual repositioning.
+
 ## Remaining slices
 
 1. Searchable game browser, appearance and launch detail subpages; separated-profile creation flow.
