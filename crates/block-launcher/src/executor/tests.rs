@@ -58,6 +58,7 @@ fn output_command(root: &Path) -> anyhow::Result<crate::command::JavaCommand> {
             user_type: "msa".into(),
             xuid: String::new(),
             client_id: String::new(),
+            user_properties: "{}".into(),
         },
     )
 }
@@ -603,6 +604,7 @@ async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_lo
         user_type: "msa".into(),
         xuid: String::new(),
         client_id: String::new(),
+        user_properties: "{}".into(),
     };
     let directory = GameDirectoryGuard::acquire(&game)?;
     let invocation = LaunchPlan::resolve(

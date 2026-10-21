@@ -74,11 +74,15 @@ impl JavaCommand {
     ) -> anyhow::Result<Self> {
         let session = provider.session()?;
         session.validate()?;
-        let secrets = if session.access_token == "0" {
+        let offline = session.user_type == "msa" && session.access_token == "0";
+        let mut secrets = if offline {
             Vec::new()
         } else {
             vec![session.access_token.clone()]
         };
+        if session.user_properties != "{}" {
+            secrets.push(session.user_properties.clone());
+        }
         let template = &plan.command;
         let mut variables = template.variables.clone();
         variables.extend([
@@ -87,7 +91,7 @@ impl JavaCommand {
             ("auth_access_token".into(), session.access_token.clone()),
             (
                 "auth_session".into(),
-                if session.access_token == "0" {
+                if offline {
                     "0".into()
                 } else {
                     format!("token:{}:{}", session.access_token, session.uuid)
@@ -96,6 +100,7 @@ impl JavaCommand {
             ("user_type".into(), session.user_type),
             ("auth_xuid".into(), session.xuid),
             ("clientid".into(), session.client_id),
+            ("user_properties".into(), session.user_properties),
         ]);
         for (name, path) in &template.path_variables {
             let path = path.replace(RUN_ID_TOKEN, run_id);
@@ -273,7 +278,10 @@ fn substitute(template: &str, variables: &BTreeMap<String, String>) -> anyhow::R
                 .get(name)
                 .with_context(|| format!("missing launch placeholder: {name}"))?,
         );
-        secret |= name == "auth_access_token" || name == "auth_session";
+        secret |= matches!(
+            name,
+            "auth_access_token" | "auth_session" | "user_properties"
+        );
         rest = &rest[end + 1..];
     }
     value.push_str(rest);

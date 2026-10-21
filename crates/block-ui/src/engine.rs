@@ -817,6 +817,7 @@ fn game_session(session: &AuthenticatedSession) -> GameSession {
         user_type: "msa".into(),
         xuid: String::new(),
         client_id: session.account.client_id.clone(),
+        user_properties: session.expose_user_properties().to_owned(),
     }
 }
 

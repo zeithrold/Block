@@ -3,10 +3,21 @@ use uuid::Uuid;
 use crate::{Account, AuthError, Result, SecretString};
 
 const SERVICE: &str = "dev.block.launcher.microsoft";
+const AUTHLIB_SERVICE: &str = "dev.block.launcher.authlib";
+
+fn service(reference: &str) -> &'static str {
+    if reference.starts_with("authlib:") {
+        AUTHLIB_SERVICE
+    } else {
+        SERVICE
+    }
+}
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(not(test))]
 fn entry(reference: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, reference).map_err(|_| AuthError::CredentialStoreUnavailable)
+    keyring::Entry::new(service(reference), reference)
+        .map_err(|_| AuthError::CredentialStoreUnavailable)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -31,6 +42,16 @@ pub(crate) async fn load(account: &Account) -> Result<SecretString> {
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn load_blocking(reference: &str) -> Result<SecretString> {
+    #[cfg(test)]
+    {
+        fixture_store()
+            .lock()
+            .map_err(|_| AuthError::CredentialStoreUnavailable)?
+            .get(&(service(reference), reference.to_owned()))
+            .map(|secret| SecretString::new(secret.expose().to_owned()))
+            .ok_or(AuthError::CredentialsMissing)
+    }
+    #[cfg(not(test))]
     entry(reference)?
         .get_password()
         .map(SecretString::new)
@@ -54,6 +75,18 @@ pub(crate) async fn save(reference: String, secret: SecretString) -> Result<()> 
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn save_blocking(reference: &str, secret: &SecretString) -> Result<()> {
+    #[cfg(test)]
+    {
+        fixture_store()
+            .lock()
+            .map_err(|_| AuthError::CredentialStoreUnavailable)?
+            .insert(
+                (service(reference), reference.to_owned()),
+                SecretString::new(secret.expose().to_owned()),
+            );
+        Ok(())
+    }
+    #[cfg(not(test))]
     entry(reference)?
         .set_password(secret.expose())
         .map_err(|error| map_store_error(&error))
@@ -77,6 +110,15 @@ pub(crate) async fn delete(account: &Account) -> Result<()> {
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn delete_blocking(reference: &str) -> Result<()> {
+    #[cfg(test)]
+    {
+        fixture_store()
+            .lock()
+            .map_err(|_| AuthError::CredentialStoreUnavailable)?
+            .remove(&(service(reference), reference.to_owned()));
+        Ok(())
+    }
+    #[cfg(not(test))]
     match entry(reference)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(_) => Err(AuthError::CredentialStoreUnavailable),
@@ -94,8 +136,20 @@ fn delete_blocking(_reference: &str) -> Result<()> {
 /// # Errors
 /// Returns an explicit error if the backend is missing, locked or inaccessible.
 pub async fn probe_secure_storage() -> Result<()> {
-    tokio::task::spawn_blocking(|| {
-        let reference = format!("storage-check-{}", Uuid::new_v4());
+    probe_storage(false).await
+}
+
+pub(crate) async fn probe_authlib_storage() -> Result<()> {
+    probe_storage(true).await
+}
+
+async fn probe_storage(authlib: bool) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let reference = format!(
+            "{}storage-check-{}",
+            if authlib { "authlib:" } else { "" },
+            Uuid::new_v4()
+        );
         let value = SecretString::new(Uuid::new_v4().to_string());
         save_blocking(&reference, &value)?;
         let read = load_blocking(&reference);
@@ -110,6 +164,15 @@ pub async fn probe_secure_storage() -> Result<()> {
     })
     .await
     .map_err(|_| AuthError::CredentialStoreUnavailable)?
+}
+
+#[cfg(test)]
+fn fixture_store()
+-> &'static std::sync::Mutex<std::collections::HashMap<(&'static str, String), SecretString>> {
+    static STORE: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<(&'static str, String), SecretString>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    &STORE
 }
 
 #[cfg(test)]

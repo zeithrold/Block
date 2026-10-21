@@ -122,6 +122,7 @@ impl Fixture {
                 user_type: "msa".into(),
                 xuid: "fixture-xuid".into(),
                 client_id: String::new(),
+                user_properties: "{}".into(),
             },
             SystemTime::now() + Duration::from_secs(600),
         )

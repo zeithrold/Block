@@ -621,6 +621,7 @@ impl MicrosoftAuth {
             account,
             expires_at,
             access_token: minecraft.access_token,
+            user_properties: SecretString::new("{}".into()),
         })
     }
 

@@ -247,6 +247,7 @@ fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> an
                 user_type: "msa".into(),
                 xuid: "0".into(),
                 client_id: String::new(),
+                user_properties: "{}".into(),
             })
         }
     }

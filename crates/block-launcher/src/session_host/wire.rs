@@ -26,6 +26,12 @@ pub(super) struct Bootstrap {
     user_type: String,
     xuid: String,
     client_id: String,
+    #[serde(default = "empty_user_properties")]
+    user_properties: String,
+}
+
+fn empty_user_properties() -> String {
+    "{}".into()
 }
 
 impl fmt::Debug for Bootstrap {
@@ -54,14 +60,21 @@ impl Bootstrap {
             user_type: game.user_type.clone(),
             xuid: game.xuid.clone(),
             client_id: game.client_id.clone(),
+            user_properties: game.user_properties.clone(),
         })
     }
 
     pub(super) fn redact(&self, text: &str) -> String {
-        if self.access_token.len() > 1 {
+        let offline = self.user_type == "msa" && self.access_token == "0";
+        let text = if !offline && !self.access_token.is_empty() {
             text.replace(&self.access_token, "<redacted>")
         } else {
             text.to_owned()
+        };
+        if self.user_properties.len() > 2 {
+            text.replace(&self.user_properties, "<redacted>")
+        } else {
+            text
         }
     }
 }
@@ -83,6 +96,7 @@ impl SessionProvider for Bootstrap {
             user_type: self.user_type.clone(),
             xuid: self.xuid.clone(),
             client_id: self.client_id.clone(),
+            user_properties: self.user_properties.clone(),
         };
         game.validate()?;
         Ok(game)
@@ -148,6 +162,7 @@ mod tests {
                 user_type: "msa".into(),
                 xuid: "synthetic-xuid".into(),
                 client_id: "synthetic-client-id".into(),
+                user_properties: "{}".into(),
             },
             SystemTime::now() + Duration::from_secs(600),
         )
@@ -185,6 +200,38 @@ mod tests {
             decoded.redact(&format!("first={TOKEN}, second={TOKEN}")),
             "first=<redacted>, second=<redacted>"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn external_user_properties_round_trip_privately_with_old_bootstrap_compatibility()
+    -> anyhow::Result<()> {
+        let mut original = bootstrap()?;
+        original.user_type = "mojang".into();
+        original.username = "山与海".into();
+        original.user_properties =
+            r#"{"preferredLanguage":["zh_CN"],"private":["SYNTHETIC_PROPERTY"]}"#.into();
+        let mut bytes = Vec::new();
+        send(&mut bytes, &original).await?;
+        let decoded: Bootstrap = receive(&mut bytes.as_slice()).await?;
+        let session = decoded.session()?;
+        assert_eq!(session.username, "山与海");
+        assert_eq!(session.user_properties, original.user_properties);
+        assert!(!format!("{decoded:?} {session:?}").contains("SYNTHETIC_PROPERTY"));
+        assert_eq!(
+            decoded.redact(&format!("{} {TOKEN}", session.user_properties)),
+            "<redacted> <redacted>"
+        );
+        let mut legacy = serde_json::to_value(&original)?;
+        legacy
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("Missing bootstrap fields"))?
+            .remove("user_properties");
+        let legacy: Bootstrap = serde_json::from_value(legacy)?;
+        assert_eq!(legacy.session()?.user_properties, "{}");
+        let mut opaque = original;
+        opaque.access_token = "0".into();
+        assert_eq!(opaque.redact("token=0"), "token=<redacted>");
         Ok(())
     }
 

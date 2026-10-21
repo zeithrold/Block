@@ -9,7 +9,10 @@ mod credentials;
 mod microsoft;
 mod secret;
 
-pub use authlib::{AuthlibProvider, ProviderAddress, ProviderMetadata};
+pub use authlib::{
+    AuthlibAuth, AuthlibProfile, AuthlibProvider, PendingAuthlibSignIn, PreparedAuthlibSignIn,
+    ProviderAddress, ProviderMetadata,
+};
 pub use callback::PendingSignIn;
 pub use credentials::probe_secure_storage;
 pub use microsoft::{MicrosoftAuth, PendingDeviceSignIn, PreparedMicrosoftSignIn, SignInStage};
@@ -92,6 +95,7 @@ pub struct AuthenticatedSession {
     pub account: Account,
     pub expires_at: SystemTime,
     access_token: SecretString,
+    user_properties: SecretString,
 }
 
 impl AuthenticatedSession {
@@ -99,6 +103,11 @@ impl AuthenticatedSession {
     #[must_use]
     pub fn expose_access_token(&self) -> &str {
         self.access_token.expose()
+    }
+
+    #[must_use]
+    pub fn expose_user_properties(&self) -> &str {
+        self.user_properties.expose()
     }
 
     /// Allow one minute for preparing and starting the Java process.
@@ -127,12 +136,32 @@ pub enum AuthError {
         "The provider discovery redirects contain a loop or exceed five hops. Enter its API root directly."
     )]
     ProviderDiscoveryLoop,
-    #[error("Provider discovery timed out. Check its address and your connection, then try again.")]
+    #[error(
+        "The provider request timed out. Check its address and your connection, then try again."
+    )]
     ProviderTimedOut,
     #[error("The provider returned invalid Yggdrasil metadata. Check its API root and public key.")]
     ProviderMetadata,
     #[error("The provider is limiting requests. Try again after {retry_after_seconds} seconds.")]
     ProviderThrottled { retry_after_seconds: u64 },
+    #[error("The provider rejected the account or password. Check them and try again.")]
+    ProviderCredentialsRejected,
+    #[error("Provider authorization has expired or was revoked. Sign in to this provider again.")]
+    ProviderSignInRequired,
+    #[error(
+        "This provider account has no playable characters. Create a character on its website, then sign in again."
+    )]
+    ProviderNoProfiles,
+    #[error("Choose one of the characters returned by this provider before continuing.")]
+    ProviderProfileSelectionRequired,
+    #[error(
+        "The provider identity, client token or selected character changed unexpectedly. Sign in again."
+    )]
+    ProviderIdentityChanged,
+    #[error("This prepared provider sign-in expired. Sign in again before saving the account.")]
+    ProviderPreparationExpired,
+    #[error("Enter a provider account and password. The password is never saved.")]
+    ProviderLoginRequired,
     #[error("Configure a public Microsoft application client ID before signing in.")]
     MissingClientId,
     #[error("The Microsoft application client ID is invalid.")]

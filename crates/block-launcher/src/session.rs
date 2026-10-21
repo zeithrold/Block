@@ -29,6 +29,7 @@ pub struct GameSession {
     pub user_type: String,
     pub xuid: String,
     pub client_id: String,
+    pub user_properties: String,
 }
 
 impl fmt::Debug for GameSession {
@@ -75,6 +76,7 @@ impl SessionProvider for OfflineSession {
             user_type: "msa".into(),
             xuid: "0".into(),
             client_id: String::new(),
+            user_properties: "{}".into(),
         })
     }
 }
@@ -84,10 +86,35 @@ impl GameSession {
     /// # Errors
     /// Rejects unusable or inconsistent player/session fields.
     pub fn validate(&self) -> anyhow::Result<()> {
-        OfflineSession::Offline {
-            username: self.username.clone(),
+        if self.user_type == "mojang" {
+            ensure!(
+                !self.username.is_empty()
+                    && self.username.encode_utf16().count() <= 16
+                    && !self.username.chars().any(char::is_control),
+                "invalid external player name"
+            );
+        } else {
+            OfflineSession::Offline {
+                username: self.username.clone(),
+            }
+            .validate()?;
         }
-        .validate()?;
+        ensure!(
+            self.user_properties.len() <= 64 * 1024,
+            "user properties are too large"
+        );
+        let properties: serde_json::Value = serde_json::from_str(&self.user_properties)?;
+        ensure!(
+            properties
+                .as_object()
+                .is_some_and(|values| values.len() <= 64
+                    && values.iter().all(|(name, value)| !name.is_empty()
+                        && name.len() <= 128
+                        && value.as_array().is_some_and(|items| items
+                            .iter()
+                            .all(|item| item.as_str().is_some_and(|text| text.len() <= 4096))))),
+            "invalid user properties"
+        );
         ensure!(
             self.uuid.len() == 32 && self.uuid.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid player UUID"

@@ -11,12 +11,603 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
-use crate::{AuthError, Result};
+use crate::{
+    Account, AccountProvider, AccountRef, AuthError, AuthenticatedSession, AuthlibAccount, Result,
+    SecretString, credentials,
+};
 
 const QUICK_LINK: &str = "authlib-injector:yggdrasil-server:";
 const MAX_METADATA: usize = 512 * 1024;
 const DISCOVERY_STAGE: &str = "Provider discovery";
+const AUTH_STAGE: &str = "External authentication";
+const PREPARATION_TTL: Duration = Duration::from_secs(15 * 60);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct AuthlibProfile {
+    pub id: Uuid,
+    pub name: String,
+}
+
+impl AuthlibProfile {
+    fn validate(&self) -> Result<()> {
+        if self.name.is_empty()
+            || self.name.encode_utf16().count() > 16
+            || self.name.chars().any(char::is_control)
+        {
+            return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+        }
+        Ok(())
+    }
+}
+
+/// A provider response waiting for character selection. Secrets remain transient.
+pub struct PendingAuthlibSignIn {
+    provider_id: Uuid,
+    api_url: String,
+    login: String,
+    reply: AuthlibReply,
+    expires_at: tokio::time::Instant,
+}
+
+impl std::fmt::Debug for PendingAuthlibSignIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PendingAuthlibSignIn([REDACTED])")
+    }
+}
+
+impl PendingAuthlibSignIn {
+    #[must_use]
+    pub fn profiles(&self) -> &[AuthlibProfile] {
+        &self.reply.available_profiles
+    }
+
+    #[must_use]
+    pub fn selected_profile(&self) -> Option<&AuthlibProfile> {
+        self.reply.selected_profile.as_ref()
+    }
+
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        tokio::time::Instant::now() >= self.expires_at
+    }
+}
+
+/// A verified character awaiting Finish; dropping it writes no credentials.
+pub struct PreparedAuthlibSignIn {
+    session: AuthenticatedSession,
+    tokens: TokenBundle,
+    api_url: String,
+    expires_at: tokio::time::Instant,
+}
+
+impl std::fmt::Debug for PreparedAuthlibSignIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PreparedAuthlibSignIn([REDACTED])")
+    }
+}
+
+impl PreparedAuthlibSignIn {
+    #[must_use]
+    pub const fn account(&self) -> &Account {
+        &self.session.account
+    }
+
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        tokio::time::Instant::now() >= self.expires_at
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuthlibAuth {
+    provider: AuthlibProvider,
+    client: Client,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthlibReply {
+    access_token: SecretString,
+    client_token: SecretString,
+    #[serde(default)]
+    available_profiles: Vec<AuthlibProfile>,
+    selected_profile: Option<AuthlibProfile>,
+    user: Option<AuthlibUser>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct AuthlibUser {
+    id: Option<Uuid>,
+    #[serde(default)]
+    properties: Vec<UserProperty>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct UserProperty {
+    name: String,
+    value: String,
+}
+
+// Only the encoded SecretString is passed to the OS store. No serializable
+// session/token type is exported, and account metadata contains neither token.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TokenBundle {
+    schema_version: u32,
+    account_key: String,
+    api_url: String,
+    access_token: SecretString,
+    client_token: SecretString,
+    user: Option<AuthlibUser>,
+}
+
+impl AuthlibAuth {
+    /// Bind authentication to an already discovered and explicitly accepted API.
+    /// POST requests never follow redirects or ALI to another endpoint.
+    pub fn new(provider: &AuthlibProvider) -> Result<Self> {
+        provider.validate()?;
+        let builder = Client::builder();
+        #[cfg(test)]
+        let builder = builder.no_proxy();
+        let client = builder
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .user_agent("Block/0.1 (external authentication)")
+            .build()
+            .map_err(auth_network)?;
+        Ok(Self {
+            provider: provider.clone(),
+            client,
+        })
+    }
+
+    /// Authenticate without persisting a password or either token.
+    pub async fn authenticate(
+        &self,
+        login: &str,
+        password: SecretString,
+        cancel: &CancellationToken,
+    ) -> Result<PendingAuthlibSignIn> {
+        validate_login(login)?;
+        if password.expose().is_empty() || password.expose().len() > 4096 {
+            return Err(AuthError::ProviderLoginRequired);
+        }
+        tokio::select! {biased; ()=cancel.cancelled()=>return Err(AuthError::Cancelled), result=credentials::probe_authlib_storage()=>result?,}
+        let client_token = Uuid::new_v4().simple().to_string();
+        let reply = self.token_request("authenticate",&serde_json::json!({"username":login,"password":password.expose(),"clientToken":client_token,"requestUser":true,"agent":{"name":"Minecraft","version":1}}),cancel).await?;
+        if reply.client_token.expose() != client_token {
+            return Err(AuthError::ProviderIdentityChanged);
+        }
+        if reply.selected_profile.is_none() && reply.available_profiles.is_empty() {
+            return Err(AuthError::ProviderNoProfiles);
+        }
+        Ok(PendingAuthlibSignIn {
+            provider_id: self.provider.id,
+            api_url: self.provider.api_url.clone(),
+            login: login.to_owned(),
+            reply,
+            expires_at: tokio::time::Instant::now() + PREPARATION_TTL,
+        })
+    }
+
+    /// A profile assignment is a real refresh, never a local token relabeling.
+    pub async fn prepare_sign_in(
+        &self,
+        pending: &PendingAuthlibSignIn,
+        selection: Option<Uuid>,
+        cancel: &CancellationToken,
+    ) -> Result<PreparedAuthlibSignIn> {
+        if cancel.is_cancelled() {
+            return Err(AuthError::Cancelled);
+        }
+        if pending.is_expired() {
+            return Err(AuthError::ProviderPreparationExpired);
+        }
+        if pending.provider_id != self.provider.id || pending.api_url != self.provider.api_url {
+            return Err(AuthError::ProviderIdentityChanged);
+        }
+        let reply = if let Some(bound) = &pending.reply.selected_profile {
+            if selection.is_some_and(|id| id != bound.id) {
+                return Err(AuthError::ProviderIdentityChanged);
+            }
+            AuthlibReply {
+                access_token: SecretString::new(pending.reply.access_token.expose().to_owned()),
+                client_token: SecretString::new(pending.reply.client_token.expose().to_owned()),
+                available_profiles: pending.reply.available_profiles.clone(),
+                selected_profile: Some(bound.clone()),
+                user: pending.reply.user.clone(),
+            }
+        } else {
+            let id = selection
+                .or_else(|| {
+                    (pending.reply.available_profiles.len() == 1)
+                        .then(|| pending.reply.available_profiles[0].id)
+                })
+                .ok_or(AuthError::ProviderProfileSelectionRequired)?;
+            let profile = pending
+                .reply
+                .available_profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .ok_or(AuthError::ProviderIdentityChanged)?;
+            let reply = self.token_request("refresh",&serde_json::json!({"accessToken":pending.reply.access_token.expose(),"clientToken":pending.reply.client_token.expose(),"requestUser":true,"selectedProfile":{"id":profile.id.simple().to_string(),"name":profile.name}}),cancel).await?;
+            if reply.client_token.expose() != pending.reply.client_token.expose()
+                || user_changed(pending.reply.user.as_ref(), reply.user.as_ref())
+                || reply.selected_profile.as_ref().is_none_or(|p| p.id != id)
+            {
+                return Err(AuthError::ProviderIdentityChanged);
+            }
+            reply
+        };
+        if cancel.is_cancelled() {
+            return Err(AuthError::Cancelled);
+        }
+        if pending.is_expired() {
+            return Err(AuthError::ProviderPreparationExpired);
+        }
+        let profile = reply
+            .selected_profile
+            .as_ref()
+            .ok_or(AuthError::ProviderProfileSelectionRequired)?;
+        let mut account = Account {
+            reference: AccountRef {
+                player_id: profile.id,
+            },
+            provider: AccountProvider::Authlib,
+            player_name: profile.name.clone(),
+            client_id: String::new(),
+            credential_ref: String::new(),
+            authlib: Some(AuthlibAccount {
+                provider_id: self.provider.id,
+                login: pending.login.clone(),
+            }),
+        };
+        account.credential_ref = account.identity_key();
+        let tokens = TokenBundle {
+            schema_version: 1,
+            account_key: account.identity_key(),
+            api_url: self.provider.api_url.clone(),
+            access_token: reply.access_token,
+            client_token: reply.client_token,
+            user: reply.user,
+        };
+        let session = session_from_tokens(account, &tokens)?;
+        Ok(PreparedAuthlibSignIn {
+            session,
+            tokens,
+            api_url: self.provider.api_url.clone(),
+            expires_at: pending.expires_at,
+        })
+    }
+
+    /// Final confirmation validates the prepared token and then writes the OS store.
+    pub async fn save_sign_in(
+        &self,
+        prepared: PreparedAuthlibSignIn,
+        cancel: &CancellationToken,
+    ) -> Result<AuthenticatedSession> {
+        if prepared.is_expired() {
+            return Err(AuthError::ProviderPreparationExpired);
+        }
+        self.validate_account(&prepared.session.account)?;
+        if prepared.api_url != self.provider.api_url {
+            return Err(AuthError::ProviderIdentityChanged);
+        }
+        if !self.validate_tokens(&prepared.tokens, cancel).await? {
+            return Err(AuthError::ProviderSignInRequired);
+        }
+        if prepared.is_expired() {
+            return Err(AuthError::ProviderPreparationExpired);
+        }
+        if cancel.is_cancelled() {
+            return Err(AuthError::Cancelled);
+        }
+        credentials::save(
+            prepared.session.account.credential_ref.clone(),
+            prepared.tokens.encode()?,
+        )
+        .await?;
+        Ok(prepared.session)
+    }
+
+    /// Validate before launch; refresh only a provider-declared invalid token.
+    pub async fn refresh(
+        &self,
+        account: &Account,
+        cancel: &CancellationToken,
+    ) -> Result<AuthenticatedSession> {
+        self.validate_account(account)?;
+        let mut tokens = self.load_tokens(account).await?;
+        if !self.validate_tokens(&tokens, cancel).await? {
+            let reply = self.token_request("refresh",&serde_json::json!({"accessToken":tokens.access_token.expose(),"clientToken":tokens.client_token.expose(),"requestUser":true}),cancel).await?;
+            let profile = reply
+                .selected_profile
+                .as_ref()
+                .ok_or(AuthError::ProviderIdentityChanged)?;
+            if profile.id != account.reference.player_id
+                || user_changed(tokens.user.as_ref(), reply.user.as_ref())
+                || reply.client_token.expose() != tokens.client_token.expose()
+            {
+                return Err(AuthError::ProviderIdentityChanged);
+            }
+            tokens.access_token = reply.access_token;
+            tokens.client_token = reply.client_token;
+            tokens.user = reply.user;
+            let mut account = account.clone();
+            account.player_name = profile.name.clone();
+            if cancel.is_cancelled() {
+                return Err(AuthError::Cancelled);
+            }
+            credentials::save(account.credential_ref.clone(), tokens.encode()?).await?;
+            return session_from_tokens(account, &tokens);
+        }
+        session_from_tokens(account.clone(), &tokens)
+    }
+
+    /// Revoke only this saved token. Local credential deletion is a separate action.
+    pub async fn invalidate(&self, account: &Account, cancel: &CancellationToken) -> Result<()> {
+        self.validate_account(account)?;
+        let tokens = self.load_tokens(account).await?;
+        let (status,_) = self.request("invalidate",&serde_json::json!({"accessToken":tokens.access_token.expose(),"clientToken":tokens.client_token.expose()}),cancel).await?;
+        expect_status(status, StatusCode::NO_CONTENT, "invalidate")
+    }
+
+    /// Revoke all provider sessions only with a freshly supplied password.
+    pub async fn signout(
+        &self,
+        login: &str,
+        password: SecretString,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        validate_login(login)?;
+        if password.expose().is_empty() || password.expose().len() > 4096 {
+            return Err(AuthError::ProviderLoginRequired);
+        }
+        let (status, _) = self
+            .request(
+                "signout",
+                &serde_json::json!({"username":login,"password":password.expose()}),
+                cancel,
+            )
+            .await?;
+        expect_status(status, StatusCode::NO_CONTENT, "signout")
+    }
+
+    /// Remove this app's local external credential, even if the server is unavailable.
+    pub async fn forget(account: &Account) -> Result<()> {
+        validate_external_account(account)?;
+        credentials::delete(account).await
+    }
+
+    fn validate_account(&self, account: &Account) -> Result<()> {
+        validate_external_account(account)?;
+        if account
+            .authlib
+            .as_ref()
+            .is_none_or(|link| link.provider_id != self.provider.id)
+        {
+            return Err(AuthError::ProviderIdentityChanged);
+        }
+        Ok(())
+    }
+
+    async fn load_tokens(&self, account: &Account) -> Result<TokenBundle> {
+        let raw = credentials::load(account).await?;
+        if raw.expose().len() > MAX_METADATA {
+            return Err(AuthError::CredentialsMissing);
+        }
+        let tokens: TokenBundle =
+            serde_json::from_str(raw.expose()).map_err(|_| AuthError::CredentialsMissing)?;
+        if tokens.schema_version != 1
+            || tokens.account_key != account.identity_key()
+            || tokens.api_url != self.provider.api_url
+        {
+            return Err(AuthError::ProviderIdentityChanged);
+        }
+        validate_auth_token(&tokens.access_token)?;
+        validate_auth_token(&tokens.client_token)?;
+        legacy_properties(tokens.user.as_ref())?;
+        Ok(tokens)
+    }
+
+    async fn validate_tokens(
+        &self,
+        tokens: &TokenBundle,
+        cancel: &CancellationToken,
+    ) -> Result<bool> {
+        let (status,_) = self.request("validate",&serde_json::json!({"accessToken":tokens.access_token.expose(),"clientToken":tokens.client_token.expose()}),cancel).await?;
+        if status == StatusCode::FORBIDDEN {
+            return Ok(false);
+        }
+        expect_status(status, StatusCode::NO_CONTENT, "validate")?;
+        Ok(true)
+    }
+
+    async fn token_request(
+        &self,
+        operation: &'static str,
+        body: &serde_json::Value,
+        cancel: &CancellationToken,
+    ) -> Result<AuthlibReply> {
+        let (status, bytes) = self.request(operation, body, cancel).await?;
+        expect_status(status, StatusCode::OK, operation)?;
+        let reply: AuthlibReply = serde_json::from_slice(&bytes)
+            .map_err(|_| AuthError::InvalidResponse { stage: AUTH_STAGE })?;
+        validate_auth_token(&reply.access_token)?;
+        validate_auth_token(&reply.client_token)?;
+        if reply.available_profiles.len() > 256 {
+            return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+        }
+        let mut seen = HashSet::new();
+        for profile in &reply.available_profiles {
+            profile.validate()?;
+            if !seen.insert(profile.id) {
+                return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+            }
+        }
+        if let Some(profile) = &reply.selected_profile {
+            profile.validate()?;
+            if !reply.available_profiles.is_empty()
+                && !reply.available_profiles.iter().any(|p| p == profile)
+            {
+                return Err(AuthError::ProviderIdentityChanged);
+            }
+        }
+        legacy_properties(reply.user.as_ref())?;
+        Ok(reply)
+    }
+
+    async fn request(
+        &self,
+        operation: &'static str,
+        body: &serde_json::Value,
+        cancel: &CancellationToken,
+    ) -> Result<(StatusCode, Zeroizing<Vec<u8>>)> {
+        let url = canonical_url(&self.provider.api_url)?
+            .join(&format!("authserver/{operation}"))
+            .map_err(|_| AuthError::InvalidProviderAddress)?;
+        tokio::select! {
+            biased;
+            ()=cancel.cancelled()=>Err(AuthError::Cancelled),
+            result=async {
+                let mut response = self.client.post(url).json(body).send().await.map_err(auth_network)?;
+                let status=response.status();
+                if status==StatusCode::TOO_MANY_REQUESTS {
+                    let value=response.headers().get(reqwest::header::RETRY_AFTER).and_then(|v|v.to_str().ok());
+                    let seconds=value.and_then(|s|s.parse().ok()).or_else(||value.and_then(|s|httpdate::parse_http_date(s).ok()).and_then(|when|when.duration_since(SystemTime::now()).ok()).map(|d|d.as_secs())).unwrap_or(30).clamp(1,86400);
+                    return Err(AuthError::ProviderThrottled {retry_after_seconds:seconds});
+                }
+                if response.content_length().is_some_and(|length|length>MAX_METADATA as u64) {return Err(AuthError::InvalidResponse {stage:AUTH_STAGE});}
+                let mut bytes=Zeroizing::new(Vec::new());
+                while let Some(chunk)=response.chunk().await.map_err(auth_network)? {
+                    if bytes.len().saturating_add(chunk.len())>MAX_METADATA {return Err(AuthError::InvalidResponse {stage:AUTH_STAGE});}
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok((status,bytes))
+            }=>result,
+        }
+    }
+}
+
+impl TokenBundle {
+    fn encode(&self) -> Result<SecretString> {
+        serde_json::to_string(&serde_json::json!({"schema_version":self.schema_version,"account_key":self.account_key,"api_url":self.api_url,"access_token":self.access_token.expose(),"client_token":self.client_token.expose(),"user":self.user}))
+            .map(SecretString::new).map_err(|_|AuthError::InvalidResponse {stage:AUTH_STAGE})
+    }
+}
+
+fn validate_login(login: &str) -> Result<()> {
+    if login.trim() != login
+        || login.is_empty()
+        || login.chars().count() > 128
+        || login.chars().any(char::is_control)
+    {
+        return Err(AuthError::ProviderLoginRequired);
+    }
+    Ok(())
+}
+
+fn validate_auth_token(token: &SecretString) -> Result<()> {
+    if token.expose().is_empty()
+        || token.expose().len() > 32768
+        || token.expose().chars().any(char::is_control)
+    {
+        return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+    }
+    Ok(())
+}
+
+fn validate_external_account(account: &Account) -> Result<()> {
+    if account.provider != AccountProvider::Authlib
+        || !account.client_id.is_empty()
+        || account.credential_ref != account.identity_key()
+    {
+        return Err(AuthError::ProviderIdentityChanged);
+    }
+    let link = account
+        .authlib
+        .as_ref()
+        .ok_or(AuthError::ProviderIdentityChanged)?;
+    if link.provider_id.is_nil() {
+        return Err(AuthError::ProviderIdentityChanged);
+    }
+    validate_login(&link.login)?;
+    AuthlibProfile {
+        id: account.reference.player_id,
+        name: account.player_name.clone(),
+    }
+    .validate()
+}
+
+fn legacy_properties(user: Option<&AuthlibUser>) -> Result<SecretString> {
+    let mut values = std::collections::BTreeMap::<&str, Vec<&str>>::new();
+    if let Some(user) = user {
+        if user.properties.len() > 64 {
+            return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+        }
+        for property in &user.properties {
+            if property.name.is_empty() || property.name.len() > 128 || property.value.len() > 4096
+            {
+                return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+            }
+            values
+                .entry(&property.name)
+                .or_default()
+                .push(&property.value);
+        }
+    }
+    let json = serde_json::to_string(&values)
+        .map_err(|_| AuthError::InvalidResponse { stage: AUTH_STAGE })?;
+    if json.len() > 64 * 1024 {
+        return Err(AuthError::InvalidResponse { stage: AUTH_STAGE });
+    }
+    Ok(SecretString::new(json))
+}
+
+fn user_changed(old: Option<&AuthlibUser>, new: Option<&AuthlibUser>) -> bool {
+    old.and_then(|user| user.id)
+        .zip(new.and_then(|user| user.id))
+        .is_some_and(|(old, new)| old != new)
+}
+
+fn session_from_tokens(account: Account, tokens: &TokenBundle) -> Result<AuthenticatedSession> {
+    Ok(AuthenticatedSession {
+        account,
+        access_token: SecretString::new(tokens.access_token.expose().to_owned()),
+        user_properties: legacy_properties(tokens.user.as_ref())?,
+        // Yggdrasil does not report expiry. Bound bootstrap freshness locally;
+        // every subsequent launch still validates against the provider.
+        expires_at: SystemTime::now() + PREPARATION_TTL,
+    })
+}
+
+fn expect_status(status: StatusCode, expected: StatusCode, operation: &str) -> Result<()> {
+    if status == expected {
+        return Ok(());
+    }
+    if status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED {
+        return Err(if matches!(operation, "authenticate" | "signout") {
+            AuthError::ProviderCredentialsRejected
+        } else {
+            AuthError::ProviderSignInRequired
+        });
+    }
+    Err(AuthError::Http {
+        stage: AUTH_STAGE,
+        status: status.as_u16(),
+    })
+}
+
+fn auth_network(error: reqwest::Error) -> AuthError {
+    if error.is_timeout() {
+        AuthError::ProviderTimedOut
+    } else {
+        AuthError::Network { stage: AUTH_STAGE }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderAddress {
@@ -436,7 +1027,7 @@ mod tests {
     #[test]
     fn existing_accounts_keep_their_identity_and_external_profiles_use_provider_and_login_scope()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut account: crate::Account = serde_json::from_value(
+        let mut account: Account = serde_json::from_value(
             serde_json::json!({"reference":{"player_id":"00000000-0000-4000-8000-000000000001"},"provider":"microsoft","player_name":"Player","client_id":"public","credential_ref":"fixture"}),
         )?;
         assert!(account.authlib.is_none());
@@ -445,8 +1036,8 @@ mod tests {
             account.reference.player_id.to_string()
         );
         assert!(serde_json::to_value(&account)?.get("authlib").is_none());
-        account.provider = crate::AccountProvider::Authlib;
-        account.authlib = Some(crate::AuthlibAccount {
+        account.provider = AccountProvider::Authlib;
+        account.authlib = Some(AuthlibAccount {
             provider_id: Uuid::from_u128(1),
             login: "FirstUser".into(),
         });
@@ -495,7 +1086,43 @@ mod tests {
                     }
                     bytes.extend_from_slice(&buffer[..count]);
                 }
-                requests.push(String::from_utf8(bytes).map_err(std::io::Error::other)?);
+                let header_end = bytes
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .ok_or_else(|| std::io::Error::other("Missing request headers"))?
+                    + 4;
+                let length = String::from_utf8_lossy(&bytes[..header_end])
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .map(|(_, value)| value.trim().parse::<usize>())
+                    .transpose()
+                    .map_err(std::io::Error::other)?
+                    .unwrap_or(0);
+                if length > MAX_METADATA {
+                    return Err(std::io::Error::other("Oversized fixture request"));
+                }
+                while bytes.len() < header_end + length {
+                    let mut buffer = [0; 2048];
+                    let count = stream.read(&mut buffer).await?;
+                    if count == 0 {
+                        return Err(std::io::Error::other("Fixture body ended early"));
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let request = String::from_utf8(bytes).map_err(std::io::Error::other)?;
+                let body = if body.contains("__CLIENT_TOKEN__") {
+                    let value: serde_json::Value = serde_json::from_str(&request[header_end..])
+                        .map_err(std::io::Error::other)?;
+                    let token = value
+                        .get("clientToken")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| std::io::Error::other("Missing client token"))?;
+                    body.replace("__CLIENT_TOKEN__", token)
+                } else {
+                    body
+                };
+                requests.push(request);
                 let response = format!(
                     "HTTP/1.1 {status} Fixture\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -516,6 +1143,604 @@ mod tests {
             &CancellationToken::new(),
         )
         .await
+    }
+
+    fn auth_fixture(url: &str) -> std::result::Result<AuthlibAuth, Box<dyn std::error::Error>> {
+        let json = document();
+        Ok(AuthlibAuth::new(&AuthlibProvider {
+            id: Uuid::new_v4(),
+            name: "Protocol fixture".into(),
+            api_url: url.into(),
+            allow_http: true,
+            metadata: metadata(&json, &Url::parse(url)?)?,
+            metadata_json: json,
+        })?)
+    }
+
+    fn profile(id: u128, name: &str) -> serde_json::Value {
+        serde_json::json!({"id":Uuid::from_u128(id).simple().to_string(),"name":name})
+    }
+
+    fn token_reply(
+        token: &str,
+        selected: serde_json::Value,
+        profiles: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({"accessToken":token,"clientToken":"__CLIENT_TOKEN__","availableProfiles":profiles,"selectedProfile":selected,
+            "user":{"id":Uuid::from_u128(1234).simple().to_string(),"properties":[{"name":"preferredLanguage","value":"zh_CN"}]}})
+    }
+
+    fn json_step(value: &serde_json::Value) -> (u16, String, String) {
+        (
+            200,
+            "Content-Type: application/json\r\n".into(),
+            value.to_string(),
+        )
+    }
+
+    fn request_json(
+        request: &str,
+    ) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error>> {
+        Ok(serde_json::from_str(
+            request
+                .split_once("\r\n\r\n")
+                .ok_or("Missing fixture body")?
+                .1,
+        )?)
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_selects_a_character_then_saves_validates_refreshes_and_revokes()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let first = profile(1, "First");
+        let chosen = profile(2, "Second");
+        let renamed = profile(2, "Renamed");
+        let initial = token_reply(
+            "AUTHENTICATE_SECRET",
+            serde_json::Value::Null,
+            serde_json::json!([first, chosen]),
+        );
+        let assigned = token_reply(
+            "ASSIGNED_SECRET",
+            chosen.clone(),
+            serde_json::json!([chosen]),
+        );
+        let rotated = token_reply("ROTATED_SECRET", renamed, serde_json::json!([]));
+        let empty = || (204, String::new(), String::new());
+        let (url, task) = server(vec![
+            json_step(&initial),
+            json_step(&assigned),
+            empty(),
+            empty(),
+            (403, String::new(), "PRIVATE_BODY".into()),
+            json_step(&rotated),
+            empty(),
+            empty(),
+        ])
+        .await?;
+        let auth = auth_fixture(&url)?;
+        let cancel = CancellationToken::new();
+        let pending = auth
+            .authenticate(
+                "fixture@example.test",
+                SecretString::new("FIRST_PASSWORD".into()),
+                &cancel,
+            )
+            .await?;
+        assert_eq!(pending.profiles().len(), 2);
+        assert!(pending.selected_profile().is_none());
+        assert!(matches!(
+            auth.prepare_sign_in(&pending, None, &cancel).await,
+            Err(AuthError::ProviderProfileSelectionRequired)
+        ));
+        let prepared = auth
+            .prepare_sign_in(&pending, Some(Uuid::from_u128(2)), &cancel)
+            .await?;
+        let account = prepared.account().clone();
+        assert_eq!(account.provider, AccountProvider::Authlib);
+        assert_eq!(account.reference.player_id, Uuid::from_u128(2));
+        assert_eq!(account.credential_ref, account.identity_key());
+        assert!(matches!(
+            credentials::load(&account).await,
+            Err(AuthError::CredentialsMissing)
+        ));
+        let public = serde_json::to_string(&account)?;
+        let debug = format!("{pending:?} {prepared:?}");
+        for secret in [
+            "AUTHENTICATE_SECRET",
+            "ASSIGNED_SECRET",
+            "FIRST_PASSWORD",
+            "zh_CN",
+        ] {
+            assert!(!public.contains(secret));
+            assert!(!debug.contains(secret));
+        }
+        let saved = auth.save_sign_in(prepared, &cancel).await?;
+        assert_eq!(saved.expose_access_token(), "ASSIGNED_SECRET");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(saved.expose_user_properties())?,
+            serde_json::json!({"preferredLanguage":["zh_CN"]})
+        );
+        assert!(
+            !credentials::load(&account)
+                .await?
+                .expose()
+                .contains("FIRST_PASSWORD")
+        );
+        assert_eq!(
+            auth.refresh(&account, &cancel).await?.expose_access_token(),
+            "ASSIGNED_SECRET"
+        );
+        let refreshed = auth.refresh(&account, &cancel).await?;
+        assert_eq!(refreshed.expose_access_token(), "ROTATED_SECRET");
+        assert_eq!(refreshed.account.player_name, "Renamed");
+        assert_eq!(refreshed.account.identity_key(), account.identity_key());
+        let stored = credentials::load(&account).await?;
+        assert!(stored.expose().contains("ROTATED_SECRET"));
+        assert!(!stored.expose().contains("ASSIGNED_SECRET"));
+        auth.invalidate(&refreshed.account, &cancel).await?;
+        auth.signout(
+            "fixture@example.test",
+            SecretString::new("FRESH_PASSWORD".into()),
+            &cancel,
+        )
+        .await?;
+        AuthlibAuth::forget(&account).await?;
+        assert!(matches!(
+            auth.refresh(&account, &cancel).await,
+            Err(AuthError::CredentialsMissing)
+        ));
+        let requests = task.await??;
+        let paths = [
+            "authenticate",
+            "refresh",
+            "validate",
+            "validate",
+            "validate",
+            "refresh",
+            "invalidate",
+            "signout",
+        ];
+        assert_eq!(requests.len(), paths.len());
+        let bodies = requests
+            .iter()
+            .map(|r| request_json(r))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let client = bodies[0]["clientToken"]
+            .as_str()
+            .ok_or("No generated client token")?;
+        assert_eq!(client.len(), 32);
+        for (i, (request, path)) in requests.iter().zip(paths).enumerate() {
+            assert!(request.starts_with(&format!("POST /authserver/{path} HTTP/1.1\r\n")));
+            assert!(!request.to_lowercase().contains("authorization:"));
+            if i < 7 {
+                assert_eq!(bodies[i]["clientToken"], client);
+            }
+            if !matches!(i, 0 | 7) {
+                assert!(bodies[i].get("password").is_none());
+            }
+        }
+        assert_eq!(
+            bodies[0]["agent"],
+            serde_json::json!({"name":"Minecraft","version":1})
+        );
+        for i in [0, 1, 5] {
+            assert_eq!(bodies[i]["requestUser"], true);
+        }
+        assert_eq!(bodies[1]["selectedProfile"], profile(2, "Second"));
+        assert!(bodies[5].get("selectedProfile").is_none());
+        assert_eq!(bodies[6]["accessToken"], "ROTATED_SECRET");
+        assert_eq!(bodies[7]["password"], "FRESH_PASSWORD");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_bound_profile_skips_assignment_and_expired_or_foreign_drafts_never_save()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let selected = profile(4, "山与海");
+        let (url, task) = server(vec![json_step(&token_reply(
+            "BOUND_SECRET",
+            selected.clone(),
+            serde_json::json!([selected]),
+        ))])
+        .await?;
+        let auth = auth_fixture(&url)?;
+        let cancel = CancellationToken::new();
+        let mut pending = auth
+            .authenticate("user", SecretString::new("PASSWORD".into()), &cancel)
+            .await?;
+        assert_eq!(
+            pending.selected_profile().map(|p| p.name.as_str()),
+            Some("山与海")
+        );
+        assert!(matches!(
+            auth.prepare_sign_in(&pending, Some(Uuid::from_u128(9)), &cancel)
+                .await,
+            Err(AuthError::ProviderIdentityChanged)
+        ));
+        let foreign = auth_fixture(&url)?;
+        assert!(matches!(
+            foreign.prepare_sign_in(&pending, None, &cancel).await,
+            Err(AuthError::ProviderIdentityChanged)
+        ));
+        let mut changed = auth.provider.clone();
+        changed.api_url = format!("{url}other/");
+        changed.metadata = metadata(&changed.metadata_json, &Url::parse(&changed.api_url)?)?;
+        assert!(matches!(
+            AuthlibAuth::new(&changed)?
+                .prepare_sign_in(&pending, None, &cancel)
+                .await,
+            Err(AuthError::ProviderIdentityChanged)
+        ));
+        let mut prepared = auth.prepare_sign_in(&pending, None, &cancel).await?;
+        let account = prepared.account().clone();
+        assert_eq!(account.player_name, "山与海");
+        prepared.expires_at = tokio::time::Instant::now();
+        assert!(matches!(
+            auth.save_sign_in(prepared, &cancel).await,
+            Err(AuthError::ProviderPreparationExpired)
+        ));
+        assert!(matches!(
+            credentials::load(&account).await,
+            Err(AuthError::CredentialsMissing)
+        ));
+        pending.expires_at = tokio::time::Instant::now();
+        assert!(matches!(
+            auth.prepare_sign_in(&pending, None, &cancel).await,
+            Err(AuthError::ProviderPreparationExpired)
+        ));
+        assert_eq!(task.await??.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_rejects_invalid_profiles_tokens_and_client_identity_without_exposing_bodies()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let selected = profile(7, "Player");
+        let valid = token_reply(
+            "PRIVATE_TOKEN",
+            selected.clone(),
+            serde_json::json!([selected]),
+        );
+        let mut cases = Vec::new();
+        for (key, value) in [
+            ("availableProfiles", serde_json::json!([selected, selected])),
+            ("selectedProfile", profile(8, "Alien")),
+            ("selectedProfile", profile(7, &"x".repeat(17))),
+            ("accessToken", serde_json::json!("")),
+            ("clientToken", serde_json::json!("WRONG_CLIENT")),
+            (
+                "user",
+                serde_json::json!({"properties":[{"name":"oversized","value":"x".repeat(4097)}]}),
+            ),
+        ] {
+            let mut value_body = valid.clone();
+            value_body[key] = value;
+            cases.push(value_body);
+        }
+        for body in cases {
+            let (url, task) = server(vec![json_step(&body)]).await?;
+            let error = auth_fixture(&url)?
+                .authenticate(
+                    "user",
+                    SecretString::new("PRIVATE_PASSWORD".into()),
+                    &CancellationToken::new(),
+                )
+                .await
+                .err()
+                .ok_or("Accepted invalid provider response")?;
+            for secret in ["PRIVATE_TOKEN", "PRIVATE_PASSWORD", "WRONG_CLIENT"] {
+                assert!(!format!("{error:?} {error}").contains(secret));
+            }
+            task.await??;
+        }
+        let (url, task) = server(vec![json_step(&token_reply(
+            "EMPTY_PROFILE_SECRET",
+            serde_json::Value::Null,
+            serde_json::json!([]),
+        ))])
+        .await?;
+        assert!(matches!(
+            auth_fixture(&url)?
+                .authenticate(
+                    "user",
+                    SecretString::new("PASSWORD".into()),
+                    &CancellationToken::new()
+                )
+                .await,
+            Err(AuthError::ProviderNoProfiles)
+        ));
+        task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_never_forwards_passwords_to_redirects_or_ali_and_maps_throttling()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let trap = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let target = format!("http://{}/", trap.local_addr()?);
+        let valid = token_reply("BOUND_SECRET", profile(1, "Player"), serde_json::json!([]));
+        let when = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(120));
+        for (status, headers, body, expected) in [
+            (
+                302,
+                format!("Location: {target}\r\n"),
+                "PRIVATE_BODY".into(),
+                Some(AuthError::Http {
+                    stage: AUTH_STAGE,
+                    status: 302,
+                }),
+            ),
+            (
+                403,
+                String::new(),
+                "PRIVATE_BODY".into(),
+                Some(AuthError::ProviderCredentialsRejected),
+            ),
+            (
+                429,
+                "Retry-After: 19\r\n".into(),
+                "PRIVATE_BODY".into(),
+                Some(AuthError::ProviderThrottled {
+                    retry_after_seconds: 19,
+                }),
+            ),
+            (
+                200,
+                format!("X-Authlib-Injector-API-Location: {target}\r\n"),
+                valid.to_string(),
+                None,
+            ),
+        ] {
+            let (url, task) = server(vec![(status, headers, body)]).await?;
+            let result = auth_fixture(&url)?
+                .authenticate(
+                    "user",
+                    SecretString::new("PRIVATE_PASSWORD".into()),
+                    &CancellationToken::new(),
+                )
+                .await;
+            assert_eq!(result.err(), expected);
+            let requests = task.await??;
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].contains("PRIVATE_PASSWORD"));
+        }
+        let (url, task) = server(vec![(
+            429,
+            format!("Retry-After: {when}\r\n"),
+            String::new(),
+        )])
+        .await?;
+        assert!(matches!(
+            auth_fixture(&url)?
+                .authenticate(
+                    "user",
+                    SecretString::new("PASSWORD".into()),
+                    &CancellationToken::new()
+                )
+                .await,
+            Err(AuthError::ProviderThrottled {
+                retry_after_seconds: 110..=120
+            })
+        ));
+        task.await??;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), trap.accept())
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_changed_or_revoked_refresh_preserves_local_tokens_and_never_reauthenticates()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for changed_user in [false, true] {
+            let valid = token_reply(
+                "ORIGINAL_SECRET",
+                profile(1, "Player"),
+                serde_json::json!([]),
+            );
+            let mut changed = token_reply(
+                "NEW_SECRET",
+                profile(if changed_user { 1 } else { 2 }, "Player"),
+                serde_json::json!([]),
+            );
+            if changed_user {
+                changed["user"]["id"] =
+                    serde_json::json!(Uuid::from_u128(789).simple().to_string());
+            }
+            let (url, task) = server(vec![
+                json_step(&valid),
+                (204, String::new(), String::new()),
+                (403, String::new(), String::new()),
+                json_step(&changed),
+                (403, String::new(), String::new()),
+                (403, String::new(), "PRIVATE_BODY".into()),
+            ])
+            .await?;
+            let auth = auth_fixture(&url)?;
+            let cancel = CancellationToken::new();
+            let pending = auth
+                .authenticate("user", SecretString::new("PASSWORD".into()), &cancel)
+                .await?;
+            let prepared = auth.prepare_sign_in(&pending, None, &cancel).await?;
+            let account = auth.save_sign_in(prepared, &cancel).await?.account;
+            let original = credentials::load(&account).await?;
+            assert!(matches!(
+                auth.refresh(&account, &cancel).await,
+                Err(AuthError::ProviderIdentityChanged)
+            ));
+            assert_eq!(
+                credentials::load(&account).await?.expose(),
+                original.expose()
+            );
+            assert!(matches!(
+                auth.refresh(&account, &cancel).await,
+                Err(AuthError::ProviderSignInRequired)
+            ));
+            assert_eq!(
+                credentials::load(&account).await?.expose(),
+                original.expose()
+            );
+            let mut retargeted = auth.provider.clone();
+            retargeted.api_url = format!("{url}elsewhere/");
+            retargeted.metadata =
+                metadata(&retargeted.metadata_json, &Url::parse(&retargeted.api_url)?)?;
+            assert!(matches!(
+                AuthlibAuth::new(&retargeted)?
+                    .refresh(&account, &cancel)
+                    .await,
+                Err(AuthError::ProviderIdentityChanged)
+            ));
+            AuthlibAuth::forget(&account).await?;
+            let requests = task.await??;
+            assert_eq!(requests.len(), 6);
+            assert!(
+                requests
+                    .iter()
+                    .skip(1)
+                    .all(|request| !request.contains("PASSWORD")
+                        && !request.contains("/authenticate"))
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_cancellation_interrupts_io_and_prevents_password_submission_when_already_cancelled()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/", listener.local_addr()?);
+        let auth = auth_fixture(&url)?;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(matches!(
+            auth.authenticate("user", SecretString::new("PASSWORD".into()), &cancel)
+                .await,
+            Err(AuthError::Cancelled)
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+        let cancel = CancellationToken::new();
+        let running = cancel.clone();
+        let task = tokio::spawn(async move {
+            auth.authenticate("user", SecretString::new("PASSWORD".into()), &running)
+                .await
+        });
+        let (_held, _) = listener.accept().await?;
+        cancel.cancel();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), task).await??,
+            Err(AuthError::Cancelled)
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn yggdrasil_credentials_are_scoped_to_provider_login_character_and_api()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (url, task) = server(vec![
+            json_step(&token_reply(
+                "SCOPED_SECRET",
+                profile(1, "Player"),
+                serde_json::json!([]),
+            )),
+            (204, String::new(), String::new()),
+        ])
+        .await?;
+        let auth = auth_fixture(&url)?;
+        let cancel = CancellationToken::new();
+        let pending = auth
+            .authenticate("FirstLogin", SecretString::new("PASSWORD".into()), &cancel)
+            .await?;
+        let prepared = auth.prepare_sign_in(&pending, None, &cancel).await?;
+        let account = auth.save_sign_in(prepared, &cancel).await?.account;
+        let stored = credentials::load(&account).await?;
+        for field in ["account_key", "api_url", "schema_version"] {
+            let mut altered: serde_json::Value = serde_json::from_str(stored.expose())?;
+            altered[field] = if field == "schema_version" {
+                serde_json::json!(2)
+            } else {
+                serde_json::json!("https://other.example.test/")
+            };
+            credentials::save(
+                account.credential_ref.clone(),
+                SecretString::new(altered.to_string()),
+            )
+            .await?;
+            assert!(matches!(
+                auth.refresh(&account, &cancel).await,
+                Err(AuthError::ProviderIdentityChanged)
+            ));
+        }
+        credentials::save(account.credential_ref.clone(), stored).await?;
+        for field in ["provider", "login", "character"] {
+            let mut other = account.clone();
+            match field {
+                "provider" => {
+                    if let Some(link) = &mut other.authlib {
+                        link.provider_id = Uuid::new_v4();
+                    }
+                }
+                "login" => {
+                    if let Some(link) = &mut other.authlib {
+                        link.login = "SecondLogin".into();
+                    }
+                }
+                _ => other.reference.player_id = Uuid::from_u128(2),
+            }
+            // A copied reference must never load the original account's credential.
+            assert!(matches!(
+                auth.refresh(&other, &cancel).await,
+                Err(AuthError::ProviderIdentityChanged)
+            ));
+            other.credential_ref = other.identity_key();
+            assert!(matches!(
+                auth.refresh(&other, &cancel).await,
+                Err(AuthError::CredentialsMissing | AuthError::ProviderIdentityChanged)
+            ));
+        }
+        assert!(
+            credentials::load(&account)
+                .await?
+                .expose()
+                .contains("SCOPED_SECRET")
+        );
+        AuthlibAuth::forget(&account).await?;
+        assert_eq!(task.await??.len(), 2);
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn yggdrasil_request_timeout_has_no_automatic_password_retry()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let runnable = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let auth = auth_fixture(&format!("http://{}/", listener.local_addr()?))?;
+        let task = tokio::spawn(async move {
+            auth.request(
+                "authenticate",
+                &serde_json::json!({"password":"PASSWORD"}),
+                &CancellationToken::new(),
+            )
+            .await
+        });
+        let (_held, _) = listener.accept().await?;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        assert_eq!(task.await?.err(), Some(AuthError::ProviderTimedOut));
+        let next = tokio::time::timeout(Duration::from_millis(10), listener.accept());
+        tokio::time::advance(Duration::from_millis(11)).await;
+        assert!(next.await.is_err());
+        runnable.abort();
+        Ok(())
     }
 
     #[test]
