@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod command;
+pub mod crash;
 pub mod executor;
 pub mod install;
 pub mod launch;
@@ -14,6 +15,8 @@ pub mod resolver;
 pub mod rules;
 pub mod runtime;
 pub mod session;
+pub mod session_host;
+mod session_ipc;
 pub mod support;
 
 pub use block_download::{DownloadEvent, EventSink, Store};

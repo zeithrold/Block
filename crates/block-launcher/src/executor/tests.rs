@@ -46,6 +46,224 @@ fn plan(actions: Vec<PrepareAction>) -> ExecutionPlan {
     }
 }
 
+fn output_command(root: &Path) -> anyhow::Result<crate::command::JavaCommand> {
+    crate::command::JavaCommand::bind(
+        &plan(Vec::new()),
+        root,
+        "capture-test",
+        &crate::session::GameSession {
+            username: "Player".into(),
+            uuid: "123456781234123412341234567890ab".into(),
+            access_token: "synthetic-capture-token".into(),
+            user_type: "msa".into(),
+            xuid: String::new(),
+            client_id: String::new(),
+        },
+    )
+}
+
+#[tokio::test]
+async fn output_capture_redacts_chunk_boundaries_and_discards_entire_oversized_lines()
+-> anyhow::Result<()> {
+    use std::{sync::Mutex, time::Duration};
+    use tokio::io::AsyncWriteExt as _;
+    let temporary = tempfile::tempdir()?;
+    let path = temporary.path().join("stdout.log");
+    let command = output_command(temporary.path())?;
+    let mut bytes =
+        b"first synthetic-capture-token\nPRIVATE-PREFIX synthetic-capture-token ".to_vec();
+    bytes.extend(vec![b'x'; super::MAX_OUTPUT_LINE_BYTES]);
+    bytes.extend_from_slice(b" synthetic-capture-token\nlast synthetic-capture-token\xff");
+    let (mut writer, reader) = tokio::io::duplex(13);
+    let producer = tokio::spawn(async move {
+        for chunk in bytes.chunks(7) {
+            writer.write_all(chunk).await?;
+        }
+        writer.shutdown().await
+    });
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        super::drain(
+            reader,
+            path.clone(),
+            command,
+            Arc::new(move |event| {
+                if let Ok(mut sink) = sink.lock() {
+                    sink.push(event);
+                }
+            }),
+            false,
+        ),
+    )
+    .await??;
+    producer.await??;
+    let log = fs::read_to_string(path)?;
+    assert!(log.contains("first <redacted>\n"));
+    assert!(log.contains("last <redacted>\u{fffd}\n"));
+    assert!(log.contains("oversized game output line was discarded"));
+    assert!(!log.contains("PRIVATE-PREFIX"));
+    assert!(!log.contains("synthetic-capture-token"));
+    let events = events
+        .lock()
+        .map_err(|_| anyhow::anyhow!("capture lock poisoned"))?;
+    assert_eq!(events.len(), 3);
+    assert!(!format!("{events:?}").contains("synthetic-capture-token"));
+    assert!(!format!("{events:?}").contains("PRIVATE-PREFIX"));
+    drop(events);
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_log_creation_keeps_draining_and_redacting_without_exposing_paths()
+-> anyhow::Result<()> {
+    use std::sync::Mutex;
+    let temporary = tempfile::tempdir()?;
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    super::drain(
+        std::io::Cursor::new(b"first synthetic-capture-token\nlast synthetic-capture-token"),
+        temporary.path().join("PRIVATE-PATH/missing/stdout.log"),
+        output_command(temporary.path())?,
+        Arc::new(move |event| {
+            if let Ok(mut sink) = sink.lock() {
+                sink.push(event);
+            }
+        }),
+        false,
+    )
+    .await?;
+    let events = events
+        .lock()
+        .map_err(|_| anyhow::anyhow!("capture lock poisoned"))?;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, super::ExecutionEvent::CaptureFailed { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        matches!(events.last(), Some(super::ExecutionEvent::Log { line, .. }) if line == "last <redacted>")
+    );
+    let debug = format!("{events:?}");
+    drop(events);
+    assert!(!debug.contains("synthetic-capture-token"));
+    assert!(!debug.contains("PRIVATE-PATH"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn log_quota_caps_saved_bytes_but_keeps_consuming_and_emitting_final_output()
+-> anyhow::Result<()> {
+    use std::{
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
+    use tokio::io::AsyncWriteExt as _;
+    let temporary = tempfile::tempdir()?;
+    let path = temporary.path().join("stdout.log");
+    let (mut writer, reader) = tokio::io::duplex(4096);
+    let producer = tokio::spawn(async move {
+        let mut line = vec![b'x'; super::MAX_OUTPUT_LINE_BYTES - 1];
+        line.push(b'\n');
+        for _ in 0..256 {
+            writer.write_all(&line).await?;
+        }
+        writer
+            .write_all(b"AFTER_QUOTA synthetic-capture-token\nFINAL_LINE\n")
+            .await?;
+        writer.shutdown().await
+    });
+    let failures = Arc::new(AtomicUsize::new(0));
+    let failure_sink = failures.clone();
+    let last_line = Arc::new(Mutex::new(String::new()));
+    let last_sink = last_line.clone();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        super::drain(
+            reader,
+            path.clone(),
+            output_command(temporary.path())?,
+            Arc::new(move |event| match event {
+                super::ExecutionEvent::CaptureFailed { .. } => {
+                    failure_sink.fetch_add(1, Ordering::SeqCst);
+                }
+                super::ExecutionEvent::Log { line, .. } => {
+                    if let Ok(mut last) = last_sink.lock() {
+                        *last = line;
+                    }
+                }
+                _ => {}
+            }),
+            false,
+        ),
+    )
+    .await??;
+    producer.await??;
+    assert_eq!(
+        fs::metadata(path)?.len(),
+        super::MAX_OUTPUT_FILE_BYTES as u64
+    );
+    assert_eq!(failures.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *last_line
+            .lock()
+            .map_err(|_| anyhow::anyhow!("capture lock poisoned"))?,
+        "FINAL_LINE"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_log_write_is_reported_once_and_live_output_continues() -> anyhow::Result<()> {
+    use std::sync::Mutex;
+    let temporary = tempfile::tempdir()?;
+    let path = temporary.path().join("readonly.log");
+    fs::write(&path, b"previous data")?;
+    let mut capture = super::OutputCapture {
+        file: Some(tokio::fs::File::from_std(fs::File::open(&path)?)),
+        written: 0,
+        quota_reached: false,
+    };
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let sink: super::ExecutionSink = Arc::new(move |event| {
+        if let Ok(mut sink) = sink.lock() {
+            sink.push(event);
+        }
+    });
+    let command = output_command(temporary.path())?;
+    for line in [
+        b"first synthetic-capture-token".as_slice(),
+        b"last synthetic-capture-token",
+    ] {
+        super::emit_output(line, &command, &mut capture, &sink, false).await;
+    }
+    capture.finish(&sink, false).await;
+    let events = events
+        .lock()
+        .map_err(|_| anyhow::anyhow!("capture lock poisoned"))?;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, super::ExecutionEvent::CaptureFailed { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        matches!(events.last(), Some(super::ExecutionEvent::Log { line, .. }) if line == "last <redacted>")
+    );
+    assert!(!format!("{events:?}").contains("synthetic-capture-token"));
+    drop(events);
+    assert_eq!(fs::read(&path)?, b"previous data");
+    Ok(())
+}
+
 fn archive(root: &Path, entries: &[(&str, &[u8])]) -> anyhow::Result<PathBuf> {
     let path = root.join("natives.zip");
     let mut writer = ZipWriter::new(fs::File::create(&path)?);

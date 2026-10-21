@@ -152,8 +152,32 @@ impl Library {
         session: &dyn SessionProvider,
         cancel: &CancellationToken,
     ) -> anyhow::Result<Option<i32>> {
+        let launch = self
+            .prepare_launch(profile_id, session, cancel, None, None)
+            .await?;
+        LaunchExecutor::run(launch, self.events.clone(), cancel).await
+    }
+
+    /// Resolve an invocation inside the process which will own its lifetime and locks.
+    /// # Errors
+    /// Refuses stale session reservations, unavailable targets and corrupt installed resources.
+    pub async fn prepare_launch(
+        &self,
+        profile_id: &str,
+        session: &dyn SessionProvider,
+        cancel: &CancellationToken,
+        run_id: Option<&str>,
+        profile_fingerprint: Option<&str>,
+    ) -> anyhow::Result<LaunchPlan> {
         let state = self.catalog.snapshot()?;
         let (instance, profile, target) = state.selection(profile_id)?;
+        if let Some(expected) = profile_fingerprint {
+            use sha1::Digest as _;
+            ensure!(
+                format!("{:x}", sha1::Sha1::digest(serde_json::to_vec(profile)?)) == expected,
+                "Profile settings changed while starting. Select the profile and click Play again."
+            );
+        }
         ensure!(
             target.status == InstallStatus::Ready,
             "installation is not ready; choose Repair before playing"
@@ -162,7 +186,10 @@ impl Library {
             .manifest
             .as_ref()
             .context("installed metadata missing; choose Repair")?;
-        let directory = GameDirectoryGuard::for_profile(instance, profile)?;
+        let directory = match run_id {
+            Some(id) => GameDirectoryGuard::for_session(instance, profile, id)?,
+            None => GameDirectoryGuard::for_profile(instance, profile)?,
+        };
         let mut recipe = recipe(
             instance,
             profile,
@@ -186,12 +213,13 @@ impl Library {
         plan.command.game_args.extend(profile.game_args.clone());
         adapt(&mut plan, &metadata.parsed.manifest, target, manifest)?;
         let executor = Executor::new(offline, self.events.clone());
-        let prepared = executor
-            .prepare(plan, cancel)
-            .await
-            .context("installation integrity check failed; choose Repair")?;
+        let prepared = match run_id {
+            Some(id) => executor.prepare_session(plan, cancel, id).await,
+            None => executor.prepare(plan, cancel).await,
+        }
+        .context("installation integrity check failed; choose Repair")?;
         let launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
-        LaunchExecutor::run(launch, self.events.clone(), cancel).await
+        Ok(launch)
     }
 }
 

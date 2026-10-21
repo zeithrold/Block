@@ -2,7 +2,7 @@
 
 A Minecraft Java Edition launcher MVP built with Rust and [GPUI](https://gpui.rs/), with a shared core for the native interface and command-line tool.
 
-Block separates persistent Instances, launch Profiles and Microsoft Accounts from transient LaunchPlans. The native interface creates installations, manages multiple Profiles, installs Vanilla or the supported NeoForge representative, and supervises a verified Java invocation. Developer-offline Vanilla and NeoForge world/exit/relaunch workflows passed on Windows and Debian AMD64. Fresh Microsoft-authorized native Play remains pending; see [the acceptance ledger](docs/mvp-progress.md) for the complete platform results.
+Block separates persistent Instances, launch Profiles and Microsoft Accounts from transient LaunchPlans. The native interface creates installations, manages multiple Profiles, installs Vanilla or the supported NeoForge representative, and hands a verified Java invocation to an independent session supervisor. See [the acceptance ledger](docs/mvp-progress.md) for verified gameplay, authentication, crash assistance, and remaining platform gates.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ rustup component add rustfmt clippy
 just run
 ```
 
-Sign in with Microsoft through the system browser, create an Instance, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. **Stop** cancels preparation or terminates the owned game process.
+Sign in with Microsoft through the system browser, create an Instance, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
 
 Each Instance can have several Profiles. A Profile selects its launch target, Java, memory, additional arguments, default account and **Shared** or **Isolated** mutable game data. Copying a Profile copies settings and preserves its data policy: Isolated copies get a new directory; Shared copies continue sharing the Instance directory. Deleting a Profile keeps game files. Shared assets, libraries and managed Java remain in the content-addressed cache. A canonical game-directory lock prevents simultaneous writers.
 
@@ -63,16 +63,16 @@ The first build downloads and compiles GPUI dependencies. Subsequent builds reus
 ├── Cargo.lock              # Shared dependency lockfile
 ├── justfile                # Development and verification commands
 └── crates/
-    ├── block-app/          # Desktop entry point and window lifecycle
-    ├── block-ui/           # GPUI interface and asynchronous core adapter
+    ├── block-app/          # Launcher, headless session supervisor, crash-help entry points
+    ├── block-ui/           # GPUI launcher, crash help, and asynchronous core adapter
     ├── block-auth/         # Public Microsoft PKCE, ownership, native secure storage
     ├── block-cli/          # block-launch: plan, prepare, launch, execute
-    ├── block-launcher/     # Recipes, resolution, planning, sessions, execution
+    ├── block-launcher/     # Recipes, planning, independent sessions, execution, diagnostics
     ├── block-download/     # Verified resource cache, retries, cancellation
     └── minecraft-manifest/ # Typed official metadata and offline corpus tests
 ```
 
-Both interfaces reuse `block-launcher`. Source parsers and the pure compiler produce secret-free preparation instructions; the native library coordinates persistent installations and Profiles. After resource validation, a transient LaunchPlan binds a currently valid session and mutable-data directory. LaunchExecutor handles the actual Java process and redacted logs. Account credentials stay outside saved plans. Workspace crates inherit shared package metadata, dependencies, and lint settings.
+Both interfaces reuse `block-launcher`. Source parsers and the pure compiler produce secret-free preparation instructions; the native library coordinates persistent installations and Profiles. After resource validation, a transient LaunchPlan binds a currently valid session and mutable-data directory. LaunchExecutor handles the actual Java process and redacted logs. For native Profile launches, an independent per-game supervisor owns that plan, its locks, and its Java child; Microsoft authentication stays in the launcher. Account credentials stay outside saved plans. Workspace crates inherit shared package metadata, dependencies, and lint settings.
 
 ## Compatibility
 

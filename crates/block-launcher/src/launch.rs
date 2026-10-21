@@ -15,7 +15,7 @@ pub struct LaunchPlan {
     command: JavaCommand,
     logs: PathBuf,
     _installation: PreparedInstance,
-    _game_directory: GameDirectoryGuard,
+    game_directory: GameDirectoryGuard,
 }
 
 impl LaunchPlan {
@@ -45,7 +45,7 @@ impl LaunchPlan {
             command,
             logs,
             _installation: prepared,
-            _game_directory: directory,
+            game_directory: directory,
         })
     }
 
@@ -58,6 +58,21 @@ impl LaunchPlan {
     pub const fn environment(&self) -> &BTreeMap<String, String> {
         self.command.environment()
     }
+
+    #[must_use]
+    pub fn logs_directory(&self) -> &std::path::Path {
+        &self.logs
+    }
+
+    #[must_use]
+    pub fn game_directory(&self) -> &std::path::Path {
+        self.game_directory.directory()
+    }
+
+    #[must_use]
+    pub fn redact(&self, text: &str) -> String {
+        self.command.redact(text)
+    }
 }
 
 /// Process lifecycle only: no login, download, installer or settings access.
@@ -69,6 +84,17 @@ impl LaunchExecutor {
     /// Returns process or log IO failures; cancellation terminates the owned Java child.
     pub async fn run(
         plan: LaunchPlan,
+        events: ExecutionSink,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<Option<i32>> {
+        Self::run_borrowed(&plan, events, cancel).await
+    }
+
+    /// Keep the plan's directory locks held while its caller finalizes diagnostics.
+    /// # Errors
+    /// Returns process or log setup failures; termination facts are emitted separately.
+    pub async fn run_borrowed(
+        plan: &LaunchPlan,
         events: ExecutionSink,
         cancel: &CancellationToken,
     ) -> anyhow::Result<Option<i32>> {

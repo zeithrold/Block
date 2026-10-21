@@ -53,3 +53,5 @@ jobs:
       - run: cargo check --locked -p block-app --all-targets
       - name: Test native UI state and GPUI framework interactions
         run: cargo test --locked -p block-ui --lib --test gpui_framework
+      - name: Test detached session supervision with synthetic game processes
+        run: cargo test --locked -p block-app --test session_supervisor

@@ -27,6 +27,8 @@ pub enum ExecutionEvent {
     Log { line: String, stderr: bool },
     Started { pid: u32 },
     Exited { code: Option<i32> },
+    Terminated { outcome: crate::crash::ExitOutcome },
+    CaptureFailed { message: String },
 }
 
 pub type ExecutionSink = Arc<dyn Fn(ExecutionEvent) + Send + Sync>;
@@ -69,7 +71,7 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PreparedInstance> {
-        self.prepare_inner(plan, cancel, false).await
+        self.prepare_inner(plan, cancel, false, None).await
     }
 
     /// Explicitly repair declared immutable views, retaining corrupt bytes for diagnosis.
@@ -80,7 +82,24 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PreparedInstance> {
-        self.prepare_inner(plan, cancel, true).await
+        self.prepare_inner(plan, cancel, true, None).await
+    }
+
+    /// Prepare an installed target using the supervisor's already allocated run ID.
+    /// # Errors
+    /// Rejects invalid IDs and the same integrity, compatibility and lock failures as preparation.
+    pub async fn prepare_session(
+        &self,
+        plan: ExecutionPlan,
+        cancel: &CancellationToken,
+        run_id: &str,
+    ) -> anyhow::Result<PreparedInstance> {
+        ensure!(
+            uuid::Uuid::parse_str(run_id)?.to_string() == run_id,
+            "invalid run ID"
+        );
+        self.prepare_inner(plan, cancel, false, Some(run_id.to_owned()))
+            .await
     }
 
     async fn prepare_inner(
@@ -88,6 +107,7 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
         repair: bool,
+        run_id: Option<String>,
     ) -> anyhow::Result<PreparedInstance> {
         ensure!(
             plan.schema_version == 1,
@@ -119,7 +139,7 @@ impl Executor {
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
         });
-        let run_id = materialize_async(&plan, &root, &self.store, cancel, repair).await?;
+        let run_id = materialize_async(&plan, &root, &self.store, cancel, repair, run_id).await?;
         if let JavaExecutable::Managed { path } = &plan.command.java {
             probe_java(&confined_path(&root, path)?, &plan).await?;
         }
@@ -173,8 +193,9 @@ async fn materialize_async(
     store: &Store,
     cancel: &CancellationToken,
     repair: bool,
+    run_id: Option<String>,
 ) -> anyhow::Result<String> {
-    let run_id = uuid::Uuid::new_v4().to_string();
+    let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let materialization = (
         plan.clone(),
         root.to_owned(),
@@ -227,26 +248,56 @@ pub(crate) async fn supervise(
     });
     let stdout = child.stdout.take().context("missing game stdout")?;
     let stderr = child.stderr.take().context("missing game stderr")?;
-    let out = tokio::spawn(drain(
+    let mut out = tokio::spawn(drain(
         stdout,
         logs.join("stdout.log"),
         command.clone(),
         events.clone(),
         false,
     ));
-    let err = tokio::spawn(drain(
+    let mut err = tokio::spawn(drain(
         stderr,
         logs.join("stderr.log"),
         command,
         events.clone(),
         true,
     ));
-    let status = tokio::select! {
-        status = child.wait() => status?,
-        () = cancel.cancelled() => { child.kill().await?; child.wait().await? },
+    let (status, terminated) = tokio::select! {
+        status = child.wait() => (status?, false),
+        () = cancel.cancelled() => match child.try_wait()? {
+            Some(status) => (status, false),
+            None => {
+                match child.kill().await {
+                    Ok(()) => (child.wait().await?, true),
+                    Err(error) => match child.try_wait()? {
+                        Some(status) => (status, false),
+                        None => return Err(error.into()),
+                    },
+                }
+            }
+        },
     };
-    out.await??;
-    err.await??;
+    (events)(ExecutionEvent::Terminated {
+        outcome: crate::crash::ExitOutcome::from_status(status, terminated),
+    });
+    let capture = tokio::time::timeout(Duration::from_secs(2), async {
+        (&mut out).await??;
+        (&mut err).await??;
+        anyhow::Ok(())
+    })
+    .await;
+    let failure = match capture {
+        Ok(Ok(())) => None,
+        Ok(Err(_)) => Some("Some game output could not be saved"),
+        Err(_) => Some("Game output remained open after exit; capture was truncated"),
+    };
+    if let Some(message) = failure {
+        out.abort();
+        err.abort();
+        (events)(ExecutionEvent::CaptureFailed {
+            message: message.into(),
+        });
+    }
     (events)(ExecutionEvent::Exited {
         code: status.code(),
     });
@@ -581,14 +632,139 @@ async fn drain(
     events: ExecutionSink,
     stderr: bool,
 ) -> anyhow::Result<()> {
-    let mut lines = BufReader::new(reader).split(b'\n');
-    let mut file = tokio::fs::File::create(path).await?;
-    while let Some(line) = lines.next_segment().await? {
-        let line = command.redact(&String::from_utf8_lossy(&line));
-        file.write_all(line.as_bytes()).await?;
-        file.write_all(b"\n").await?;
-        (events)(ExecutionEvent::Log { line, stderr });
+    let mut reader = BufReader::new(reader);
+    let mut capture = OutputCapture::create(path, &events, stderr).await;
+    let mut line = Vec::new();
+    let mut oversized = false;
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .await
+            .map_err(|_| anyhow::anyhow!("Game output could not be read"))?;
+        if buffer.is_empty() {
+            if !oversized && !line.is_empty() {
+                emit_output(&line, &command, &mut capture, &events, stderr).await;
+            }
+            break;
+        }
+        let newline = buffer.iter().position(|byte| *byte == b'\n');
+        let bytes = newline.unwrap_or(buffer.len());
+        let newly_oversized =
+            !oversized && bytes > MAX_OUTPUT_LINE_BYTES.saturating_sub(line.len());
+        if newly_oversized {
+            line.clear();
+            oversized = true;
+        } else if !oversized {
+            line.extend_from_slice(&buffer[..bytes]);
+        }
+        reader.consume(newline.map_or(bytes, |position| position + 1));
+        if newly_oversized {
+            emit_output(
+                b"[Block] An oversized game output line was discarded.",
+                &command,
+                &mut capture,
+                &events,
+                stderr,
+            )
+            .await;
+        }
+        if newline.is_some() {
+            if !oversized {
+                emit_output(&line, &command, &mut capture, &events, stderr).await;
+            }
+            line.clear();
+            oversized = false;
+        }
     }
-    file.flush().await?;
+    capture.finish(&events, stderr).await;
     Ok(())
+}
+
+const MAX_OUTPUT_LINE_BYTES: usize = 64 * 1024;
+const MAX_OUTPUT_FILE_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug)]
+struct OutputCapture {
+    file: Option<tokio::fs::File>,
+    written: usize,
+    quota_reached: bool,
+}
+
+impl OutputCapture {
+    async fn create(path: PathBuf, events: &ExecutionSink, stderr: bool) -> Self {
+        let file = tokio::fs::File::create(path).await.ok();
+        if file.is_none() {
+            capture_failure(events, stderr);
+        }
+        Self {
+            file,
+            written: 0,
+            quota_reached: false,
+        }
+    }
+
+    async fn write(&mut self, line: &str, events: &ExecutionSink, stderr: bool) {
+        if self.quota_reached {
+            return;
+        }
+        let Some(file) = &mut self.file else { return };
+        let bytes = line.len().saturating_add(1);
+        if bytes > MAX_OUTPUT_FILE_BYTES.saturating_sub(self.written) {
+            self.quota_reached = true;
+            let stream = if stderr {
+                "Standard error"
+            } else {
+                "Standard output"
+            };
+            (events)(ExecutionEvent::CaptureFailed {
+                message: format!(
+                    "{stream} reached its 16 MiB capture limit; live monitoring continues."
+                ),
+            });
+            return;
+        }
+        let result = async {
+            file.write_all(line.as_bytes()).await?;
+            file.write_all(b"\n").await
+        }
+        .await;
+        if result.is_err() {
+            self.file = None;
+            capture_failure(events, stderr);
+        } else {
+            self.written += bytes;
+        }
+    }
+
+    async fn finish(&mut self, events: &ExecutionSink, stderr: bool) {
+        if let Some(file) = &mut self.file
+            && file.flush().await.is_err()
+        {
+            self.file = None;
+            capture_failure(events, stderr);
+        }
+    }
+}
+
+async fn emit_output(
+    bytes: &[u8],
+    command: &JavaCommand,
+    capture: &mut OutputCapture,
+    events: &ExecutionSink,
+    stderr: bool,
+) {
+    let line = command.redact(&String::from_utf8_lossy(bytes));
+    capture.write(&line, events, stderr).await;
+    (events)(ExecutionEvent::Log { line, stderr });
+}
+
+fn capture_failure(events: &ExecutionSink, stderr: bool) {
+    let stream = if stderr {
+        "Standard error"
+    } else {
+        "Standard output"
+    };
+    (events)(ExecutionEvent::CaptureFailed {
+        message: format!("{stream} could not be saved; live monitoring continues."),
+    });
 }

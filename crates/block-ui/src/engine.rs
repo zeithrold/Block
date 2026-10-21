@@ -1,4 +1,6 @@
 use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -13,12 +15,14 @@ use block_launcher::{
     CancellationToken, DownloadEvent, Store,
     catalog::{Catalog, Profile, Snapshot},
     command::JavaCommand,
+    crash::{CrashReport, ExitOutcome},
     executor::{ExecutionEvent, Executor},
     library::Library,
     plan::compile,
     recipe::LaunchRecipe,
     resolver::{ResolveContext, resolve},
     session::{GameSession, SessionProvider},
+    session_host::{self, RunRecord, RunState},
 };
 use minecraft_manifest::{
     decode,
@@ -36,12 +40,21 @@ pub(crate) enum Message {
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
     Browser(String),
-    Created { instance: String, profile: String },
+    Created {
+        instance: String,
+        profile: String,
+    },
     Recipe(Result<LaunchRecipe, String>),
     Status(String),
     Progress(usize),
     Log(String),
     Command(String),
+    Session(Box<RunRecord>),
+    Crash {
+        report: Box<CrashReport>,
+        directory: PathBuf,
+        guard: File,
+    },
     Finished(Result<String, String>),
 }
 
@@ -66,6 +79,10 @@ impl Engine {
             },
             |path| Ok(PathBuf::from(path)),
         )?;
+        Self::with_root(root)
+    }
+
+    pub(super) fn with_root(root: PathBuf) -> anyhow::Result<(Self, Receiver<Message>)> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -73,14 +90,19 @@ impl Engine {
                 .build()?,
         );
         let (sender, receiver) = channel(256);
-        Ok((
-            Self {
-                runtime,
-                sender,
-                root,
-            },
-            receiver,
-        ))
+        let engine = Self {
+            runtime,
+            sender,
+            root,
+        };
+        engine.watch_sessions();
+        Ok((engine, receiver))
+    }
+
+    fn watch_sessions(&self) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(observe_sessions(root, sender));
     }
 
     pub(super) fn load_catalog(&self) {
@@ -294,7 +316,13 @@ impl Engine {
         });
     }
 
-    pub(super) fn play(&self, profile: String, account: Account, cancel: CancellationToken) {
+    pub(super) fn play(
+        &self,
+        profile: String,
+        account: Account,
+        cancel: CancellationToken,
+        explicit_stop: CancellationToken,
+    ) {
         let root = self.root.clone();
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
@@ -309,22 +337,51 @@ impl Engine {
                     game: game_session(&session),
                     expires_at: session.expires_at,
                 };
-                let code = library(root.clone(), &sender)?
-                    .launch(&profile, &provider, &cancel)
-                    .await?;
-                ensure!(
-                    cancel.is_cancelled() || code == Some(0),
-                    "Minecraft exited unexpectedly ({code:?}). Open game output for details."
-                );
-                Ok(if cancel.is_cancelled() {
-                    "Stopped".into()
-                } else {
-                    "Exited normally · ready to play again".into()
-                })
+                ensure!(!cancel.is_cancelled(), "Launch was cancelled.");
+                let game = provider.session()?;
+                let executable = std::env::current_exe()?;
+                let record = session_host::spawn_session(
+                    &root,
+                    &executable,
+                    &profile,
+                    &game,
+                    provider.expires_at,
+                )
+                .await?;
+                // Window closure only cancels authentication. Only an explicit Stop
+                // may terminate a session that completed its independent handshake.
+                if explicit_stop.is_cancelled() {
+                    return session_host::stop(&root, &record.context.run_id).await;
+                }
+                Ok::<_, anyhow::Error>(record)
             }
             .await;
             send_catalog(&root, &sender).await;
-            finish(&sender, result).await;
+            match result {
+                Ok(record) => {
+                    let _ = sender.send(Message::Session(Box::new(record))).await;
+                }
+                Err(error) => finish(&sender, Err(error)).await,
+            }
+        });
+    }
+
+    pub(super) fn stop_session(&self, id: String) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            match session_host::stop(&root, &id).await {
+                Ok(record) => {
+                    let _ = sender.send(Message::Session(Box::new(record))).await;
+                }
+                Err(error) => {
+                    let _ = sender
+                        .send(Message::Status(format!(
+                            "Could not stop this session · {error:#}"
+                        )))
+                        .await;
+                }
+            }
         });
     }
 
@@ -414,7 +471,8 @@ fn forward_event(sender: &Sender<Message>, event: ExecutionEvent) {
         ExecutionEvent::Started { pid } => {
             Message::Status(format!("Running · Minecraft PID {pid}"))
         }
-        ExecutionEvent::Exited { .. } => return,
+        ExecutionEvent::Exited { .. } | ExecutionEvent::Terminated { .. } => return,
+        ExecutionEvent::CaptureFailed { message } => Message::Log(message),
         ExecutionEvent::Log { line, .. } => {
             let Some(line) = readable_log(&line) else {
                 return;
@@ -423,6 +481,143 @@ fn forward_event(sender: &Sender<Message>, event: ExecutionEvent) {
         }
     };
     let _ = sender.try_send(message);
+}
+
+async fn observe_sessions(root: PathBuf, sender: Sender<Message>) {
+    let mut seen: HashMap<String, (u64, RunState)> = HashMap::new();
+    let mut reported_failure = false;
+    while !sender.is_closed() {
+        let list_root = root.clone();
+        let records =
+            tokio::task::spawn_blocking(move || session_host::list_runs(&list_root)).await;
+        match records {
+            Ok(Ok(mut records)) => {
+                reported_failure = false;
+                records.sort_by_key(|record| std::cmp::Reverse(record.started_at_unix_ms));
+                let (active, mut finished): (Vec<_>, Vec<_>) =
+                    records.into_iter().partition(RunRecord::is_active);
+                finished.truncate(128);
+                let retained: HashSet<_> = active
+                    .iter()
+                    .chain(&finished)
+                    .map(|record| record.context.run_id.as_str())
+                    .collect();
+                seen.retain(|id, _| retained.contains(id.as_str()));
+                for record in finished {
+                    if !publish_session(&root, &sender, &mut seen, record).await {
+                        return;
+                    }
+                }
+                if !observe_active_sessions(&root, &sender, &mut seen, active).await {
+                    return;
+                }
+            }
+            _ if !reported_failure => {
+                reported_failure = true;
+                let _ = sender
+                    .send(Message::Log(
+                        "Session monitoring is temporarily unavailable; retrying.".into(),
+                    ))
+                    .await;
+            }
+            _ => {}
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn observe_active_sessions(
+    root: &Path,
+    sender: &Sender<Message>,
+    seen: &mut HashMap<String, (u64, RunState)>,
+    active: Vec<RunRecord>,
+) -> bool {
+    // Restore every reservation immediately, even if older monitors are unreachable.
+    for record in &active {
+        if !seen.contains_key(&record.context.run_id)
+            && !publish_session(root, sender, seen, record.clone()).await
+        {
+            return false;
+        }
+    }
+    let mut pending = active.into_iter();
+    let mut checks = tokio::task::JoinSet::new();
+    loop {
+        // Cap concurrent local IPC independently of the number of retained sessions.
+        while checks.len() < 8 {
+            let Some(record) = pending.next() else {
+                break;
+            };
+            let root = root.to_owned();
+            checks.spawn(async move { check_live_session(&root, record).await });
+        }
+        let Some(result) = checks.join_next().await else {
+            return true;
+        };
+        if let Ok(record) = result
+            && !publish_session(root, sender, seen, record).await
+        {
+            return false;
+        }
+    }
+}
+
+async fn check_live_session(root: &Path, mut record: RunRecord) -> RunRecord {
+    if let Ok(current) = session_host::status(root, &record.context.run_id).await {
+        current
+    } else {
+        record.state = RunState::MonitoringInterrupted;
+        record.status = "Monitoring interrupted · Minecraft may still be running".into();
+        record
+    }
+}
+
+async fn publish_session(
+    root: &Path,
+    sender: &Sender<Message>,
+    seen: &mut HashMap<String, (u64, RunState)>,
+    record: RunRecord,
+) -> bool {
+    let id = record.context.run_id.clone();
+    let fingerprint = (record.revision, record.state);
+    if seen.get(&id) == Some(&fingerprint) {
+        return true;
+    }
+    seen.insert(id.clone(), fingerprint);
+    let notify = record
+        .outcome
+        .as_ref()
+        .is_some_and(ExitOutcome::should_notify);
+    if sender
+        .send(Message::Session(Box::new(record)))
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    if notify {
+        let crash_root = root.to_owned();
+        let crash = tokio::task::spawn_blocking(move || {
+            let Some(guard) = session_host::claim_help(&crash_root, &id)? else {
+                return Ok::<_, anyhow::Error>(None);
+            };
+            let report = session_host::read_crash(&crash_root, &id)?;
+            let directory = session_host::report_directory(&crash_root, &id)?;
+            Ok(Some((report, directory, guard)))
+        })
+        .await;
+        if let Ok(Ok(Some((report, directory, guard)))) = crash {
+            return sender
+                .send(Message::Crash {
+                    report: Box::new(report),
+                    directory,
+                    guard,
+                })
+                .await
+                .is_ok();
+        }
+    }
+    true
 }
 
 async fn send_catalog(root: &Path, sender: &Sender<Message>) {
@@ -548,6 +743,79 @@ fn readable_log(line: &str) -> Option<String> {
 mod tests {
     use block_launcher::session::{OfflineSession, SessionProvider as _};
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn observer_restores_an_old_active_session_after_more_than_128_finished_runs()
+    -> anyhow::Result<()> {
+        use block_launcher::{
+            crash::CrashContext,
+            session_host::{RunRecord, RunState},
+        };
+
+        let directory = tempfile::tempdir()?;
+        let id = |index| format!("00000000-0000-4000-8000-{index:012x}");
+        let active_id = id(1);
+        let template = RunRecord {
+            schema_version: 1,
+            context: CrashContext {
+                run_id: active_id.clone(),
+                profile_id: "profile".into(),
+                profile_name: "Older game".into(),
+                minecraft_version: "1.20.6".into(),
+                loader: None,
+            },
+            instance_id: "instance".into(),
+            game_directory: directory.path().join("game"),
+            supervisor_pid: None,
+            java_pid: None,
+            state: RunState::Running,
+            outcome: None,
+            status: "Running".into(),
+            revision: 1,
+            recent_output: Vec::new(),
+            capture_warnings: Vec::new(),
+            started_at_unix_ms: 1,
+            finished_at_unix_ms: None,
+        };
+        for index in 1_u64..=130 {
+            let mut record = template.clone();
+            record.context.run_id = id(index);
+            record.started_at_unix_ms = index;
+            if index > 1 {
+                record.state = RunState::Finished;
+                record.finished_at_unix_ms = Some(index + 1);
+            }
+            let path = directory.path().join("sessions").join(id(index));
+            std::fs::create_dir_all(&path)?;
+            std::fs::write(path.join("session.json"), serde_json::to_vec(&record)?)?;
+        }
+        let (engine, mut receiver) = super::Engine::with_root(directory.path().to_path_buf())?;
+        let (finished, active) = engine.runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                let mut finished = Vec::new();
+                while let Some(message) = receiver.recv().await {
+                    if let super::Message::Session(record) = message {
+                        if record.context.run_id == active_id {
+                            return Ok::<_, anyhow::Error>((finished, record));
+                        }
+                        if !record.is_active() {
+                            finished.push(record.context.run_id);
+                        }
+                    }
+                }
+                anyhow::bail!("session observer closed before restoring the active run")
+            })
+            .await
+        })??;
+        assert!(active.is_active());
+        assert_eq!(active.started_at_unix_ms, 1);
+        assert_eq!(finished.len(), 128);
+        assert!(
+            !finished.contains(&id(2)),
+            "Only terminal history may be capped"
+        );
+        Ok(())
+    }
 
     #[test]
     fn online_provider_rejects_expiry_before_command_binding() -> anyhow::Result<()> {

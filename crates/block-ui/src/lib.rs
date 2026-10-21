@@ -1,15 +1,25 @@
 //! A native launcher with persistent installations, launch profiles and Microsoft accounts.
 
+mod crash_view;
 mod engine;
 mod text_input;
 
-use std::{collections::VecDeque, path::PathBuf, time::Duration};
+pub use crash_view::CrashView;
+
+use std::{
+    collections::{HashMap, VecDeque},
+    fs::File,
+    path::PathBuf,
+    time::Duration,
+};
 
 use block_auth::Account;
 use block_launcher::{
     CancellationToken,
     catalog::{DataPolicy, InstallStatus, Instance, LoaderKind, Profile, Snapshot},
+    crash::CrashReport,
     recipe::{LaunchRecipe, RecipeSource, RuntimeSelection},
+    session_host::{self, RunRecord, RunState},
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
@@ -26,6 +36,8 @@ use text_input::TextInput;
 pub struct LaunchOptions {
     pub recipe: Option<PathBuf>,
     pub launch: bool,
+    pub profile: Option<String>,
+    pub data_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -96,6 +108,13 @@ struct ProfileForm {
 }
 
 #[derive(Debug)]
+struct PendingCrash {
+    report: CrashReport,
+    directory: PathBuf,
+    guard: File,
+}
+
+#[derive(Debug)]
 enum Form {
     Instance(InstanceForm),
     Profile(Box<ProfileForm>),
@@ -110,6 +129,7 @@ pub struct Block {
     versions: Vec<String>,
     selected_instance: Option<String>,
     selected_profile: Option<String>,
+    pending_profile: Option<String>,
     selected_account: Option<String>,
     tab: Tab,
     form: Option<Form>,
@@ -120,6 +140,13 @@ pub struct Block {
     completed: usize,
     busy: bool,
     cancel: CancellationToken,
+    play_stop: CancellationToken,
+    active_run: Option<String>,
+    active_started_at: u64,
+    session_revisions: HashMap<String, (u64, RunState)>,
+    pending_crashes: VecDeque<PendingCrash>,
+    crash_help: Option<Entity<CrashView>>,
+    crash_guard: Option<File>,
     logs: VecDeque<String>,
     show_output: bool,
     command: Option<String>,
@@ -167,7 +194,11 @@ impl Block {
         ]);
         let focus = cx.focus_handle();
         focus.focus(window);
-        let (engine, messages, status) = match Engine::new() {
+        let engine = options
+            .data_dir
+            .clone()
+            .map_or_else(Engine::new, Engine::with_root);
+        let (engine, messages, status) = match engine {
             Ok((engine, messages)) => {
                 engine.load_catalog();
                 engine.load_versions();
@@ -192,6 +223,7 @@ impl Block {
             versions: vec!["1.20.6".into(), "1.20.1".into(), "26.3".into()],
             selected_instance: None,
             selected_profile: None,
+            pending_profile: options.profile,
             selected_account: None,
             tab: Tab::Instances,
             form: None,
@@ -202,6 +234,13 @@ impl Block {
             completed: 0,
             busy: false,
             cancel: CancellationToken::new(),
+            play_stop: CancellationToken::new(),
+            active_run: None,
+            active_started_at: 0,
+            session_revisions: HashMap::new(),
+            pending_crashes: VecDeque::new(),
+            crash_help: None,
+            crash_guard: None,
             logs: VecDeque::new(),
             show_output: false,
             command: None,
@@ -229,20 +268,7 @@ impl Block {
         }
         for message in messages {
             match message {
-                Message::Catalog(Ok(snapshot)) => {
-                    let previous = self
-                        .profile()
-                        .map(|profile| (profile.id.clone(), profile.default_account.clone()));
-                    self.snapshot = snapshot;
-                    self.normalize_selection();
-                    if previous
-                        != self
-                            .profile()
-                            .map(|profile| (profile.id.clone(), profile.default_account.clone()))
-                    {
-                        self.apply_profile_account();
-                    }
-                }
+                Message::Catalog(Ok(snapshot)) => self.apply_catalog(snapshot),
                 Message::Catalog(Err(error)) | Message::Accounts(Err(error)) => self.report(error),
                 Message::Accounts(Ok(accounts)) => {
                     self.accounts = accounts;
@@ -278,8 +304,20 @@ impl Block {
                 Message::Progress(count) => self.completed = count,
                 Message::Command(command) => self.command = Some(command),
                 Message::Log(line) => self.push_log(line),
+                Message::Session(record) => self.session_updated(*record),
+                Message::Crash {
+                    report,
+                    directory,
+                    guard,
+                } => {
+                    self.pending_crashes.push_back(PendingCrash {
+                        report: *report,
+                        directory,
+                        guard,
+                    });
+                }
                 Message::Finished(result) => {
-                    self.busy = false;
+                    self.busy = self.active_run.is_some();
                     match result {
                         Ok(status) => {
                             self.status = status;
@@ -308,6 +346,133 @@ impl Block {
             }
         }
         cx.notify();
+    }
+
+    fn apply_catalog(&mut self, snapshot: Snapshot) {
+        let previous = self
+            .profile()
+            .map(|profile| (profile.id.clone(), profile.default_account.clone()));
+        self.snapshot = snapshot;
+        if let Some(profile) = self.pending_profile.take() {
+            self.select_requested_profile(&profile);
+        }
+        self.normalize_selection();
+        if previous
+            != self
+                .profile()
+                .map(|profile| (profile.id.clone(), profile.default_account.clone()))
+        {
+            self.apply_profile_account();
+        }
+    }
+
+    fn select_requested_profile(&mut self, id: &str) {
+        if let Some(profile) = self
+            .snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.id == id)
+        {
+            self.selected_instance = Some(profile.instance_id.clone());
+            self.selected_profile = Some(profile.id.clone());
+            self.tab = Tab::Instances;
+            self.form = None;
+            self.apply_profile_account();
+        } else {
+            self.status =
+                "The requested profile is no longer available. Select another profile.".into();
+        }
+    }
+
+    fn session_updated(&mut self, record: RunRecord) {
+        let id = record.context.run_id.clone();
+        let fingerprint = (record.revision, record.state);
+        if let Some(previous) = self.session_revisions.get(&id)
+            && (previous.0 > record.revision || previous == &fingerprint)
+        {
+            return;
+        }
+        self.session_revisions.insert(id.clone(), fingerprint);
+        if self.session_revisions.len() > 256 {
+            self.session_revisions.retain(|id, _| {
+                Some(id) == self.active_run.as_ref() || id == &record.context.run_id
+            });
+        }
+        if record.is_active() {
+            if self.active_run.as_ref() != Some(&id)
+                && record.started_at_unix_ms < self.active_started_at
+            {
+                return;
+            }
+            self.active_started_at = record.started_at_unix_ms;
+            if self.active_run.is_none() {
+                if self
+                    .snapshot
+                    .profiles
+                    .iter()
+                    .any(|profile| profile.id == record.context.profile_id)
+                {
+                    self.select_requested_profile(&record.context.profile_id);
+                } else {
+                    self.pending_profile = Some(record.context.profile_id.clone());
+                }
+            }
+            self.active_run = Some(id);
+            self.busy = true;
+            self.status = record.status;
+            self.logs.clear();
+            for line in record.recent_output {
+                self.push_log(line);
+            }
+            for warning in record.capture_warnings {
+                self.push_log(warning);
+            }
+        } else if self.active_run.as_ref() == Some(&id) {
+            self.active_run = None;
+            self.busy = false;
+            self.status = record.status;
+            for line in record.recent_output {
+                self.push_log(line);
+            }
+        }
+    }
+
+    fn prepare_crash_help(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.crash_help.is_some() {
+            return;
+        }
+        let Some(pending) = self.pending_crashes.pop_front() else {
+            return;
+        };
+        let profile = pending.report.context.profile_id.clone();
+        let run = pending.report.context.run_id.clone();
+        let launcher = cx.weak_entity();
+        let view = cx.new(|cx| {
+            CrashView::new(
+                pending.report,
+                pending.directory,
+                move |window, cx| {
+                    let _ = launcher.update(cx, |view, cx| {
+                        view.crash_help = None;
+                        view.crash_guard = None;
+                        view.select_requested_profile(&profile);
+                        view.focus.focus(window);
+                        cx.notify();
+                    });
+                },
+                window,
+                cx,
+            )
+        });
+        self.crash_guard = Some(pending.guard);
+        self.crash_help = Some(view);
+        if let Some(engine) = &self.engine
+            && let Err(error) = session_host::mark_seen(&engine.root, &run)
+        {
+            self.push_log(format!(
+                "Could not mark this diagnostic report as read: {error:#}"
+            ));
+        }
     }
 
     fn normalize_selection(&mut self) {
@@ -542,7 +707,14 @@ impl Block {
             }
             UiAction::Stop => {
                 if self.busy {
-                    self.cancel.cancel();
+                    self.play_stop.cancel();
+                    if let Some(id) = &self.active_run {
+                        if let Some(engine) = &self.engine {
+                            engine.stop_session(id.clone());
+                        }
+                    } else {
+                        self.cancel.cancel();
+                    }
                     self.status = "Stopping · waiting for the current operation".into();
                 }
             }
@@ -696,8 +868,14 @@ impl Block {
             return;
         };
         self.begin("Preparing · validating profile and account");
+        self.play_stop = CancellationToken::new();
         if let Some(engine) = &self.engine {
-            engine.play(profile, account, self.cancel.clone());
+            engine.play(
+                profile,
+                account,
+                self.cancel.clone(),
+                self.play_stop.clone(),
+            );
         }
     }
 
@@ -1111,7 +1289,11 @@ impl Block {
 }
 
 impl Render for Block {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.prepare_crash_help(window, cx);
+        if let Some(help) = &self.crash_help {
+            return div().size_full().child(help.clone()).into_any_element();
+        }
         let main = match &self.form {
             Some(Form::Instance(form)) => self.instance_form(form, cx).into_any_element(),
             Some(Form::Profile(form)) => self.profile_form(form, cx).into_any_element(),
@@ -1204,6 +1386,7 @@ impl Render for Block {
             .text_color(rgb(0x00e9_f0f4))
             .child(self.sidebar(cx))
             .child(content)
+            .into_any_element()
     }
 }
 
@@ -1357,6 +1540,7 @@ mod tests {
             versions: vec!["1.20.6".into()],
             selected_instance: None,
             selected_profile: None,
+            pending_profile: None,
             selected_account: None,
             tab: super::Tab::Instances,
             form: None,
@@ -1367,6 +1551,13 @@ mod tests {
             completed: 0,
             busy: false,
             cancel: block_launcher::CancellationToken::new(),
+            play_stop: block_launcher::CancellationToken::new(),
+            active_run: None,
+            active_started_at: 0,
+            session_revisions: std::collections::HashMap::new(),
+            pending_crashes: std::collections::VecDeque::new(),
+            crash_help: None,
+            crash_guard: None,
             logs: std::collections::VecDeque::new(),
             show_output: false,
             command: None,
@@ -1374,6 +1565,156 @@ mod tests {
             recipe: None,
             recipe_load: RecipeLoadState::default(),
         }
+    }
+
+    fn supervised_record() -> block_launcher::session_host::RunRecord {
+        block_launcher::session_host::RunRecord {
+            schema_version: 1,
+            context: block_launcher::crash::CrashContext {
+                run_id: "synthetic-run".into(),
+                profile_id: "synthetic-profile".into(),
+                profile_name: "Synthetic profile".into(),
+                minecraft_version: "1.20.6".into(),
+                loader: None,
+            },
+            instance_id: "synthetic-instance".into(),
+            game_directory: std::env::temp_dir().join("synthetic-game"),
+            supervisor_pid: Some(123),
+            java_pid: Some(456),
+            state: block_launcher::session_host::RunState::Running,
+            outcome: None,
+            status: "Running · independent game session".into(),
+            revision: 1,
+            recent_output: vec!["Game is running".into()],
+            capture_warnings: Vec::new(),
+            started_at_unix_ms: 1,
+            finished_at_unix_ms: None,
+        }
+    }
+
+    #[gpui::test]
+    fn reopened_ui_restores_session_and_ignores_an_old_handoff_after_exit(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(test_view);
+        let record = supervised_record();
+        view.update(cx, |view, cx| {
+            view.session_updated(record.clone());
+            cx.notify();
+        });
+        assert!(view.read_with(cx, |view, _| view.busy));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.active_run.clone()),
+            Some("synthetic-run".into())
+        );
+        let mut finished = record.clone();
+        finished.state = block_launcher::session_host::RunState::Finished;
+        finished.revision = 3;
+        finished.status = "Exited normally".into();
+        view.update(cx, |view, cx| {
+            view.session_updated(finished);
+            // The observer can see the exit before the initial spawn RPC returns.
+            view.session_updated(record);
+            cx.notify();
+        });
+        assert!(!view.read_with(cx, |view, _| view.busy));
+        assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.status.clone()),
+            "Exited normally"
+        );
+    }
+
+    #[gpui::test]
+    fn monitoring_interruption_preserves_the_session_and_explicit_stop_is_separate(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(test_view);
+        let mut record = supervised_record();
+        view.update(cx, |view, _| view.session_updated(record.clone()));
+        record.state = block_launcher::session_host::RunState::MonitoringInterrupted;
+        record.status = "Monitoring interrupted · Minecraft may still be running".into();
+        view.update(cx, |view, cx| {
+            view.session_updated(record);
+            cx.notify();
+        });
+        assert!(view.read_with(cx, |view, _| view.busy));
+        assert!(view.read_with(cx, |view, _| view.active_run.is_some()));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(super::UiAction::Stop, window, cx);
+            });
+        });
+        assert!(view.read_with(cx, |view, _| view.play_stop.is_cancelled()));
+        assert!(!view.read_with(cx, |view, _| view.cancel.is_cancelled()));
+    }
+
+    #[gpui::test]
+    fn requested_profile_waits_for_the_initial_catalog(cx: &mut gpui::TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+            let (instance, profile) =
+                catalog.create_instance("Requested".into(), "1.20.6".into(), None, None)?;
+            let _ =
+                catalog.create_instance("Last in catalog".into(), "1.20.6".into(), None, None)?;
+            let (sender, receiver) = tokio::sync::mpsc::channel(1);
+            sender.try_send(super::Message::Catalog(Ok(catalog.snapshot()?)))?;
+            let (view, cx) = cx.add_window_view(test_view);
+            view.update(cx, |view, cx| {
+                view.pending_profile = Some(profile.id.clone());
+                view.messages = Some(receiver);
+                view.poll(cx);
+            });
+            assert_eq!(
+                view.read_with(cx, |view, _| view.selected_profile.clone()),
+                Some(profile.id)
+            );
+            assert_eq!(
+                view.read_with(cx, |view, _| view.selected_instance.clone()),
+                Some(instance.id)
+            );
+            assert!(view.read_with(cx, |view, _| view.pending_profile.is_none()));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn inline_crash_help_returns_to_the_existing_launcher_without_launching(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
+            let context = supervised_record().context;
+            let report = block_launcher::crash::CrashReport::new(
+                context,
+                block_launcher::crash::ExitOutcome::start_failed(),
+                "Java could not start",
+                Vec::new(),
+            );
+            let (view, cx) = cx.add_window_view(test_view);
+            view.update(cx, |view, cx| {
+                view.pending_crashes.push_back(super::PendingCrash {
+                    report,
+                    directory: root.path().to_path_buf(),
+                    guard,
+                });
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| view.crash_help.is_some()));
+            assert!(view.read_with(cx, |view, _| view.crash_guard.is_some()));
+            assert!(cx.debug_bounds("crash-return").is_some());
+            cx.simulate_keystrokes("enter");
+            assert!(view.read_with(cx, |view, _| view.crash_help.is_none()));
+            assert!(view.read_with(cx, |view, _| view.crash_guard.is_none()));
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[gpui::test]

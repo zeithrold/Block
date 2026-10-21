@@ -1,6 +1,6 @@
 use std::{
-    fs::{self, File, OpenOptions},
-    io::Write as _,
+    fs::{self, File, Metadata, OpenOptions},
+    io::{Read as _, Write as _},
     path::{Path, PathBuf},
 };
 
@@ -25,6 +25,17 @@ struct Document {
     snapshot: Snapshot,
 }
 
+const SESSION_MARKER: &str = ".block-session.json";
+const MAX_SESSION_MARKER_BYTES: u64 = 2048;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionReservation {
+    schema_version: u32,
+    run_id: String,
+    supervisor_pid: u32,
+}
+
 /// A process owns this canonical mutable directory until the guard is dropped.
 #[derive(Debug)]
 pub struct GameDirectoryGuard {
@@ -34,14 +45,16 @@ pub struct GameDirectoryGuard {
 
 impl GameDirectoryGuard {
     /// # Errors
-    /// Rejects concurrent game access and symlinked lock files.
+    /// Rejects concurrent game access, sticky session reservations and symlinked lock files.
     pub fn acquire(directory: &Path) -> anyhow::Result<Self> {
         validate_directory(directory)?;
         fs::create_dir_all(directory)?;
         let directory = directory.canonicalize()?;
+        reject_session_reservation(&directory)?;
         let lock = open_lock(&directory.join(".block-game.lock"))?;
         fs2::FileExt::try_lock_exclusive(&lock)
             .context("this game directory is already preparing or running; stop that game first")?;
+        reject_session_reservation(&directory)?;
         Ok(Self {
             directory,
             _lock: lock,
@@ -66,9 +79,161 @@ impl GameDirectoryGuard {
         Ok(guard)
     }
 
+    /// Reserve the mutable directory for a supervised game session.
+    ///
+    /// The reservation deliberately survives this guard and process termination.
+    /// Its owner must clear it only after confirming the Java child is terminal.
+    ///
+    /// # Errors
+    /// Rejects invalid run IDs, existing reservations and the same path/lock hazards
+    /// as `for_profile`. An existing reservation is never automatically replaced.
+    pub fn for_session(
+        instance: &Instance,
+        profile: &Profile,
+        run_id: &str,
+    ) -> anyhow::Result<Self> {
+        validate_run_id(run_id)?;
+        let guard = Self::for_profile(instance, profile)?;
+        let reservation = SessionReservation {
+            schema_version: 1,
+            run_id: run_id.into(),
+            supervisor_pid: std::process::id(),
+        };
+        let mut temp = tempfile::NamedTempFile::new_in(guard.directory())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            temp.as_file()
+                .set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+        temp.write_all(&serde_json::to_vec(&reservation)?)?;
+        temp.as_file().sync_all()?;
+        temp.persist_noclobber(guard.directory().join(SESSION_MARKER))
+            .context("another game session reserved this directory")?;
+        Ok(guard)
+    }
+
+    /// Release exactly this run's reservation after the Java child has ended.
+    ///
+    /// Only the owning supervisor after confirmed Java exit, or an operator that
+    /// verified both processes ended and established exclusive access, may call this.
+    /// This function does not acquire the directory lock, infer death from a PID,
+    /// or automatically repair stale state.
+    ///
+    /// # Errors
+    /// Rejects missing, malformed, oversized, symlinked or differently owned markers.
+    pub fn clear_session_reservation(directory: &Path, run_id: &str) -> anyhow::Result<()> {
+        validate_run_id(run_id)?;
+        let (path, metadata, reservation) = read_session_reservation(directory)?;
+        ensure!(
+            reservation.run_id == run_id,
+            "session reservation belongs to another run"
+        );
+        let current = fs::symlink_metadata(&path)?;
+        ensure!(
+            current.is_file()
+                && !current.file_type().is_symlink()
+                && same_file(&metadata, &current),
+            "session reservation changed while releasing; it was preserved"
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    pub(crate) fn session_reservation_owner(directory: &Path) -> anyhow::Result<Option<String>> {
+        match read_session_reservation(directory) {
+            Ok((_, _, reservation)) => Ok(Some(reservation.run_id)),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     #[must_use]
     pub fn directory(&self) -> &Path {
         &self.directory
+    }
+}
+
+fn read_session_reservation(
+    directory: &Path,
+) -> anyhow::Result<(PathBuf, Metadata, SessionReservation)> {
+    validate_directory(directory)?;
+    ensure!(
+        directory.canonicalize()? == directory,
+        "game directory changed before inspecting its session reservation"
+    );
+    let path = directory.join(SESSION_MARKER);
+    let metadata = fs::symlink_metadata(&path)?;
+    ensure!(
+        metadata.is_file() && !metadata.file_type().is_symlink(),
+        "refusing a non-file or symlinked session reservation"
+    );
+    ensure!(
+        metadata.len() <= MAX_SESSION_MARKER_BYTES,
+        "session reservation is too large"
+    );
+    let file = File::open(&path)?;
+    ensure!(
+        same_file(&metadata, &file.metadata()?),
+        "session reservation changed while opening"
+    );
+    let mut bytes = Vec::new();
+    file.take(MAX_SESSION_MARKER_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() as u64 <= MAX_SESSION_MARKER_BYTES,
+        "session reservation grew while reading"
+    );
+    let reservation: SessionReservation =
+        serde_json::from_slice(&bytes).context("invalid session reservation; it was preserved")?;
+    ensure!(
+        reservation.schema_version == 1,
+        "unsupported session reservation schema"
+    );
+    validate_run_id(&reservation.run_id)?;
+    let current = fs::symlink_metadata(&path)?;
+    ensure!(
+        current.is_file() && !current.file_type().is_symlink() && same_file(&metadata, &current),
+        "session reservation changed while reading"
+    );
+    Ok((path, metadata, reservation))
+}
+
+fn same_file(left: &Metadata, right: &Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if left.dev() != right.dev() || left.ino() != right.ino() {
+            return false;
+        }
+    }
+    left.len() == right.len()
+        && left.modified().ok() == right.modified().ok()
+        && left.created().ok() == right.created().ok()
+}
+
+fn validate_run_id(run_id: &str) -> anyhow::Result<()> {
+    let parsed = uuid::Uuid::parse_str(run_id).context("invalid game session run ID")?;
+    ensure!(
+        parsed.to_string() == run_id,
+        "game session run ID must be a canonical UUID"
+    );
+    Ok(())
+}
+
+fn reject_session_reservation(directory: &Path) -> anyhow::Result<()> {
+    match fs::symlink_metadata(directory.join(SESSION_MARKER)) {
+        Ok(_) => anyhow::bail!(
+            "this game directory has a reserved session; reconnect to its supervisor or confirm the previous game has ended before recovering it"
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 

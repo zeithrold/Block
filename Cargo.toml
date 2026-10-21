@@ -28,7 +28,8 @@ tempfile = "3"
 block-download = { path = "crates/block-download" }
 block-launcher = { path = "crates/block-launcher" }
 minecraft-manifest = { path = "crates/minecraft-manifest" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "process", "sync", "time", "signal", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std", "process", "sync", "time", "signal", "net"] }
+interprocess = { version = "2.4.6", features = ["tokio"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 fs2 = "0.4"

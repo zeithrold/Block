@@ -21,6 +21,13 @@ uuid.workspace = true
 zip.workspace = true
 fs2.workspace = true
 tempfile.workspace = true
+interprocess.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+widestring = "1"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
 
 [dev-dependencies]
 tempfile.workspace = true
