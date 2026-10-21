@@ -6,12 +6,12 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 
 - [x] Freeze the unchanged React product reference: Block-UI commit `fd2713b` (local only).
 - [x] Migrate decisions and remove old evidence before staging; push retained baseline `5c634fe` to main.
-- [ ] Current-source CI on Windows AMD64, Linux AMD64 and macOS ARM64.
+- [x] Native-window baseline CI on Windows AMD64, Linux AMD64 and macOS ARM64 (`def4a1b`).
 - [x] Remove vendored framework patches; published GPUI 0.3.9 / Base 0.8.0 compile unchanged.
 - [x] Fixed-size/native-chrome implementation; macOS real Welcome 960×600 and separate version picker 760×520 captured.
 - [x] Independent dialog-window implementation: focus existing purposes, preserve drafts, reject stale results and close children with parents.
 - [ ] Finish cross-platform CI and remote interactive acceptance for the new window implementation.
-- [ ] Native scenario runner, real window screenshots and prototype/native comparison board.
+- [x] Debug-only network-free scenario runner, native screenshots and comparison board; React shots remain pending.
 - [ ] UI-only smoke on Windows AMD64, Linux AMD64 and Linux ARM64 after window migration.
 
 ## Product decisions and intended differences
@@ -90,8 +90,11 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Baseline `5c634fe`: local full `just check` passed 381 tests. Current upstream/native-window implementation and cross-platform fixes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests. macOS CI passed; Windows/Linux fixes await CI. Remote UI smoke remains pending.
+- Baseline `5c634fe`: local full `just check` passed 381 tests. Native-window fixes `def4a1b` passed CI run `39625139939`. Scenario tooling and dialog layout changes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests; their CI remains pending.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
+- `scripts/snap-native --no-build` captured 40 debug UI scenarios in both themes (118 primary/child images); `scripts/parity-board` built `target/parity-shots/index.html`. Release compilation excludes scenario flags and fixture code.
+- The React reference server is available at `http://127.0.0.1:5173/`; the separate prototype screenshot task has not supplied its images. The board labels missing reference shots explicitly. Current native fixture records cover implemented Microsoft/Vanilla/NeoForge models; additional provider/loader scenarios await their real implementations.
+- Linux ARM64 actual Home → Games → native version-picker smoke captured under `target/parity-shots/linux-arm64/`. Its KDE session uses Xwayland `:1` plus its session Xauthority; Spectacle captures the active window because scrot returns black pixels there. Windows Welcome/Home/Games capture succeeded; its dialog and Linux AMD64 smoke remain pending.
 - Required supported launches: macOS Vanilla/Fabric/Quilt/Forge/NeoForge/OptiFine plus Authlib injection; three remote hosts Vanilla/Fabric/modern Forge.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.

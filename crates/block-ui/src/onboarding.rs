@@ -973,7 +973,7 @@ impl Block {
             .debug_selector(|| "onboarding-section".into())
             .w_full()
             .min_h_0()
-            .max_h(window.viewport_size().height - px(64.))
+            .h_full()
             .flex()
             .flex_col()
             .child(

@@ -34,6 +34,15 @@ struct Args {
     supervise: Option<String>,
     #[arg(long, conflicts_with_all = ["recipe", "launch", "supervise", "profile"], requires = "data_dir")]
     crash: Option<String>,
+    #[cfg(debug_assertions)]
+    #[arg(long, conflicts_with_all = ["recipe", "launch", "profile", "data_dir", "supervise", "crash", "build_info"], value_parser = clap::builder::PossibleValuesParser::new(block_ui::SCENARIOS.iter().copied()))]
+    scenario: Option<String>,
+    #[cfg(debug_assertions)]
+    #[arg(long, requires = "scenario", value_parser = ["light", "dark"])]
+    theme: Option<String>,
+    #[cfg(debug_assertions)]
+    #[arg(long)]
+    list_scenarios: bool,
 }
 
 fn main() -> ExitCode {
@@ -47,6 +56,11 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> anyhow::Result<()> {
+    #[cfg(debug_assertions)]
+    if args.list_scenarios {
+        println!("{}", block_ui::SCENARIOS.join("\n"));
+        return Ok(());
+    }
     if args.build_info {
         println!("{}", build_info::current());
         return Ok(());
@@ -73,6 +87,24 @@ fn run(args: Args) -> anyhow::Result<()> {
         let report = session_host::read_crash(&root, id)?;
         return crash_application(root, report);
     }
+    #[cfg(debug_assertions)]
+    let _scenario_directory = args
+        .scenario
+        .as_ref()
+        .map(|_| {
+            tempfile::Builder::new()
+                .prefix("block-ui-scenario-")
+                .tempdir()
+        })
+        .transpose()?;
+    #[cfg(debug_assertions)]
+    let args = {
+        let mut args = args;
+        if let Some(directory) = &_scenario_directory {
+            args.data_dir = Some(directory.path().to_owned());
+        }
+        args
+    };
     gpui_platform::application()
         .with_assets(block_ui::UiAssets)
         .run(move |cx: &mut App| {
@@ -89,6 +121,11 @@ fn run(args: Args) -> anyhow::Result<()> {
                     data_dir: args.data_dir,
                     system_window_chrome: false,
                     build_info: block_ui::BuildInfo::default(),
+                    #[cfg(debug_assertions)]
+                    scenario: args.scenario.map(|name| block_ui::ScenarioOptions {
+                        name,
+                        dark: args.theme.as_deref() == Some("dark"),
+                    }),
                 },
             ) {
                 eprintln!("Failed to open the Block window: {error:#}");

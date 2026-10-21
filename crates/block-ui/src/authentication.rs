@@ -76,6 +76,22 @@ impl fmt::Debug for AuthWizard {
 }
 
 impl AuthWizard {
+    #[cfg(debug_assertions)]
+    pub(super) fn scenario(&mut self, name: &str, account: Option<Account>) {
+        self.phase = match name {
+            "auth-waiting" => Phase::Waiting,
+            "auth-verifying" => Phase::Verifying,
+            "auth-complete" => Phase::Complete,
+            "auth-error" => Phase::Failed,
+            _ => Phase::Choose,
+        };
+        if name == "auth-complete" {
+            self.saved_account = account;
+        }
+        if name == "auth-error" {
+            self.error = Some("The authorization request expired. Try signing in again.".into());
+        }
+    }
     pub(super) fn snapshot(&self, cx: &Context<'_, Block>) -> Self {
         let body_scroll = ScrollHandle::new();
         body_scroll.set_offset(self.body_scroll.offset());

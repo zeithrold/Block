@@ -57,7 +57,7 @@ Keep one checkout per host at `~/block-src` and update it with `git fetch`. Neve
 
 ## Pilot Goal
 
-- [ ] **P0 Baseline:**
+- [x] **P0 Baseline:**
   - Snapshot-commit the prototype.
   - Move still-valid product decisions into an English `docs/STATUS.md`.
   - Delete the old ledgers and evidence before staging any Block baseline commit; keep them out of Git history.
@@ -67,7 +67,7 @@ Keep one checkout per host at `~/block-src` and update it with `git fetch`. Neve
   - Make windows fixed-size; on macOS use the native traffic lights.
   - Turn dialogs and drawers into separate GPUI windows.
   - Delete the overlay, inert, paint-scale and accessibility code.
-- [ ] **P2 Comparison tool:** a `--scenario` debug flag, a native screenshot script and a side-by-side board.
+- [x] **P2 Comparison tool:** a `--scenario` debug flag, a native screenshot script and a side-by-side board.
 - [ ] **P3 Inventory:** list every prototype page, state and feature in `STATUS.md` as the completion checklist.
 - [ ] **P4 Pages.** Each page ships with its full real backend:
   - [ ] Home
@@ -89,7 +89,7 @@ Pending required user acceptance, live sign-in or smoke runs must remain pending
 
 ## Needs the user
 
-- [ ] Grant macOS Screen Recording permission to the terminal running Codex.
+- [x] Grant macOS Screen Recording permission to the terminal running Codex.
 - [ ] Enable "Allow public client flows" on the Azure app registration. Device Code sign-in requires it.
 - [ ] Sign in with the genuine Microsoft account in the morning of 2026-10-22, Asia/Taipei, when available; batch host requests and do not start expiring codes ahead of time.
 - [ ] Provide an Authlib provider account if one should be tested live.

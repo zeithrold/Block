@@ -17,9 +17,9 @@ anyhow.workspace = true
 block-launcher.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 sha1.workspace = true
 block-download.workspace = true
 fs2.workspace = true

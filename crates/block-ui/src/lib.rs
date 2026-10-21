@@ -26,6 +26,8 @@ mod platform;
 mod profile_editor;
 #[cfg(test)]
 mod profile_editor_tests;
+#[cfg(debug_assertions)]
+mod scenarios;
 mod scroll_area;
 mod search_selector;
 mod select;
@@ -44,6 +46,8 @@ pub use about::BuildInfo;
 pub use crash_view::CrashView;
 pub use design::{Assets as UiAssets, load_fonts};
 pub use gpui_base::Root as ProductRoot;
+#[cfg(debug_assertions)]
+pub use scenarios::{SCENARIOS, ScenarioOptions};
 
 /// Register the shared unstyled foundation once before opening product windows.
 pub fn initialize(cx: &mut gpui::App) {
@@ -99,6 +103,8 @@ pub struct LaunchOptions {
     pub data_dir: Option<PathBuf>,
     pub system_window_chrome: bool,
     pub build_info: BuildInfo,
+    #[cfg(debug_assertions)]
+    pub scenario: Option<ScenarioOptions>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -370,29 +376,42 @@ impl Block {
         bind_navigation_keys(cx);
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        let engine = options
-            .data_dir
-            .clone()
-            .map_or_else(Engine::new, Engine::with_root);
+        #[cfg(not(debug_assertions))]
+        let scenario_mode = false;
+        #[cfg(debug_assertions)]
+        let scenario_mode = options.scenario.is_some();
+        let engine = if scenario_mode {
+            None
+        } else {
+            Some(
+                options
+                    .data_dir
+                    .clone()
+                    .map_or_else(Engine::new, Engine::with_root),
+            )
+        };
         let (engine, messages, status) = match engine {
-            Ok((engine, messages)) => {
+            Some(Ok((engine, messages))) => {
                 engine.load_catalog();
                 engine.load_versions();
                 (Some(engine), Some(messages), "Welcome to Block".into())
             }
-            Err(error) => (None, None, format!("Engine unavailable: {error:#}")),
+            Some(Err(error)) => (None, None, format!("Engine unavailable: {error:#}")),
+            None => (None, None, "UI scenario fixture".into()),
         };
-        cx.spawn(async move |view, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                if view.update(cx, Self::poll).is_err() {
-                    break;
+        if !scenario_mode {
+            cx.spawn(async move |view, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(100))
+                        .await;
+                    if view.update(cx, Self::poll).is_err() {
+                        break;
+                    }
                 }
-            }
-        })
-        .detach();
+            })
+            .detach();
+        }
         let preferences = engine
             .as_ref()
             .map(|engine| Preferences::load(&engine.root))
@@ -488,6 +507,17 @@ impl Block {
             view.load_recipe(path, options.launch, cx);
         } else if options.launch {
             view.status = "Select a profile and Microsoft account before playing".into();
+        }
+        #[cfg(debug_assertions)]
+        if let Some(scenario) = options.scenario {
+            let owner = cx.entity();
+            window.on_next_frame(move |window, cx| {
+                owner.update(cx, |view, cx| {
+                    if let Err(error) = view.apply_scenario(&scenario, window, cx) {
+                        view.status = format!("Could not prepare UI scenario: {error:#}");
+                    }
+                });
+            });
         }
         view
     }

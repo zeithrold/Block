@@ -821,7 +821,6 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let viewport = window.viewport_size();
         let content = div()
             .id(("surface-content", layer.revision))
             .size_full()
@@ -857,13 +856,15 @@ impl Block {
                 .child(self.button("confirm-separate", "Enable separated profiles", UiAction::SeparateProfiles, cx))
                 .child(self.button("cancel-separate", "Keep bundled mode", UiAction::ConfirmSeparate(false), cx)),
             Surface::GamesHelp => content.child(self.render_games_help(cx)),
-            Surface::GuideInformation(tab) => content.p_0().child(div().h((viewport.height - px(160.)).max(px(220.))).w_full().min_h_0()
+            Surface::GuideInformation(tab) => content.p_0().child(div().h_full().w_full().min_h_0()
                 .child(if *tab == Tab::Settings { self.render_settings(window, cx).into_any_element() } else { self.render_about(window, cx).into_any_element() })),
             Surface::OnboardingSection(page) => content.p_0().gap_0().overflow_hidden().child(self.render_onboarding_section(*page, window, cx)),
             Surface::Auth => content.p_0().child(self.render_auth_wizard(window, cx)),
-            Surface::WizardSection(_) => content.p_0().child(self.render_game_wizard_transition_body(window, cx))
-                .child(self.button("section-done", "Done", UiAction::WizardPage(None), cx))
-                .child(self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)),
+            Surface::WizardSection(_) => content.p_0().gap_0()
+                .child(div().flex_1().min_h_0().child(self.render_game_wizard_transition_body(window, cx)))
+                .child(super::patterns::management_footer(window.viewport_size(), self.palette).justify_end()
+                    .child(self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx).w_auto())
+                    .child(self.button("section-done", "Done", UiAction::WizardPage(None), cx).w_auto())),
             Surface::Select(state) => content.p_1().gap_0().rounded_lg().child(self.select_options(state, cx)),
         };
         if !matches!(
