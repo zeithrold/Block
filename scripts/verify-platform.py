@@ -185,7 +185,10 @@ def refresh_source_mtimes(root, source, evidence_dir):
                 or root not in path.resolve().parents):
             result["skipped"] += 1
             continue
-        os.utime(path, None, follow_symlinks=False)
+        # Windows Python does not implement utime(follow_symlinks=False).
+        # The guards above already exclude links and paths outside this checkout.
+        options = {"follow_symlinks": False} if os.utime in os.supports_follow_symlinks else {}
+        os.utime(path, None, **options)
         result["count"] += 1
     refreshed = source_metadata(root, evidence_dir)
     result.update(completed_at=utc_now(), after_manifest_sha256=refreshed["manifest_sha256"])
