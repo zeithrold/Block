@@ -12,7 +12,8 @@ use std::{
 
 use anyhow::{Context as _, ensure};
 use block_auth::{
-    Account, AccountRef, AuthenticatedSession, MicrosoftAuth, PreparedMicrosoftSignIn,
+    Account, AccountProvider, AccountRef, AuthenticatedSession, MicrosoftAuth,
+    PreparedMicrosoftSignIn,
 };
 use block_launcher::{
     CancellationToken, Store,
@@ -549,20 +550,51 @@ impl Engine {
         });
     }
 
+    pub(super) fn save_offline_account(&self, account: Account) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let result = async {
+                ensure!(
+                    account == offline_account(&account.player_name)?,
+                    "The offline identity is invalid."
+                );
+                let (accounts, _) = merge_signed_in_account(load_accounts(&root)?, &account)?;
+                save_accounts(&root, &accounts)?;
+                let _ = sender
+                    .unscoped()
+                    .send(Message::Accounts(Ok(accounts)))
+                    .await;
+                let name = account.player_name.clone();
+                let _ = sender.send(Message::SignedIn(account)).await;
+                Ok(format!("Offline identity {name} saved for local play"))
+            }
+            .await;
+            finish(&sender, result).await;
+        });
+    }
+
     pub(super) fn sign_out(&self, account: Account) {
         let root = self.root.clone();
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
             let result = async {
                 // Use the account's public registration ID, including after a build configuration change.
-                MicrosoftAuth::new(&account.client_id)?
-                    .sign_out(&account)
-                    .await?;
+                if account.provider == AccountProvider::Microsoft {
+                    MicrosoftAuth::new(&account.client_id)?
+                        .sign_out(&account)
+                        .await?;
+                }
                 let mut accounts = load_accounts(&root)?;
                 accounts.retain(|saved| saved.reference != account.reference);
                 save_accounts(&root, &accounts)?;
                 let _ = sender.send(Message::Accounts(Ok(accounts))).await;
-                Ok("Signed out · saved credentials removed".to_owned())
+                Ok(if account.provider == AccountProvider::Offline {
+                    "Offline identity removed · game files kept"
+                } else {
+                    "Signed out · saved credentials removed"
+                }
+                .to_owned())
             }
             .await;
             finish(&sender, result).await;
@@ -585,10 +617,28 @@ impl Engine {
                         "Preparing · checking account authorization".into(),
                     ))
                     .await;
-                let session = auth()?.refresh(&account, &cancel).await?;
-                let provider = OnlineSession {
-                    game: game_session(&session),
-                    expires_at: session.expires_at,
+                let provider = match account.provider {
+                    AccountProvider::Microsoft => {
+                        let session = auth()?.refresh(&account, &cancel).await?;
+                        OnlineSession {
+                            game: game_session(&session),
+                            expires_at: session.expires_at,
+                        }
+                    }
+                    AccountProvider::Offline => {
+                        ensure!(
+                            account == offline_account(&account.player_name)?,
+                            "The saved offline identity is invalid. Remove it and add it again."
+                        );
+                        OnlineSession {
+                            game: block_launcher::session::OfflineSession::Offline {
+                                username: account.player_name.clone(),
+                            }
+                            .session()?,
+                            // This bounds the private supervisor bootstrap, not account validity.
+                            expires_at: SystemTime::now() + Duration::from_secs(24 * 60 * 60),
+                        }
+                    }
                 };
                 ensure!(!cancel.is_cancelled(), "Launch was cancelled.");
                 let game = provider.session()?;
@@ -917,6 +967,22 @@ fn load_accounts(root: &Path) -> anyhow::Result<Vec<Account>> {
     }
 }
 
+pub(super) fn offline_account(username: &str) -> anyhow::Result<Account> {
+    let game = block_launcher::session::OfflineSession::Offline {
+        username: username.to_owned(),
+    }
+    .session()?;
+    Ok(Account {
+        reference: AccountRef {
+            player_id: game.uuid.parse()?,
+        },
+        provider: AccountProvider::Offline,
+        player_name: game.username,
+        client_id: String::new(),
+        credential_ref: String::new(),
+    })
+}
+
 fn merge_signed_in_account(
     mut accounts: Vec<Account>,
     account: &Account,
@@ -925,12 +991,15 @@ fn merge_signed_in_account(
         !accounts
             .iter()
             .any(|saved| saved.reference == account.reference
-                && saved.credential_ref != account.credential_ref),
-        "This player already has a saved account for a different Microsoft application registration. Sign out that account before signing in again."
+                && (saved.provider != account.provider
+                    || saved.credential_ref != account.credential_ref)),
+        "This player already has a saved account for a different provider or Microsoft application registration. Remove that account before adding it again."
     );
-    let existed = accounts
-        .iter()
-        .any(|saved| saved.credential_ref == account.credential_ref);
+    let existed = accounts.iter().any(|saved| {
+        saved.reference == account.reference
+            && saved.provider == account.provider
+            && saved.credential_ref == account.credential_ref
+    });
     accounts.retain(|saved| saved.reference != account.reference);
     accounts.push(account.clone());
     Ok((accounts, existed))
@@ -1008,6 +1077,95 @@ fn readable_log(line: &str) -> Option<String> {
 mod tests {
     use block_launcher::session::{OfflineSession, SessionProvider as _};
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn offline_identity_matches_java_and_rejects_invalid_or_colliding_metadata()
+    -> anyhow::Result<()> {
+        let steve = super::offline_account("Steve")?;
+        assert_eq!(
+            steve.reference.player_id.simple().to_string(),
+            "5627dd98e6be3c21b8a8e92344183641"
+        );
+        assert_ne!(steve.reference, super::offline_account("steve")?.reference);
+        assert!(steve.client_id.is_empty() && steve.credential_ref.is_empty());
+        for name in [
+            "",
+            "bad name",
+            "name-with-dash",
+            "中文",
+            "abcdefghijklmnopq",
+            "line\n",
+        ] {
+            assert!(super::offline_account(name).is_err(), "{name:?}");
+        }
+        let alex = super::offline_account("Alex_123")?;
+        let (accounts, existed) = super::merge_signed_in_account(vec![steve.clone()], &alex)?;
+        assert!(!existed);
+        let (accounts, existed) = super::merge_signed_in_account(accounts, &steve)?;
+        assert!(existed);
+        assert_eq!(accounts.len(), 2);
+        let mut microsoft = steve.clone();
+        microsoft.provider = block_auth::AccountProvider::Microsoft;
+        microsoft.credential_ref = "synthetic-keychain-reference".into();
+        assert!(super::merge_signed_in_account(vec![microsoft], &steve).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn offline_identity_persists_reopens_and_removes_without_a_credential_store()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()?,
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(32);
+        let engine = super::Engine {
+            runtime: runtime.clone(),
+            sender: sender.into(),
+            root: root.path().to_owned(),
+            prepared_sign_in: Default::default(),
+        };
+        let account = super::offline_account("Local_Player")?;
+        let finish = |receiver: &mut tokio::sync::mpsc::Receiver<super::Message>| {
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while let Some(message) = receiver.recv().await {
+                        if let super::Message::Finished(result) = message {
+                            return result.map_err(anyhow::Error::msg);
+                        }
+                    }
+                    anyhow::bail!("The account operation ended without completion")
+                })
+                .await?
+            })
+        };
+        engine.save_offline_account(account.clone());
+        finish(&mut receiver)?;
+        assert_eq!(super::load_accounts(root.path())?, vec![account.clone()]);
+        engine.save_offline_account(account.clone());
+        finish(&mut receiver)?;
+        assert_eq!(super::load_accounts(root.path())?.len(), 1);
+        let original = std::fs::read(root.path().join("accounts.json"))?;
+        let mut forged = account.clone();
+        forged.client_id = "must-not-be-treated-as-microsoft".into();
+        engine.save_offline_account(forged);
+        assert!(finish(&mut receiver).is_err());
+        assert_eq!(std::fs::read(root.path().join("accounts.json"))?, original);
+        engine.sign_out(account.clone());
+        finish(&mut receiver)?;
+        assert!(super::load_accounts(root.path())?.is_empty());
+        std::fs::write(root.path().join("accounts.json"), b"corrupt")?;
+        engine.save_offline_account(account);
+        assert!(finish(&mut receiver).is_err());
+        assert_eq!(
+            std::fs::read(root.path().join("accounts.json"))?,
+            b"corrupt"
+        );
+        Ok(())
+    }
 
     #[test]
     fn observer_restores_an_old_active_session_after_more_than_128_finished_runs()

@@ -576,9 +576,7 @@ impl Block {
             .gap_6()
             .text_center();
         if let Some(account) = account {
-            let provider = match account.provider {
-                block_auth::AccountProvider::Microsoft => "Microsoft Account",
-            };
+            let provider = account.provider.label();
             let palette = self.palette;
 
             identity = identity
@@ -920,7 +918,7 @@ impl Block {
                 .child(self.button("confirm-delete", "Delete profile", UiAction::ConfirmDelete, cx)),
             Surface::RemoveAccount(id) => content
                 .child(div().text_xl().child("Remove this account?"))
-                .child(note("Saved credentials are removed from this device. Your games and worlds stay on disk. Sign in again to use this account."))
+                .child(note("This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it."))
                 .child(self.button("confirm-remove-account", "Remove account", UiAction::SignOut(id.clone()), cx)),
             Surface::SeparateProfiles => content
                 .child(div().text_xl().child("Enable separated profiles?"))

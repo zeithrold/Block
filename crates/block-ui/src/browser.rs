@@ -310,7 +310,7 @@ impl Block {
                         id,
                         title: account.player_name.clone(),
                         icon: RowIcon::Account,
-                        badges: vec![("Microsoft Account".into(), BadgeVariant::Secondary)],
+                        badges: vec![(account.provider.label().into(), BadgeVariant::Secondary)],
                     }
                 })
                 .collect(),
@@ -1044,10 +1044,12 @@ impl Block {
             {
                 let id = account_id(account);
                 let current = self.selected_account.as_ref() == Some(&id);
-                body = body.child(self.detail_identity(RowIcon::Account, &account.player_name, vec![("Microsoft Account".into(), BadgeVariant::Secondary)], current))
-                    .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", "Microsoft Account".into()), ("Authentication", "Ownership rechecked at launch".into()), ("Environment", "Minecraft: Java Edition".into())], narrow))
-                    .child(div().border_t_1().border_color(rgb(self.palette.border)).pt_5().flex().flex_col().gap_2().child(note("A Microsoft identity for Minecraft: Java Edition."))
-                        .child(note("This account was verified when it was saved. Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store.")));
+                let offline = account.provider == block_auth::AccountProvider::Offline;
+                body = body.child(self.detail_identity(RowIcon::Account, &account.player_name, vec![(account.provider.label().into(), BadgeVariant::Secondary)], current))
+                    .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", account.provider.label().into()), ("Authentication", if offline { "Local identity; no online authorization" } else { "Ownership rechecked at launch" }.into()), ("Environment", "Minecraft: Java Edition".into())], narrow))
+                    .child(div().border_t_1().border_color(rgb(self.palette.border)).pt_5().flex().flex_col().gap_2()
+                        .child(note(if offline { "A local player identity for offline play." } else { "A Microsoft identity for Minecraft: Java Edition." }))
+                        .child(note(if offline { "The UUID is derived from the exact player name. No credentials are stored. This identity cannot access authenticated online services." } else { "Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store." })));
                 footer = footer
                     .child(self.browser_control(
                         format!("account-logout-{id}"),

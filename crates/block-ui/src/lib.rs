@@ -211,6 +211,7 @@ enum UiAction {
     AuthNext,
     AuthBack,
     AuthMethod(authentication::Method),
+    AuthProvider(block_auth::AccountProvider),
     CopyDeviceCode,
     AuthCancel,
     AuthFinish,
@@ -511,7 +512,7 @@ impl Block {
         if let Some(path) = options.recipe {
             view.load_recipe(path, options.launch, cx);
         } else if options.launch {
-            view.status = "Select a profile and Microsoft account before playing".into();
+            view.status = "Select a profile and account before playing".into();
         }
         #[cfg(debug_assertions)]
         if let Some(scenario) = options.scenario {
@@ -1491,6 +1492,7 @@ impl Block {
             UiAction::AuthCancel => self.cancel_auth(window, cx),
             UiAction::AuthFinish => self.finish_auth(window, cx),
             UiAction::AuthNext => self.auth_next(cx),
+            UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
             UiAction::AuthBack => self.auth_back(cx),
             UiAction::AuthMethod(method) => self.change_auth_method(method, window, cx),
             UiAction::CopyDeviceCode => self.copy_device_code(cx),
@@ -1772,7 +1774,7 @@ impl Block {
             {
                 "This profile's default account is unavailable. Choose an account explicitly or sign in again.".into()
             } else {
-                "Sign in with Microsoft and select an account before playing".into()
+                "Add and select an account before playing".into()
             };
             return;
         };
@@ -2922,7 +2924,9 @@ mod tests {
         });
         assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Accounts);
         assert!(!view.read_with(cx, |view, _| view.busy));
-        assert!(view.read_with(cx, |view, _| view.status.contains("Sign in with Microsoft")));
+        assert!(view.read_with(cx, |view, _| {
+            view.status.contains("Add and select an account")
+        }));
     }
 
     #[test]

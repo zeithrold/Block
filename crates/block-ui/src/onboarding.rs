@@ -366,7 +366,7 @@ impl Block {
         let mut body = div().flex().flex_col().gap_6().child(self.setup_heading(
             "02 / YOUR ACCOUNT",
             "Who’s playing?",
-            "Use the Microsoft account you use for Minecraft.",
+            "Choose the account you want to play with.",
         ));
         if let Some(account) = selected {
             body = body.child(
@@ -374,15 +374,17 @@ impl Block {
                     .child(div().flex().items_center().gap_3()
                         .child(components::avatar_fallback(&account.player_name, self.palette, 40., AvatarState::Unavailable))
                         .child(div().flex_1().min_w_0().child(div().text_lg().child(account.player_name.clone()))
-                            .child(self.setup_caption("Microsoft · Minecraft: Java Edition"))))
+                            .child(self.setup_caption(account.provider.label()))))
                     .child(components::badge("Account saved", self.palette, BadgeVariant::Success))
-                    .child(self.setup_caption("Authorization has saved this account to your device. Leaving setup keeps the saved account.")),
+                    .child(self.setup_caption("This account is saved on your device. Leaving setup keeps the saved account.")),
             );
         } else {
             body = body.child(
                 components::card(self.palette)
                     .child(microsoft_mark())
-                    .children(self.busy.then(|| components::avatar_fallback("", self.palette, 32., AvatarState::Loading)))
+                    .children(self.busy.then(|| {
+                        components::avatar_fallback("", self.palette, 32., AvatarState::Loading)
+                    }))
                     .child(
                         div()
                             .font_weight(gpui::FontWeight::MEDIUM)
@@ -393,9 +395,9 @@ impl Block {
                             }),
                     )
                     .child(self.setup_caption(if self.busy {
-                        "Complete Microsoft authorization in your browser. The account is saved when authorization succeeds."
+                        "Complete account setup in its window. Only Finish saves the account."
                     } else {
-                        "Sign in securely in your browser."
+                        "Sign in with Microsoft or add a local offline identity."
                     }))
                     .children(self.busy.then(|| self.setup_caption(self.status.clone())))
                     .child(if self.busy {

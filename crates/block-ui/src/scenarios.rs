@@ -36,8 +36,12 @@ pub const SCENARIOS: &[&str] = &[
     "wizard-review",
     "accounts-list",
     "accounts-detail",
+    "accounts-offline-detail",
     "auth-choose",
     "auth-information",
+    "auth-offline-information",
+    "auth-offline-error",
+    "auth-offline-complete",
     "auth-device-preparing",
     "auth-device-waiting",
     "auth-waiting",
@@ -114,6 +118,7 @@ impl Block {
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
+        self.accounts[2] = crate::engine::offline_account("Pixel")?;
         self.selected_profile = Some("vanilla".into());
         self.selected_instance = Some("vanilla".into());
         self.selected_account = self.accounts.first().map(account_id);
@@ -230,10 +235,21 @@ impl Block {
             {
                 self.handle(UiAction::Inspect(id), window, cx);
             }
+            if name == "accounts-offline-detail" {
+                self.handle(UiAction::Inspect(account_id(&self.accounts[2])), window, cx);
+            }
             if name.starts_with("auth-") {
                 self.open_auth_wizard(window, cx);
                 if let Some(auth) = &mut self.shell.auth {
-                    auth.scenario(name, self.accounts.first().cloned());
+                    auth.scenario(
+                        name,
+                        if name.starts_with("auth-offline-") {
+                            self.accounts.get(2).cloned()
+                        } else {
+                            self.accounts.first().cloned()
+                        },
+                        cx,
+                    );
                 }
             }
         }

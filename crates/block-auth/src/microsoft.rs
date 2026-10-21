@@ -517,6 +517,9 @@ impl MicrosoftAuth {
     /// # Errors
     /// Returns a secure-store error if deletion cannot be confirmed.
     pub async fn sign_out(&self, account: &Account) -> Result<()> {
+        if account.provider != AccountProvider::Microsoft {
+            return Err(AuthError::IdentityChanged);
+        }
         if account.credential_ref != credential_ref(&account.client_id, account.reference.player_id)
         {
             return Err(AuthError::CredentialsMissing);
@@ -532,6 +535,9 @@ impl MicrosoftAuth {
     }
 
     fn validate_account(&self, account: &Account) -> Result<()> {
+        if account.provider != AccountProvider::Microsoft {
+            return Err(AuthError::IdentityChanged);
+        }
         if account.client_id != self.client_id {
             return Err(AuthError::ClientIdChanged);
         }
@@ -832,6 +838,29 @@ impl MinecraftProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn offline_metadata_cannot_enter_microsoft_refresh_or_credential_deletion() -> Result<()>
+    {
+        let auth = MicrosoftAuth::new("00000000-0000-4000-8000-000000000001")?;
+        let id = Uuid::nil();
+        let account = Account {
+            reference: AccountRef { player_id: id },
+            provider: AccountProvider::Offline,
+            player_name: "Local_Player".into(),
+            client_id: auth.client_id.clone(),
+            credential_ref: credential_ref(&auth.client_id, id),
+        };
+        assert!(matches!(
+            auth.refresh(&account, &CancellationToken::new()).await,
+            Err(AuthError::IdentityChanged)
+        ));
+        assert_eq!(
+            auth.sign_out(&account).await,
+            Err(AuthError::IdentityChanged)
+        );
+        Ok(())
+    }
 
     #[test]
     fn errors_never_echo_provider_descriptions_or_unrecognized_codes() {

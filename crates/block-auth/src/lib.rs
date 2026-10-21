@@ -24,14 +24,27 @@ pub struct AccountRef {
     pub player_id: Uuid,
 }
 
-/// Authentication authority, intentionally limited to the implemented provider.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// Explicit account authority; offline identities grant no online access.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountProvider {
+    #[default]
     Microsoft,
+    Offline,
 }
 
-/// Safe-to-persist player metadata. Ownership is rechecked for every new session.
+impl AccountProvider {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Microsoft => "Microsoft Account",
+            Self::Offline => "Offline Mode",
+        }
+    }
+}
+
+/// Safe-to-persist metadata. Microsoft ownership is rechecked for each session.
+/// Offline identities carry empty client and credential references.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Account {
     pub reference: AccountRef,

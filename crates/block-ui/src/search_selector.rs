@@ -334,7 +334,7 @@ impl Block {
                     })
                     .child(note(if query.is_empty() {
                         if accounts {
-                            "Sign in with Microsoft to add an account."
+                            "Add an account to choose a player identity."
                         } else {
                             "Create a game to start playing."
                         }
@@ -450,7 +450,12 @@ impl Block {
                 .iter()
                 .filter_map(|account| {
                     let id = account_id(account);
-                    let description = "Microsoft · Java Edition";
+                    let description = match account.provider {
+                        block_auth::AccountProvider::Microsoft => "Microsoft · Java Edition",
+                        block_auth::AccountProvider::Offline => {
+                            "Local play · No online authorization"
+                        }
+                    };
                     format!("{} {description}", account.player_name)
                         .to_lowercase()
                         .contains(query)
@@ -465,7 +470,7 @@ impl Block {
                             description: description.into(),
                             enabled: !self.busy,
                             appearance: None,
-                            badges: vec!["Microsoft Account".into()],
+                            badges: vec![account.provider.label().into()],
                         })
                 })
                 .collect()
