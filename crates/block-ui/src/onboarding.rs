@@ -779,7 +779,6 @@ impl Block {
             && !version.trim().is_empty()
             && version.len() <= 80
             && !version.chars().any(char::is_control)
-            && (!form.is_neoforge() || version.trim() == "1.20.6")
             && self.wizard_loader_issue(cx).is_none()
             && (directory.trim().is_empty() || std::path::Path::new(directory.trim()).is_absolute())
             && self
@@ -1045,10 +1044,7 @@ impl Block {
             {
                 WizardField::GameName
             }
-            Some(Form::Instance(form))
-                if form.version.read(cx).value().trim().is_empty()
-                    || (form.is_neoforge() && form.version.read(cx).value().trim() != "1.20.6") =>
-            {
+            Some(Form::Instance(form)) if form.version.read(cx).value().trim().is_empty() => {
                 WizardField::Version
             }
             _ if self.wizard_loader_issue(cx).is_some() => WizardField::Loader,

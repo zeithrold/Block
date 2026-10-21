@@ -71,6 +71,7 @@ def main():
                             "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
                             "download-files", "wizard-version-picker", "wizard-loader-picker",
                             "wizard-fabric-picker", "wizard-quilt-picker", "wizard-loader-loading",
+                            "wizard-neoforge-picker",
                             "wizard-loader-error", "wizard-loader-empty",
                             "wizard-configuration", "welcome-version-picker", "remove-confirmation",
                             "remove-account-confirmation", "remove-provider-confirmation", "separate-confirmation", "games-help",

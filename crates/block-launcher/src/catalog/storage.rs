@@ -348,10 +348,9 @@ impl Catalog {
         );
         if let Some((kind, version)) = &loader {
             match kind {
-                LoaderKind::NeoForge => ensure!(
-                    minecraft_version == "1.20.6" && version == "20.6.144",
-                    "NeoForge 20.6.144 requires Minecraft 1.20.6"
-                ),
+                LoaderKind::NeoForge => {
+                    crate::install::neoforge::validate_version(&minecraft_version, version)?
+                }
                 LoaderKind::Fabric | LoaderKind::Quilt => {
                     crate::install::fabric::validate_version(version)?
                 }

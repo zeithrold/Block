@@ -266,6 +266,7 @@ struct InstanceForm {
 }
 
 impl InstanceForm {
+    #[cfg(test)]
     fn is_neoforge(&self) -> bool {
         self.loader == block_launcher::catalog::LoaderKind::NeoForge
     }
@@ -1798,8 +1799,6 @@ impl Block {
             Some("Choose a Minecraft version")
         } else if version.len() > 80 || version.chars().any(char::is_control) {
             Some("Use a Minecraft version of at most 80 UTF-8 bytes without control characters")
-        } else if form.is_neoforge() && version.trim() != "1.20.6" {
-            Some("NeoForge 20.6.144 requires Minecraft 1.20.6")
         } else if self.wizard_loader_issue(cx).is_some() {
             Some("Choose a compatible loader build in Mod loader before continuing")
         } else if !directory.trim().is_empty() && !PathBuf::from(directory.trim()).is_absolute() {
@@ -2836,7 +2835,7 @@ mod tests {
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
         click_selector(cx, "wizard-loader-neoforge");
-        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6")));
+        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.1" && form.loader_version.is_none())));
         assert!(!view.read_with(cx, |view, _| view.busy));
     }
 

@@ -313,12 +313,15 @@ impl Engine {
             let result = async {
                 let options = Preferences::load(&root)?.downloads;
                 let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
-                block_launcher::install::fabric::versions(
-                    &kind,
-                    &minecraft,
-                    &ResolveContext { store, cancel },
-                )
-                .await
+                let context = ResolveContext { store, cancel };
+                match kind {
+                    LoaderKind::NeoForge => {
+                        block_launcher::install::neoforge::versions(&minecraft, &context).await
+                    }
+                    _ => {
+                        block_launcher::install::fabric::versions(&kind, &minecraft, &context).await
+                    }
+                }
             }
             .await
             .map_err(|error| format!("{error:#}"));
@@ -1983,15 +1986,16 @@ mod tests {
             pending_authlib: Default::default(),
             prepared_authlib: Default::default(),
         };
-        for (kind, version) in [
-            (super::LoaderKind::Fabric, "0.16.14"),
-            (super::LoaderKind::Quilt, "0.29.2"),
+        for (kind, version, minecraft) in [
+            (super::LoaderKind::Fabric, "0.16.14", "1.20.6"),
+            (super::LoaderKind::Quilt, "0.29.2", "1.20.6"),
+            (super::LoaderKind::NeoForge, "21.1.219", "1.21.1"),
         ] {
             let cancel = super::CancellationToken::new();
             cancel.cancel();
             engine.create_instance_with_profile(
                 kind.name().into(),
-                "1.20.6".into(),
+                minecraft.into(),
                 None,
                 Some((kind.clone(), version.into())),
                 super::GameDefaults::default(),
@@ -2018,7 +2022,7 @@ mod tests {
             })??;
             let state = super::Catalog::open(root.path())?.snapshot()?;
             let (instance, saved, target) = state.selection(&profile)?;
-            assert_eq!(instance.minecraft_version, "1.20.6");
+            assert_eq!(instance.minecraft_version, minecraft);
             assert_eq!(
                 saved.target_id,
                 format!("{}-{version}", kind.name().to_lowercase())

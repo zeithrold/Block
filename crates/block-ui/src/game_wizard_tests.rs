@@ -226,8 +226,11 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
     click(cx, "wizard-component-loader");
     assert!(crate::test_support::control_bounds(cx, "wizard-loader-picker").is_some());
     click(cx, "wizard-loader-neoforge");
-    view.read_with(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
+    view.update(cx, |view, cx| {
+        let request = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = request { view.receive_loader_versions(request, Ok(vec![loader_build("21.1.219", true)]), cx); }
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.21.1"));
+        cx.notify();
     });
     view.update(cx, |view, cx| {
         if let Some(search) = &view.shell.wizard.loader_search {
@@ -236,15 +239,15 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(crate::test_support::control_bounds(cx, "wizard-loader-build-20.6.144").is_none());
+    assert!(crate::test_support::control_bounds(cx, "wizard-loader-build-21.1.219").is_none());
     view.update(cx, |view, cx| {
         if let Some(search) = &view.shell.wizard.loader_search {
-            search.update(cx, |field, cx| field.set_value("20.6", cx));
+            search.update(cx, |field, cx| field.set_value("21.1", cx));
         }
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(crate::test_support::control_bounds(cx, "wizard-loader-build-20.6.144").is_some());
+    assert!(crate::test_support::control_bounds(cx, "wizard-loader-build-21.1.219").is_some());
     click(cx, "wizard-loader-fabric");
     assert!(view.read_with(
         cx,
@@ -525,9 +528,7 @@ fn exact_version_metadata_and_filtered_result_count_never_guess_a_release_type(
 }
 
 #[gpui::test]
-fn incompatible_version_notice_is_draft_only_and_cancel_restores_the_loader(
-    cx: &mut TestAppContext,
-) {
+fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -545,7 +546,7 @@ fn incompatible_version_notice_is_draft_only_and_cancel_restores_the_loader(
     cx.simulate_resize(size(px(960.), px(600.)));
     cx.run_until_parked();
 
-    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.is_neoforge() && form.version.read(cx).value() == "1.21.1")); });
+    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.loader_version.is_none() && form.version.read(cx).value() == "1.21.1")); });
     click(cx, "wizard-back");
     view.update(cx, |view, cx| {
         assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
@@ -554,6 +555,8 @@ fn incompatible_version_notice_is_draft_only_and_cancel_restores_the_loader(
         view.set_wizard_version("1.20.6".into(), cx);
         assert!(view.shell.wizard.version_notice.is_none(), "the unchanged compatible version cannot announce a removal");
         view.set_wizard_version("1.21.1".into(), cx);
+        let request = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = request { view.receive_loader_versions(request, Ok(vec![loader_build("21.1.219", true)]), cx); }
         view.advance_game_wizard(cx);
         assert!(view.shell.wizard.version_notice.is_some());
         assert!(view.shell.wizard.page.is_none());

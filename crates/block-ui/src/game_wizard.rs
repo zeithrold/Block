@@ -493,9 +493,7 @@ impl Block {
         {
             if form.name.read(cx).value().trim().is_empty() {
                 field = Some(WizardField::GameName);
-            } else if form.version.read(cx).value().trim().is_empty()
-                || (form.is_neoforge() && form.version.read(cx).value() != "1.20.6")
-            {
+            } else if form.version.read(cx).value().trim().is_empty() {
                 field = Some(WizardField::Version);
             } else if self.wizard_loader_issue(cx).is_some() {
                 field = Some(WizardField::Loader);
@@ -806,11 +804,7 @@ impl Block {
             return;
         }
         form.loader = kind.clone();
-        form.loader_version = (kind == LoaderKind::NeoForge).then(|| "20.6.144".into());
-        if kind == LoaderKind::NeoForge {
-            form.version
-                .update(cx, |field, cx| field.set_value("1.20.6", cx));
-        }
+        form.loader_version = None;
         self.shell.wizard.loader_catalog = None;
         self.shell.wizard.loader_request = None;
         self.shell.wizard.version_notice = None;
@@ -837,20 +831,17 @@ impl Block {
         let Some(Form::Instance(form)) = &mut self.form else {
             return;
         };
-        let valid = if form.is_neoforge() {
-            version == "20.6.144" && form.version.read(cx).value() == "1.20.6"
-        } else {
-            self.shell
-                .wizard
-                .loader_catalog
-                .as_ref()
-                .is_some_and(|catalog| {
-                    catalog.kind == form.loader
-                        && catalog.minecraft == form.version.read(cx).value()
-                        && matches!(catalog.load, CollectionLoad::Ready)
-                        && catalog.builds.iter().any(|build| build.version == version)
-                })
-        };
+        let valid = self
+            .shell
+            .wizard
+            .loader_catalog
+            .as_ref()
+            .is_some_and(|catalog| {
+                catalog.kind == form.loader
+                    && catalog.minecraft == form.version.read(cx).value()
+                    && matches!(catalog.load, CollectionLoad::Ready)
+                    && catalog.builds.iter().any(|build| build.version == version)
+            });
         if valid {
             form.loader_version = Some(version);
             self.shell.wizard.clear_error();
@@ -863,7 +854,7 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return;
         };
-        if !matches!(form.loader, LoaderKind::Fabric | LoaderKind::Quilt) {
+        if form.loader == LoaderKind::Vanilla {
             return;
         }
         let minecraft = form.version.read(cx).value();
@@ -935,17 +926,19 @@ impl Block {
         self.shell.wizard.loader_request = None;
         match result {
             Ok(mut builds) => {
-                builds.sort_by(|left, right| {
-                    match (
-                        semver::Version::parse(&left.version),
-                        semver::Version::parse(&right.version),
-                    ) {
-                        (Ok(left), Ok(right)) => right.cmp(&left),
-                        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
-                        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
-                        (Err(_), Err(_)) => right.version.cmp(&left.version),
-                    }
-                });
+                if form.loader != LoaderKind::NeoForge {
+                    builds.sort_by(|left, right| {
+                        match (
+                            semver::Version::parse(&left.version),
+                            semver::Version::parse(&right.version),
+                        ) {
+                            (Ok(left), Ok(right)) => right.cmp(&left),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => right.version.cmp(&left.version),
+                        }
+                    });
+                }
                 if let Some(selected) = &form.loader_version {
                     if !builds.iter().any(|build| build.version == *selected) {
                         form.loader_version = None;
@@ -974,13 +967,6 @@ impl Block {
         };
         match form.loader {
             LoaderKind::Vanilla => None,
-            LoaderKind::NeoForge
-                if form.version.read(cx).value() == "1.20.6"
-                    && form.loader_version.as_deref() == Some("20.6.144") =>
-            {
-                None
-            }
-            LoaderKind::NeoForge => Some("NeoForge 20.6.144 requires Minecraft 1.20.6.".into()),
             _ => {
                 let Some(catalog) = self.shell.wizard.loader_catalog.as_ref() else {
                     return Some(
@@ -1012,24 +998,17 @@ impl Block {
             version.trim().to_owned()
         };
         let changed = form.version.read(cx).value() != version;
-        let cleared = form.is_neoforge() && version != "1.20.6";
         if changed {
             form.version
                 .update(cx, |field, cx| field.set_value(&version, cx));
         }
-        if cleared {
-            form.loader = LoaderKind::Vanilla;
-            form.loader_version = None;
-            self.shell.wizard.version_notice = Some(format!(
-                "NeoForge 20.6.144 was removed from this draft because it requires Minecraft 1.20.6. Minecraft {version} will use Vanilla."
-            ));
-        } else if changed {
+        if changed {
             self.shell.wizard.version_notice = None;
         }
         if changed {
             self.shell.wizard.loader_catalog = None;
             self.shell.wizard.loader_request = None;
-            if matches!(form.loader, LoaderKind::Fabric | LoaderKind::Quilt) {
+            if form.loader != LoaderKind::Vanilla {
                 form.loader_version = None;
                 self.shell.wizard.version_notice = Some("Minecraft changed. Choose a compatible build from the refreshed loader catalog.".into());
             }
@@ -1078,12 +1057,6 @@ impl Block {
                 WizardField::Version,
                 "Choose a Minecraft version from the list.".into(),
             ));
-        }
-        if matches!(page, WizardPage::Version | WizardPage::Loader)
-            && form.is_neoforge()
-            && version != "1.20.6"
-        {
-            return Some((WizardField::Version, "The native NeoForge installer supports Minecraft 1.20.6. Choose that version or turn off NeoForge.".into()));
         }
         if matches!(page, WizardPage::Version | WizardPage::Loader)
             && let Some(issue) = self.wizard_loader_issue(cx)
@@ -2200,7 +2173,7 @@ impl Block {
                     )),
             )
             .child(note("Open a tile to configure it. Minecraft version and Mod loader become fixed when this Instance is created."))
-            .children(self.shell.wizard.version_notice.as_ref().filter(|_| !form.is_neoforge()).map(|notice| self.wizard_version_notice(notice)))
+            .children(self.shell.wizard.version_notice.as_ref().map(|notice| self.wizard_version_notice(notice)))
             .children((!self.shell.wizard.separated).then(|| self.wizard_profile_options_trigger("Appearance & launch settings", cx)))
             .children((!self.shell.wizard.separated).then(|| {
                 let content = self.wizard_profile(window, cx, false).into_any_element();
@@ -2464,10 +2437,10 @@ impl Block {
             .child(self.wizard_version_list(form, versions, cx))
             .child(components::field_with("Selected version ID", &form.version, self.palette, FieldOptions {
                 required: true,
-                hint: Some("Enter an exact official version ID. Installation verifies the catalog before downloading. NeoForge requires Minecraft 1.20.6.".into()), ..FieldOptions::default()
+                hint: Some("Enter an exact official version ID. Installation verifies the catalog before downloading. Loader builds are filtered for this version.".into()), ..FieldOptions::default()
             }))
             .child(self.wizard_version_metadata(form, cx))
-            .children(self.shell.wizard.version_notice.as_ref().filter(|_| !form.is_neoforge()).map(|notice| self.wizard_version_notice(notice)))
+            .children(self.shell.wizard.version_notice.as_ref().map(|notice| self.wizard_version_notice(notice)))
     }
 
     fn wizard_version_catalog_status(&self, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
@@ -2788,23 +2761,11 @@ impl Block {
             .loader_catalog
             .as_ref()
             .filter(|catalog| catalog.kind == form.loader && catalog.minecraft == minecraft);
-        let pinned = [LoaderVersion {
-            version: "20.6.144".into(),
-            stable: true,
-        }];
-        let builds = if form.is_neoforge() {
-            pinned.as_slice()
-        } else {
-            catalog.map_or(&[][..], |catalog| catalog.builds.as_slice())
-        };
-        let load = if form.is_neoforge() {
-            CollectionLoad::Ready
-        } else {
-            catalog.map_or_else(
-                || CollectionLoad::Failed("Load the official catalog to choose a build.".into()),
-                |catalog| catalog.load.clone(),
-            )
-        };
+        let builds = catalog.map_or(&[][..], |catalog| catalog.builds.as_slice());
+        let load = catalog.map_or_else(
+            || CollectionLoad::Failed("Load the official catalog to choose a build.".into()),
+            |catalog| catalog.load.clone(),
+        );
         pane = pane
             .child(
                 div()

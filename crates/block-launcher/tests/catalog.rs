@@ -2,17 +2,28 @@ use block_launcher::catalog::{Catalog, DataPolicy, GameDirectoryGuard};
 use std::{fs, sync::Arc};
 
 #[test]
-fn explicit_fabric_and_quilt_targets_survive_reopen_and_profile_selection() -> anyhow::Result<()> {
+fn explicit_loader_targets_survive_reopen_and_profile_selection() -> anyhow::Result<()> {
     use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    for (kind, prefix) in [(LoaderKind::Fabric, "fabric"), (LoaderKind::Quilt, "quilt")] {
-        let target_id = format!("{prefix}-0.16.14");
+    for (kind, prefix, minecraft, version) in [
+        (LoaderKind::Fabric, "fabric", "1.20.6", "0.16.14"),
+        (LoaderKind::Quilt, "quilt", "1.20.6", "0.29.2"),
+        (LoaderKind::NeoForge, "neoforge", "1.21.1", "21.1.219"),
+        (LoaderKind::NeoForge, "neoforge", "26.3", "26.3.0.95"),
+        (
+            LoaderKind::NeoForge,
+            "neoforge",
+            "1.20.1",
+            "1.20.1-47.1.106",
+        ),
+    ] {
+        let target_id = format!("{prefix}-{version}");
         let (instance, profile) = catalog.create_instance_with_loader(
             format!("{prefix} test"),
-            "1.20.6".into(),
+            minecraft.into(),
             None,
-            Some((kind.clone(), "0.16.14".into())),
+            Some((kind.clone(), version.into())),
             ProfileConfiguration {
                 name: "Default".into(),
                 target_id: target_id.clone(),
@@ -25,7 +36,7 @@ fn explicit_fabric_and_quilt_targets_survive_reopen_and_profile_selection() -> a
         assert_eq!(saved_instance.targets.len(), 2);
         assert_eq!(saved_profile.target_id, target_id);
         assert_eq!(target.kind, kind);
-        assert_eq!(target.loader_version.as_deref(), Some("0.16.14"));
+        assert_eq!(target.loader_version.as_deref(), Some(version));
         assert_eq!(
             target.status,
             block_launcher::catalog::InstallStatus::Pending
@@ -43,6 +54,7 @@ fn invalid_loader_identity_creates_no_instance_directory_or_catalog_entry() -> a
         (LoaderKind::Fabric, "../escape"),
         (LoaderKind::Quilt, "bad/version"),
         (LoaderKind::Vanilla, "1"),
+        (LoaderKind::NeoForge, "21.1.219"),
     ] {
         let directory = root.path().join("must-not-exist");
         assert!(

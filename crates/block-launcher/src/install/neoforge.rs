@@ -1,4 +1,4 @@
-//! Install the representative `NeoForge` 20.6 client using its verified official installer.
+//! Official NeoForge catalogs and verified client installer execution.
 //!
 //! Installer work is confined to a fresh staging directory. Only verified library
 //! objects and a merged version manifest are published; game saves are never touched.
@@ -23,9 +23,11 @@ use crate::{
     resolver::{ResolveContext, download_resource},
 };
 
-/// The supported, tested representative. Other generations require their own validation.
-pub const VERSION: &str = "20.6.144";
-pub const MINECRAFT_VERSION: &str = "1.20.6";
+#[cfg(test)]
+const VERSION: &str = "20.6.144";
+#[cfg(test)]
+const MINECRAFT_VERSION: &str = "1.20.6";
+const MAVEN: &str = "https://maven.neoforged.net/releases/";
 const MAX_ARTIFACT_SIZE: u64 = 512 * 1024 * 1024;
 const MAX_INSTALL_SIZE: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -69,11 +71,167 @@ struct OverlayArguments {
 struct InstallerProfile {
     minecraft: String,
     libraries: Vec<Library>,
+    #[serde(default)]
+    data: BTreeMap<String, SideData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SideData {
+    client: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MavenMetadata {
+    #[serde(rename = "groupId")]
+    group: String,
+    #[serde(rename = "artifactId")]
+    artifact: String,
+    versioning: MavenVersioning,
+}
+#[derive(Deserialize)]
+struct MavenVersioning {
+    versions: MavenVersions,
+}
+#[derive(Deserialize)]
+struct MavenVersions {
+    #[serde(rename = "version", default)]
+    versions: Vec<String>,
+}
+
+fn version_details(version: &str) -> Option<(String, semver::Version)> {
+    super::fabric::validate_version(version).ok()?;
+    if let Some(loader) = version.strip_prefix("1.20.1-") {
+        return Some(("1.20.1".into(), semver::Version::parse(loader).ok()?));
+    }
+    let (release, suffix) = version.split_once('-').unwrap_or((version, ""));
+    let numbers = release
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let (mut minecraft, build) = match numbers.as_slice() {
+        [major @ 20..=25, minor, build] => (
+            if *minor == 0 {
+                format!("1.{major}")
+            } else {
+                format!("1.{major}.{minor}")
+            },
+            *build,
+        ),
+        [year, release, patch, build] if *year >= 26 => (
+            if *patch == 0 {
+                format!("{year}.{release}")
+            } else {
+                format!("{year}.{release}.{patch}")
+            },
+            *build,
+        ),
+        _ => return None,
+    };
+    let (prerelease, game_suffix) = suffix.split_once('+').unwrap_or((suffix, ""));
+    if !game_suffix.is_empty() {
+        let (phase, number) = game_suffix.rsplit_once('-')?;
+        if !["snapshot", "pre", "rc"].contains(&phase) || number.parse::<u32>().is_err() {
+            return None;
+        }
+        minecraft.push('-');
+        minecraft.push_str(game_suffix);
+    }
+    let mut rank = semver::Version::new(0, 0, build);
+    rank.pre = semver::Prerelease::new(prerelease).ok()?;
+    Some((minecraft, rank))
+}
+
+/// Validate the official version-number relationship before creating a catalog target.
+pub fn validate_version(minecraft: &str, version: &str) -> anyhow::Result<()> {
+    ensure!(
+        version_details(version).is_some_and(|(game, _)| game == minecraft),
+        "NeoForge build does not match the selected Minecraft version"
+    );
+    Ok(())
+}
+
+fn artifact(version: &str) -> &'static str {
+    if version.starts_with("1.20.1-") {
+        "forge"
+    } else {
+        "neoforge"
+    }
+}
+
+fn manifest_id(version: &str) -> String {
+    version.strip_prefix("1.20.1-").map_or_else(
+        || format!("neoforge-{version}"),
+        |loader| format!("1.20.1-forge-{loader}"),
+    )
+}
+
+/// Read all official builds for a game, newest first, including historical and snapshot catalogs.
+pub async fn versions(
+    minecraft: &str,
+    context: &ResolveContext,
+) -> anyhow::Result<Vec<super::fabric::LoaderVersion>> {
+    versions_from(minecraft, context, MAVEN).await
+}
+
+async fn versions_from(
+    minecraft: &str,
+    context: &ResolveContext,
+    maven: &str,
+) -> anyhow::Result<Vec<super::fabric::LoaderVersion>> {
+    ensure!(
+        !minecraft.is_empty() && minecraft.len() <= 80 && !minecraft.chars().any(char::is_control),
+        "Invalid Minecraft version"
+    );
+    let artifact = if minecraft == "1.20.1" {
+        "forge"
+    } else {
+        "neoforge"
+    };
+    let url = reqwest::Url::parse(maven)?
+        .join(&format!("net/neoforged/{artifact}/maven-metadata.xml"))?;
+    let key = format!(
+        "neoforge-catalog-{artifact}-{:x}.xml",
+        Sha1::digest(url.as_str().as_bytes())
+    );
+    let bytes = tokio::select! {biased;
+        () = context.cancel.cancelled() => anyhow::bail!("NeoForge catalog request cancelled"),
+        result = tokio::time::timeout(Duration::from_secs(45), context.store.metadata_pinned(&key, url.as_str())) => result.context("NeoForge catalog request timed out")?.context("Could not load the official NeoForge catalog; retry")?,
+    };
+    ensure!(
+        bytes.len() <= 4 * 1024 * 1024 && !String::from_utf8_lossy(&bytes).contains("<!DOCTYPE"),
+        "Invalid NeoForge Maven metadata"
+    );
+    let metadata: MavenMetadata =
+        quick_xml::de::from_reader(bytes.as_slice()).context("Invalid NeoForge Maven catalog")?;
+    ensure!(
+        metadata.group == "net.neoforged"
+            && metadata.artifact == artifact
+            && metadata.versioning.versions.versions.len() <= 65536,
+        "Unexpected NeoForge Maven catalog identity"
+    );
+    let mut builds: BTreeMap<String, semver::Version> = BTreeMap::new();
+    for version in metadata.versioning.versions.versions {
+        if let Some((game, rank)) = version_details(&version)
+            && game == minecraft
+        {
+            builds.insert(version, rank);
+        }
+    }
+    let mut builds: Vec<_> = builds.into_iter().collect();
+    builds.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| right.0.cmp(&left.0)));
+    Ok(builds
+        .into_iter()
+        .map(|(version, rank)| super::fabric::LoaderVersion {
+            version,
+            stable: rank.pre.is_empty(),
+        })
+        .collect())
 }
 
 /// Install `NeoForge` into the shared immutable cache, leaving mutable game data alone.
 ///
-/// `java` must be the already prepared native Java 21 executable for this host.
+/// `java` must be the already prepared native runtime for the selected game.
 /// Failed attempts retain their isolated staging directory and installer log for
 /// diagnosis. Retrying creates a new stage and cannot overwrite a valid installation.
 ///
@@ -82,22 +240,30 @@ struct InstallerProfile {
 /// Java, cancellation, installer failure, or unsafe/generated library paths.
 pub async fn install(
     base: &VersionManifest,
+    version: &str,
     java: &Path,
     context: &ResolveContext,
 ) -> anyhow::Result<InstalledLoader> {
-    ensure!(
-        base.id == MINECRAFT_VERSION,
-        "NeoForge {VERSION} requires Minecraft {MINECRAFT_VERSION}"
-    );
+    install_from(base, version, java, context, MAVEN).await
+}
+
+async fn install_from(
+    base: &VersionManifest,
+    version: &str,
+    java: &Path,
+    context: &ResolveContext,
+    maven: &str,
+) -> anyhow::Result<InstalledLoader> {
+    validate_version(&base.id, version)?;
     ensure!(!context.cancel.is_cancelled(), "installation cancelled");
     let root = context.store.root().canonicalize()?;
-    let destination = root.join("loaders/neoforge").join(VERSION);
+    let destination = root.join("loaders/neoforge").join(version);
     tokio::fs::create_dir_all(&destination).await?;
     let _installation_lock = acquire_installation_lock(&destination, &context.cancel).await?;
     let receipt = destination.join("installed.json");
     if let Ok(bytes) = tokio::fs::read(&receipt).await
         && let Ok(installed) = serde_json::from_slice::<InstalledLoader>(&bytes)
-        && installed.version == VERSION
+        && installed.version == version
         && installed.minecraft_version == base.id
         && installed.manifest_path == destination.join("manifest.json")
         && installed.manifest_path.is_file()
@@ -106,10 +272,24 @@ pub async fn install(
     {
         return Ok(installed);
     }
-    let installer_url = format!(
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/{VERSION}/neoforge-{VERSION}-installer.jar"
+    ensure!(
+        versions_from(&base.id, context, maven)
+            .await?
+            .iter()
+            .any(|build| build.version == version),
+        "NeoForge build is no longer available for this Minecraft version"
     );
-    let installer_resource = context.store.describe_maven(&installer_url).await?;
+    let artifact = artifact(version);
+    let installer_url =
+        format!("{maven}net/neoforged/{artifact}/{version}/{artifact}-{version}-installer.jar");
+    let installer_resource = tokio::select! {biased;
+        () = context.cancel.cancelled() => anyhow::bail!("NeoForge installation cancelled"),
+        result = tokio::time::timeout(Duration::from_secs(45), context.store.describe_maven(&installer_url)) => result.context("NeoForge installer metadata timed out")??,
+    };
+    ensure!(
+        installer_resource.size > 0 && installer_resource.size <= MAX_ARTIFACT_SIZE,
+        "Invalid NeoForge installer size"
+    );
     let archive_path = context
         .store
         .fetch(&installer_resource, &context.cancel)
@@ -120,7 +300,7 @@ pub async fn install(
         "installer game version does not match selected version"
     );
     ensure!(
-        overlay.id == format!("neoforge-{VERSION}"),
+        overlay.id == manifest_id(version),
         "unexpected NeoForge launch target"
     );
     let stage = root
@@ -139,7 +319,7 @@ pub async fn install(
     let manifest_path = destination.join("manifest.json");
     atomic_json(&manifest_path, &result.0)?;
     let installed = InstalledLoader {
-        version: VERSION.into(),
+        version: version.into(),
         minecraft_version: base.id.clone(),
         manifest_sha1: file_digest(&manifest_path)?,
         manifest_path,
@@ -182,6 +362,7 @@ async fn install_staged(
     overlay: Overlay,
     profile: InstallerProfile,
 ) -> anyhow::Result<(VersionManifest, Vec<InstalledArtifact>)> {
+    let generated = generated_client_paths(&profile)?;
     let libraries = stage.join("libraries");
     let mut expected = BTreeMap::new();
     for library in profile.libraries.iter().chain(&overlay.libraries) {
@@ -233,10 +414,7 @@ async fn install_staged(
     )?;
     run_installer(java, installer, stage, &context.cancel).await?;
     let artifacts = import_libraries(&libraries, &expected, context)?;
-    for required in [
-        "net/neoforged/neoforge/20.6.144/neoforge-20.6.144-client.jar",
-        "net/minecraft/client/1.20.6-20240627.102356/client-1.20.6-20240627.102356-extra.jar",
-    ] {
+    for required in generated {
         ensure!(
             artifacts
                 .iter()
@@ -246,6 +424,55 @@ async fn install_staged(
     }
     let manifest = merge_manifest(base, overlay)?;
     Ok((manifest, artifacts))
+}
+
+fn generated_client_paths(profile: &InstallerProfile) -> anyhow::Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for name in ["PATCHED", "MC_EXTRA"] {
+        let coordinate = profile
+            .data
+            .get(name)
+            .and_then(|value| value.client.as_deref());
+        if let Some(coordinate) = coordinate {
+            let coordinate = coordinate
+                .strip_prefix('[')
+                .and_then(|value| value.strip_suffix(']'))
+                .context("Invalid installer client output coordinate")?;
+            paths.push(coordinate_path(coordinate)?);
+        } else {
+            ensure!(
+                name != "PATCHED",
+                "Installer omitted its patched client output"
+            );
+        }
+    }
+    Ok(paths)
+}
+
+fn coordinate_path(coordinate: &str) -> anyhow::Result<String> {
+    let (coordinate, extension) = coordinate.split_once('@').unwrap_or((coordinate, "jar"));
+    ensure!(
+        !extension.is_empty() && extension.bytes().all(|byte| byte.is_ascii_alphanumeric()),
+        "Invalid Maven extension"
+    );
+    let parts: Vec<_> = coordinate.split(':').collect();
+    ensure!((3..=4).contains(&parts.len()), "Invalid Maven coordinate");
+    for part in &parts {
+        super::fabric::validate_version(part)?;
+    }
+    let classifier = parts
+        .get(3)
+        .map_or_else(String::new, |value| format!("-{value}"));
+    let path = format!(
+        "{}/{}/{}/{}-{}{classifier}.{extension}",
+        parts[0].replace('.', "/"),
+        parts[1],
+        parts[2],
+        parts[1],
+        parts[2]
+    );
+    safe_relative(&path)?;
+    Ok(path)
 }
 
 async fn run_installer(
@@ -530,9 +757,9 @@ pub fn adapt_plan(
     installed: &InstalledLoader,
 ) -> anyhow::Result<()> {
     ensure!(
-        installed.version == VERSION
-            && installed.minecraft_version == MINECRAFT_VERSION
-            && manifest.id == format!("neoforge-{VERSION}")
+        version_details(&installed.version)
+            .is_some_and(|(minecraft, _)| minecraft == installed.minecraft_version)
+            && manifest.id == manifest_id(&installed.version)
             && plan.version == manifest.id
             && plan.manifest_sha1 == installed.manifest_sha1,
         "NeoForge installation/plan mismatch"

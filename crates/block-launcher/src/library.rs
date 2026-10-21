@@ -133,6 +133,15 @@ impl Library {
             .executor
             .prepare_repair(compile(&recipe, &metadata)?, cancel)
             .await?;
+        if target.kind != LoaderKind::Vanilla {
+            (self.events)(crate::executor::ExecutionEvent::Stage {
+                name: format!(
+                    "Installing {} {}",
+                    target.kind.name(),
+                    target.loader_version.as_deref().unwrap_or("")
+                ),
+            });
+        }
         let manifest = if target.kind == LoaderKind::NeoForge {
             let java = match &prepared.plan.command.java {
                 JavaExecutable::Managed { path } => {
@@ -140,9 +149,17 @@ impl Library {
                 }
                 JavaExecutable::Local { path } => path.clone(),
             };
-            neoforge::install(&metadata.parsed.manifest, &java, &context)
-                .await?
-                .manifest_path
+            neoforge::install(
+                &metadata.parsed.manifest,
+                target
+                    .loader_version
+                    .as_deref()
+                    .context("NeoForge build missing")?,
+                &java,
+                &context,
+            )
+            .await?
+            .manifest_path
         } else if matches!(target.kind, LoaderKind::Fabric | LoaderKind::Quilt) {
             crate::install::fabric::install(
                 &target.kind,
@@ -299,6 +316,11 @@ fn adapt(
         let installed: InstalledLoader = serde_json::from_slice(
             &std::fs::read(receipt).context("loader receipt missing; choose Repair")?,
         )?;
+        ensure!(
+            target.loader_version.as_deref() == Some(installed.version.as_str())
+                && installed.manifest_path == path,
+            "Installed NeoForge target does not match the selected build; choose Repair"
+        );
         neoforge::adapt_plan(plan, manifest, &installed)?;
     }
     Ok(())
