@@ -28,8 +28,26 @@ pub enum ProxyMode {
     System,
     /// Bypass proxies, including environment proxy variables.
     Direct,
-    /// Use an HTTP or HTTPS proxy. Authentication and SOCKS are not supported.
+    /// Use an HTTP or HTTPS proxy without credentials.
     Http { url: String },
+    /// Use SOCKS5 with local DNS (`socks5`) or proxy DNS (`socks5h`).
+    Socks5 { url: String },
+}
+
+impl ProxyMode {
+    /// Select the manual protocol from its URL; download-option validation also
+    /// checks the host, credentials and address components before saving or use.
+    /// # Errors
+    /// Rejects malformed URLs and unsupported manual proxy schemes.
+    pub fn manual(url: String) -> anyhow::Result<Self> {
+        let parsed = reqwest::Url::parse(&url).context("invalid proxy URL")?;
+        ensure!(parsed.host_str().is_some(), "proxy URL requires a host");
+        match parsed.scheme() {
+            "http" | "https" => Ok(Self::Http { url }),
+            "socks5" | "socks5h" => Ok(Self::Socks5 { url }),
+            _ => bail!("proxy scheme must be http, https, socks5, or socks5h"),
+        }
+    }
 }
 
 /// Object-transfer settings; proxy selection also applies to metadata requests.
@@ -72,12 +90,19 @@ impl DownloadOptions {
             self.bytes_per_second != Some(0),
             "download rate must be positive or unlimited"
         );
-        if let ProxyMode::Http { url } = &self.proxy {
+        if let ProxyMode::Http { url } | ProxyMode::Socks5 { url } = &self.proxy {
             let proxy = reqwest::Url::parse(url).context("invalid proxy URL")?;
-            ensure!(
-                matches!(proxy.scheme(), "http" | "https"),
-                "proxy scheme must be http or https"
-            );
+            match self.proxy {
+                ProxyMode::Http { .. } => ensure!(
+                    matches!(proxy.scheme(), "http" | "https"),
+                    "HTTP proxy scheme must be http or https"
+                ),
+                ProxyMode::Socks5 { .. } => ensure!(
+                    matches!(proxy.scheme(), "socks5" | "socks5h"),
+                    "SOCKS5 proxy scheme must be socks5 or socks5h"
+                ),
+                ProxyMode::System | ProxyMode::Direct => {}
+            }
             ensure!(proxy.host_str().is_some(), "proxy URL requires a host");
             ensure!(
                 proxy.username().is_empty() && proxy.password().is_none(),
@@ -236,7 +261,9 @@ impl Store {
         client = match &options.proxy {
             ProxyMode::System => client,
             ProxyMode::Direct => client.no_proxy(),
-            ProxyMode::Http { url } => client.no_proxy().proxy(reqwest::Proxy::all(url)?),
+            ProxyMode::Http { url } | ProxyMode::Socks5 { url } => {
+                client.no_proxy().proxy(reqwest::Proxy::all(url)?)
+            }
         };
         let client = client.build()?;
         std::fs::create_dir_all(&root)?;

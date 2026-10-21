@@ -374,3 +374,61 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
     });
     settings_frame(cx);
 }
+
+#[gpui::test]
+fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
+    cx: &mut gpui::TestAppContext,
+) {
+    use anyhow::Context as _;
+    let result = (|| -> anyhow::Result<()> {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        let root = tempfile::tempdir()?;
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| -> anyhow::Result<()> {
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                view.handle(UiAction::ProxyMode(2), window, cx);
+                let draft = view.settings_form.as_ref().context("Settings draft")?;
+                draft.proxy_url.update(cx, |input, cx| {
+                    input.set_value("  socks5h://127.0.0.1:1080  ", cx)
+                });
+                let parsed = draft
+                    .parse(&view.saved_preferences, cx)
+                    .map_err(|error| anyhow::anyhow!(error.message))?;
+                assert_eq!(
+                    parsed.downloads.proxy,
+                    block_launcher::ProxyMode::Socks5 {
+                        url: "socks5h://127.0.0.1:1080".into()
+                    }
+                );
+                assert_eq!(
+                    view.saved_preferences.downloads.proxy,
+                    block_launcher::ProxyMode::System
+                );
+                parsed.save(root.path())?;
+                let original = std::fs::read(root.path().join("preferences.json"))?;
+                view.saved_preferences = Preferences::load(root.path())?;
+                view.preferences.clone_from(&view.saved_preferences);
+                view.open_settings(cx);
+                let draft = view
+                    .settings_form
+                    .as_ref()
+                    .context("Reopened settings draft")?;
+                assert_eq!(draft.proxy_mode, 2);
+                assert_eq!(draft.proxy_url.read(cx).value(), "socks5h://127.0.0.1:1080");
+                draft.proxy_url.update(cx, |input, cx| {
+                    input.set_value("socks5://user:secret@localhost:1080", cx)
+                });
+                assert!(draft.parse_downloads(cx).is_err());
+                assert_eq!(
+                    std::fs::read(root.path().join("preferences.json"))?,
+                    original
+                );
+                view.handle(UiAction::Tab(Tab::Home), window, cx);
+                assert_eq!(view.preferences, view.saved_preferences);
+                assert_eq!(view.preferences.downloads.proxy, parsed.downloads.proxy);
+                Ok(())
+            })
+        })
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}

@@ -346,7 +346,7 @@ impl Block {
                 [
                     ("Use system proxy", 0),
                     ("Direct connection", 1),
-                    ("Manual HTTP / HTTPS proxy", 2),
+                    ("Manual proxy", 2),
                 ]
                 .into_iter()
                 .map(|(label, mode)| SelectChoice {

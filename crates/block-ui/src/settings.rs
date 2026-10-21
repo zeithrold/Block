@@ -241,7 +241,7 @@ impl SettingsDraft {
         let (proxy_mode, proxy_url) = match &downloads.proxy {
             ProxyMode::System => (0, ""),
             ProxyMode::Direct => (1, ""),
-            ProxyMode::Http { url } => (2, url.as_str()),
+            ProxyMode::Http { url } | ProxyMode::Socks5 { url } => (2, url.as_str()),
         };
         let scroll = ScrollHandle::new();
         let draft = Self {
@@ -468,13 +468,12 @@ impl SettingsDraft {
         let proxy = match self.proxy_mode {
             0 => ProxyMode::System,
             1 => ProxyMode::Direct,
-            2 => ProxyMode::Http {
-                url: self.proxy_url.read(cx).value().trim().into(),
-            },
+            2 => ProxyMode::manual(self.proxy_url.read(cx).value().trim().into())
+                .map_err(|error| SettingsError::at(SettingsField::ProxyUrl, error))?,
             _ => {
                 return Err(SettingsError::at(
                     SettingsField::ProxyUrl,
-                    "Choose System, Direct, or HTTP proxy",
+                    "Choose System, Direct, or Manual proxy",
                 ));
             }
         };
@@ -1310,9 +1309,9 @@ impl Block {
                 .child(self.settings_field(draft, SettingsField::Retries, "Retry count", Some("0–10 additional attempts.")).flex_1()))
             .child(self.settings_field(draft, SettingsField::Rate, "Download speed limit (MB/s)", Some("0 or empty means unlimited. 1 MB/s = 1,000,000 bytes/s; metadata is not throttled.")))
             .child(self.product_select_field("settings-proxy", "Proxy", match draft.proxy_mode {
-                1 => "Direct connection", 2 => "Manual HTTP / HTTPS proxy", _ => "Use system proxy",
+                1 => "Direct connection", 2 => "Manual proxy", _ => "Use system proxy",
             }, super::select::ProductChoice::Proxy, cx))
-            .children((draft.proxy_mode == 2).then(|| self.settings_field(draft, SettingsField::ProxyUrl, "Proxy address", Some("HTTP or HTTPS URL with a host and optional port. Credentials and SOCKS are unsupported."))))
+            .children((draft.proxy_mode == 2).then(|| self.settings_field(draft, SettingsField::ProxyUrl, "Proxy address", Some("HTTP, HTTPS and SOCKS5 URLs are supported. Use socks5h:// to resolve hostnames through the proxy. Credentials are unsupported."))))
             .child(self.render_connection_test(cx))
     }
 

@@ -210,7 +210,7 @@ mod tests {
                 if let Some(draft) = &mut view.settings_form {
                     draft.proxy_mode = 2;
                     draft.proxy_url.update(cx, |field, cx| {
-                        field.set_value("socks5://127.0.0.1:1080", cx);
+                        field.set_value("ftp://127.0.0.1:1080", cx);
                     });
                 }
                 view.test_connection(window, cx);

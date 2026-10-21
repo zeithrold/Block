@@ -186,7 +186,7 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
         view.update(cx, |view, cx| {
             if let Some(draft) = &view.settings_form {
                 draft.proxy_url.update(cx, |input, cx| {
-                    input.set_value("socks5://127.0.0.1:7890", cx);
+                    input.set_value("ftp://127.0.0.1:7890", cx);
                 });
             }
             view.save_settings(window, cx);
@@ -195,7 +195,7 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
     assert!(
         view.read_with(cx, |view, cx| view.settings_form.as_ref().is_some_and(
             |draft| draft.proxy_mode == 2
-                && draft.proxy_url.read(cx).value() == "socks5://127.0.0.1:7890"
+                && draft.proxy_url.read(cx).value() == "ftp://127.0.0.1:7890"
                 && draft.error.as_ref().is_some_and(
                     |error| error.field == Some(crate::settings::SettingsField::ProxyUrl)
                 )

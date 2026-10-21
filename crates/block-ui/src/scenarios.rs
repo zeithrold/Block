@@ -62,6 +62,7 @@ pub const SCENARIOS: &[&str] = &[
     "settings-game",
     "settings-profiles",
     "settings-downloads",
+    "settings-socks5",
     "settings-storage",
     "about",
     "welcome-1",
@@ -365,6 +366,15 @@ impl Block {
             self.tab = Tab::Settings;
             self.open_settings(cx);
             self.select_settings_page(section as u8, window, cx);
+        }
+        if name == "settings-socks5" {
+            self.saved_preferences.downloads.proxy = block_launcher::ProxyMode::Socks5 {
+                url: "socks5h://127.0.0.1:1080".into(),
+            };
+            self.preferences.clone_from(&self.saved_preferences);
+            self.tab = Tab::Settings;
+            self.open_settings(cx);
+            self.select_settings_page(3, window, cx);
         }
         if name == "about" {
             self.tab = Tab::About;
