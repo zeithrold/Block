@@ -10,9 +10,9 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 - [x] Remove vendored framework patches; published GPUI 0.3.9 / Base 0.8.0 compile unchanged.
 - [x] Fixed-size/native-chrome implementation; macOS real Welcome 960×600 and separate version picker 760×520 captured.
 - [x] Independent dialog-window implementation: focus existing purposes, preserve drafts, reject stale results and close children with parents.
-- [ ] Finish cross-platform CI and remote interactive acceptance for the new window implementation.
+- [x] Native-window baseline CI and remote interactive smoke on all three test hosts.
 - [x] Debug-only network-free scenario runner, native screenshots and comparison board; React shots remain pending.
-- [ ] UI-only smoke on Windows AMD64, Linux AMD64 and Linux ARM64 after window migration.
+- [x] UI-only Home → Games → native version-picker smoke on Windows AMD64, Linux AMD64 and Linux ARM64.
 
 ## Product decisions and intended differences
 
@@ -53,6 +53,8 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 - [ ] Microsoft Device Code — real request/poll, interval/slow_down, expiry/cancel and XBL → XSTS → Minecraft.
 - [ ] Offline account — validate username and derive UUID v3 from OfflinePlayer:<name>; preserve launch authorization boundaries.
 - [ ] Authlib provider add/edit/remove, discovery and quick-link import — real metadata, HTTPS policy, linked-account rules and caching.
+- [ ] Provider URL/pasted or dropped quick links, duplicate handling and explicit HTTP consent — validated normalization, ALI discovery, persisted consent and password-safe requests.
+- [ ] Authlib account/password form, selected provider and multiple characters — real credential exchange, profile selection, cancellation and final secure-save confirmation.
 - [ ] Yggdrasil authenticate/refresh/validate/invalidate/signout and profile selection — local protocol fixtures and secure storage.
 - [ ] Authlib launch injection — official verified agent JAR, prefetched metadata and actual injected game launch.
 - [ ] Wizard back/cancel/finish and provider picker — independent windows, local drafts and stale-result rejection.
@@ -60,6 +62,7 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 ### Games and Game Wizard
 - [ ] Bundled/Separated browsing, search, details and Home synchronization — real Instance/Profile joins and mode rules.
 - [ ] Profile/Instance appearance and launch/settings editing — validation, immutable version/loader and transactional persistence.
+- [ ] Profile icons/colors, memory, extra JVM arguments, inherited Java/window defaults, isolated/shared files and default account — persisted drafts compiled into actual launch recipes.
 - [ ] Bundled two-step and Separated four-step creation — section drafts, existing-Instance selection and atomic final save.
 - [ ] Version/loader/location pickers — real catalogs, compatibility filtering, retryable loading and independent windows.
 - [ ] Vanilla installation — verified official metadata/resources, real progress, retries and resumable downloads.
@@ -73,8 +76,10 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 ### Settings
 - [ ] General — System/Light/Dark preview/save/cancel, system plus in-app reduced motion and persisted preferences.
 - [ ] Game — Java, memory/JVM, window/fullscreen and snapshot defaults applied to new setups only.
+- [ ] Default memory 1–32 GB, automatic/selected Java, three window presets/custom sizes and extra JVM arguments — validated persisted defaults without rewriting existing Profiles.
 - [ ] Profiles — confirmed one-way mode conversion; Restore defaults preserves mode and existing setups.
 - [ ] Downloads — concurrency/rate/retry policies, System/Direct/HTTP(S)/SOCKS5 proxy and real connection testing.
+- [ ] Parallel downloads 1–16, retries 0–10 and nonnegative MB/s limit (0 means unlimited) — validated draft/save behavior and real transport policies.
 - [ ] Storage — validated library/cache paths and transactional relocation: copy, verify, atomic switch, interruption recovery, space check.
 - [ ] Relocation concurrency and cleanup — block launches/installs; delete old directory only after explicit user confirmation.
 
@@ -94,7 +99,8 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
 - `scripts/snap-native --no-build` captured 40 debug UI scenarios in both themes (118 primary/child images); `scripts/parity-board` built `target/parity-shots/index.html`. Release compilation excludes scenario flags and fixture code.
 - The React reference server is available at `http://127.0.0.1:5173/`; the separate prototype screenshot task has not supplied its images. The board labels missing reference shots explicitly. Current native fixture records cover implemented Microsoft/Vanilla/NeoForge models; additional provider/loader scenarios await their real implementations.
-- Linux ARM64 actual Home → Games → native version-picker smoke captured under `target/parity-shots/linux-arm64/`. Its KDE session uses Xwayland `:1` plus its session Xauthority; Spectacle captures the active window because scrot returns black pixels there. Windows Welcome/Home/Games capture succeeded; its dialog and Linux AMD64 smoke remain pending.
+- All three remote hosts completed actual Home → Games → native version-picker smoke, with visible screenshots under `target/parity-shots/{linux-arm64,windows-amd64,linux-amd64}/`. ARM64/Windows used pushed `d97206d`; Linux AMD64 used `def4a1b`. These establish the P1 window baseline, not current-page parity or P5 game verification.
+- Linux ARM64 KDE uses Xwayland `:1` plus session Xauthority and Spectacle; scrot returns black pixels there. Linux AMD64 X11 needs ImageMagick screen-based window capture. Windows captures run in an interactive scheduled task and enumerate visible windows by process ID. Test tasks were removed and the AMD64 VM was stopped softly after capture.
 - Required supported launches: macOS Vanilla/Fabric/Quilt/Forge/NeoForge/OptiFine plus Authlib injection; three remote hosts Vanilla/Fabric/modern Forge.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.

@@ -18,9 +18,7 @@ use block_launcher::{
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, FontWeight, InteractiveElement as _, IntoElement,
     KeyDownEvent, ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
-    Window,
-    accesskit::{Node, Role},
-    div, px, relative, rgb,
+    Window, accesskit::Role, div, px, relative, rgb,
 };
 
 use super::{
@@ -117,12 +115,6 @@ fn category_panel(kind: BrowserKind, rows: impl IntoElement) -> gpui::AnyElement
     if !matches!(kind, BrowserKind::Instances | BrowserKind::Profiles) {
         return rows.into_any_element();
     }
-    let mut panel = Node::new(Role::TabPanel);
-    panel.set_label(if kind == BrowserKind::Instances {
-        "Instance browser"
-    } else {
-        "Profile browser"
-    });
     div()
         .id("games-category-panel")
         .flex()
@@ -576,8 +568,6 @@ impl Block {
                 );
             }
         } else {
-            let mut tab_list = Node::new(Role::TabList);
-            tab_list.set_label("Game categories");
             heading = heading.child(
                 div()
                     .id("games-tabs")
@@ -664,8 +654,6 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
         let state = self.collection();
-        let mut semantic = Node::new(Role::ListBox);
-        semantic.set_label(format!("Saved {}", kind.noun()));
         let mut rows = div()
             .id("collection-list")
             .debug_selector(|| "collection-list".into())
@@ -983,8 +971,6 @@ impl Block {
         icon: Icon,
     ) -> gpui::Stateful<gpui::Div> {
         let label = label.into();
-        let mut semantic = Node::new(Role::Status);
-        semantic.set_label(label.to_string());
         div()
             .id("browser-status")
             .p_5()
@@ -1484,15 +1470,6 @@ impl Block {
                     .child(contents),
                 );
             } else {
-                let mut semantic = Node::new(Role::Group);
-                semantic.set_label(format!(
-                    "{label}: {}",
-                    if label == "OptiFine" {
-                        "Unavailable"
-                    } else {
-                        "Fixed at creation"
-                    }
-                ));
                 grid = grid.child(
                     components::card(self.palette)
                         .id(id)

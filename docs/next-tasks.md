@@ -62,7 +62,7 @@ Keep one checkout per host at `~/block-src` and update it with `git fetch`. Neve
   - Move still-valid product decisions into an English `docs/STATUS.md`.
   - Delete the old ledgers and evidence before staging any Block baseline commit; keep them out of Git history.
   - Commit the retained working tree to `main`, push, and check CI.
-- [ ] **P1 Platform simplification:**
+- [x] **P1 Platform simplification:**
   - Use unpatched GPUI and drop `vendor/`.
   - Make windows fixed-size; on macOS use the native traffic lights.
   - Turn dialogs and drawers into separate GPUI windows.
