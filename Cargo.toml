@@ -2,10 +2,12 @@
 members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth"]
 default-members = ["crates/block-app"]
 resolver = "3"
-exclude = ["vendor/xattr"]
+exclude = ["vendor/gpui-pre", "vendor/gpui-pre-macos", "vendor/gpui-base"]
 
 [patch.crates-io]
-xattr = { path = "vendor/xattr" }
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
+gpui-base = { path = "vendor/gpui-base" }
 
 [workspace.package]
 version = "0.1.0"
@@ -16,7 +18,9 @@ publish = false
 block-auth = { path = "crates/block-auth" }
 unicode-segmentation = "1"
 block-ui = { path = "crates/block-ui" }
-gpui = "0.2.2"
+gpui = { package = "gpui-pre", version = "=0.3.9" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
+gpui-base = "=0.8.0"
 anyhow = "1"
 rayon = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"] }

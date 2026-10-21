@@ -1,0 +1,254 @@
+--- a/src/gpui_macos.rs
++++ b/src/gpui_macos.rs
+@@ -23,6 +23,8 @@
+     pub use gpui_apple::metal_renderer::MetalHeadlessRenderer;
+ }
+ 
++#[cfg(any(test, feature = "test-support"))]
++mod native_accessibility;
+ mod platform;
+ mod window;
+ mod window_appearance;
+--- /dev/null
++++ b/src/native_accessibility.rs
+@@ -0,0 +1,94 @@
++//! Opt-in native provider inspection. This reads the upstream adapter's AppKit
++//! objects; it does not create a bridge, tree or event route.
++use cocoa::{
++    base::{BOOL, NO, YES, id, nil},
++    foundation::{NSArray, NSString},
++};
++use objc::{msg_send, sel, sel_impl};
++use std::{collections::HashSet, ffi::CStr};
++unsafe fn text(value: id) -> Option<String> {
++    if value == nil {
++        return None;
++    }
++    let supported: BOOL = unsafe { msg_send![value, respondsToSelector: sel!(UTF8String)] };
++    if supported == NO {
++        return None;
++    }
++    let bytes = unsafe { value.UTF8String() };
++    if bytes.is_null() {
++        None
++    } else {
++        Some(
++            unsafe { CStr::from_ptr(bytes) }
++                .to_string_lossy()
++                .into_owned(),
++        )
++    }
++}
++unsafe fn accessible_name(node: id) -> String {
++    let label: id = unsafe { msg_send![node, accessibilityLabel] };
++    if let Some(label) = unsafe { text(label) } {
++        return label;
++    }
++    // The official AccessKit adapter exposes control names through the AppKit title
++    // selector. Read that actual provider attribute rather than the schema.
++    let title: id = unsafe { msg_send![node, accessibilityTitle] };
++    unsafe { text(title) }.unwrap_or_default()
++}
++unsafe fn objects(
++    array: id,
++    depth: usize,
++    visited: &mut HashSet<usize>,
++    output: &mut Vec<(id, usize)>,
++) {
++    if array == nil || depth > 32 || output.len() > 4096 {
++        return;
++    }
++    for index in 0..unsafe { array.count() } {
++        let object = unsafe { array.objectAtIndex(index) };
++        if !visited.insert(object as usize) {
++            continue;
++        }
++        output.push((object, depth));
++        let children: id = unsafe { msg_send![object, accessibilityChildren] };
++        unsafe {
++            objects(children, depth + 1, visited, output);
++        }
++    }
++}
++
++pub(super) unsafe fn snapshot(view: id) -> Vec<gpui::NativeAccessibilityNode> {
++    let mut nodes = Vec::new();
++    // SAFETY: The MacWindow owns this content view and calls on the main thread.
++    let children: id = unsafe { msg_send![view, accessibilityChildren] };
++    unsafe {
++        objects(children, 0, &mut HashSet::new(), &mut nodes);
++    }
++    nodes
++        .into_iter()
++        .map(|(node, depth)| unsafe {
++            let role: id = msg_send![node, accessibilityRole];
++            let value: id = msg_send![node, accessibilityValue];
++            gpui::NativeAccessibilityNode {
++                role: text(role).unwrap_or_default(),
++                label: accessible_name(node),
++                value: text(value),
++                depth,
++            }
++        })
++        .collect()
++}
++pub(super) unsafe fn press(view: id, label: &str) -> bool {
++    let mut nodes = Vec::new();
++    let children: id = unsafe { msg_send![view, accessibilityChildren] };
++    unsafe {
++        objects(children, 0, &mut HashSet::new(), &mut nodes);
++    }
++    for (node, _) in nodes {
++        if unsafe { accessible_name(node) } == label {
++            let pressed: BOOL = unsafe { msg_send![node, accessibilityPerformPress] };
++            return pressed == YES;
++        }
++    }
++    false
++}
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -12,7 +12,7 @@
+         NSApplication, NSBackingStoreBuffered, NSColor, NSEvent, NSEventModifierFlags, NSEventType,
+         NSFilenamesPboardType, NSPasteboard, NSRequestUserAttentionType, NSScreen, NSView,
+         NSViewHeightSizable, NSViewWidthSizable, NSVisualEffectBlendingMode,
+-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
++        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowButton,
+         NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode,
+         NSWindowStyleMask, NSWindowTitleVisibility,
+     },
+@@ -958,6 +958,32 @@
+ pub(crate) struct MacWindow(Arc<Mutex<MacWindowState>>, MainThreadMarker);
+ 
+ impl MacWindow {
++    fn schedule_frame_for(window_state: Weak<Mutex<MacWindowState>>) {
++        let Some(state) = window_state.upgrade() else {
++            return;
++        };
++        let executor = state.lock().foreground_executor.clone();
++        drop(state);
++        executor
++            .spawn(async move {
++                let Some(state) = window_state.upgrade() else {
++                    return;
++                };
++                let state = state.lock();
++                if state.closed.load(Ordering::Acquire) {
++                    return;
++                }
++                let view = state.native_view.as_ptr();
++                drop(state);
++                // SAFETY: This foreground task runs on the owning main thread;
++                // the live window owns this view, and closed windows return above.
++                // Marking it dirty requests AppKit's real displayLayer callback.
++                let view = unsafe { &*view.cast::<Objc2NSView>() };
++                view.setNeedsDisplay(true);
++            })
++            .detach();
++    }
++
+     pub fn open(
+         handle: AnyWindowHandle,
+         WindowParams {
+@@ -996,20 +1022,20 @@
+                 style_mask =
+                     NSWindowStyleMask::NSClosableWindowMask | NSWindowStyleMask::NSTitledWindowMask;
+ 
+-                if is_resizable {
+-                    style_mask |= NSWindowStyleMask::NSResizableWindowMask;
+-                }
+-
+-                if is_minimizable {
+-                    style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
+-                }
+-
+                 if titlebar.appears_transparent {
+                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+                 }
+             } else {
+                 style_mask = NSWindowStyleMask::NSTitledWindowMask
+                     | NSWindowStyleMask::NSFullSizeContentViewWindowMask;
++            }
++
++            // Custom chrome must not remove edge resizing or minimization.
++            if is_resizable {
++                style_mask |= NSWindowStyleMask::NSResizableWindowMask;
++            }
++            if is_minimizable {
++                style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
+             }
+ 
+             let native_window: id = match kind {
+@@ -1177,11 +1203,24 @@
+                 });
+             }
+ 
++            let custom_titlebar = titlebar.is_none();
+             if titlebar.is_none_or(|titlebar| titlebar.appears_transparent) {
+                 native_window.setTitlebarAppearsTransparent_(YES);
+                 native_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
+             }
+ 
++            if custom_titlebar {
++                for button in [
++                    NSWindowButton::NSWindowCloseButton,
++                    NSWindowButton::NSWindowMiniaturizeButton,
++                    NSWindowButton::NSWindowZoomButton,
++                ] {
++                    let button: id = msg_send![native_window, standardWindowButton: button];
++                    if button != nil {
++                        let _: () = msg_send![button, setHidden: YES];
++                    }
++                }
++            }
+             native_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable);
+             native_view.setWantsBestResolutionOpenGLSurface_(YES);
+ 
+@@ -2016,6 +2055,15 @@
+                 .styleMask()
+                 .contains(NSWindowStyleMask::NSFullScreenWindowMask)
+         }
++    }
++
++    fn schedule_frame(&self) {
++        Self::schedule_frame_for(Arc::downgrade(&self.0));
++    }
++
++    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
++        let state = Arc::downgrade(&self.0);
++        Some(Rc::new(move || Self::schedule_frame_for(state.clone())))
+     }
+ 
+     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
+@@ -2364,6 +2412,31 @@
+         this.renderer.render_to_image(scene)
+     }
+ 
++    #[cfg(any(test, feature = "test-support"))]
++    fn native_accessibility_snapshot(&self) -> Option<Vec<gpui::NativeAccessibilityNode>> {
++        // SAFETY: MacWindow owns this NSWindow and runs on the main thread.
++        // The official for_window adapter subclasses contentView, which is the
++        // parent of GPUIView; querying GPUIView would miss that provider.
++        let view = unsafe { self.0.lock().native_window.contentView() };
++        if view == nil {
++            return None;
++        }
++        // SAFETY: The live NSWindow keeps its content view alive; the state lock
++        // is released before invoking the provider, which may activate GPUI.
++        Some(unsafe { crate::native_accessibility::snapshot(view) })
++    }
++    #[cfg(any(test, feature = "test-support"))]
++    fn native_accessibility_press(&self, label: &str) -> bool {
++        // SAFETY: Same main-thread ownership boundary as the snapshot method.
++        let view = unsafe { self.0.lock().native_window.contentView() };
++        if view == nil {
++            return false;
++        }
++        // SAFETY: No platform mutex is held while querying or invoking actions
++        // on the official content-view provider.
++        unsafe { crate::native_accessibility::press(view, label) }
++    }
++
+     fn a11y_init(&self, callbacks: gpui::A11yCallbacks) {
+         let mut lock = self.0.lock();
+ 
