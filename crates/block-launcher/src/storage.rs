@@ -918,6 +918,13 @@ pub fn finish_cleanup(root: &Path, id: uuid::Uuid, remove: bool) -> anyhow::Resu
     fs::remove_file(root.join(JOURNAL))?;
     Ok(())
 }
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::permissions_set_readonly_false,
+        reason = "Only Windows clears its read-only file attribute during confirmed cleanup; Unix permissions are never widened."
+    )
+)]
 fn remove_owned(path: &Path) -> anyhow::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
