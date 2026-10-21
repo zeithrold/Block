@@ -43,6 +43,11 @@ pub const SCENARIOS: &[&str] = &[
     "remove-provider-confirmation",
     "auth-choose",
     "auth-information",
+    "auth-authlib-information",
+    "auth-authlib-http-warning",
+    "auth-authlib-characters",
+    "auth-authlib-complete",
+    "auth-authlib-provider-add",
     "auth-offline-information",
     "auth-offline-error",
     "auth-offline-complete",
@@ -244,6 +249,13 @@ impl Block {
                 self.handle(UiAction::Inspect(account_id(&self.accounts[2])), window, cx);
             }
             if name.starts_with("auth-") {
+                if name.starts_with("auth-authlib-") {
+                    self.shell.providers.records = vec![
+                        super::providers::fixture_provider(false)?,
+                        super::providers::fixture_provider(true)?,
+                    ];
+                    self.shell.providers.loaded = true;
+                }
                 self.open_auth_wizard(window, cx);
                 if let Some(auth) = &mut self.shell.auth {
                     auth.scenario(
@@ -255,6 +267,23 @@ impl Block {
                         },
                         cx,
                     );
+                }
+                if name == "auth-authlib-provider-add" {
+                    let owner = cx.entity();
+                    cx.defer(move |cx| {
+                        let handle = owner
+                            .read(cx)
+                            .shell
+                            .surfaces
+                            .layers()
+                            .find(|entry| matches!(entry.kind, Surface::Auth))
+                            .and_then(|entry| entry.window);
+                        if let Some(handle) = handle {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                owner.update(cx, |view, cx| view.open_auth_provider_add(window, cx))
+                            });
+                        }
+                    });
                 }
             }
         }

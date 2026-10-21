@@ -374,7 +374,7 @@ impl Block {
                     .child(div().flex().items_center().gap_3()
                         .child(components::avatar_fallback(&account.player_name, self.palette, 40., AvatarState::Unavailable))
                         .child(div().flex_1().min_w_0().child(div().text_lg().child(account.player_name.clone()))
-                            .child(self.setup_caption(account.provider.label()))))
+                            .child(self.setup_caption(self.account_authority(account)))))
                     .child(components::badge("Account saved", self.palette, BadgeVariant::Success))
                     .child(self.setup_caption("This account is saved on your device. Leaving setup keeps the saved account.")),
             );

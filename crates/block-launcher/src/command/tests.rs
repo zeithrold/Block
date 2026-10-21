@@ -8,6 +8,8 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         platform::{Architecture, OperatingSystem, Target},
         session::GameSession,
     };
+    use base64::Engine as _;
+    use sha2::{Digest as _, Sha256};
     use std::collections::BTreeMap;
     let properties = r#"{"preferredLanguage":["zh_CN"],"private":["SYNTHETIC_PROPERTY"]}"#;
     let session = GameSession {
@@ -18,6 +20,7 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         xuid: String::new(),
         client_id: String::new(),
         user_properties: properties.into(),
+        authlib: None,
     };
     let plan = ExecutionPlan {
         schema_version: 1,
@@ -50,7 +53,9 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
             cwd: "game".into(),
         },
     };
-    let root = tempfile::tempdir()?;
+    let root = tempfile::Builder::new()
+        .prefix("block agent path with spaces ")
+        .tempdir()?;
     let command = JavaCommand::bind(&plan, root.path(), "run", &session)?;
     assert!(command.arguments.iter().any(|arg| arg.value == properties));
     assert!(
@@ -69,6 +74,35 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         command.redact(&format!("properties={properties}")),
         "properties=<redacted>"
     );
+    let jar = root.path().join("verified agent.jar");
+    std::fs::write(&jar, b"verified fixture agent")?;
+    let mut injected = session.clone();
+    injected.authlib = Some(crate::session::AuthlibLaunch {
+        api_url: "https://provider.example.test/api/".into(),
+        metadata_json: r#"{"skinDomains":["skins.example.test"]}"#.into(),
+        agent: jar.clone(),
+        sha256: format!("{:x}", Sha256::digest(b"verified fixture agent")),
+    });
+    let with_agent = JavaCommand::bind(&plan, root.path(), "run", &injected)?;
+    assert_eq!(
+        with_agent.arguments[0].value,
+        format!(
+            "-javaagent:{}=https://provider.example.test/api/",
+            jar.display()
+        )
+    );
+    let prefetched = with_agent.arguments[1]
+        .value
+        .strip_prefix("-Dauthlibinjector.yggdrasil.prefetched=")
+        .ok_or_else(|| anyhow::anyhow!("Missing Authlib prefetch argument"))?;
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD.decode(prefetched)?,
+        br#"{"skinDomains":["skins.example.test"]}"#
+    );
+    assert_eq!(with_agent.arguments[2].value, "fixture.Main");
+    assert!(!serde_json::to_string(&plan)?.contains("provider.example.test"));
+    std::fs::write(jar, b"tampered fixture agent")?;
+    assert!(JavaCommand::bind(&plan, root.path(), "run", &injected).is_err());
     for invalid in ["null", r#"{"x":"not an array"}"#, r#"{"x":[12]}"#] {
         let mut invalid_session = session.clone();
         invalid_session.user_properties = invalid.into();

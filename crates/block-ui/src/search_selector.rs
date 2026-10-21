@@ -451,11 +451,20 @@ impl Block {
                 .filter_map(|account| {
                     let id = account_id(account);
                     let description = match account.provider {
-                        block_auth::AccountProvider::Microsoft => "Microsoft · Java Edition",
-                        block_auth::AccountProvider::Offline => {
-                            "Local play · No online authorization"
+                        block_auth::AccountProvider::Microsoft => {
+                            "Microsoft · Java Edition".to_owned()
                         }
-                        block_auth::AccountProvider::Authlib => "External provider · Java Edition",
+                        block_auth::AccountProvider::Offline => {
+                            "Local play · No online authorization".to_owned()
+                        }
+                        block_auth::AccountProvider::Authlib => format!(
+                            "{} · {}",
+                            self.account_authority(account),
+                            self.account_provider(account)
+                                .map_or("Provider unavailable", |provider| provider
+                                    .api_url
+                                    .as_str())
+                        ),
                     };
                     format!("{} {description}", account.player_name)
                         .to_lowercase()
@@ -468,10 +477,10 @@ impl Block {
                             },
                             id,
                             title: account.player_name.clone(),
-                            description: description.into(),
+                            description,
                             enabled: !self.busy,
                             appearance: None,
-                            badges: vec![account.provider.label().into()],
+                            badges: vec![self.account_authority(account)],
                         })
                 })
                 .collect()

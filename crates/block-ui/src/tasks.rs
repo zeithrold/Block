@@ -29,6 +29,33 @@ impl DownloadTracker {
     pub(super) fn apply(&mut self, event: DownloadEvent) {
         self.revision = self.revision.wrapping_add(1);
         match event {
+            DownloadEvent::Artifact {
+                sha256,
+                received,
+                total,
+                complete,
+                cached,
+                retries,
+            } => {
+                let id = format!("SHA-256:{sha256}");
+                let transfer = self.files.entry(id.clone()).or_insert_with(|| Transfer {
+                    id,
+                    ..Default::default()
+                });
+                if !cached {
+                    let delta = if transfer.retries == retries {
+                        received.saturating_sub(transfer.received)
+                    } else {
+                        received
+                    };
+                    self.transport_bytes = self.transport_bytes.saturating_add(delta);
+                }
+                transfer.received = received;
+                transfer.size = total;
+                transfer.complete = complete;
+                transfer.cached = cached;
+                transfer.retries = retries;
+            }
             DownloadEvent::Started { sha1, size } => {
                 self.files.insert(
                     sha1.clone(),
@@ -116,5 +143,27 @@ mod tests {
                 .and_then(|file| file.size),
             None
         );
+    }
+
+    #[test]
+    fn sha256_progress_counts_transport_retries_and_cache_hits_truthfully() {
+        let mut tracker = DownloadTracker::default();
+        let event = |received, total, complete, cached, retries| DownloadEvent::Artifact {
+            sha256: "a".repeat(64),
+            received,
+            total,
+            complete,
+            cached,
+            retries,
+        };
+        tracker.apply(event(40, None, false, false, 0));
+        tracker.apply(event(0, Some(100), false, false, 1));
+        tracker.apply(event(100, Some(100), false, false, 1));
+        assert_eq!(tracker.verified(), 0);
+        assert_eq!(tracker.transport_bytes, 140);
+        tracker.apply(event(100, Some(100), true, false, 1));
+        tracker.apply(event(100, Some(100), true, true, 0));
+        assert_eq!(tracker.verified(), 1);
+        assert_eq!(tracker.transport_bytes, 140);
     }
 }

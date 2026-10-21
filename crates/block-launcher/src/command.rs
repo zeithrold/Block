@@ -5,7 +5,9 @@ use std::{
 };
 
 use anyhow::{Context as _, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
+use sha2::{Digest as _, Sha256};
 
 const RUN_ID_TOKEN: &str = "${run_id}";
 
@@ -74,6 +76,39 @@ impl JavaCommand {
     ) -> anyhow::Result<Self> {
         let session = provider.session()?;
         session.validate()?;
+        let injection = if let Some(authlib) = &session.authlib {
+            use std::io::Read as _;
+            let mut file = std::fs::File::open(&authlib.agent)
+                .context("Authlib agent is missing; retry Play to download it")?;
+            let size = file.metadata()?.len();
+            ensure!(
+                size > 0 && size <= 16 * 1024 * 1024,
+                "Authlib agent has an invalid size"
+            );
+            let mut hash = Sha256::new();
+            let mut buffer = [0; 64 * 1024];
+            loop {
+                let length = file.read(&mut buffer)?;
+                if length == 0 {
+                    break;
+                }
+                hash.update(&buffer[..length]);
+            }
+            ensure!(
+                format!("{:x}", hash.finalize()) == authlib.sha256,
+                "Authlib agent SHA-256 changed; retry Play to repair its cache"
+            );
+            let agent = java_path(authlib.agent.clone(), plan.target.os)?;
+            vec![
+                format!("-javaagent:{}={}", agent.display(), authlib.api_url),
+                format!(
+                    "-Dauthlibinjector.yggdrasil.prefetched={}",
+                    STANDARD.encode(authlib.metadata_json.as_bytes())
+                ),
+            ]
+        } else {
+            Vec::new()
+        };
         let offline = session.user_type == "msa" && session.access_token == "0";
         let mut secrets = if offline {
             Vec::new()
@@ -146,6 +181,10 @@ impl JavaCommand {
             .iter()
             .map(|value| substitute(value, &variables))
             .collect::<anyhow::Result<Vec<_>>>()?;
+        arguments.extend(injection.into_iter().map(|value| Argument {
+            value,
+            secret: false,
+        }));
         arguments.push(Argument {
             value: template.main_class.clone(),
             secret: false,

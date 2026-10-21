@@ -301,7 +301,17 @@ impl Block {
             BrowserKind::Accounts => self
                 .accounts
                 .iter()
-                .filter(|account| account.player_name.to_lowercase().contains(&query))
+                .filter(|account| {
+                    format!(
+                        "{} {} {}",
+                        account.player_name,
+                        self.account_authority(account),
+                        self.account_provider(account)
+                            .map_or("", |provider| provider.api_url.as_str())
+                    )
+                    .to_lowercase()
+                    .contains(&query)
+                })
                 .map(|account| {
                     let id = account_id(account);
                     Record {
@@ -310,7 +320,7 @@ impl Block {
                         id,
                         title: account.player_name.clone(),
                         icon: RowIcon::Account,
-                        badges: vec![(account.provider.label().into(), BadgeVariant::Secondary)],
+                        badges: vec![(self.account_authority(account), BadgeVariant::Secondary)],
                     }
                 })
                 .collect(),
@@ -1041,11 +1051,34 @@ impl Block {
                 let current = self.selected_account.as_ref() == Some(&id);
                 let offline = account.provider == block_auth::AccountProvider::Offline;
                 let external = account.provider == block_auth::AccountProvider::Authlib;
-                body = body.child(self.detail_identity(RowIcon::Account, &account.player_name, vec![(account.provider.label().into(), BadgeVariant::Secondary)], current))
+                body = body.child(self.detail_identity(RowIcon::Account, &account.player_name, vec![(self.account_authority(account), BadgeVariant::Secondary)], current))
                     .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", account.provider.label().into()), ("Authentication", if offline { "Local identity; no online authorization" } else if external { "External authentication provider" } else { "Ownership rechecked at launch" }.into()), ("Environment", "Minecraft: Java Edition".into())], narrow))
                     .child(div().border_t_1().border_color(rgb(self.palette.border)).pt_5().flex().flex_col().gap_2()
                         .child(note(if offline { "A local player identity for offline play." } else if external { "An identity issued by an external authentication provider." } else { "A Microsoft identity for Minecraft: Java Edition." }))
                         .child(note(if offline { "The UUID is derived from the exact player name. No credentials are stored. This identity cannot access authenticated online services." } else if external { "Provider credentials must be verified before launch. Access and client tokens belong in your system credential store." } else { "Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store." })));
+                if external {
+                    body = body.child(Self::detail_metadata(
+                        "Provider",
+                        &[
+                            ("Name", self.account_authority(account)),
+                            (
+                                "API address",
+                                self.account_provider(account).map_or_else(
+                                    || "Provider unavailable".into(),
+                                    |provider| provider.api_url.clone(),
+                                ),
+                            ),
+                            (
+                                "Account",
+                                account
+                                    .authlib
+                                    .as_ref()
+                                    .map_or_else(String::new, |link| link.login.clone()),
+                            ),
+                        ],
+                        narrow,
+                    ));
+                }
                 footer = footer
                     .child(self.browser_control(
                         format!("account-logout-{id}"),

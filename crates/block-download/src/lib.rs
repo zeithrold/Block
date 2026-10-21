@@ -14,6 +14,7 @@ use anyhow::{Context as _, bail, ensure};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
+use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -130,6 +131,14 @@ pub struct Resource {
 
 #[derive(Debug, Clone)]
 pub enum DownloadEvent {
+    Artifact {
+        sha256: String,
+        received: u64,
+        total: Option<u64>,
+        complete: bool,
+        cached: bool,
+        retries: u32,
+    },
     Started {
         sha1: String,
         size: u64,
@@ -334,6 +343,21 @@ impl Store {
     /// # Errors
     /// Fails on missing offline metadata, invalid names, HTTP errors, or IO.
     pub async fn metadata(&self, name: &str, url: &str) -> anyhow::Result<Vec<u8>> {
+        self.metadata_policy(name, url, false).await
+    }
+
+    /// Read artifact discovery metadata without accepting a different final
+    /// origin. The shared cache and proxy policy still apply.
+    pub async fn metadata_pinned(&self, name: &str, url: &str) -> anyhow::Result<Vec<u8>> {
+        self.metadata_policy(name, url, true).await
+    }
+
+    async fn metadata_policy(
+        &self,
+        name: &str,
+        url: &str,
+        pin_origin: bool,
+    ) -> anyhow::Result<Vec<u8>> {
         ensure!(
             !name.is_empty()
                 && name
@@ -356,6 +380,12 @@ impl Store {
             .send()
             .await?
             .error_for_status()?;
+        if pin_origin {
+            ensure!(
+                response.url().origin() == reqwest::Url::parse(url)?.origin(),
+                "Artifact metadata redirected outside its official origin"
+            );
+        }
         ensure!(
             response.content_length().unwrap_or(0) <= 16 * 1024 * 1024,
             "root metadata is too large"
@@ -489,6 +519,185 @@ impl Store {
                         attempt: attempt + 1,
                     });
                     tokio::select! { () = cancel.cancelled() => bail!("download cancelled"), () = tokio::time::sleep(Duration::from_secs(u64::from(attempt + 1))) => {} }
+                }
+            }
+        }
+        bail!("download attempts exhausted")
+    }
+
+    /// Fetch an upstream SHA-256 artifact with bounded size and the store's
+    /// proxy, concurrency, retry and aggregate rate policies. Only a verified
+    /// temporary file is published; cancellation never replaces the destination.
+    pub async fn fetch_sha256(
+        &self,
+        url: &str,
+        digest: &str,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<PathBuf> {
+        const MAX_SIZE: u64 = 16 * 1024 * 1024;
+        ensure!(
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "invalid SHA-256 digest"
+        );
+        ensure!(!cancel.is_cancelled(), "download cancelled");
+        let directory = self.root.join("objects-sha256").join(&digest[..2]);
+        tokio::fs::create_dir_all(&directory).await?;
+        let path = directory.join(format!("{digest}.jar"));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("lock"))?;
+        loop {
+            match fs2::FileExt::try_lock_exclusive(&lock) {
+                Ok(()) => break,
+                Err(error)
+                    if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {}
+                Err(error) => return Err(error.into()),
+            }
+            tokio::select! {biased; ()=cancel.cancelled()=>bail!("download cancelled"), ()=tokio::time::sleep(Duration::from_millis(50))=>{}}
+        }
+        let check = path.clone();
+        let expected = digest.to_owned();
+        let cached = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<u64>> {
+            let Ok(mut file) = File::open(check) else {
+                return Ok(None);
+            };
+            let size = file.metadata()?.len();
+            if size == 0 || size > MAX_SIZE {
+                return Ok(None);
+            }
+            let mut hash = Sha256::new();
+            let mut bytes = [0; 64 * 1024];
+            loop {
+                let count = file.read(&mut bytes)?;
+                if count == 0 {
+                    break;
+                }
+                hash.update(&bytes[..count]);
+            }
+            Ok((format!("{:x}", hash.finalize()) == expected).then_some(size))
+        })
+        .await??;
+        if let Some(size) = cached {
+            (self.events)(DownloadEvent::Artifact {
+                sha256: digest.into(),
+                received: size,
+                total: Some(size),
+                complete: true,
+                cached: true,
+                retries: 0,
+            });
+            return Ok(path);
+        }
+        ensure!(!self.offline, "missing or corrupt offline SHA-256 artifact");
+        let _permit = tokio::select! {biased; ()=cancel.cancelled()=>bail!("download cancelled"),permit=self.transfers.acquire()=>permit?,};
+        for attempt in 0..=self.options.max_retries {
+            let mut retry_delay = Duration::from_secs(u64::from(attempt + 1));
+            let mut received = 0u64;
+            let mut total = None;
+            (self.events)(DownloadEvent::Artifact {
+                sha256: digest.into(),
+                received,
+                total,
+                complete: false,
+                cached: false,
+                retries: attempt,
+            });
+            let transfer = async {
+                let response = self.client.get(url).send().await?;
+                ensure!(
+                    response.url().origin() == reqwest::Url::parse(url)?.origin(),
+                    "SHA-256 artifact redirected outside its official origin"
+                );
+                if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    && let Some(value) = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                {
+                    let seconds = value.parse::<u64>().ok().or_else(|| {
+                        httpdate::parse_http_date(value)
+                            .ok()
+                            .and_then(|when| when.duration_since(std::time::SystemTime::now()).ok())
+                            .map(|d| d.as_secs())
+                    });
+                    if let Some(seconds) = seconds {
+                        retry_delay = Duration::from_secs(seconds.clamp(1, 86400));
+                    }
+                }
+                let response = response.error_for_status()?;
+                total = response.content_length();
+                ensure!(
+                    total.is_none_or(|size| size > 0 && size <= MAX_SIZE),
+                    "SHA-256 artifact exceeds the size limit"
+                );
+                let temporary = tempfile::NamedTempFile::new_in(&directory)?;
+                let mut file = tokio::fs::File::from_std(temporary.reopen()?);
+                let mut stream = response.bytes_stream();
+                let mut hash = Sha256::new();
+                while let Some(bytes) = stream.try_next().await? {
+                    received = received.saturating_add(bytes.len() as u64);
+                    ensure!(
+                        received <= MAX_SIZE,
+                        "SHA-256 artifact exceeds the size limit"
+                    );
+                    if let Some(limiter) = &self.rate_limiter {
+                        limiter.wait(bytes.len() as u64, cancel).await?;
+                    }
+                    hash.update(&bytes);
+                    file.write_all(&bytes).await?;
+                    (self.events)(DownloadEvent::Artifact {
+                        sha256: digest.into(),
+                        received,
+                        total,
+                        complete: false,
+                        cached: false,
+                        retries: attempt,
+                    });
+                }
+                ensure!(
+                    received > 0
+                        && total.is_none_or(|size| size == received)
+                        && format!("{:x}", hash.finalize()) == digest,
+                    "artifact size or SHA-256 mismatch"
+                );
+                file.flush().await?;
+                drop(file);
+                Ok::<_, anyhow::Error>(temporary)
+            };
+            let result = tokio::select! {biased; ()=cancel.cancelled()=>bail!("download cancelled"),result=transfer=>result,};
+            match result {
+                Ok(temporary) => {
+                    ensure!(!cancel.is_cancelled(), "download cancelled");
+                    temporary.persist(&path)?;
+                    (self.events)(DownloadEvent::Artifact {
+                        sha256: digest.into(),
+                        received,
+                        total,
+                        complete: true,
+                        cached: false,
+                        retries: attempt,
+                    });
+                    return Ok(path);
+                }
+                Err(error) => {
+                    let permanent = error
+                        .downcast_ref::<reqwest::Error>()
+                        .and_then(reqwest::Error::status)
+                        .is_some_and(|status| {
+                            status.is_client_error()
+                                && status.as_u16() != 408
+                                && status.as_u16() != 429
+                        });
+                    if permanent || attempt == self.options.max_retries {
+                        return Err(error).context("SHA-256 artifact download failed");
+                    }
+                    tokio::select! {biased; ()=cancel.cancelled()=>bail!("download cancelled"),()=tokio::time::sleep(retry_delay)=>{}}
                 }
             }
         }

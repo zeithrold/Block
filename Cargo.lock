@@ -707,10 +707,12 @@ dependencies = [
  "anyhow",
  "fs2",
  "futures-util",
+ "httpdate",
  "reqwest",
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -721,6 +723,7 @@ name = "block-launcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "block-download",
  "fs2",
  "futures-util",
@@ -734,6 +737,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",

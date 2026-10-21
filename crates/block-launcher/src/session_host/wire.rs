@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::session::{GameSession, SessionProvider};
 
-const MAX_FRAME: u32 = 256 * 1024;
+const MAX_FRAME: u32 = 2 * 1024 * 1024;
 
 // This private wire representation is used only on the inherited bootstrap pipe.
 // Keeping GameSession itself non-serializable prevents accidental disk persistence.
@@ -28,6 +28,17 @@ pub(super) struct Bootstrap {
     client_id: String,
     #[serde(default = "empty_user_properties")]
     user_properties: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authlib: Option<AuthlibBootstrap>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthlibBootstrap {
+    api_url: String,
+    metadata_json: String,
+    agent: std::path::PathBuf,
+    sha256: String,
 }
 
 fn empty_user_properties() -> String {
@@ -61,6 +72,12 @@ impl Bootstrap {
             xuid: game.xuid.clone(),
             client_id: game.client_id.clone(),
             user_properties: game.user_properties.clone(),
+            authlib: game.authlib.as_ref().map(|authlib| AuthlibBootstrap {
+                api_url: authlib.api_url.clone(),
+                metadata_json: authlib.metadata_json.clone(),
+                agent: authlib.agent.clone(),
+                sha256: authlib.sha256.clone(),
+            }),
         })
     }
 
@@ -97,6 +114,15 @@ impl SessionProvider for Bootstrap {
             xuid: self.xuid.clone(),
             client_id: self.client_id.clone(),
             user_properties: self.user_properties.clone(),
+            authlib: self
+                .authlib
+                .as_ref()
+                .map(|authlib| crate::session::AuthlibLaunch {
+                    api_url: authlib.api_url.clone(),
+                    metadata_json: authlib.metadata_json.clone(),
+                    agent: authlib.agent.clone(),
+                    sha256: authlib.sha256.clone(),
+                }),
         };
         game.validate()?;
         Ok(game)
@@ -163,6 +189,7 @@ mod tests {
                 xuid: "synthetic-xuid".into(),
                 client_id: "synthetic-client-id".into(),
                 user_properties: "{}".into(),
+                authlib: None,
             },
             SystemTime::now() + Duration::from_secs(600),
         )
@@ -211,12 +238,22 @@ mod tests {
         original.username = "山与海".into();
         original.user_properties =
             r#"{"preferredLanguage":["zh_CN"],"private":["SYNTHETIC_PROPERTY"]}"#.into();
+        original.authlib = Some(super::AuthlibBootstrap {
+            api_url: "https://provider.example.test/api/".into(),
+            metadata_json: "{}".into(),
+            agent: std::env::temp_dir().join("fixture-agent.jar"),
+            sha256: "a".repeat(64),
+        });
         let mut bytes = Vec::new();
         send(&mut bytes, &original).await?;
         let decoded: Bootstrap = receive(&mut bytes.as_slice()).await?;
         let session = decoded.session()?;
         assert_eq!(session.username, "山与海");
         assert_eq!(session.user_properties, original.user_properties);
+        assert_eq!(
+            session.authlib.as_ref().map(|value| value.api_url.as_str()),
+            Some("https://provider.example.test/api/")
+        );
         assert!(!format!("{decoded:?} {session:?}").contains("SYNTHETIC_PROPERTY"));
         assert_eq!(
             decoded.redact(&format!("{} {TOKEN}", session.user_properties)),
@@ -227,8 +264,13 @@ mod tests {
             .as_object_mut()
             .ok_or_else(|| anyhow::anyhow!("Missing bootstrap fields"))?
             .remove("user_properties");
+        legacy
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("Missing bootstrap fields"))?
+            .remove("authlib");
         let legacy: Bootstrap = serde_json::from_value(legacy)?;
         assert_eq!(legacy.session()?.user_properties, "{}");
+        assert!(legacy.session()?.authlib.is_none());
         let mut opaque = original;
         opaque.access_token = "0".into();
         assert_eq!(opaque.redact("token=0"), "token=<redacted>");

@@ -18,6 +18,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProductChoice {
+    AuthProvider,
     Appearance,
     Proxy,
     DefaultJava,
@@ -242,6 +243,10 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
         match kind {
+            ProductChoice::AuthProvider => {
+                let choices = self.auth_provider_choices();
+                (!choices.is_empty()).then_some(("Authentication provider", choices))
+            }
             ProductChoice::ProfileRuntime => {
                 let Some(Form::Profile(form)) = &self.form else {
                     return None;
@@ -365,7 +370,8 @@ impl Block {
                     UiAction::CustomDefaultWindow,
                 ),
             ),
-            ProductChoice::ProfileRuntime
+            ProductChoice::AuthProvider
+            | ProductChoice::ProfileRuntime
             | ProductChoice::ProfileDataPolicy
             | ProductChoice::InstanceRuntime
             | ProductChoice::InstanceWindow

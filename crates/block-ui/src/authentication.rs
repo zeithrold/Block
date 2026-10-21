@@ -11,8 +11,9 @@ use std::fmt;
 
 use block_auth::{Account, AccountProvider, SignInStage};
 use gpui::{
-    Context, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
-    ScrollHandle, Size, Styled as _, Window, div, point, px, relative, rgb,
+    AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, ScrollHandle, Size, StatefulInteractiveElement as _, Styled as _,
+    Window, div, point, px, relative, rgb,
 };
 
 use super::{
@@ -22,6 +23,50 @@ use super::{
     note, patterns,
 };
 
+#[derive(IntoElement)]
+struct ProviderPassword {
+    state: gpui::Entity<gpui_base::input::InputState>,
+    palette: super::Palette,
+}
+
+impl gpui::RenderOnce for ProviderPassword {
+    fn render(self, window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+        let palette = self.palette;
+        let focused = self.state.read(cx).focus_handle(cx).is_focused(window);
+        self.state.update(cx, |state, _| {
+            state.set_editor_style(gpui_base::input::InputEditorStyle {
+                foreground: rgb(palette.foreground).into(),
+                muted_foreground: rgb(palette.muted).into(),
+                background: rgb(palette.background).into(),
+                border: rgb(palette.input).into(),
+                caret: rgb(palette.foreground).into(),
+                selection: gpui::rgba(0x62bd_a855).into(),
+                ..Default::default()
+            })
+        });
+        div()
+            .id("auth-password")
+            .h(px(super::design::CONTROL_HEIGHT))
+            .w_full()
+            .px_3()
+            .py(px((super::design::CONTROL_HEIGHT
+                - super::design::BODY_LINE_HEIGHT)
+                / 2.))
+            .text_size(px(super::design::BODY_FONT_SIZE))
+            .line_height(px(super::design::BODY_LINE_HEIGHT))
+            .rounded(px(super::design::CONTROL_RADIUS))
+            .border_1()
+            .border_color(rgb(if focused { palette.ring } else { palette.input }))
+            .bg(rgb(palette.background))
+            .shadow(if focused {
+                super::design::focus_ring(palette.ring)
+            } else {
+                Vec::new()
+            })
+            .child(gpui_base::input::Input::new(&self.state))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
     #[default]
@@ -30,6 +75,7 @@ enum Phase {
     Preparing,
     Waiting,
     Verifying,
+    Characters,
     Failed,
     Complete,
     Saving,
@@ -41,7 +87,7 @@ impl Phase {
         match self {
             Self::Choose => 0,
             Self::Information | Self::Preparing | Self::Waiting | Self::Failed => 1,
-            Self::Verifying => 2,
+            Self::Verifying | Self::Characters => 2,
             Self::Complete | Self::Saving | Self::Saved => 3,
         }
     }
@@ -65,11 +111,31 @@ struct DeviceCode {
     expires_at: std::time::Instant,
 }
 
+#[derive(Debug)]
+struct AuthProviderDraft {
+    id: uuid::Uuid,
+    name: gpui::Entity<super::TextInput>,
+    address: gpui::Entity<super::TextInput>,
+    observed_address: String,
+    accepted_http: Option<String>,
+    error: Option<String>,
+    attempt: Option<(u64, block_launcher::CancellationToken)>,
+    saved: Option<uuid::Uuid>,
+}
+
 #[derive(Default)]
 pub(super) struct AuthWizard {
     phase: Phase,
     provider: AccountProvider,
     username: Option<gpui::Entity<super::TextInput>>,
+    login: Option<gpui::Entity<super::TextInput>>,
+    password: Option<gpui::Entity<gpui_base::input::InputState>>,
+    external_provider: Option<uuid::Uuid>,
+    external_api: Option<String>,
+    accepted_http: Option<String>,
+    characters: Vec<block_auth::AuthlibProfile>,
+    character: Option<uuid::Uuid>,
+    provider_draft: Option<AuthProviderDraft>,
     method: Method,
     device_code: Option<DeviceCode>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
@@ -107,6 +173,11 @@ impl AuthWizard {
     ) {
         self.phase = match name {
             "auth-information" => Phase::Information,
+            "auth-authlib-information"
+            | "auth-authlib-http-warning"
+            | "auth-authlib-provider-add" => Phase::Information,
+            "auth-authlib-characters" => Phase::Characters,
+            "auth-authlib-complete" => Phase::Complete,
             "auth-offline-information" => Phase::Information,
             "auth-offline-error" => Phase::Failed,
             "auth-offline-complete" => Phase::Complete,
@@ -123,7 +194,7 @@ impl AuthWizard {
             name,
             "auth-complete" | "auth-saving" | "auth-offline-complete"
         ) {
-            self.prepared_account = account;
+            self.prepared_account = account.clone();
         }
         if name.starts_with("auth-offline-") {
             self.provider = AccountProvider::Offline;
@@ -141,6 +212,52 @@ impl AuthWizard {
             }
             if name == "auth-offline-error" {
                 self.error = Some("Use 1–16 ASCII letters, numbers, or underscores.".into());
+            }
+        }
+        if name.starts_with("auth-authlib-") {
+            self.provider = AccountProvider::Authlib;
+            self.external_provider = Some(uuid::Uuid::from_u128(
+                if name == "auth-authlib-http-warning" {
+                    2
+                } else {
+                    1
+                },
+            ));
+            self.external_api = Some(
+                if name == "auth-authlib-http-warning" {
+                    "http://community.example.test/api/"
+                } else {
+                    "https://community.example.test/api/"
+                }
+                .into(),
+            );
+            if let Some(login) = &self.login {
+                login.update(cx, |field, cx| field.set_value("player@example.test", cx));
+            }
+            if name == "auth-authlib-characters" {
+                self.characters = vec![
+                    block_auth::AuthlibProfile {
+                        id: uuid::Uuid::from_u128(11),
+                        name: "Explorer".into(),
+                    },
+                    block_auth::AuthlibProfile {
+                        id: uuid::Uuid::from_u128(12),
+                        name: "Builder".into(),
+                    },
+                ];
+                self.character = Some(uuid::Uuid::from_u128(12));
+            }
+            if name == "auth-authlib-complete"
+                && let Some(mut account) = account
+            {
+                account.provider = AccountProvider::Authlib;
+                account.authlib = Some(block_auth::AuthlibAccount {
+                    provider_id: uuid::Uuid::from_u128(1),
+                    login: "player@example.test".into(),
+                });
+                account.client_id.clear();
+                account.credential_ref = account.identity_key();
+                self.prepared_account = Some(account);
             }
         }
         if name.starts_with("auth-device-") {
@@ -167,6 +284,15 @@ impl AuthWizard {
             phase: self.phase,
             provider: self.provider,
             username: self.username.clone(),
+            login: self.login.clone(),
+            // Outgoing motion layers never retain a password editor or its history.
+            password: None,
+            external_provider: self.external_provider,
+            external_api: self.external_api.clone(),
+            accepted_http: self.accepted_http.clone(),
+            characters: self.characters.clone(),
+            character: self.character,
+            provider_draft: None,
             method: self.method,
             device_code: None,
             attempt: None,
@@ -200,6 +326,8 @@ impl AuthWizard {
         self.device_code = None;
         self.error = Some(if self.provider == AccountProvider::Offline {
             "The local identity could not be saved. Check the data directory and try adding it again. Previously saved accounts are kept.".into()
+        } else if self.provider == AccountProvider::Authlib {
+            error.to_owned()
         } else {
             sign_in_error(error)
         });
@@ -209,6 +337,707 @@ impl AuthWizard {
 }
 
 impl Block {
+    pub(super) fn open_auth_provider_add(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.provider_draft.is_some())
+        {
+            self.shell
+                .surfaces
+                .open(super::shell::Surface::AuthProviderAdd, window, cx);
+            return;
+        }
+        if self.busy
+            || self.shell.auth.as_ref().is_none_or(|s| {
+                s.provider != AccountProvider::Authlib
+                    || !matches!(s.phase, Phase::Information | Phase::Failed)
+            })
+        {
+            return;
+        }
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|s| s.provider_draft.is_none())
+        {
+            let address = super::input("", "Server API address or Authlib quick link", cx);
+            cx.observe(&address, |view, field, cx| {
+                let value = field.read(cx).value();
+                if let Some(draft) = view
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|s| s.provider_draft.as_mut())
+                    && draft.address == field
+                    && draft.observed_address != value
+                {
+                    draft.observed_address = value;
+                    draft.accepted_http = None;
+                    draft.error = None;
+                    cx.notify();
+                }
+            })
+            .detach();
+            let draft = AuthProviderDraft {
+                id: uuid::Uuid::new_v4(),
+                name: super::input("", "Your community server", cx),
+                address,
+                observed_address: String::new(),
+                accepted_http: None,
+                error: None,
+                attempt: None,
+                saved: None,
+            };
+            if let Some(state) = &mut self.shell.auth {
+                state.provider_draft = Some(draft);
+            }
+        }
+        self.shell
+            .surfaces
+            .open(super::shell::Surface::AuthProviderAdd, window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn cancel_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.take())
+            && let Some((revision, cancel)) = draft.attempt
+        {
+            cancel.cancel();
+            if revision == self.operation_revision {
+                self.operation_revision = self.operation_revision.wrapping_add(1);
+                if let Some(engine) = &mut self.engine {
+                    engine.begin_operation(self.operation_revision);
+                }
+                self.busy = self.active_run.is_some();
+                self.operation_cancellable = false;
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn identify_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.as_mut())
+        {
+            match block_auth::ProviderAddress::parse(&draft.address.read(cx).value()) {
+                Ok(address) => {
+                    if draft.name.read(cx).value().trim().is_empty() {
+                        draft
+                            .name
+                            .update(cx, |field, cx| field.set_value(&address.suggested_name, cx));
+                    }
+                    draft
+                        .address
+                        .update(cx, |field, cx| field.set_value(&address.url, cx));
+                    draft.observed_address = address.url;
+                    draft.accepted_http = None;
+                    draft.error = None;
+                }
+                Err(error) => draft.error = Some(error.to_string()),
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn consent_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.as_mut())
+            && let Ok(address) = block_auth::ProviderAddress::parse(&draft.address.read(cx).value())
+            && address.insecure
+        {
+            draft.accepted_http = if draft.accepted_http.as_deref() == Some(address.url.as_str()) {
+                None
+            } else {
+                Some(address.url)
+            };
+            draft.error = None;
+        }
+        cx.notify();
+    }
+
+    pub(super) fn save_auth_provider(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        let Some(draft) = self
+            .shell
+            .auth
+            .as_ref()
+            .and_then(|s| s.provider_draft.as_ref())
+        else {
+            return;
+        };
+        let address = match block_auth::ProviderAddress::parse(&draft.address.read(cx).value()) {
+            Ok(address) => address,
+            Err(error) => {
+                if let Some(draft) = self
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|s| s.provider_draft.as_mut())
+                {
+                    draft.error = Some(error.to_string());
+                }
+                cx.notify();
+                return;
+            }
+        };
+        if let Some(provider) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|p| p.api_url == address.url)
+        {
+            self.use_auth_provider(provider.id, window, cx);
+            return;
+        }
+        let name = draft.name.read(cx).value().trim().to_owned();
+        let accepted = draft.accepted_http.as_deref() == Some(address.url.as_str());
+        if name.is_empty() || address.insecure && !accepted {
+            if let Some(draft) = self
+                .shell
+                .auth
+                .as_mut()
+                .and_then(|s| s.provider_draft.as_mut())
+            {
+                draft.error = Some(
+                    if name.is_empty() {
+                        "Enter a provider display name."
+                    } else {
+                        "Confirm the HTTP warning for this address."
+                    }
+                    .into(),
+                );
+            }
+            cx.notify();
+            return;
+        }
+        self.begin_cancellable("Discovering your authentication provider");
+        self.operation_kind = super::OperationKind::Account;
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.as_mut())
+        {
+            draft.error = None;
+            draft.saved = None;
+            draft.attempt = Some((self.operation_revision, self.cancel.clone()));
+            for field in [&draft.name, &draft.address] {
+                field.update(cx, |field, cx| field.set_read_only(true, cx));
+            }
+        }
+        if let Some(engine) = &self.engine {
+            engine.save_provider(None, name, address.url, accepted, self.cancel.clone());
+        } else {
+            self.auth_provider_finished(
+                &Err("Provider setup is unavailable: engine unavailable".into()),
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    fn use_auth_provider(
+        &mut self,
+        id: uuid::Uuid,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(api) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.api_url.clone())
+        else {
+            return;
+        };
+        if let Some(state) = &mut self.shell.auth {
+            if let Some(field) = &state.password {
+                field.update(cx, |field, cx| field.set_value("", window, cx));
+            }
+            state.external_provider = Some(id);
+            state.external_api = Some(api);
+            state.accepted_http = None;
+            state.error = None;
+            state.provider_draft = None;
+            state.transition(Phase::Information);
+        }
+        self.shell.surfaces.activate(window);
+        self.shell.surfaces.close(window, &self.focus, cx);
+        cx.notify();
+    }
+
+    pub(super) fn auth_provider_finished(
+        &mut self,
+        result: &Result<String, String>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.as_mut())
+            && draft
+                .attempt
+                .as_ref()
+                .is_some_and(|(revision, _)| *revision == self.operation_revision)
+            && let Err(error) = result
+        {
+            draft.error = Some(error.clone());
+            draft.attempt = None;
+            for field in [&draft.name, &draft.address] {
+                field.update(cx, |field, cx| field.set_read_only(false, cx));
+            }
+        }
+    }
+
+    pub(super) fn auth_provider_saved(&mut self, id: &str, cx: &mut Context<'_, Self>) -> bool {
+        let Ok(id) = id.parse::<uuid::Uuid>() else {
+            return false;
+        };
+        let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|s| s.provider_draft.as_mut())
+        else {
+            return false;
+        };
+        if draft.attempt.as_ref().is_none_or(|(revision, cancel)| {
+            *revision != self.operation_revision || cancel.is_cancelled()
+        }) {
+            return false;
+        }
+        draft.saved = Some(id);
+        let draft_id = draft.id;
+        let handle = self
+            .shell
+            .surfaces
+            .layers()
+            .find(|entry| matches!(entry.kind, super::shell::Surface::AuthProviderAdd))
+            .and_then(|entry| entry.window);
+        if let Some(handle) = handle {
+            let owner = cx.entity();
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    owner.update(cx, |view, cx| {
+                        if view
+                            .shell
+                            .auth
+                            .as_ref()
+                            .and_then(|s| s.provider_draft.as_ref())
+                            .is_none_or(|draft| draft.id != draft_id || draft.saved != Some(id))
+                        {
+                            return;
+                        }
+                        view.use_auth_provider(id, window, cx);
+                    })
+                });
+            });
+        }
+        true
+    }
+
+    pub(super) fn render_auth_provider_add(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let Some(draft) = self
+            .shell
+            .auth
+            .as_ref()
+            .and_then(|s| s.provider_draft.as_ref())
+        else {
+            return div();
+        };
+        let parsed = block_auth::ProviderAddress::parse(&draft.address.read(cx).value()).ok();
+        let existing = parsed.as_ref().and_then(|a| {
+            self.shell
+                .providers
+                .records
+                .iter()
+                .find(|p| p.api_url == a.url)
+        });
+        let mut form = div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(div().text_xl().child("Add a provider"))
+            .child(note(
+                "Enter the server details or paste an Authlib quick link.",
+            ))
+            .child(components::field_with(
+                "Display name",
+                &draft.name,
+                self.palette,
+                components::FieldOptions {
+                    required: true,
+                    ..Default::default()
+                },
+            ))
+            .child(components::field_with(
+                "Server API address",
+                &draft.address,
+                self.palette,
+                components::FieldOptions {
+                    required: true,
+                    ..Default::default()
+                },
+            ))
+            .child(self.auth_button(
+                "auth-provider-identify",
+                "Recognize address",
+                UiAction::AuthProviderIdentify,
+                ButtonVariant::Outline,
+                ControlState {
+                    disabled: self.busy,
+                    ..Default::default()
+                },
+                cx,
+            ));
+        if let Some(provider) = existing {
+            form = form.child(note(format!(
+                "Already saved as {}. Select it without creating a duplicate.",
+                provider.name
+            )));
+        }
+        if let Some(address) = &parsed
+            && address.insecure
+        {
+            form=form.child(note("HTTP sends your password and tokens without encryption. Continue only if you trust this address and network."))
+                .child(components::checkbox("auth-provider-http","I accept the HTTP risk for this address",draft.accepted_http.as_deref()==Some(address.url.as_str()),self.palette,ControlState{disabled:self.busy,..Default::default()},cx.listener(|view,(),window,cx|view.handle(UiAction::AuthProviderConsent,window,cx))));
+        }
+        form.children(draft.error.as_ref().map(|error| note(error.clone())))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(self.auth_button(
+                        "auth-provider-cancel",
+                        "Cancel",
+                        UiAction::AuthProviderCancel,
+                        ButtonVariant::Ghost,
+                        ControlState::default(),
+                        cx,
+                    ))
+                    .child(self.auth_button(
+                        "auth-provider-save",
+                        if existing.is_some() {
+                            "Use saved provider"
+                        } else {
+                            "Add and select"
+                        },
+                        UiAction::AuthProviderSave,
+                        ButtonVariant::Primary,
+                        ControlState {
+                            busy: draft.attempt.is_some(),
+                            disabled: self.busy
+                                || existing.is_none()
+                                    && parsed.as_ref().is_some_and(|a| {
+                                        a.insecure
+                                            && draft.accepted_http.as_deref()
+                                                != Some(a.url.as_str())
+                                    }),
+                            ..Default::default()
+                        },
+                        cx,
+                    )),
+            )
+    }
+
+    pub(super) fn account_provider(
+        &self,
+        account: &Account,
+    ) -> Option<&block_auth::AuthlibProvider> {
+        let id = account.authlib.as_ref()?.provider_id;
+        self.shell
+            .providers
+            .records
+            .iter()
+            .find(|provider| provider.id == id)
+    }
+
+    pub(super) fn account_authority(&self, account: &Account) -> String {
+        if account.provider == AccountProvider::Authlib {
+            self.account_provider(account).map_or_else(
+                || "Missing provider".into(),
+                |provider| provider.name.clone(),
+            )
+        } else {
+            account.provider.label().into()
+        }
+    }
+    fn start_external_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(state) = &self.shell.auth else {
+            return;
+        };
+        if state.provider_draft.is_some() {
+            return;
+        }
+        let Some(provider) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|p| Some(p.id) == state.external_provider)
+            .cloned()
+        else {
+            if let Some(state) = &mut self.shell.auth {
+                state.failed("Choose a saved authentication provider first.");
+            }
+            cx.notify();
+            return;
+        };
+        if state.external_api.as_deref() != Some(provider.api_url.as_str()) {
+            if let Some(state) = &mut self.shell.auth {
+                if let Some(field) = &state.password {
+                    field.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+                state.accepted_http = None;
+                state.failed(
+                    "The provider address changed. Choose it again and re-enter your password.",
+                );
+            }
+            cx.notify();
+            return;
+        }
+        if provider.api_url.starts_with("http:")
+            && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
+        {
+            if let Some(state) = &mut self.shell.auth {
+                state.failed(
+                    "Confirm the HTTP warning for this provider before sending your password.",
+                );
+            }
+            cx.notify();
+            return;
+        }
+        if state.phase == Phase::Characters {
+            let Some(character) = state
+                .character
+                .filter(|id| state.characters.iter().any(|p| p.id == *id))
+            else {
+                return;
+            };
+            self.begin_cancellable("Selecting your provider character");
+            self.operation_kind = super::OperationKind::Account;
+            if let Some(state) = &mut self.shell.auth {
+                state.error = None;
+                state.attempt = Some((self.operation_revision, self.cancel.clone()));
+                state.transition(Phase::Verifying);
+            }
+            if let Some(engine) = &self.engine {
+                engine.select_authlib_character(provider.id, character, self.cancel.clone());
+            }
+            cx.notify();
+            return;
+        }
+        let login = state.login.as_ref().map_or_else(String::new, |field| {
+            field.read(cx).value().trim().to_owned()
+        });
+        let password = state
+            .password
+            .as_ref()
+            .map_or_else(String::new, |field| field.read(cx).value().to_string());
+        if login.is_empty() || password.is_empty() {
+            if let Some(state) = &mut self.shell.auth {
+                state.failed(
+                    "Enter your provider account and password. The password is never saved.",
+                );
+            }
+            cx.notify();
+            return;
+        }
+        let password = block_auth::SecretString::new(password);
+        if let Some(field) = self
+            .shell
+            .auth
+            .as_ref()
+            .and_then(|state| state.password.as_ref())
+        {
+            field.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+        self.abandon_auth_attempt();
+        self.begin_cancellable("Authenticating with your provider");
+        self.operation_kind = super::OperationKind::Account;
+        if let Some(state) = &mut self.shell.auth {
+            state.characters.clear();
+            state.character = None;
+            state.prepared_account = None;
+            state.error = None;
+            state.attempt = Some((self.operation_revision, self.cancel.clone()));
+            if !self.busy {
+                state.failed("External sign-in could not start: engine unavailable");
+            } else {
+                state.transition(Phase::Preparing);
+            }
+            if let Some(focus) = &state.focus {
+                focus.focus(window, cx);
+            }
+        }
+        if let Some(engine) = &self.engine {
+            engine.sign_in_authlib(
+                provider.id,
+                provider.api_url,
+                login,
+                password,
+                self.cancel.clone(),
+            );
+        }
+        cx.notify();
+    }
+
+    pub(super) fn auth_characters(&mut self, characters: Vec<block_auth::AuthlibProfile>) {
+        if let Some(state) = &mut self.shell.auth
+            && state.provider == AccountProvider::Authlib
+            && state.phase.pending()
+            && state
+                .attempt
+                .as_ref()
+                .is_some_and(|(_, cancel)| !cancel.is_cancelled())
+            && !characters.is_empty()
+        {
+            state.character = characters.first().map(|p| p.id);
+            state.characters = characters;
+            state.error = None;
+            state.transition(Phase::Characters);
+        }
+    }
+
+    pub(super) fn choose_auth_character(&mut self, id: uuid::Uuid, cx: &mut Context<'_, Self>) {
+        if let Some(state) = &mut self.shell.auth
+            && state.phase == Phase::Characters
+            && !self.busy
+            && state.characters.iter().any(|profile| profile.id == id)
+        {
+            state.character = Some(id);
+            state.error = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn choose_external_provider(
+        &mut self,
+        id: uuid::Uuid,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.busy {
+            return;
+        }
+        let Some(api) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|provider| provider.id == id)
+            .map(|provider| provider.api_url.clone())
+        else {
+            return;
+        };
+        if let Some(state) = &mut self.shell.auth
+            && state.provider == AccountProvider::Authlib
+            && matches!(state.phase, Phase::Information | Phase::Failed)
+        {
+            if state.external_provider != Some(id)
+                || state.external_api.as_deref() != Some(api.as_str())
+            {
+                state.external_provider = Some(id);
+                state.external_api = Some(api);
+                state.accepted_http = None;
+                state.characters.clear();
+                state.character = None;
+                if let Some(field) = &state.password {
+                    field.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+            }
+            state.error = None;
+            state.transition(Phase::Information);
+            if self
+                .shell
+                .surfaces
+                .top()
+                .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Select(_)))
+            {
+                self.shell.surfaces.close(window, &self.focus, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    pub(super) fn consent_external_auth(&mut self, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        if let Some(state) = &mut self.shell.auth
+            && matches!(state.phase, Phase::Information | Phase::Failed)
+            && let Some(provider) = self
+                .shell
+                .providers
+                .records
+                .iter()
+                .find(|p| Some(p.id) == state.external_provider)
+        {
+            state.accepted_http =
+                if state.accepted_http.as_deref() == Some(provider.api_url.as_str()) {
+                    None
+                } else {
+                    Some(provider.api_url.clone())
+                };
+            state.error = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn auth_provider_choices(&self) -> Vec<super::select::SelectChoice<UiAction>> {
+        if self.shell.auth.as_ref().is_none_or(|state| {
+            state.provider != AccountProvider::Authlib
+                || !matches!(state.phase, Phase::Information | Phase::Failed)
+                || state.provider_draft.is_some()
+        }) {
+            return Vec::new();
+        }
+        self.shell
+            .providers
+            .records
+            .iter()
+            .map(|provider| super::select::SelectChoice {
+                label: format!("{} · {}", provider.name, provider.api_url),
+                selected: self
+                    .shell
+                    .auth
+                    .as_ref()
+                    .is_some_and(|state| state.external_provider == Some(provider.id)),
+                action: UiAction::AuthExternalProvider(provider.id),
+            })
+            .collect()
+    }
+
     pub(super) fn choose_auth_provider(
         &mut self,
         provider: AccountProvider,
@@ -257,7 +1086,7 @@ impl Block {
         }
     }
 
-    pub(super) fn auth_back(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn auth_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let Some(phase) = self.shell.auth.as_ref().map(|state| state.phase) else {
             return;
         };
@@ -271,8 +1100,46 @@ impl Block {
         {
             return;
         }
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.provider_draft.is_some())
+        {
+            self.cancel_auth_provider(cx);
+            let handle = self
+                .shell
+                .surfaces
+                .layers()
+                .find(|entry| matches!(entry.kind, super::shell::Surface::AuthProviderAdd))
+                .and_then(|entry| entry.window);
+            if let Some(handle) = handle {
+                let owner = cx.entity();
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        owner.update(cx, |view, cx| {
+                            if view
+                                .shell
+                                .auth
+                                .as_ref()
+                                .is_some_and(|state| state.provider_draft.is_some())
+                            {
+                                return;
+                            }
+                            view.shell.surfaces.activate(window);
+                            view.shell.surfaces.close(window, &view.focus, cx);
+                        })
+                    });
+                });
+            }
+        }
         self.abandon_auth_attempt();
         if let Some(state) = &mut self.shell.auth {
+            if let Some(password) = &state.password {
+                password.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            state.characters.clear();
+            state.character = None;
             state.browser_url = None;
             state.device_code = None;
             state.stage = None;
@@ -368,8 +1235,57 @@ impl Block {
             return;
         }
         let focus = cx.focus_handle();
+        let password = cx.new(|cx| {
+            gpui_base::input::InputState::new(window, cx)
+                .masked(true)
+                .placeholder("Your provider password")
+                .validate(|value, _| value.len() <= 4096)
+        });
+        cx.observe(&password, |_, _, cx| cx.notify()).detach();
+        cx.subscribe(
+            &password,
+            |view, input, event: &gpui_base::input::InputEvent, cx| {
+                if !matches!(
+                    event,
+                    gpui_base::input::InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false
+                    }
+                ) || view.shell.auth.as_ref().is_none_or(|state| {
+                    state.provider != AccountProvider::Authlib
+                        || state.password.as_ref() != Some(&input)
+                        || !matches!(state.phase, Phase::Information | Phase::Failed)
+                }) {
+                    return;
+                }
+                let handle = view
+                    .shell
+                    .surfaces
+                    .layers()
+                    .find(|entry| matches!(entry.kind, super::shell::Surface::Auth))
+                    .and_then(|entry| entry.window);
+                if let Some(handle) = handle {
+                    let owner = cx.entity();
+                    cx.defer(move |cx| {
+                        let _ = handle.update(cx, |_, window, cx| {
+                            owner.update(cx, |view, cx| view.start_auth(window, cx))
+                        });
+                    });
+                }
+            },
+        )
+        .detach();
         let wizard = AuthWizard {
             username: Some(super::input("", "Your player name", cx)),
+            login: Some(super::input("", "Email or username", cx)),
+            password: Some(password),
+            external_provider: self.shell.providers.records.first().map(|p| p.id),
+            external_api: self
+                .shell
+                .providers
+                .records
+                .first()
+                .map(|p| p.api_url.clone()),
             return_tab: self.tab,
             return_size: window.viewport_size(),
             focus: Some(focus.clone()),
@@ -388,6 +1304,15 @@ impl Block {
                 matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved)
             })
         {
+            return;
+        }
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.provider == AccountProvider::Authlib)
+        {
+            self.start_external_auth(window, cx);
             return;
         }
         if self
@@ -516,7 +1441,12 @@ impl Block {
     /// Authentication is verified, but nothing is persisted until Finish.
     pub(super) fn auth_prepared(&mut self, account: Account) {
         if let Some(state) = &mut self.shell.auth
-            && state.provider == AccountProvider::Microsoft
+            && state.provider == account.provider
+            && (account.provider != AccountProvider::Authlib
+                || account
+                    .authlib
+                    .as_ref()
+                    .is_some_and(|link| Some(link.provider_id) == state.external_provider))
             && state.phase.pending()
             && state
                 .attempt
@@ -536,6 +1466,14 @@ impl Block {
             && (state.phase.pending() || state.phase == Phase::Saving)
         {
             match result {
+                Err(error)
+                    if state.provider == AccountProvider::Authlib
+                        && !state.characters.is_empty()
+                        && state.phase == Phase::Verifying =>
+                {
+                    state.error = Some(error.clone());
+                    state.transition(Phase::Characters);
+                }
                 Err(error) => state.failed(error),
                 Ok(_) => state.failed("Sign-in ended without an identity confirmation"),
             }
@@ -543,6 +1481,15 @@ impl Block {
     }
 
     pub(super) fn cancel_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.cancel_auth_provider(cx);
+        if let Some(password) = self
+            .shell
+            .auth
+            .as_ref()
+            .and_then(|state| state.password.as_ref())
+        {
+            password.update(cx, |input, cx| input.set_value("", window, cx));
+        }
         let committing = self
             .shell
             .auth
@@ -585,6 +1532,8 @@ impl Block {
         if let Some(engine) = &self.engine {
             if account.provider == AccountProvider::Offline {
                 engine.save_offline_account(account);
+            } else if account.provider == AccountProvider::Authlib {
+                engine.save_authlib_sign_in(account.identity_key());
             } else {
                 engine.save_sign_in(account.reference);
             }
@@ -600,7 +1549,7 @@ impl Block {
             || state
                 .prepared_account
                 .as_ref()
-                .is_none_or(|prepared| prepared.reference != account.reference)
+                .is_none_or(|prepared| prepared.identity_key() != account.identity_key())
         {
             return;
         }
@@ -793,6 +1742,8 @@ impl Block {
                 "Sign in",
                 if state.provider == AccountProvider::Offline {
                     "Choose a local player name"
+                } else if state.provider == AccountProvider::Authlib {
+                    "Your provider account"
                 } else {
                     "Continue with Microsoft"
                 },
@@ -801,6 +1752,8 @@ impl Block {
                 "Verification",
                 if state.provider == AccountProvider::Offline {
                     "Validate the local identity"
+                } else if state.provider == AccountProvider::Authlib {
+                    "Select your provider character"
                 } else {
                     "Ownership and player profile"
                 },
@@ -812,7 +1765,10 @@ impl Block {
             description,
             complete: match title {
                 "Account type" => state.phase != Phase::Choose,
-                "Sign in" => matches!(state.phase, Phase::Verifying | Phase::Complete),
+                "Sign in" => matches!(
+                    state.phase,
+                    Phase::Verifying | Phase::Characters | Phase::Complete
+                ),
                 "Verification" => {
                     matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved)
                 }
@@ -841,18 +1797,26 @@ impl Block {
             Phase::Information => (
                 if state.provider == AccountProvider::Offline {
                     "Your local player"
+                } else if state.provider == AccountProvider::Authlib {
+                    "Sign in to your provider"
                 } else {
                     "Sign in with Microsoft"
                 },
                 if state.provider == AccountProvider::Offline {
                     "Choose a name for local play without an authentication service."
+                } else if state.provider == AccountProvider::Authlib {
+                    "Choose your server and enter its account credentials."
                 } else {
                     "Choose browser sign-in or enter a device code on another device."
                 },
             ),
             Phase::Preparing => (
                 "Preparing secure sign-in",
-                "Block is requesting a real Microsoft authorization session.",
+                if state.provider == AccountProvider::Authlib {
+                    "Block is authenticating with your selected provider."
+                } else {
+                    "Block is requesting a real Microsoft authorization session."
+                },
             ),
             Phase::Waiting if state.method == Method::Device => (
                 "Approve your device code",
@@ -864,7 +1828,15 @@ impl Block {
             ),
             Phase::Verifying => (
                 "Verifying your account",
-                "Block is checking Java Edition ownership and resolving your player profile.",
+                if state.provider == AccountProvider::Authlib {
+                    "Block is assigning the selected character through your provider."
+                } else {
+                    "Block is checking Java Edition ownership and resolving your player profile."
+                },
+            ),
+            Phase::Characters => (
+                "Choose your character",
+                "These characters were returned by your authentication provider.",
             ),
             Phase::Failed => (
                 "Sign-in needs your attention",
@@ -902,10 +1874,36 @@ impl Block {
         body = match state.phase {
             Phase::Choose => body.child(self.auth_choices(state, cx)),
             Phase::Information => body.child(self.auth_information(state, cx)),
+            Phase::Preparing | Phase::Waiting if state.provider == AccountProvider::Authlib => {
+                body.child(self.auth_waiting(state, cx))
+            }
             Phase::Preparing | Phase::Waiting => body
                 .child(self.auth_information(state, cx))
                 .child(self.auth_waiting(state, cx)),
             Phase::Verifying => body.child(self.auth_waiting(state, cx)),
+            Phase::Characters => {
+                let mut choices = components::card(self.palette).gap_3();
+                for character in &state.characters {
+                    let id = character.id;
+                    choices = choices
+                        .child(components::radio(
+                            format!("auth-character-{id}"),
+                            character.name.clone(),
+                            state.character == Some(id),
+                            self.palette,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx.listener(move |view, (), window, cx| {
+                                view.handle(UiAction::AuthCharacter(id), window, cx)
+                            }),
+                        ))
+                        .child(note(character.id.to_string()));
+                }
+                body.child(choices)
+                    .children(state.error.as_ref().map(|error| note(error.clone())))
+            }
             Phase::Failed => body.child(self.auth_information(state, cx)).child(
                 components::card(self.palette)
                     .border_color(rgb(self.palette.destructive))
@@ -936,24 +1934,9 @@ impl Block {
                 .child(components::radio("auth-microsoft", "Microsoft account", state.provider == AccountProvider::Microsoft, self.palette,
                     ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthProvider(AccountProvider::Microsoft), window, cx))))
                 .child(note("Sign in securely in your browser. Block never asks for your Microsoft password.")));
-        choices = choices.child(
-            components::card(self.palette)
-                .gap_2()
-                .child(components::button(
-                    "auth-authlib-unavailable",
-                    "Authlib-Injector",
-                    self.palette,
-                    ButtonVariant::Ghost,
-                    ControlState {
-                        disabled: true,
-                        ..ControlState::default()
-                    },
-                    |(), _, _| {},
-                ))
-                .child(note(
-                    "Provider authentication is not supported in this version.",
-                )),
-        );
+        choices = choices.child(components::card(self.palette)
+            .child(components::radio("auth-authlib","Authlib-Injector",state.provider==AccountProvider::Authlib,self.palette,ControlState::default(),cx.listener(|view,(),window,cx|view.handle(UiAction::AuthProvider(AccountProvider::Authlib),window,cx))))
+            .child(note("A community authentication provider. Its account and password are separate from Microsoft.")));
         choices.child(components::card(self.palette)
             .child(components::radio("auth-offline", "Offline Mode", state.provider == AccountProvider::Offline, self.palette,
                 ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthProvider(AccountProvider::Offline), window, cx))))
@@ -962,6 +1945,109 @@ impl Block {
     }
 
     fn auth_information(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        if state.provider == AccountProvider::Authlib {
+            let provider = self
+                .shell
+                .providers
+                .records
+                .iter()
+                .find(|p| Some(p.id) == state.external_provider);
+            let mut card = components::card(self.palette)
+                .gap_3()
+                .child(
+                    div()
+                        .flex()
+                        .items_end()
+                        .gap_2()
+                        .child(div().flex_1().min_w_0().child(self.product_select_field(
+                            "auth-provider-picker",
+                            "Authentication provider",
+                            provider.map_or("Choose a server", |p| p.name.as_str()),
+                            super::select::ProductChoice::AuthProvider,
+                            cx,
+                        )))
+                        .child(self.auth_button(
+                            "auth-provider-add",
+                            "+",
+                            UiAction::AuthProviderAdd,
+                            ButtonVariant::Outline,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx,
+                        )),
+                )
+                .children(provider.map(|p| note(p.api_url.clone())));
+            if let Some(error) = &self.shell.providers.load_error {
+                card = card.child(note(error.clone()));
+            }
+            if self.shell.providers.loaded && self.shell.providers.records.is_empty() {
+                card = card.child(note(
+                    "No saved providers. Use + to add your server or import its quick link.",
+                ));
+            }
+            if state.provider_draft.is_some() {
+                card = card.child(note(
+                    "Finish or close the provider dialog before signing in.",
+                ));
+            }
+            if provider.is_some_and(|provider| {
+                state.external_api.as_deref() != Some(provider.api_url.as_str())
+            }) {
+                card = card.child(note(
+                    "The provider address changed. Choose it again and re-enter your password.",
+                ));
+            }
+            if let Some(provider) = provider
+                && provider.api_url.starts_with("http:")
+            {
+                card=card.child(div().p_3().rounded_lg().border_1().border_color(rgb(self.palette.destructive))
+                    .child(note("This provider uses HTTP. Your password and tokens are sent without encryption. Continue only if you trust this address and network.")))
+                    .child(components::checkbox("auth-http-consent","I accept the HTTP risk for this address",state.accepted_http.as_deref()==Some(provider.api_url.as_str()),self.palette,ControlState{disabled:self.busy,..ControlState::default()},cx.listener(|view,(),window,cx|view.handle(UiAction::AuthHttpConsent,window,cx))));
+            }
+            let mut fields = div().flex().gap_4();
+            if let Some(login) = &state.login {
+                fields = fields.child(div().flex_1().min_w_0().child(components::field_with(
+                    "Account",
+                    login,
+                    self.palette,
+                    components::FieldOptions {
+                        required: true,
+                        ..components::FieldOptions::default()
+                    },
+                )));
+            }
+            let password_focus = state.password.clone();
+            fields = fields.child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("auth-password-label")
+                            .text_size(px(super::design::BODY_FONT_SIZE))
+                            .line_height(px(super::design::BODY_LINE_HEIGHT))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .cursor(gpui::CursorStyle::IBeam)
+                            .on_click(move |_, window, cx| {
+                                if let Some(password) = &password_focus {
+                                    password.read(cx).focus_handle(cx).focus(window, cx);
+                                }
+                                cx.stop_propagation();
+                            })
+                            .child("Password *"),
+                    )
+                    .children(state.password.as_ref().map(|state| ProviderPassword {
+                        state: state.clone(),
+                        palette: self.palette,
+                    })),
+            );
+            return card.child(fields).child(note("The password is cleared after sending and is never saved. Only Finish stores this provider's tokens securely."));
+        }
         if state.provider == AccountProvider::Offline {
             let mut card = components::card(self.palette)
                 .child(note("An offline identity for local play, without signing in to an authentication service."));
@@ -990,6 +2076,18 @@ impl Block {
     }
 
     fn auth_waiting(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        if state.provider == AccountProvider::Authlib {
+            return components::card(self.palette)
+                .child(note(if state.phase == Phase::Verifying {
+                    "Confirming the selected character with your provider…"
+                } else {
+                    "Checking your account with the selected provider…"
+                }))
+                .child(components::progress(
+                    ProgressState::Indeterminate,
+                    self.palette,
+                ));
+        }
         if state.method == Method::Device
             && matches!(state.phase, Phase::Preparing | Phase::Waiting)
         {
@@ -1065,7 +2163,8 @@ impl Block {
         components::card(self.palette)
             .child(components::avatar_fallback(&account.player_name, self.palette, 64., AvatarState::Fallback))
             .child(div().text_xl().child(account.player_name.clone()))
-            .child(components::badge(account.provider.label(), self.palette, BadgeVariant::Secondary))
+            .child(components::badge(self.account_authority(account), self.palette, BadgeVariant::Secondary))
+            .children(self.account_provider(account).map(|provider|note(provider.api_url.clone())))
             .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
             .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else { "Finish saves this account and selects it. Closing now discards the preparation and keeps previously saved accounts unchanged." }))
     }
@@ -1119,6 +2218,8 @@ impl Block {
             Phase::Information => (
                 if state.provider == AccountProvider::Offline {
                     "Continue"
+                } else if state.provider == AccountProvider::Authlib {
+                    "Sign in"
                 } else if state.method == Method::Device {
                     "Request a code"
                 } else {
@@ -1131,10 +2232,24 @@ impl Block {
                 ("Waiting…", UiAction::Authenticate, true)
             }
             Phase::Failed => ("Try again", UiAction::AuthRetry, false),
+            Phase::Characters => ("Continue", UiAction::Authenticate, false),
             Phase::Complete => ("Finish", UiAction::AuthFinish, false),
             Phase::Saving => ("Saving…", UiAction::AuthFinish, true),
             Phase::Saved => ("Done", UiAction::AuthCancel, false),
         };
+        let provider_blocked = state.provider == AccountProvider::Authlib
+            && matches!(state.phase, Phase::Information | Phase::Failed)
+            && self
+                .shell
+                .providers
+                .records
+                .iter()
+                .find(|p| Some(p.id) == state.external_provider)
+                .is_none_or(|provider| {
+                    state.external_api.as_deref() != Some(provider.api_url.as_str())
+                        || provider.api_url.starts_with("http:")
+                            && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
+                });
         footer.child(self.auth_button(
             "auth-primary",
             label,
@@ -1142,11 +2257,17 @@ impl Block {
             ButtonVariant::Primary,
             ControlState {
                 busy,
-                disabled: self.busy
-                    && matches!(
-                        state.phase,
-                        Phase::Choose | Phase::Information | Phase::Failed | Phase::Complete
-                    ),
+                disabled: state.provider_draft.is_some()
+                    || provider_blocked
+                    || self.busy
+                        && matches!(
+                            state.phase,
+                            Phase::Choose
+                                | Phase::Information
+                                | Phase::Failed
+                                | Phase::Complete
+                                | Phase::Characters
+                        ),
                 ..ControlState::default()
             },
             cx,
@@ -1263,6 +2384,302 @@ mod tests {
     }
 
     #[gpui::test]
+    fn inline_provider_drafts_keep_the_parent_login_and_select_duplicates_without_saving(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let provider = crate::providers::fixture_provider(false);
+                assert!(provider.is_ok());
+                let Ok(provider) = provider else {
+                    return;
+                };
+                view.shell.providers.records = vec![provider.clone()];
+                view.shell.providers.loaded = true;
+                view.open_auth_wizard(window, cx);
+                view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
+                view.auth_next(cx);
+                let password = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.password.clone());
+                assert!(password.is_some());
+                let Some(password) = password else {
+                    return;
+                };
+                password.update(cx, |field, cx| {
+                    field.set_value("PARENT_SYNTHETIC_PASSWORD", window, cx)
+                });
+                view.open_auth_provider_add(window, cx);
+                if let Some(draft) = view
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|state| state.provider_draft.as_mut())
+                {
+                    draft
+                        .name
+                        .update(cx, |field, cx| field.set_value("New provider", cx));
+                    draft.address.update(cx, |field, cx| {
+                        field.set_value("http://new.example.test/api/", cx)
+                    });
+                }
+                view.save_auth_provider(window, cx);
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .and_then(|state| state.provider_draft.as_ref())
+                        .is_some_and(|draft| draft
+                            .error
+                            .as_ref()
+                            .is_some_and(|error| error.contains("HTTP warning")))
+                );
+                assert!(!view.auth_provider_saved(&provider.id.to_string(), cx));
+                view.cancel_auth_provider(cx);
+                assert_eq!(
+                    password.read(cx).value().as_ref(),
+                    "PARENT_SYNTHETIC_PASSWORD"
+                );
+                assert!(view.shell.auth.as_ref().is_some_and(|state| state.phase
+                    == Phase::Information
+                    && state.provider_draft.is_none()));
+                view.open_auth_provider_add(window, cx);
+                if let Some(draft) = view
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|state| state.provider_draft.as_mut())
+                {
+                    draft
+                        .address
+                        .update(cx, |field, cx| field.set_value(&provider.api_url, cx));
+                }
+                view.save_auth_provider(window, cx);
+                assert_eq!(view.shell.providers.records.len(), 1);
+                assert_eq!(password.read(cx).value().as_ref(), "");
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.provider_draft.is_none()
+                            && state.external_provider == Some(provider.id))
+                );
+                view.open_auth_provider_add(window, cx);
+                let pending = block_launcher::CancellationToken::new();
+                if let Some(draft) = view
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|state| state.provider_draft.as_mut())
+                {
+                    draft.attempt = Some((view.operation_revision, pending.clone()));
+                }
+                view.busy = true;
+                view.auth_back(window, cx);
+                assert!(pending.is_cancelled());
+                assert!(view.shell.auth.as_ref().is_some_and(
+                    |state| state.phase == Phase::Choose && state.provider_draft.is_none()
+                ));
+                assert!(!view.auth_provider_saved(&provider.id.to_string(), cx));
+                view.cancel_auth(window, cx);
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn external_provider_changes_clear_sensitive_drafts_and_rebind_http_consent(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let providers = [
+                    crate::providers::fixture_provider(false),
+                    crate::providers::fixture_provider(true),
+                ]
+                .into_iter()
+                .collect::<anyhow::Result<Vec<_>>>();
+                assert!(providers.is_ok());
+                let Ok(providers) = providers else {
+                    return;
+                };
+                view.shell.providers.records = providers;
+                view.shell.providers.loaded = true;
+                view.open_auth_wizard(window, cx);
+                view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
+                view.auth_next(cx);
+                let password = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.password.clone());
+                assert!(password.is_some());
+                let Some(password) = password else {
+                    return;
+                };
+                password.update(cx, |input, cx| {
+                    input.set_value("SYNTHETIC_PASSWORD", window, cx)
+                });
+                let snapshot = view.shell.auth.as_ref().map(|state| state.snapshot(cx));
+                assert!(snapshot.is_some_and(|state| state.password.is_none()));
+                assert!(!format!("{:?}", view.shell.auth).contains("SYNTHETIC_PASSWORD"));
+                view.choose_external_provider(uuid::Uuid::from_u128(2), window, cx);
+                assert_eq!(password.read(cx).value().as_ref(), "");
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.accepted_http.is_none())
+                );
+                view.consent_external_auth(cx);
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.accepted_http.as_deref()
+                            == Some("http://community.example.test/api/"))
+                );
+                password.update(cx, |input, cx| {
+                    input.set_value("SECOND_SYNTHETIC_PASSWORD", window, cx)
+                });
+                view.shell.providers.records[1].api_url =
+                    "http://community.example.test/changed/".into();
+                view.start_auth(window, cx);
+                assert_eq!(password.read(cx).value().as_ref(), "");
+                assert!(view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Failed
+                        && state
+                            .error
+                            .as_ref()
+                            .is_some_and(|error| error.contains("provider address changed"))
+                }));
+                view.auth_back(window, cx);
+                assert_eq!(password.read(cx).value().as_ref(), "");
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.phase == Phase::Information)
+                );
+                view.auth_back(window, cx);
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.phase == Phase::Choose)
+                );
+                view.cancel_auth(window, cx);
+                assert!(view.shell.auth.is_none());
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn external_characters_require_a_live_attempt_and_preparation_matches_the_selected_provider(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.open_auth_wizard(window, cx);
+                view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
+                view.auth_next(cx);
+                if let Some(state) = &mut view.shell.auth {
+                    state.external_provider = Some(uuid::Uuid::from_u128(1));
+                }
+                let profiles = vec![
+                    block_auth::AuthlibProfile {
+                        id: uuid::Uuid::from_u128(1),
+                        name: "First".into(),
+                    },
+                    block_auth::AuthlibProfile {
+                        id: uuid::Uuid::from_u128(2),
+                        name: "Second".into(),
+                    },
+                ];
+                view.auth_characters(profiles.clone());
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.characters.is_empty())
+                );
+                simulate_started_attempt(view, Phase::Preparing);
+                view.auth_characters(profiles.clone());
+                view.busy = false;
+                view.choose_auth_character(uuid::Uuid::from_u128(999), cx);
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.character == Some(uuid::Uuid::from_u128(1)))
+                );
+                view.choose_auth_character(uuid::Uuid::from_u128(2), cx);
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.character == Some(uuid::Uuid::from_u128(2)))
+                );
+                simulate_started_attempt(view, Phase::Verifying);
+                view.auth_finished(&Err("Provider timeout".into()));
+                view.busy = false;
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.phase == Phase::Characters
+                            && state.character == Some(uuid::Uuid::from_u128(2)))
+                );
+                simulate_started_attempt(view, Phase::Verifying);
+                let account = test_account();
+                assert!(account.is_ok());
+                let Ok(mut account) = account else {
+                    return;
+                };
+                account.provider = block_auth::AccountProvider::Authlib;
+                account.authlib = Some(block_auth::AuthlibAccount {
+                    provider_id: uuid::Uuid::from_u128(99),
+                    login: "User".into(),
+                });
+                account.client_id.clear();
+                account.credential_ref = account.identity_key();
+                view.auth_prepared(account.clone());
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.prepared_account.is_none())
+                );
+                if let Some(link) = &mut account.authlib {
+                    link.provider_id = uuid::Uuid::from_u128(1);
+                }
+                account.credential_ref = account.identity_key();
+                view.auth_prepared(account.clone());
+                assert!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.phase == Phase::Complete)
+                );
+                assert!(
+                    !view
+                        .accounts
+                        .iter()
+                        .any(|saved| saved.identity_key() == account.identity_key())
+                );
+                view.cancel_auth(window, cx);
+                view.auth_characters(profiles);
+                view.auth_prepared(account);
+                assert!(view.shell.auth.is_none());
+            })
+        });
+    }
+
+    #[gpui::test]
     fn offline_preparation_validates_edits_and_cancel_preserves_saved_accounts(
         cx: &mut TestAppContext,
     ) {
@@ -1293,7 +2710,7 @@ mod tests {
                             .is_some_and(|account| account.player_name == "Local_Player")
                 }));
                 assert!(view.accounts.is_empty() && !view.busy);
-                view.auth_back(cx);
+                view.auth_back(window, cx);
                 assert!(
                     view.shell
                         .auth

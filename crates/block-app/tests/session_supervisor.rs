@@ -123,6 +123,7 @@ impl Fixture {
                 xuid: "fixture-xuid".into(),
                 client_id: String::new(),
                 user_properties: "{}".into(),
+                authlib: None,
             },
             SystemTime::now() + Duration::from_secs(600),
         )

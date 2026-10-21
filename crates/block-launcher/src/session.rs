@@ -30,6 +30,55 @@ pub struct GameSession {
     pub xuid: String,
     pub client_id: String,
     pub user_properties: String,
+    pub authlib: Option<AuthlibLaunch>,
+}
+
+/// Public provider configuration carried only with the transient launch session.
+/// The Java command rechecks the agent digest immediately before binding it.
+#[derive(Clone, Debug)]
+pub struct AuthlibLaunch {
+    pub api_url: String,
+    pub metadata_json: String,
+    pub agent: std::path::PathBuf,
+    pub sha256: String,
+}
+
+impl AuthlibLaunch {
+    pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        let url = reqwest::Url::parse(&self.api_url)?;
+        ensure!(
+            matches!(url.scheme(), "https" | "http")
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
+                && url.as_str() == self.api_url
+                && url.path().ends_with('/'),
+            "invalid Authlib API root"
+        );
+        ensure!(
+            self.metadata_json.len() <= 512 * 1024
+                && serde_json::from_str::<serde_json::Value>(&self.metadata_json)?.is_object(),
+            "invalid prefetched Authlib metadata"
+        );
+        ensure!(
+            self.sha256.len() == 64
+                && self
+                    .sha256
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "invalid Authlib agent digest"
+        );
+        ensure!(
+            self.agent.is_absolute()
+                && self
+                    .agent
+                    .to_str()
+                    .is_some_and(|path| !path.contains('=') && !path.chars().any(char::is_control)),
+            "Authlib agent requires an absolute UTF-8 path without '=' or control characters"
+        );
+        Ok(())
+    }
 }
 
 impl fmt::Debug for GameSession {
@@ -77,6 +126,7 @@ impl SessionProvider for OfflineSession {
             xuid: "0".into(),
             client_id: String::new(),
             user_properties: "{}".into(),
+            authlib: None,
         })
     }
 }
@@ -86,6 +136,13 @@ impl GameSession {
     /// # Errors
     /// Rejects unusable or inconsistent player/session fields.
     pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(authlib) = &self.authlib {
+            ensure!(
+                self.user_type == "mojang",
+                "Authlib injection requires an external account"
+            );
+            authlib.validate()?;
+        }
         if self.user_type == "mojang" {
             ensure!(
                 !self.username.is_empty()

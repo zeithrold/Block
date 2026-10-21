@@ -465,6 +465,7 @@ impl Block {
                 self.cancel_component_draft(cx)
             }
             Surface::Auth => self.cancel_auth(parent, cx),
+            Surface::AuthProviderAdd => self.cancel_auth_provider(cx),
             Surface::GuideInformation(super::Tab::Settings) => {
                 self.preferences.clone_from(&self.saved_preferences);
                 self.settings_form = None;
@@ -508,6 +509,7 @@ impl Surface {
                 super::WizardPage::Location => "Game configuration",
             },
             Self::Auth => "Add account",
+            Self::AuthProviderAdd => "Add authentication provider",
             Self::Select(state) => &state.title,
         }
     }
@@ -516,6 +518,7 @@ impl Surface {
             Self::GuideInformation(_) => (960., 600.),
             Self::OnboardingSection(_) | Self::WizardSection(_) => (760., 520.),
             Self::Auth => (960., 600.),
+            Self::AuthProviderAdd => (460., 520.),
             Self::Drawer(Drawer::Downloads) | Self::DownloadFiles(_) => (600., 460.),
             Self::Drawer(_) => (432., 600.),
             _ => (460., 300.),

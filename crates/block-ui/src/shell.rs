@@ -43,6 +43,7 @@ pub(super) enum Surface {
     OnboardingSection(super::WizardPage),
     WizardSection(super::WizardPage),
     Auth,
+    AuthProviderAdd,
     Select(super::select::SelectState<UiAction>),
 }
 
@@ -121,6 +122,7 @@ impl ShellState {
             | Surface::OnboardingSection(_)
             | Surface::WizardSection(_)
             | Surface::Auth
+            | Surface::AuthProviderAdd
             | Surface::Select(_) => None,
         })
     }
@@ -585,7 +587,7 @@ impl Block {
             .gap_6()
             .text_center();
         if let Some(account) = account {
-            let provider = account.provider.label();
+            let provider = self.account_authority(account);
             let palette = self.palette;
 
             identity = identity
@@ -946,6 +948,7 @@ impl Block {
                 .child(if *tab == Tab::Settings { self.render_settings(window, cx).into_any_element() } else { self.render_about(window, cx).into_any_element() })),
             Surface::OnboardingSection(page) => content.p_0().gap_0().overflow_hidden().child(self.render_onboarding_section(*page, window, cx)),
             Surface::Auth => content.p_0().child(self.render_auth_wizard(window, cx)),
+            Surface::AuthProviderAdd=>content.child(self.render_auth_provider_add(cx)),
             Surface::WizardSection(_) => content.p_0().gap_0()
                 .child(div().flex_1().min_h_0().child(self.render_game_wizard_transition_body(window, cx)))
                 .child(super::patterns::management_footer(window.viewport_size(), self.palette).justify_end()
@@ -958,6 +961,7 @@ impl Block {
             Surface::OnboardingSection(_)
                 | Surface::WizardSection(_)
                 | Surface::Auth
+                | Surface::AuthProviderAdd
                 | Surface::Select(_)
         ) {
             content =

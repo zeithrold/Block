@@ -223,6 +223,14 @@ enum UiAction {
     AuthBack,
     AuthMethod(authentication::Method),
     AuthProvider(block_auth::AccountProvider),
+    AuthExternalProvider(uuid::Uuid),
+    AuthHttpConsent,
+    AuthProviderAdd,
+    AuthProviderIdentify,
+    AuthProviderConsent,
+    AuthProviderSave,
+    AuthProviderCancel,
+    AuthCharacter(uuid::Uuid),
     CopyDeviceCode,
     AuthCancel,
     AuthFinish,
@@ -596,7 +604,11 @@ impl Block {
                     self.report(error);
                 }
                 Message::Providers(result) => self.receive_providers(result),
-                Message::ProviderSaved(id) => self.provider_saved(&id, cx),
+                Message::ProviderSaved(id) => {
+                    if !self.auth_provider_saved(&id, cx) {
+                        self.provider_saved(&id, cx);
+                    }
+                }
                 Message::Accounts(Err(error)) => {
                     self.shell.accounts.load = browser::CollectionLoad::Failed(error.clone());
                     self.report(error);
@@ -636,6 +648,7 @@ impl Block {
                     }
                 }
                 Message::AuthPrepared(account) => self.auth_prepared(account),
+                Message::AuthlibCharacters(characters) => self.auth_characters(characters),
                 Message::SignedIn(account) => self.auth_saved(account, cx),
                 Message::DeviceCode {
                     user_code,
@@ -669,6 +682,7 @@ impl Block {
                     });
                 }
                 Message::Finished(result) => {
+                    self.auth_provider_finished(&result, cx);
                     self.providers_finished(&result);
                     self.instance_edit_finished(&result, cx);
                     self.profile_edit_finished(&result, cx);
@@ -1143,6 +1157,14 @@ impl Block {
                     .shell
                     .surfaces
                     .top()
+                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::AuthProviderAdd))
+                {
+                    self.cancel_auth_provider(cx);
+                    self.shell.surfaces.close(window, &self.focus, cx);
+                } else if self
+                    .shell
+                    .surfaces
+                    .top()
                     .is_some_and(|entry| matches!(entry.kind, shell::Surface::Auth))
                 {
                     self.cancel_auth(window, cx);
@@ -1522,7 +1544,18 @@ impl Block {
             UiAction::ProviderRemove(id) => self.remove_provider(id, window, cx),
             UiAction::AuthNext => self.auth_next(cx),
             UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
-            UiAction::AuthBack => self.auth_back(cx),
+            UiAction::AuthBack => self.auth_back(window, cx),
+            UiAction::AuthExternalProvider(id) => self.choose_external_provider(id, window, cx),
+            UiAction::AuthHttpConsent => self.consent_external_auth(cx),
+            UiAction::AuthProviderAdd => self.open_auth_provider_add(window, cx),
+            UiAction::AuthProviderIdentify => self.identify_auth_provider(cx),
+            UiAction::AuthProviderConsent => self.consent_auth_provider(cx),
+            UiAction::AuthProviderSave => self.save_auth_provider(window, cx),
+            UiAction::AuthProviderCancel => {
+                self.cancel_auth_provider(cx);
+                self.shell.surfaces.close(window, &self.focus, cx);
+            }
+            UiAction::AuthCharacter(id) => self.choose_auth_character(id, cx),
             UiAction::AuthMethod(method) => self.change_auth_method(method, window, cx),
             UiAction::CopyDeviceCode => self.copy_device_code(cx),
             UiAction::AuthReopen => self.reopen_auth(cx),
@@ -2018,6 +2051,7 @@ impl Block {
                 | UiAction::DownloadFiles(_)
                 | UiAction::Drawer(_)
                 | UiAction::AuthCancel
+                | UiAction::AuthProviderCancel
                 | UiAction::AuthReopen
                 | UiAction::SignIn
                 | UiAction::AuthBack
