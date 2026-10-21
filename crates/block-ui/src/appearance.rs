@@ -21,24 +21,36 @@ pub(super) struct Preferences {
     pub appearance: Appearance,
     pub reduce_motion: bool,
     pub onboarding_complete: bool,
+    pub game: super::settings::GameDefaults,
+    pub downloads: block_launcher::DownloadOptions,
 }
 
 impl Preferences {
     pub(super) fn load(root: &Path) -> anyhow::Result<Self> {
         match std::fs::read(root.join("preferences.json")) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Ok(bytes) => {
+                let preferences: Self = serde_json::from_slice(&bytes)?;
+                preferences.validate()?;
+                Ok(preferences)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
     }
 
     pub(super) fn save(&self, root: &Path) -> anyhow::Result<()> {
+        self.validate()?;
         std::fs::create_dir_all(root)?;
         let mut file = tempfile::NamedTempFile::new_in(root)?;
         file.write_all(&serde_json::to_vec_pretty(self)?)?;
         file.as_file().sync_all()?;
         file.persist(root.join("preferences.json"))?;
         Ok(())
+    }
+
+    pub(super) fn validate(&self) -> anyhow::Result<()> {
+        self.game.validate()?;
+        self.downloads.validate()
     }
 
     pub(super) const fn palette(&self, system: WindowAppearance) -> Palette {
@@ -107,6 +119,31 @@ mod tests {
         assert_eq!(Preferences::load(root.path())?, Preferences::default());
         std::fs::write(root.path().join("preferences.json"), b"invalid")?;
         assert!(Preferences::load(root.path()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_settings_gain_defaults_and_invalid_drafts_preserve_saved_preferences()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("preferences.json");
+        let original = br#"{"appearance":"Dark","reduce_motion":true,"onboarding_complete":true}"#;
+        std::fs::write(&path, original)?;
+        let mut preferences = Preferences::load(root.path())?;
+        assert_eq!(
+            preferences.game,
+            super::super::settings::GameDefaults::default()
+        );
+        assert_eq!(
+            preferences.downloads,
+            block_launcher::DownloadOptions::default()
+        );
+        assert!(preferences.onboarding_complete && preferences.reduce_motion);
+        preferences.downloads.proxy = block_launcher::ProxyMode::Http {
+            url: "http://user:password@localhost:8080".into(),
+        };
+        assert!(preferences.save(root.path()).is_err());
+        assert_eq!(std::fs::read(path)?, original);
         Ok(())
     }
 }

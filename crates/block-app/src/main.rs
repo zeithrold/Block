@@ -1,3 +1,7 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
+mod build_info;
+
 use std::{path::PathBuf, process::ExitCode};
 
 use anyhow::Context as _;
@@ -5,8 +9,8 @@ use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
 use gpui::{
-    App, AppContext as _, Application, Bounds, KeyBinding, WindowBounds, WindowDecorations,
-    WindowOptions, px, size,
+    App, AppContext as _, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds,
+    WindowDecorations, WindowOptions, px, size,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
@@ -16,6 +20,8 @@ struct Quit;
 #[derive(Debug, clap::Parser)]
 #[command(version, about = "Block Minecraft launcher")]
 struct Args {
+    #[arg(long)]
+    build_info: bool,
     #[arg(long)]
     recipe: Option<PathBuf>,
     #[arg(long)]
@@ -41,6 +47,10 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> anyhow::Result<()> {
+    if args.build_info {
+        println!("{}", build_info::current());
+        return Ok(());
+    }
     if let Some(id) = &args.supervise {
         let root = args
             .data_dir
@@ -72,6 +82,7 @@ fn run(args: Args) -> anyhow::Result<()> {
                 launch: args.launch,
                 profile: args.profile,
                 data_dir: args.data_dir,
+                system_window_chrome: false,
             },
         ) {
             eprintln!("Failed to open the Block window: {error:#}");
@@ -94,11 +105,22 @@ fn configure_application(cx: &mut App) {
     .detach();
 }
 
-fn window_options(cx: &App, _title: &str) -> WindowOptions {
+fn window_options(cx: &App, title: &str) -> WindowOptions {
+    #[cfg(target_os = "linux")]
+    let system_chrome = gpui::guess_compositor() == "X11";
+    #[cfg(not(target_os = "linux"))]
+    let system_chrome = cfg!(target_os = "windows");
     let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
     WindowOptions {
-        titlebar: None,
-        window_decorations: Some(WindowDecorations::Client),
+        titlebar: system_chrome.then(|| TitlebarOptions {
+            title: Some(title.to_owned().into()),
+            ..Default::default()
+        }),
+        window_decorations: Some(if system_chrome {
+            WindowDecorations::Server
+        } else {
+            WindowDecorations::Client
+        }),
         app_id: Some("one.ztd.block".into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(360.0), px(540.0))),
@@ -106,8 +128,9 @@ fn window_options(cx: &App, _title: &str) -> WindowOptions {
     }
 }
 
-fn open_launcher(cx: &mut App, options: LaunchOptions) -> anyhow::Result<()> {
+fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()> {
     let window_options = window_options(cx, "Block");
+    options.system_window_chrome = window_options.titlebar.is_some();
     cx.open_window(window_options, |window, cx| {
         cx.new(|cx| Block::new(window, cx, options))
     })?;

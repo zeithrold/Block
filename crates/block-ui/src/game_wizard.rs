@@ -75,6 +75,68 @@ impl Block {
     ) -> impl IntoElement + use<> {
         let state = &self.shell.wizard;
         let review = state.step == WizardStep::Review;
+        let body = self.game_wizard_body(form, cx);
+        let show_back = review || state.page.is_some();
+        let next_label = if state.page.is_some() {
+            "Done"
+        } else if review {
+            "Create and install"
+        } else {
+            "Continue"
+        };
+        let next_action = if review && state.page.is_none() {
+            UiAction::SaveInstance
+        } else {
+            UiAction::WizardNext
+        };
+        let footer = div()
+            .w_full()
+            .flex()
+            .justify_between()
+            .items_center()
+            .gap_3()
+            .child(self.button("cancel-instance", "Cancel", UiAction::CancelForm, cx))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .children(
+                        show_back
+                            .then(|| self.button("wizard-back", "Back", UiAction::WizardBack, cx)),
+                    )
+                    .child(self.button("wizard-next", next_label, next_action, cx)),
+            )
+            .into_any_element();
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(body)
+            .child(note(self.status.clone()))
+            .into_any_element();
+        div()
+            .id("game-wizard")
+            .debug_selector(|| "game-wizard".into())
+            .size_full()
+            .min_h_0()
+            .child(self.render_wizard_frame(
+                &[
+                    ("Game setup", "Name and configure"),
+                    ("Review", "Check the details"),
+                ],
+                usize::from(review),
+                body,
+                footer,
+            ))
+    }
+
+    pub(super) fn game_wizard_body(
+        &self,
+        form: &InstanceForm,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let state = &self.shell.wizard;
+        let review = state.step == WizardStep::Review;
         let mut body = match state.page {
             Some(WizardPage::Version) => self.wizard_version(form, cx).into_any_element(),
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
@@ -100,69 +162,156 @@ impl Block {
                 )
                 .into_any_element();
         }
-        let show_back = review || state.page.is_some();
-        let next_label = if state.page.is_some() {
-            "Done"
-        } else if review {
-            "Create and install"
-        } else {
-            "Continue"
-        };
-        let next_action = if review && state.page.is_none() {
-            UiAction::SaveInstance
-        } else {
-            UiAction::WizardNext
-        };
+        body
+    }
+
+    /// Shared fixed rail and action footer for game setup and first-run setup.
+    pub(super) fn render_wizard_frame(
+        &self,
+        steps: &[(&str, &str)],
+        current: usize,
+        body: gpui::AnyElement,
+        footer: gpui::AnyElement,
+    ) -> gpui::AnyElement {
+        let rail = self.wizard_step_rail(steps, current);
         div()
-            .id("game-wizard")
-            .debug_selector(|| "game-wizard".into())
-            .w_full()
-            .min_w_0()
+            .id("wizard-frame")
+            .size_full()
+            .min_h_0()
             .flex()
-            .flex_col()
-            .gap_6()
-            .child(div().flex().gap_3().children(
-                [(1, "Game setup", !review), (2, "Review", review)].map(
-                    |(number, title, current)| {
-                        div()
-                            .flex_1()
-                            .rounded_lg()
-                            .border_1()
-                            .border_color(rgb(if current {
-                                self.palette.primary
-                            } else {
-                                self.palette.border
-                            }))
-                            .bg(rgb(self.palette.surface))
-                            .p_3()
-                            .text_sm()
-                            .child(format!("{number}  {title}"))
-                            .child(note(if current { "Current step" } else { "" }))
-                    },
-                ),
-            ))
-            .child(div().min_h(px(310.)).overflow_hidden().child(body))
+            .child(rail)
             .child(
                 div()
-                    .border_t_1()
-                    .border_color(rgb(self.palette.border))
-                    .pt_4()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .h_full()
                     .flex()
-                    .flex_wrap()
-                    .justify_between()
-                    .items_center()
-                    .gap_3()
-                    .child(self.button("cancel-instance", "Cancel", UiAction::CancelForm, cx))
+                    .flex_col()
                     .child(
                         div()
+                            .id("wizard-body")
+                            .debug_selector(|| "wizard-body".into())
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(div().w_full().max_w(px(608.)).mx_auto().p_8().child(body)),
+                    )
+                    .child(
+                        div()
+                            .id("wizard-footer")
+                            .debug_selector(|| "wizard-footer".into())
+                            .h(px(72.))
+                            .flex_shrink_0()
+                            .border_t_1()
+                            .border_color(rgb(self.palette.border))
                             .flex()
-                            .gap_2()
-                            .children(show_back.then(|| {
-                                self.button("wizard-back", "Back", UiAction::WizardBack, cx)
-                            }))
-                            .child(self.button("wizard-next", next_label, next_action, cx)),
+                            .items_center()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(608.))
+                                    .mx_auto()
+                                    .px_8()
+                                    .flex()
+                                    .flex_col()
+                                    .child(footer),
+                            ),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn wizard_step_rail(&self, steps: &[(&str, &str)], current: usize) -> gpui::AnyElement {
+        div()
+            .id("wizard-rail")
+            .debug_selector(|| "wizard-rail".into())
+            .w(gpui::relative(0.32))
+            .min_w_0()
+            .h_full()
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .border_r_1()
+            .border_color(rgb(self.palette.border))
+            .bg(rgb(self.palette.surface))
+            .child(
+                div()
+                    .id("wizard-steps")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(note("Setup"))
+                    .children(
+                        steps
+                            .iter()
+                            .enumerate()
+                            .map(|(index, (title, description))| {
+                                let active = index == current;
+                                div()
+                                    .flex()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .size(px(28.))
+                                            .flex_shrink_0()
+                                            .rounded_full()
+                                            .border_1()
+                                            .border_color(rgb(if active {
+                                                self.palette.primary
+                                            } else {
+                                                self.palette.border
+                                            }))
+                                            .bg(rgb(if active {
+                                                self.palette.primary
+                                            } else {
+                                                self.palette.background
+                                            }))
+                                            .text_color(rgb(if active {
+                                                self.palette.on_primary
+                                            } else {
+                                                self.palette.muted
+                                            }))
+                                            .text_sm()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child((index + 1).to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .text_sm()
+                                            .text_color(rgb(if active {
+                                                self.palette.foreground
+                                            } else {
+                                                self.palette.muted
+                                            }))
+                                            .child((*title).to_owned())
+                                            .child(note((*description).to_owned())),
+                                    )
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(72.))
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(rgb(self.palette.border))
+                    .px_6()
+                    .flex()
+                    .items_center()
+                    .child(note(format!("Step {} of {}", current + 1, steps.len()))),
+            )
+            .into_any_element()
     }
 
     fn wizard_setup(
@@ -176,45 +325,47 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_2xl().child("Create your game"))
+            .child(div().text_xl().child("Create your game"))
             .child(note(
                 "Choose the game components. Review everything before installation begins.",
             ))
             .child(field("Game name", &form.name))
-            .child(self.wizard_component(
-                "version",
-                "Minecraft version",
-                &version,
-                WizardPage::Version,
-                cx,
-            ))
-            .child(self.wizard_component(
-                "loader",
-                "Mod loader",
-                if form.neoforge {
-                    "NeoForge 20.6.144"
-                } else {
-                    "Vanilla"
-                },
-                WizardPage::Loader,
-                cx,
-            ))
-            .child(self.wizard_unavailable(
-                "optifine",
-                "OptiFine",
-                "Installation is not available yet",
-            ))
-            .child(self.wizard_component(
-                "location",
-                "Installation location",
-                if directory.is_empty() {
-                    "Automatic · Block data folder"
-                } else {
-                    &directory
-                },
-                WizardPage::Location,
-                cx,
-            ))
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(4)
+                    .gap_3()
+                    .child(self.wizard_component(
+                        "version",
+                        "Minecraft version",
+                        &version,
+                        WizardPage::Version,
+                        cx,
+                    ))
+                    .child(self.wizard_component(
+                        "loader",
+                        "Mod loader",
+                        if form.neoforge {
+                            "NeoForge 20.6.144"
+                        } else {
+                            "Vanilla"
+                        },
+                        WizardPage::Loader,
+                        cx,
+                    ))
+                    .child(self.wizard_unavailable("optifine", "OptiFine", "Unavailable", true))
+                    .child(self.wizard_component(
+                        "location",
+                        "Installation location",
+                        if directory.is_empty() {
+                            "Automatic · Block data folder"
+                        } else {
+                            &directory
+                        },
+                        WizardPage::Location,
+                        cx,
+                    )),
+            )
     }
 
     fn wizard_component(
@@ -225,38 +376,61 @@ impl Block {
         page: WizardPage,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        self.button(
-            format!("wizard-component-{id}"),
-            title.to_owned(),
-            UiAction::WizardPage(Some(page)),
-            cx,
-        )
-        .w_full()
-        .flex()
-        .flex_col()
-        .items_start()
-        .gap_2()
-        .p_4()
-        .child(note(value.to_owned()))
+        let mut card = self
+            .button(
+                format!("wizard-component-{id}"),
+                title.to_owned(),
+                UiAction::WizardPage(Some(page)),
+                cx,
+            )
+            .w_full()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .items_start()
+            .justify_between()
+            .gap_2()
+            .p_3()
+            .child(note(value.to_owned()).w_full().line_clamp(3));
+        card.style().aspect_ratio = Some(1.);
+        card
     }
 
-    fn wizard_unavailable(&self, id: &str, title: &str, reason: &str) -> impl IntoElement + use<> {
-        div()
+    fn wizard_unavailable(
+        &self,
+        id: &str,
+        title: &str,
+        reason: &str,
+        square: bool,
+    ) -> impl IntoElement + use<> {
+        let mut card = div()
             .id(gpui::SharedString::from(format!("wizard-unavailable-{id}")))
+            .debug_selector({
+                let selector = format!("wizard-unavailable-{id}");
+                move || selector
+            })
             .w_full()
+            .min_w_0()
+            .min_h_0()
             .rounded_md()
             .border_1()
             .border_color(rgb(self.palette.border))
-            .p_4()
+            .p_3()
             .opacity(0.6)
             .flex()
             .flex_col()
+            .justify_between()
             .gap_2()
-            .child(format!("{title} · Unavailable"))
-            .child(note(reason.to_owned()))
+            .child(title.to_owned())
+            .child(note(reason.to_owned()).w_full().line_clamp(3));
+        if square {
+            card.style().aspect_ratio = Some(1.);
+        }
+        card
     }
 
-    fn wizard_version(
+    pub(super) fn wizard_version(
         &self,
         form: &InstanceForm,
         cx: &Context<'_, Self>,
@@ -297,7 +471,7 @@ impl Block {
             ))
     }
 
-    fn wizard_loader(
+    pub(super) fn wizard_loader(
         &self,
         form: &InstanceForm,
         cx: &Context<'_, Self>,
@@ -328,11 +502,11 @@ impl Block {
             .child(option("wizard-loader-neoforge", "NeoForge 20.6.144 · Minecraft 1.20.6", form.neoforge))
             .child(note("Selecting NeoForge also selects Minecraft 1.20.6."))
             .children(["Fabric", "Forge", "Quilt"].map(|loader| {
-                self.wizard_unavailable(loader, loader, "This loader does not have an installer in Block yet")
+                self.wizard_unavailable(loader, loader, "This loader does not have an installer in Block yet", false)
             }))
     }
 
-    fn wizard_location(
+    pub(super) fn wizard_location(
         &self,
         form: &InstanceForm,
         cx: &Context<'_, Self>,
@@ -366,8 +540,9 @@ impl Block {
                 ("Mod loader", if form.neoforge { "NeoForge 20.6.144" } else { "Vanilla" }.to_owned()),
                 ("Installation location", if directory.is_empty() { "Automatic · Block data folder".to_owned() } else { directory }),
                 ("Game data", "Isolated profile folder".to_owned()),
-                ("Java runtime", "Automatic · managed by Block".to_owned()),
-                ("Maximum memory", "2048 MiB · editable after creation".to_owned()),
+                ("Java runtime", if self.saved_preferences.game.java.is_empty() { "Automatic · managed by Block".to_owned() } else { self.saved_preferences.game.java.clone() }),
+                ("Maximum memory", format!("{} MiB · editable after creation", self.saved_preferences.game.memory_mib)),
+                ("Game window", format!("{} × {}{}", self.saved_preferences.game.width, self.saved_preferences.game.height, if self.saved_preferences.game.fullscreen { " · Fullscreen" } else { "" })),
             ].map(|(label, value)| {
                 div()
                     .rounded_md()

@@ -30,6 +30,8 @@ use minecraft_manifest::{
 };
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
+use super::{appearance::Preferences, settings::GameDefaults};
+
 // Browser URLs contain transient authorization state and deliberately have no Debug representation.
 #[expect(
     clippy::redundant_pub_crate,
@@ -127,17 +129,10 @@ impl Engine {
         let root = self.root.clone();
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
-            let result = async {
-                let store = Store::new(root, false, Arc::new(|_| {}))?;
-                let bytes = store
-                    .metadata(
-                        "version_manifest_v2.json",
-                        "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
-                    )
-                    .await?;
-                let index: VersionIndex = decode(&bytes)?;
-                Ok::<_, anyhow::Error>(index.versions)
-            }
+            let result = version_index(
+                root,
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+            )
             .await;
             let _ = sender
                 .send(Message::Versions(
@@ -153,20 +148,26 @@ impl Engine {
         version: String,
         directory: Option<PathBuf>,
         neoforge: bool,
+        defaults: GameDefaults,
         cancel: CancellationToken,
     ) {
         let root = self.root.clone();
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
             let result = async {
+                defaults.validate()?;
                 let catalog_root = root.clone();
                 let (instance, profile) = tokio::task::spawn_blocking(move || {
-                    Catalog::open(catalog_root)?.create_instance(
+                    let catalog = Catalog::open(catalog_root)?;
+                    let (instance, mut profile) = catalog.create_instance(
                         name,
                         version,
                         directory,
                         neoforge.then(|| "20.6.144".to_owned()),
-                    )
+                    )?;
+                    defaults.apply_to(&mut profile)?;
+                    catalog.save_profile(profile.clone())?;
+                    Ok::<_, anyhow::Error>((instance, profile))
                 })
                 .await??;
                 let _ = sender
@@ -454,6 +455,7 @@ fn game_session(session: &AuthenticatedSession) -> GameSession {
 }
 
 fn library(root: PathBuf, sender: &Sender<Message>) -> anyhow::Result<Library> {
+    let options = Preferences::load(&root)?.downloads;
     let progress = sender.clone();
     let completed = AtomicUsize::new(0);
     let download = Arc::new(move |event| {
@@ -465,11 +467,20 @@ fn library(root: PathBuf, sender: &Sender<Message>) -> anyhow::Result<Library> {
         }
     });
     let events = sender.clone();
-    Library::new(
+    Library::with_options(
         root,
         download,
         Arc::new(move |event| forward_event(&events, event)),
+        options,
     )
+}
+
+async fn version_index(root: PathBuf, url: &str) -> anyhow::Result<Vec<VersionEntry>> {
+    let options = Preferences::load(&root)?.downloads;
+    let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
+    let bytes = store.metadata("version_manifest_v2.json", url).await?;
+    let index: VersionIndex = decode(&bytes)?;
+    Ok(index.versions)
 }
 
 fn forward_event(sender: &Sender<Message>, event: ExecutionEvent) {
@@ -695,7 +706,8 @@ async fn run_recipe(
     sender: Sender<Message>,
     cancel: CancellationToken,
 ) -> anyhow::Result<Option<i32>> {
-    let store = Store::new(root, false, Arc::new(|_| {}))?;
+    let options = Preferences::load(&root)?.downloads;
+    let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
     let metadata = resolve(
         &recipe,
         &ResolveContext {
@@ -925,5 +937,130 @@ mod tests {
             b"corrupt account document"
         );
         Ok(())
+    }
+
+    #[test]
+    fn new_game_settings_reach_the_profile_without_changing_existing_games() -> anyhow::Result<()> {
+        use super::GameDefaults;
+        use block_launcher::{CancellationToken, catalog::Catalog, recipe::RuntimeSelection};
+        let root = tempfile::tempdir()?;
+        let catalog = Catalog::open(root.path())?;
+        let (_, existing) =
+            catalog.create_instance("Existing".into(), "26.3".into(), None, None)?;
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()?,
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(32);
+        let engine = super::Engine {
+            runtime: runtime.clone(),
+            sender,
+            root: root.path().to_owned(),
+        };
+        let java = std::env::current_exe()?;
+        let defaults = GameDefaults {
+            memory_mib: 4096,
+            java: java.display().to_string(),
+            jvm_arguments: "-Dlabel=\"My world\"".into(),
+            width: 1600,
+            height: 900,
+            fullscreen: true,
+            show_snapshots: true,
+        };
+        let cancel = CancellationToken::new();
+        cancel.cancel(); // Test profile creation, with installation prevented from networking.
+        engine.create_instance(
+            "Configured".into(),
+            "26.3".into(),
+            None,
+            false,
+            defaults,
+            cancel,
+        );
+        let profile_id = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while let Some(message) = receiver.recv().await {
+                    if let super::Message::Created { profile, .. } = message {
+                        return Ok::<_, anyhow::Error>(profile);
+                    }
+                }
+                anyhow::bail!("instance creation did not report a saved profile")
+            })
+            .await
+        })??;
+        let state = catalog.snapshot()?;
+        let (_, saved, _) = state.selection(&profile_id)?;
+        assert_eq!(saved.memory_mib, 4096);
+        assert!(matches!(&saved.runtime, RuntimeSelection::Local { java: path } if path == &java));
+        assert_eq!(saved.jvm_args, ["-Dlabel=My world"]);
+        assert_eq!(
+            saved.game_args,
+            ["--width", "1600", "--height", "900", "--fullscreen"]
+        );
+        assert_eq!(
+            state.selection(&existing.id)?.1.memory_mib,
+            existing.memory_mib
+        );
+        assert_eq!(
+            state.selection(&existing.id)?.1.game_args,
+            existing.game_args
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn saved_network_settings_route_version_metadata_through_a_real_loopback_proxy()
+    -> anyhow::Result<()> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let root = tempfile::tempdir()?;
+        runtime.block_on(async {
+            let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let origin = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let url = format!("http://{}/index.json", origin.local_addr()?);
+            let mut preferences = super::Preferences::default();
+            preferences.downloads.max_concurrent = 3;
+            preferences.downloads.max_retries = 0;
+            preferences.downloads.proxy = block_launcher::ProxyMode::Http {
+                url: format!("http://{}", proxy.local_addr()?),
+            };
+            preferences.save(root.path())?;
+            let (sender, _) = tokio::sync::mpsc::channel(2);
+            assert_eq!(
+                super::library(root.path().to_owned(), &sender)?.download_options(),
+                &preferences.downloads
+            );
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = proxy.accept().await?;
+                let mut bytes = [0; 4096];
+                let length = stream.read(&mut bytes).await?;
+                let request = String::from_utf8_lossy(&bytes[..length]).into_owned();
+                let body = br#"{"latest":{"release":"test","snapshot":"test"},"versions":[]}"#;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(header.as_bytes()).await?;
+                stream.write_all(body).await?;
+                Ok::<_, anyhow::Error>(request)
+            });
+            let versions = tokio::time::timeout(
+                Duration::from_secs(2),
+                super::version_index(root.path().to_owned(), &url),
+            )
+            .await??;
+            assert_eq!(versions.len(), 0);
+            assert!(server.await??.starts_with(&format!("GET {url} HTTP/1.1")));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), origin.accept())
+                    .await
+                    .is_err()
+            );
+            Ok::<_, anyhow::Error>(())
+        })
     }
 }

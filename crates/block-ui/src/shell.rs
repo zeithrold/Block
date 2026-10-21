@@ -14,7 +14,7 @@ use gpui::{
     img, px, rgb,
 };
 
-use super::{Appearance, Block, Form, Tab, UiAction, account_id, note};
+use super::{Block, Form, Tab, UiAction, account_id, note};
 
 static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(
@@ -41,7 +41,8 @@ pub(super) struct ShellState {
     pub backwards: bool,
     pub confirm_separation: bool,
     pub wizard: super::game_wizard::WizardState,
-    pub onboarding_step: usize,
+    pub onboarding: super::onboarding::State,
+    pub system_window_chrome: bool,
 }
 
 pub(super) fn brand(size: f32) -> impl IntoElement {
@@ -51,14 +52,14 @@ pub(super) fn brand(size: f32) -> impl IntoElement {
 impl Block {
     pub(super) fn render_shell(
         &self,
-        _window: &mut Window,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let home = self.tab == Tab::Home && self.form.is_none();
         let content = if home {
             self.home(cx).into_any_element()
         } else if self.tab == Tab::Onboarding {
-            self.onboarding(cx).into_any_element()
+            self.onboarding(window, cx).into_any_element()
         } else {
             self.management(cx).into_any_element()
         };
@@ -78,10 +79,10 @@ impl Block {
                 }
             }))
             .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
-                view.focus_field(false, window, cx);
+                view.move_focus(false, window, cx);
             }))
             .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
-                view.focus_field(true, window, cx);
+                view.move_focus(true, window, cx);
             }))
             .size_full()
             .relative()
@@ -140,7 +141,7 @@ impl Block {
                     self.button("back-home", "← Home", UiAction::Tab(Tab::Home), cx)
                 }
             }))
-            .child(window_controls(cx))
+            .children((!self.shell.system_window_chrome).then(|| window_controls(cx)))
     }
 
     fn animate(
@@ -266,6 +267,22 @@ impl Block {
             );
         } else {
             let profile = self.profile();
+            let (label, action) = match profile
+                .and_then(|profile| self.snapshot.selection(&profile.id).ok())
+            {
+                Some((_, _, target)) => match &target.status {
+                    block_launcher::catalog::InstallStatus::Ready => ("▶  Launch", UiAction::Play),
+                    block_launcher::catalog::InstallStatus::Failed { .. } => {
+                        ("Retry download", UiAction::Repair)
+                    }
+                    block_launcher::catalog::InstallStatus::Pending
+                    | block_launcher::catalog::InstallStatus::Installing => {
+                        ("Download", UiAction::Repair)
+                    }
+                },
+                None if profile.is_some() => ("Repair game", UiAction::Repair),
+                None => ("+  Create game", UiAction::CreateInstance),
+            };
             content = content.child(
                 div()
                     .flex()
@@ -284,23 +301,21 @@ impl Block {
                             .bg(rgb(self.palette.primary))
                             .text_color(rgb(self.palette.on_primary))
                             .cursor_pointer()
+                            .tab_index(0)
                             .hover(|style| style.opacity(0.85))
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                view.handle(
-                                    if view.profile().is_some() {
-                                        UiAction::Play
-                                    } else {
-                                        UiAction::CreateInstance
-                                    },
-                                    window,
-                                    cx,
-                                );
+                            .on_key_down({
+                                let action = action.clone();
+                                cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        view.handle(action.clone(), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                })
+                            })
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.handle(action.clone(), window, cx);
                             }))
-                            .child(div().text_xl().child(if profile.is_some() {
-                                "▶  Launch"
-                            } else {
-                                "+  Create game"
-                            }))
+                            .child(div().text_xl().child(label))
                             .child(
                                 div().text_xs().child(
                                     profile
@@ -348,6 +363,11 @@ impl Block {
             ("nav-settings", "Settings", Tab::Settings),
             ("nav-about", "About", Tab::About),
         ] {
+            if tab == Tab::Profiles
+                && self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled
+            {
+                continue;
+            }
             sidebar = sidebar.child(self.button(
                 id,
                 if self.tab == tab {
@@ -387,6 +407,12 @@ impl Block {
     }
 
     fn management(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        if let Some(Form::Instance(form)) = &self.form {
+            return self.instance_form(form, cx).into_any_element();
+        }
+        if self.tab == Tab::Settings && self.form.is_none() {
+            return self.settings(cx).into_any_element();
+        }
         let main = match &self.form {
             Some(Form::Instance(form)) => self.instance_form(form, cx).into_any_element(),
             Some(Form::Profile(form)) => self.profile_form(form, cx).into_any_element(),
@@ -407,6 +433,7 @@ impl Block {
             .debug_selector(|| "management-detail".into())
             .flex_1()
             .min_w_0()
+            .min_h_0()
             .h_full()
             .overflow_y_scroll()
             .p_6()
@@ -423,32 +450,11 @@ impl Block {
             .flex()
             .child(self.navigation(cx))
             .child(detail)
+            .into_any_element()
     }
 
     fn settings(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
-        div().flex().flex_col().gap_4().child(div().text_2xl().child("Settings"))
-            .child(note("Make Block feel like home."))
-            .child(div().text_lg().child("Appearance"))
-            .child(div().flex().gap_2().children([("system", "System", Appearance::System), ("light", "Light", Appearance::Light), ("dark", "Dark", Appearance::Dark)].map(|(id, label, appearance)| {
-                self.button(format!("appearance-{id}"), if self.preferences.appearance == appearance { format!("● {label}") } else { label.into() }, UiAction::SetAppearance(appearance), cx)
-            })))
-            .child(self.button("reduce-motion", if self.preferences.reduce_motion { "Reduce motion: On" } else { "Reduce motion: Off" }, UiAction::ReduceMotion, cx))
-            .child(div().text_lg().child("Profile mode"))
-            .child(if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Separated {
-                note("Separated profiles · several launch profiles can share an installation.").into_any_element()
-            } else if self.shell.confirm_separation {
-                div().flex().flex_col().gap_2()
-                    .child(note("Switch to Separated profiles? Existing games and files stay in place. This conversion cannot be reversed."))
-                    .child(self.button("confirm-separate", "Switch to Separated", UiAction::SeparateProfiles, cx))
-                    .child(self.button("cancel-separate", "Keep Bundled", UiAction::ConfirmSeparate(false), cx)).into_any_element()
-            } else {
-                div().flex().flex_col().gap_2().child(note("Bundled profiles · one game, one profile. Recommended for beginners."))
-                    .child(self.button("separate-profiles", "Switch to Separated…", UiAction::ConfirmSeparate(true), cx)).into_any_element()
-            })
-            .child(note("Preview changes immediately. Save to keep them; leaving this page discards unsaved changes."))
-            .child(div().flex().gap_2()
-                .child(self.button("save-preferences", "Save changes", UiAction::SavePreferences, cx))
-                .child(self.button("reset-preferences", "Restore defaults", UiAction::ResetPreferences, cx)))
+        self.render_settings(cx)
     }
 
     fn about(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
@@ -597,30 +603,54 @@ impl Block {
     }
 }
 
+#[cfg(test)]
+#[path = "home_tests.rs"]
+mod home_tests;
+
+#[derive(Clone, Copy)]
+enum WindowControl {
+    Minimize,
+    Close,
+}
+
+fn apply_window_control(control: WindowControl, window: &mut Window) {
+    match control {
+        WindowControl::Minimize => window.minimize_window(),
+        WindowControl::Close => window.remove_window(),
+    }
+}
+
 fn window_controls<T: 'static>(cx: &Context<'_, T>) -> impl IntoElement + use<T> {
-    div()
-        .flex()
-        .gap_1()
-        .child(
+    div().flex().gap_1().children(
+        [
+            ("window-minimize", "−", WindowControl::Minimize),
+            ("window-close", "×", WindowControl::Close),
+        ]
+        .map(|(id, label, control)| {
             div()
-                .id("window-minimize")
+                .id(id)
                 .tab_index(0)
                 .px_3()
                 .py_2()
                 .cursor_pointer()
-                .hover(|style| style.bg(rgb(0x0073_7373)))
-                .on_click(cx.listener(|_, _, window, _| window.minimize_window()))
-                .child("−"),
-        )
-        .child(
-            div()
-                .id("window-close")
-                .tab_index(0)
-                .px_3()
-                .py_2()
-                .cursor_pointer()
-                .hover(|style| style.bg(rgb(0x00dc_2626)))
-                .on_click(cx.listener(|_, _, window, _| window.remove_window()))
-                .child("×"),
-        )
+                .focus(|style| style.bg(rgb(0x0073_7373)))
+                .hover(move |style| {
+                    style.bg(rgb(if matches!(control, WindowControl::Close) {
+                        0x00dc_2626
+                    } else {
+                        0x0073_7373
+                    }))
+                })
+                .on_key_down(
+                    cx.listener(move |_, event: &gpui::KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            apply_window_control(control, window);
+                            cx.stop_propagation();
+                        }
+                    }),
+                )
+                .on_click(cx.listener(move |_, _, window, _| apply_window_control(control, window)))
+                .child(label)
+        }),
+    )
 }

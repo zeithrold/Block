@@ -4,3 +4,6 @@
 .env
 /vendor/xattr/Cargo.lock
 /vendor/xattr/target/
+
+__pycache__/
+*.py[cod]

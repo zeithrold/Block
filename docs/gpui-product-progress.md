@@ -26,11 +26,29 @@ Local macOS ARM64 `just check` completed with exit 0: format, all-target/all-fea
 - macOS full `just check`: exit 0, 165 tests. Native QA confirmed a 960×600 guide, working custom drag (position moved from 427/168 to 500/204), immediate dark preview, completion persistence, transition to 432×768 Home native close, and fresh-process reopening directly into dark portrait Home. Screenshot capture initially paused while the desktop was locked, then resumed after user unlock. Automated input initially used stale coordinates; the live accessibility bounds resolved that test-tool issue.
 - The macOS package plist, executable help, file hashes and deterministic archive checks passed. Other package formats and all-platform window/animation acceptance remain separate pending gates.
 
+## Stage 3: reference-based setup and effective preferences
+
+The six reference routes were captured directly from the running Block-UI development server. All returned HTTP 200 with no page errors. The shared native wizard now follows its 32% step rail, four square component tiles, independent right-pane scrolling and fixed 72 px footer. A native screenshot exposed a primary-action alignment issue; the footer context was corrected and a layout assertion now guards the right edge.
+
+The user rejected the early native guide. The newly redrawn `/welcome` reference was captured from the development server (HTTP 200, no page errors). Its dense Instance/Account design is a reference, not a specification to copy wholesale. Native first launch now has its own 8:5 brand composition and **Your game → Your account → Ready to go** flow: one task per page, initial name and version only, optional loader/folder disclosure, and a three-row final summary. Java, memory and file paths are not required beginner decisions. The compact layout removes the brand side panel and keeps the footer actionable.
+
+Microsoft sign-in remains real and cancellable. “I’ll sign in later” advances only the account step, while “Skip setup” finishes the complete guide without creating a game. Neither creates an identity or bypasses the Play gate. “Create and download” calls the real installer, enters Home after catalog creation and continues background downloads. Home offers Download/Retry download for incomplete/failed targets, without requiring an account or creating another instance. Returning from authentication keeps the draft; a failed preference save can retry completion while the same game downloads. Native macOS screenshots verified the new composition and exposed a Microsoft mark sizing issue, which was corrected before the final build. These changes supersede the earlier informational guide and rejected shared-rail first run.
+
+Game defaults (Java, memory, JVM arguments, resolution, fullscreen and snapshot visibility) are validated and applied only to new games. Downloads use actual shared concurrency, retry, aggregate object-body rate limits and System/Direct/HTTP(S) proxy policies; local HTTP tests verify behavior. Settings keep a draft, preserve it on validation failure, show the specific error and open the relevant section. Storage relocation, SOCKS proxies and unsupported loaders are not offered as functioning features.
+
+Window fallback follows the user's permission: **Windows and Linux X11 use system decorations**, after native custom dragging failed. macOS keeps its custom controls and verified drag behavior. Native Wayland keeps the custom path pending separate compositor acceptance. Windows also builds as a GUI subsystem application to avoid an unwanted console window.
+
+`--build-info` exposes compile-time product, platform and source identity. The platform verifier refreshes only source-file mtimes, confirms unchanged bytes, runs checks with a source stamp, executes the binary to compare its compiled identity, and rejects source changes during verification. This protects shared Cargo caches from stale source-archive timestamps. Manual unstamped builds report null source identity.
+
+Local Stage 3 `just check` passed with exit 0 and 183 tests after the first-run redesign, effective preference wiring and Home download recovery. Regression coverage includes compact footer bounds, draft persistence, preventing exit during catalog creation, completion-save retry during background download, and retrying a failed download without a second game. New-source graphical acceptance and CI results are tracked separately.
+
+Stage 2 CI [39545112536](https://github.com/zeithrold/Block/actions/runs/39545112536) passed all three jobs. Separate Windows verification of Stage 1 passed 152 platform-specific tests and a native build. Stage 2 GUI acceptance passed initial/portrait sizing, minimize/restore/close, first-run completion and reopening on Windows AMD64 and Linux ARM64. Windows motion frames confirmed fade/slide progression. Both hosts' custom drag failures remain recorded; fallback acceptance belongs to the newer build. Linux ARM64 used XWayland and CPU llvmpipe; its short desktop clamped Home height to 756 px. These older receipts do not establish acceptance of the newer Account/Game/Review flow.
+
 ## Remaining slices
 
 1. Searchable game browser, appearance and launch detail subpages; separated-profile creation flow.
 2. Selector search, arrow keys and selection feedback; avatar fallback; distinct downloading/running/stopping states; complete enter/exit, detail, wizard and overlay animations.
-3. Real new-game defaults, download/network policies, storage paths and profile appearance; expose each setting only when its backend behavior exists.
+3. Storage paths and profile appearance; expose each setting only when its backend behavior exists.
 4. Account wizard and deletion confirmation; browser authentication cancellation. Device Code, offline identity and Authlib providers need real distinct backend support before they can be advertised. Additional loader tiles must reflect actual install capability.
 5. Complete graphical and interaction matrix, packaging and product-level acceptance on all four requested hosts.
 

@@ -19,5 +19,5 @@ pub mod session_host;
 mod session_ipc;
 pub mod support;
 
-pub use block_download::{DownloadEvent, EventSink, Store};
+pub use block_download::{DownloadEvent, DownloadOptions, EventSink, ProxyMode, Store};
 pub use tokio_util::sync::CancellationToken;
