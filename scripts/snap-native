@@ -71,7 +71,7 @@ def main():
                             "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
                             "download-files", "wizard-version-picker", "wizard-loader-picker",
                             "wizard-configuration", "welcome-version-picker", "remove-confirmation",
-                            "remove-account-confirmation", "separate-confirmation", "games-help",
+                            "remove-account-confirmation", "remove-provider-confirmation", "separate-confirmation", "games-help",
                             "welcome-settings", "welcome-about",
                         } or name.startswith("auth-")
                         required = 2 if dialog else 1

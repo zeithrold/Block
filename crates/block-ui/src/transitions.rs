@@ -83,12 +83,16 @@ impl Block {
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = format!(
-                "{:?}:{}:{}",
+                "{:?}:{}:{}:{}",
                 self.tab,
                 self.shell.auth.is_some(),
-                matches!(self.form, Some(Form::Instance(_))) && self.tab != Tab::Onboarding
+                matches!(self.form, Some(Form::Instance(_))) && self.tab != Tab::Onboarding,
+                self.shell.providers.visible
             );
             let detail = match self.tab {
+                Tab::Accounts if self.shell.providers.visible => {
+                    format!("provider:{}", self.shell.providers.motion_key())
+                }
                 Tab::Settings => format!("settings:{}", self.shell.settings_page),
                 _ => format!(
                     "{:?}:{:?}:{:?}:{}:{:?}",
@@ -316,6 +320,7 @@ impl ShellState {
             games: self.games.snapshot(cx),
             profiles: self.profiles.snapshot(cx),
             accounts: self.accounts.snapshot(cx),
+            providers: self.providers.snapshot(cx),
             selector: self.selector.as_ref().map(|selector| selector.snapshot(cx)),
             revision: self.revision,
             backwards: self.backwards,

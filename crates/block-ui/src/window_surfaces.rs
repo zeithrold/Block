@@ -497,6 +497,7 @@ impl Surface {
             Self::DownloadFiles(group) => group.label(),
             Self::DeleteProfile(_) => "Delete profile",
             Self::RemoveAccount(_) => "Remove account",
+            Self::RemoveProvider(_) => "Remove provider",
             Self::SeparateProfiles => "Enable separated profiles",
             Self::GamesHelp => "Instances and Profiles",
             Self::GuideInformation(super::Tab::Settings) => "Settings",

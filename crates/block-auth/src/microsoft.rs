@@ -615,6 +615,7 @@ impl MicrosoftAuth {
             player_name: profile.name,
             client_id: self.client_id.clone(),
             credential_ref: credential_ref(&self.client_id, player_id),
+            authlib: None,
         };
         Ok(AuthenticatedSession {
             account,
@@ -850,6 +851,7 @@ mod tests {
             player_name: "Local_Player".into(),
             client_id: auth.client_id.clone(),
             credential_ref: credential_ref(&auth.client_id, id),
+            authlib: None,
         };
         assert!(matches!(
             auth.refresh(&account, &CancellationToken::new()).await,

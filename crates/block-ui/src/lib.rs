@@ -26,6 +26,7 @@ mod platform;
 mod profile_editor;
 #[cfg(test)]
 mod profile_editor_tests;
+mod providers;
 #[cfg(debug_assertions)]
 mod scenarios;
 mod scroll_area;
@@ -121,6 +122,16 @@ enum Tab {
 
 #[derive(Clone, Debug)]
 enum UiAction {
+    Providers,
+    ProvidersBack,
+    ProviderAdd,
+    ProviderList,
+    ProviderInspect(String),
+    ProviderIdentify,
+    ProviderConsent,
+    ProviderSave,
+    ProviderRemoveRequest(String),
+    ProviderRemove(String),
     Tab(Tab),
     Drawer(Option<Drawer>),
     DownloadFiles(downloads::DownloadGroup),
@@ -584,6 +595,8 @@ impl Block {
                     self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone());
                     self.report(error);
                 }
+                Message::Providers(result) => self.receive_providers(result),
+                Message::ProviderSaved(id) => self.provider_saved(&id, cx),
                 Message::Accounts(Err(error)) => {
                     self.shell.accounts.load = browser::CollectionLoad::Failed(error.clone());
                     self.report(error);
@@ -656,6 +669,7 @@ impl Block {
                     });
                 }
                 Message::Finished(result) => {
+                    self.providers_finished(&result);
                     self.instance_edit_finished(&result, cx);
                     self.profile_edit_finished(&result, cx);
                     self.auth_finished(&result);
@@ -1005,6 +1019,8 @@ impl Block {
         self.motion.direction = if matches!(
             action,
             UiAction::CancelForm
+                | UiAction::ProvidersBack
+                | UiAction::ProviderList
                 | UiAction::BrowserBack
                 | UiAction::WizardBack
                 | UiAction::OnboardingBack
@@ -1070,6 +1086,9 @@ impl Block {
                 self.complete_onboarding();
             }
             UiAction::Tab(tab) => {
+                if self.shell.providers.visible {
+                    self.close_providers(cx);
+                }
                 if self.shell.auth.is_some() {
                     self.cancel_auth(window, cx);
                 }
@@ -1491,6 +1510,16 @@ impl Block {
             UiAction::Authenticate | UiAction::AuthRetry => self.start_auth(window, cx),
             UiAction::AuthCancel => self.cancel_auth(window, cx),
             UiAction::AuthFinish => self.finish_auth(window, cx),
+            UiAction::Providers => self.open_providers(cx),
+            UiAction::ProvidersBack => self.close_providers(cx),
+            UiAction::ProviderAdd => self.edit_provider(None, cx),
+            UiAction::ProviderList => self.show_provider_list(cx),
+            UiAction::ProviderInspect(id) => self.edit_provider(Some(&id), cx),
+            UiAction::ProviderIdentify => self.identify_provider(cx),
+            UiAction::ProviderConsent => self.consent_provider(cx),
+            UiAction::ProviderSave => self.save_provider(cx),
+            UiAction::ProviderRemoveRequest(id) => self.request_remove_provider(id, window, cx),
+            UiAction::ProviderRemove(id) => self.remove_provider(id, window, cx),
             UiAction::AuthNext => self.auth_next(cx),
             UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
             UiAction::AuthBack => self.auth_back(cx),
@@ -1984,6 +2013,8 @@ impl Block {
             UiAction::Stop
                 | UiAction::OnboardingSkip
                 | UiAction::Tab(_)
+                | UiAction::Providers
+                | UiAction::ProvidersBack
                 | UiAction::DownloadFiles(_)
                 | UiAction::Drawer(_)
                 | UiAction::AuthCancel
@@ -2135,7 +2166,7 @@ fn frozen_input(input: &Entity<TextInput>, cx: &mut Context<'_, Block>) -> Entit
     cx.new(|cx| input.read(cx).frozen(cx))
 }
 fn account_id(account: &Account) -> String {
-    account.reference.player_id.to_string()
+    account.identity_key()
 }
 /// Parse explicit quoted arguments without invoking a shell or interpreting backslashes in paths.
 fn parse_arguments(value: &str) -> anyhow::Result<Vec<String>> {
@@ -3043,6 +3074,7 @@ mod tests {
                 player_name: "AccountA".into(),
                 client_id: "public-client".into(),
                 credential_ref: "synthetic-a".into(),
+                authlib: None,
             };
             let mut account_b = account_a.clone();
             account_b.reference.player_id = "00000000-0000-4000-8000-000000000002".parse()?;

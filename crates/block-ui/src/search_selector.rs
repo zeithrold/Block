@@ -455,6 +455,7 @@ impl Block {
                         block_auth::AccountProvider::Offline => {
                             "Local play · No online authorization"
                         }
+                        block_auth::AccountProvider::Authlib => "External provider · Java Edition",
                     };
                     format!("{} {description}", account.player_name)
                         .to_lowercase()

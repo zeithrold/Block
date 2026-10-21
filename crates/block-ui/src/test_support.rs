@@ -110,6 +110,7 @@ pub(super) fn test_account() -> anyhow::Result<Account> {
         player_name: "TestPlayer".into(),
         client_id: "synthetic-public-client".into(),
         credential_ref: "synthetic-no-credentials".into(),
+        authlib: None,
     })
 }
 

@@ -3,11 +3,13 @@
 //! Only account metadata is serializable. Sessions, authorization codes, PKCE
 //! verifiers and credentials deliberately have no serialization implementation.
 
+mod authlib;
 mod callback;
 mod credentials;
 mod microsoft;
 mod secret;
 
+pub use authlib::{AuthlibProvider, ProviderAddress, ProviderMetadata};
 pub use callback::PendingSignIn;
 pub use credentials::probe_secure_storage;
 pub use microsoft::{MicrosoftAuth, PendingDeviceSignIn, PreparedMicrosoftSignIn, SignInStage};
@@ -31,6 +33,7 @@ pub enum AccountProvider {
     #[default]
     Microsoft,
     Offline,
+    Authlib,
 }
 
 impl AccountProvider {
@@ -39,6 +42,7 @@ impl AccountProvider {
         match self {
             Self::Microsoft => "Microsoft Account",
             Self::Offline => "Offline Mode",
+            Self::Authlib => "Authlib-Injector",
         }
     }
 }
@@ -52,6 +56,34 @@ pub struct Account {
     pub player_name: String,
     pub client_id: String,
     pub credential_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authlib: Option<AuthlibAccount>,
+}
+
+/// Public provider/user linkage. Access and client tokens stay in secure storage.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuthlibAccount {
+    pub provider_id: Uuid,
+    pub login: String,
+}
+
+impl Account {
+    /// Provider scope prevents equal character UUIDs on unrelated servers colliding.
+    #[must_use]
+    pub fn identity_key(&self) -> String {
+        if self.provider == AccountProvider::Authlib
+            && let Some(link) = &self.authlib
+        {
+            use sha2::{Digest as _, Sha256};
+            return format!(
+                "authlib:{}:{:x}:{}",
+                link.provider_id,
+                Sha256::digest(link.login.as_bytes()),
+                self.reference.player_id
+            );
+        }
+        self.reference.player_id.to_string()
+    }
 }
 
 /// A verified, expiring Minecraft session. Never persist this object or its token.
@@ -81,6 +113,26 @@ impl AuthenticatedSession {
 /// Errors contain only controlled messages and status codes, never response bodies.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum AuthError {
+    #[error("Use a provider display name of 1–128 characters, without control characters.")]
+    InvalidProviderName,
+    #[error(
+        "Enter an HTTP(S) API root or a valid Authlib quick link, without credentials, a query or a fragment."
+    )]
+    InvalidProviderAddress,
+    #[error(
+        "This provider uses HTTP. Confirm the warning for this address before connecting; HTTPS connections are never downgraded automatically."
+    )]
+    InsecureProvider,
+    #[error(
+        "The provider discovery redirects contain a loop or exceed five hops. Enter its API root directly."
+    )]
+    ProviderDiscoveryLoop,
+    #[error("Provider discovery timed out. Check its address and your connection, then try again.")]
+    ProviderTimedOut,
+    #[error("The provider returned invalid Yggdrasil metadata. Check its API root and public key.")]
+    ProviderMetadata,
+    #[error("The provider is limiting requests. Try again after {retry_after_seconds} seconds.")]
+    ProviderThrottled { retry_after_seconds: u64 },
     #[error("Configure a public Microsoft application client ID before signing in.")]
     MissingClientId,
     #[error("The Microsoft application client ID is invalid.")]

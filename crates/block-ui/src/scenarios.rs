@@ -37,6 +37,10 @@ pub const SCENARIOS: &[&str] = &[
     "accounts-list",
     "accounts-detail",
     "accounts-offline-detail",
+    "accounts-providers",
+    "provider-add",
+    "provider-http-warning",
+    "remove-provider-confirmation",
     "auth-choose",
     "auth-information",
     "auth-offline-information",
@@ -115,6 +119,7 @@ impl Block {
                     player_name: name.into(),
                     client_id: "ui-scenario-public-client".into(),
                     credential_ref: "ui-scenario-no-credentials".into(),
+                    authlib: None,
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -251,6 +256,15 @@ impl Block {
                         cx,
                     );
                 }
+            }
+        }
+        if name == "accounts-providers"
+            || name.starts_with("provider-")
+            || name == "remove-provider-confirmation"
+        {
+            self.provider_scenario(name, cx)?;
+            if name == "remove-provider-confirmation" {
+                self.request_remove_provider(uuid::Uuid::from_u128(1).to_string(), window, cx);
             }
         }
         if let Some(section) = ["general", "game", "profiles", "downloads", "storage"]

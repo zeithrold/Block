@@ -52,8 +52,8 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 - [ ] Microsoft browser PKCE — ownership/profile verification prepares a memory-only identity; Finish saves credentials/metadata. Local cancellation/refresh/ownership checks pass; live verification remains pending.
 - [ ] Microsoft Device Code — request/poll, interval/slow_down, HTTP throttling/timeout backoff, expiry/cancel, XBL → XSTS → Minecraft and final confirmation implemented; live verification remains pending.
 - [ ] Offline account — explicit local identity, validated username/Java UUID v3, final-save confirmation, persistent selection/removal and launch dispatch implemented; actual game smoke remains pending.
-- [ ] Authlib provider add/edit/remove, discovery and quick-link import — real metadata, HTTPS policy, linked-account rules and caching.
-- [ ] Provider URL/pasted or dropped quick links, duplicate handling and explicit HTTP consent — validated normalization, ALI discovery, persisted consent and password-safe requests.
+- [ ] Authlib provider management — add/edit/remove, bounded ALI discovery, atomic public metadata persistence and linked-account endpoint/deletion protection implemented. Favicon URL is cached; icon image retrieval remains pending.
+- [ ] Provider URL/quick-link import — input/paste, duplicate selection, explicit address-bound HTTP consent, redirect limits and HTTPS downgrade rejection implemented. External text drop requires the user decision below.
 - [ ] Authlib account/password form, selected provider and multiple characters — real credential exchange, profile selection, cancellation and final secure-save confirmation.
 - [ ] Yggdrasil authenticate/refresh/validate/invalidate/signout and profile selection — local protocol fixtures and secure storage.
 - [ ] Authlib launch injection — official verified agent JAR, prefetched metadata and actual injected game launch.
@@ -95,10 +95,10 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Microsoft authorization `9ecc1fd` passed three-platform CI run `39640688731`. Offline `8b6a136` passed full local `just check` (332 tests), release compilation and macOS/Linux CI; Windows session-supervisor verification remains under investigation.
+- Supervisor diagnostics `d6400a9` passed three-platform CI run `39644470331`; Offline `8b6a136` also passed after a Windows-only rerun. Full local baseline: 332 tests plus release compilation. The earlier intermittent Windows lifecycle failure has not been reproduced on the test host or established as fixed.
 - Old ui-parity evidence was removed before staging. `gpui-product-progress.md` already existed in earlier history; its current-tree deletion does not rewrite those prior commits.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
-- Native screenshots cover 48 debug UI scenarios in both themes (148 primary/child images), including Microsoft method choice/device request/waiting/saving and Offline information/error/review/detail. `scripts/parity-board` builds `target/parity-shots/index.html`. Fixture codes are not live authorization codes; release compilation excludes scenario flags/fixtures.
+- Native screenshots cover 52 debug UI scenarios in both themes (158 primary/child images), including provider management/new/HTTP consent and its independent remove window. `scripts/parity-board` builds `target/parity-shots/index.html`. Fixture codes are not live authorization codes; release compilation excludes scenario flags/fixtures.
 - The React reference server is available at `http://127.0.0.1:5173/`; the separate prototype screenshot task has not supplied its images. The board labels missing reference shots explicitly. Current native fixture records cover implemented Microsoft/Vanilla/NeoForge models; additional provider/loader scenarios await their real implementations.
 - All three remote hosts completed actual Home → Games → native version-picker smoke, with visible screenshots under `target/parity-shots/{linux-arm64,windows-amd64,linux-amd64}/`. ARM64/Windows used pushed `d97206d`; Linux AMD64 used `def4a1b`. These establish the P1 window baseline, not current-page parity or P5 game verification.
 - Linux ARM64 KDE uses Xwayland `:1` plus session Xauthority and Spectacle; scrot returns black pixels there. Linux AMD64 X11 needs ImageMagick screen-based window capture. Windows captures run in an interactive scheduled task and enumerate visible windows by process ID. Test tasks were removed and the AMD64 VM was stopped softly after capture.
@@ -111,6 +111,8 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 - Eight Device Code loopback tests cover the complete ownership chain, poll intervals, slow_down/429, timeout backoff, cancellation during I/O, expiry, malformed links and controlled error mapping. UI regressions cover prepared-versus-saved state, method changes, orphan URLs and parent drafts after delayed save completion.
 - Microsoft preparation does not write account metadata or refresh credentials; final confirmation writes both. First-run's combined new-account/game commit remains required Welcome work. No live device request has been started. The public client ID is present in local .env and must be passed privately to the test app's environment.
 - Offline preparation is local and memory-only until Finish; saved metadata has no credential/client references. Launch checks the saved name/UUID and never falls back from failed Microsoft authorization. Local tests cover name boundaries, case-sensitive Java UUIDs, duplicate/colliding identities, corrupt metadata, durable save/removal and editable/cancelled drafts.
+- Provider discovery/state tests cover ALI and redirects, HTTPS/consent, bounded/invalid metadata, throttling, cancellation/timeouts, stale/duplicate writes, corruption and linked-account protection. Existing account IDs remain compatible; external identities include provider, login and character UUID. Yggdrasil login/tokens and launch injection are still pending and are not exposed as working sign-in.
+- Provider changes passed full local `just check` (345 tests) and release compilation; their CI is pending. The default HTTP form shows the consent control and disables saving until accepted. Unreadable provider metadata stays an error instead of being presented as an empty saved list.
 - The prototype's outer page padding is not launcher content. Compare cropped Home at 432×768 and management content at 960×600 logical pixels; browser viewport dimensions must allow for that padding.
 - Home visual work: square initial fallback, provider badge, centered launch icon/text and integrated Profile selector; official version details remain in the launch tooltip. Reserve macOS traffic-light space and give account/Profile windows usable list height. Real account avatars and full Home acceptance remain open.
 - Screenshot capture includes the launched process's allocated windows, including inactive floating panels; their actual CGWindowID capture was inspected. It does not require System Events activation.
@@ -126,6 +128,7 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 | macOS Screen Recording permission | Available; actual Welcome/version-picker capture succeeded. No user action needed. |
 | OptiFine official JAR | User downloads when needed, launcher automates installation. |
 | Authlib provider account | Optional live-provider verification; local fixture otherwise. |
+| Authlib external text drag/drop | Fixed GPUI 0.3.9 macOS exposes file paths only; user choice pending on accepting input/paste import as an explicit difference. Continue the supported import and provider features meanwhile. |
 
 ## v0 notes
 

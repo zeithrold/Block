@@ -36,6 +36,7 @@ pub(super) enum Surface {
     DownloadFiles(super::downloads::DownloadGroup),
     DeleteProfile(String),
     RemoveAccount(String),
+    RemoveProvider(String),
     SeparateProfiles,
     GamesHelp,
     GuideInformation(Tab),
@@ -61,6 +62,7 @@ pub(super) struct ShellState {
     pub games: super::browser::CollectionState,
     pub profiles: super::browser::CollectionState,
     pub accounts: super::browser::CollectionState,
+    pub providers: super::providers::State,
     pub selector: Option<super::search_selector::SearchSelectorState>,
     pub revision: usize,
     pub backwards: bool,
@@ -112,6 +114,7 @@ impl ShellState {
             Surface::DownloadFiles(_)
             | Surface::DeleteProfile(_)
             | Surface::RemoveAccount(_)
+            | Surface::RemoveProvider(_)
             | Surface::SeparateProfiles
             | Surface::GamesHelp
             | Surface::GuideInformation(_)
@@ -248,6 +251,9 @@ impl Block {
     }
 
     pub(super) fn navigation_title(&self) -> &'static str {
+        if self.tab == Tab::Accounts && self.shell.providers.visible {
+            return "Authlib providers";
+        }
         if self.shell.instance_editor.is_some() {
             return "Instance settings";
         }
@@ -270,6 +276,9 @@ impl Block {
     }
 
     fn contextual_back(&self) -> (&'static str, UiAction) {
+        if self.tab == Tab::Accounts && self.shell.providers.visible {
+            return ("Accounts", UiAction::ProvidersBack);
+        }
         if self.shell.instance_editor.is_some() {
             return (
                 if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
@@ -869,6 +878,9 @@ impl Block {
     }
 
     fn management(&self, window: &Window, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        if self.tab == Tab::Accounts && self.shell.providers.visible {
+            return self.render_providers(window, cx).into_any_element();
+        }
         if let Some(Form::Instance(form)) = &self.form {
             return self.instance_form(form, window, cx).into_any_element();
         }
@@ -920,6 +932,10 @@ impl Block {
                 .child(div().text_xl().child("Remove this account?"))
                 .child(note("This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it."))
                 .child(self.button("confirm-remove-account", "Remove account", UiAction::SignOut(id.clone()), cx)),
+            Surface::RemoveProvider(id) => content
+                .child(div().text_xl().child("Remove this provider?"))
+                .child(note(if self.provider_links(id)>0 { "This provider is used by saved accounts. Remove those accounts first." } else { "The saved provider and cached metadata are removed. Game files stay on disk." }))
+                .children((self.provider_links(id)==0).then(||self.button("confirm-remove-provider","Remove provider",UiAction::ProviderRemove(id.clone()),cx))),
             Surface::SeparateProfiles => content
                 .child(div().text_xl().child("Enable separated profiles?"))
                 .child(note("This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored."))

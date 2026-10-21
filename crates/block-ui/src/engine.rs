@@ -83,6 +83,8 @@ impl ProfileDraftValues {
     reason = "This private module exposes items only to its parent view."
 )]
 pub(crate) enum Message {
+    Providers(Result<Vec<block_auth::AuthlibProvider>, String>),
+    ProviderSaved(String),
     ForOperation {
         operation: u64,
         message: Box<Self>,
@@ -233,6 +235,8 @@ impl Engine {
         let root = self.root.clone();
         let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
+            let providers = load_providers(&root).map_err(|error| format!("{error:#}"));
+            let _ = sender.send(Message::Providers(providers)).await;
             send_catalog(&root, &sender).await;
             let accounts = tokio::task::spawn_blocking(move || load_accounts(&root)).await;
             let result = match accounts {
@@ -550,6 +554,70 @@ impl Engine {
         });
     }
 
+    pub(super) fn save_provider(
+        &self,
+        original: Option<block_auth::AuthlibProvider>,
+        name: String,
+        address: String,
+        allow_http: bool,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let result = async {
+                let address = block_auth::ProviderAddress::parse(&address)?;
+                let provider = if let Some(provider) = &original
+                    && address.url == provider.api_url
+                    && (!address.insecure || allow_http)
+                {
+                    let mut provider = provider.clone();
+                    provider.name = name;
+                    provider.validate()?;
+                    provider
+                } else {
+                    block_auth::AuthlibProvider::discover(
+                        original.as_ref().map_or_else(uuid::Uuid::new_v4, |p| p.id),
+                        &name,
+                        &address.url,
+                        allow_http,
+                        &cancel,
+                    )
+                    .await?
+                };
+                ensure!(!cancel.is_cancelled(), "Provider setup was cancelled.");
+                persist_provider(&root, original.as_ref(), &provider)?;
+                let _ = sender
+                    .unscoped()
+                    .send(Message::Providers(Ok(load_providers(&root)?)))
+                    .await;
+                let _ = sender
+                    .send(Message::ProviderSaved(provider.id.to_string()))
+                    .await;
+                Ok(format!("Provider {} saved", provider.name))
+            }
+            .await;
+            finish(&sender, result).await;
+        });
+    }
+
+    pub(super) fn remove_provider(&self, id: String) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let result = async {
+                let providers = delete_provider(&root, id.parse()?)?;
+                let _ = sender
+                    .unscoped()
+                    .send(Message::Providers(Ok(providers)))
+                    .await;
+                Ok("Provider removed; game files are kept".into())
+            }
+            .await;
+            finish(&sender, result).await;
+        });
+    }
+
     pub(super) fn save_offline_account(&self, account: Account) {
         let root = self.root.clone();
         let sender = self.sender.clone();
@@ -586,7 +654,7 @@ impl Engine {
                         .await?;
                 }
                 let mut accounts = load_accounts(&root)?;
-                accounts.retain(|saved| saved.reference != account.reference);
+                accounts.retain(|saved| saved.identity_key() != account.identity_key());
                 save_accounts(&root, &accounts)?;
                 let _ = sender.send(Message::Accounts(Ok(accounts))).await;
                 Ok(if account.provider == AccountProvider::Offline {
@@ -618,6 +686,9 @@ impl Engine {
                     ))
                     .await;
                 let provider = match account.provider {
+                    AccountProvider::Authlib => {
+                        return Err(block_auth::AuthError::SignInRequired.into());
+                    }
                     AccountProvider::Microsoft => {
                         let session = auth()?.refresh(&account, &cancel).await?;
                         OnlineSession {
@@ -967,6 +1038,102 @@ fn load_accounts(root: &Path) -> anyhow::Result<Vec<Account>> {
     }
 }
 
+fn load_providers(root: &Path) -> anyhow::Result<Vec<block_auth::AuthlibProvider>> {
+    use std::io::Read as _;
+    let file = match File::open(root.join("providers.json")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("Saved providers could not be opened"),
+    };
+    let mut bytes = Vec::new();
+    file.take(16 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 16 * 1024 * 1024,
+        "Saved providers are too large"
+    );
+    let providers: Vec<block_auth::AuthlibProvider> =
+        serde_json::from_slice(&bytes).context("Saved provider metadata could not be read")?;
+    validate_providers(&providers)?;
+    Ok(providers)
+}
+
+fn validate_providers(providers: &[block_auth::AuthlibProvider]) -> anyhow::Result<()> {
+    ensure!(providers.len() <= 64, "At most 64 providers may be saved");
+    for (index, provider) in providers.iter().enumerate() {
+        provider.validate()?;
+        ensure!(
+            !providers[..index]
+                .iter()
+                .any(|p| p.id == provider.id || p.api_url == provider.api_url),
+            "A provider with this API address is already saved"
+        );
+    }
+    Ok(())
+}
+
+fn delete_provider(
+    root: &Path,
+    id: uuid::Uuid,
+) -> anyhow::Result<Vec<block_auth::AuthlibProvider>> {
+    let mut providers = load_providers(root)?;
+    ensure!(
+        !load_accounts(root)?.iter().any(|a| a
+            .authlib
+            .as_ref()
+            .is_some_and(|link| link.provider_id == id)),
+        "This provider is used by saved accounts. Remove those accounts before removing the provider."
+    );
+    let count = providers.len();
+    providers.retain(|provider| provider.id != id);
+    ensure!(
+        providers.len() != count,
+        "This provider is no longer saved."
+    );
+    save_providers(root, &providers)?;
+    Ok(providers)
+}
+
+fn save_providers(root: &Path, providers: &[block_auth::AuthlibProvider]) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    validate_providers(providers)?;
+    let bytes = serde_json::to_vec_pretty(providers)?;
+    ensure!(
+        bytes.len() <= 16 * 1024 * 1024,
+        "Saved providers are too large"
+    );
+    std::fs::create_dir_all(root)?;
+    let mut file = tempfile::NamedTempFile::new_in(root)?;
+    file.write_all(&bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(root.join("providers.json"))?;
+    Ok(())
+}
+
+fn persist_provider(
+    root: &Path,
+    original: Option<&block_auth::AuthlibProvider>,
+    provider: &block_auth::AuthlibProvider,
+) -> anyhow::Result<()> {
+    let mut providers = load_providers(root)?;
+    let saved = providers.iter().find(|p| p.id == provider.id);
+    ensure!(
+        saved == original,
+        "The provider changed while editing. Open it again before saving."
+    );
+    if original.is_some_and(|old| old.api_url != provider.api_url) {
+        ensure!(
+            !load_accounts(root)?.iter().any(|a| a
+                .authlib
+                .as_ref()
+                .is_some_and(|link| link.provider_id == provider.id)),
+            "This provider is used by saved accounts. Its API address cannot change while accounts are linked."
+        );
+    }
+    providers.retain(|p| p.id != provider.id);
+    providers.push(provider.clone());
+    save_providers(root, &providers)
+}
+
 pub(super) fn offline_account(username: &str) -> anyhow::Result<Account> {
     let game = block_launcher::session::OfflineSession::Offline {
         username: username.to_owned(),
@@ -980,6 +1147,7 @@ pub(super) fn offline_account(username: &str) -> anyhow::Result<Account> {
         player_name: game.username,
         client_id: String::new(),
         credential_ref: String::new(),
+        authlib: None,
     })
 }
 
@@ -990,17 +1158,17 @@ fn merge_signed_in_account(
     ensure!(
         !accounts
             .iter()
-            .any(|saved| saved.reference == account.reference
+            .any(|saved| saved.identity_key() == account.identity_key()
                 && (saved.provider != account.provider
                     || saved.credential_ref != account.credential_ref)),
         "This player already has a saved account for a different provider or Microsoft application registration. Remove that account before adding it again."
     );
     let existed = accounts.iter().any(|saved| {
-        saved.reference == account.reference
+        saved.identity_key() == account.identity_key()
             && saved.provider == account.provider
             && saved.credential_ref == account.credential_ref
     });
-    accounts.retain(|saved| saved.reference != account.reference);
+    accounts.retain(|saved| saved.identity_key() != account.identity_key());
     accounts.push(account.clone());
     Ok((accounts, existed))
 }
@@ -1077,6 +1245,49 @@ fn readable_log(line: &str) -> Option<String> {
 mod tests {
     use block_launcher::session::{OfflineSession, SessionProvider as _};
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn provider_persistence_preserves_drafts_duplicates_links_and_corrupt_files()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let provider = crate::providers::fixture_provider(false)?;
+        super::persist_provider(root.path(), None, &provider)?;
+        assert_eq!(super::load_providers(root.path())?, vec![provider.clone()]);
+        let original_bytes = std::fs::read(root.path().join("providers.json"))?;
+        let mut duplicate = provider.clone();
+        duplicate.id = uuid::Uuid::new_v4();
+        assert!(super::persist_provider(root.path(), None, &duplicate).is_err());
+        assert_eq!(
+            std::fs::read(root.path().join("providers.json"))?,
+            original_bytes
+        );
+        let mut account = super::offline_account("Player")?;
+        account.provider = block_auth::AccountProvider::Authlib;
+        account.authlib = Some(block_auth::AuthlibAccount {
+            provider_id: provider.id,
+            login: "fixture-user".into(),
+        });
+        super::save_accounts(root.path(), &[account])?;
+        assert!(super::delete_provider(root.path(), provider.id).is_err());
+        let mut moved = crate::providers::fixture_provider(true)?;
+        moved.id = provider.id;
+        assert!(super::persist_provider(root.path(), Some(&provider), &moved).is_err());
+        let mut renamed = provider.clone();
+        renamed.name = "Renamed community".into();
+        super::persist_provider(root.path(), Some(&provider), &renamed)?;
+        assert!(super::persist_provider(root.path(), Some(&provider), &provider).is_err());
+        assert_eq!(super::load_providers(root.path())?, vec![renamed]);
+        super::save_accounts(root.path(), &[])?;
+        assert!(super::delete_provider(root.path(), provider.id)?.is_empty());
+        std::fs::write(root.path().join("providers.json"), b"broken cache")?;
+        assert!(super::load_providers(root.path()).is_err());
+        assert!(super::persist_provider(root.path(), None, &provider).is_err());
+        assert_eq!(
+            std::fs::read(root.path().join("providers.json"))?,
+            b"broken cache"
+        );
+        Ok(())
+    }
 
     #[test]
     fn offline_identity_matches_java_and_rejects_invalid_or_colliding_metadata()
@@ -1271,6 +1482,7 @@ mod tests {
             player_name: "Synthetic".into(),
             client_id: "synthetic-public-client".into(),
             credential_ref: "synthetic-store-reference".into(),
+            authlib: None,
         };
         super::save_accounts(root.path(), std::slice::from_ref(&account))?;
         assert_eq!(super::load_accounts(root.path())?, vec![account]);
@@ -1295,6 +1507,7 @@ mod tests {
             player_name: "BeforeRename".into(),
             client_id: "old-public-client".into(),
             credential_ref: "old-store-reference".into(),
+            authlib: None,
         };
         let mut renamed = old.clone();
         renamed.player_name = "AfterRename".into();
