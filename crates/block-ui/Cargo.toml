@@ -6,6 +6,8 @@ publish.workspace = true
 
 [dependencies]
 gpui.workspace = true
+gpui-base.workspace = true
+gpui_platform.workspace = true
 anyhow.workspace = true
 block-auth.workspace = true
 unicode-segmentation.workspace = true
@@ -17,8 +19,24 @@ serde_json.workspace = true
 serde.workspace = true
 tokio.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSWorkspace"] }
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+gpui-base = { workspace = true, features = ["test-support"] }
+gpui_platform = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_text = { package = "gpui-pre-apple", version = "=0.3.9" }
+
+[[example]]
+name = "native_accessibility"
+test = false
+
+[[example]]
+name = "native_paint_scale"
+test = false

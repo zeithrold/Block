@@ -1,18 +1,27 @@
-//! First launch presents one decision at a time; advanced game options stay optional.
+//! Three honest setup steps share component drafts with the game wizard.
 #![expect(
     clippy::redundant_pub_crate,
     reason = "First-run state is shared only with the parent view."
 )]
-use std::time::Duration;
+use super::scroll_area::ScrollAreaExt as _;
+use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    Animation, AnimationExt as _, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
-    rgb,
+    Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
+    ScrollHandle, Styled as _, Window, div, point, px, relative, rgb,
 };
 
-use super::game_wizard::{WizardPage, WizardState};
-use super::{Block, Form, InstanceForm, Tab, UiAction, account_id, field, input};
+use super::game_wizard::{ProfileDraft, WizardField, WizardPage, WizardState};
+use super::{
+    Block, Form, InstanceForm, Tab, UiAction, account_id,
+    components::{
+        self, AvatarState, BadgeVariant, ButtonSize, ButtonVariant, ControlState, FieldOptions,
+        ProgressState,
+    },
+    design::BROWSER_FRACTION,
+    input, patterns,
+    shell::Surface,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Progress {
@@ -29,11 +38,33 @@ pub(super) enum Step {
     Review,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct State {
     pub step: Step,
-    pub options: bool,
     pub error: Option<String>,
+    pub account: Option<String>,
+    account_decided: bool,
+    scroll: ScrollHandle,
+    heading_focus: Option<FocusHandle>,
+    error_field: Option<WizardField>,
+    reveal: Rc<Cell<Option<WizardField>>>,
+}
+
+impl State {
+    pub(super) fn snapshot(&self, cx: &Context<'_, Block>) -> Self {
+        let scroll = ScrollHandle::new();
+        scroll.set_offset(self.scroll.offset());
+        Self {
+            step: self.step,
+            error: self.error.clone(),
+            account: self.account.clone(),
+            account_decided: self.account_decided,
+            scroll,
+            heading_focus: Some(cx.focus_handle()),
+            error_field: self.error_field,
+            reveal: Rc::new(Cell::new(None)),
+        }
+    }
 }
 
 impl Step {
@@ -50,10 +81,14 @@ impl Block {
     pub(super) fn begin_onboarding(&mut self, cx: &mut Context<'_, Self>) {
         self.tab = Tab::Onboarding;
         self.onboarding_progress = Progress::Draft;
-        self.shell.onboarding.step = Step::Game;
-        self.shell.onboarding.options = false;
-        self.shell.onboarding.error = None;
-        self.shell.wizard = WizardState::default();
+        self.shell.onboarding = State {
+            account: self.selected_account.clone(),
+            heading_focus: Some(cx.focus_handle()),
+            ..State::default()
+        };
+        self.shell.wizard = WizardState::new(cx);
+        self.shell.wizard.profile = Some(ProfileDraft::new(&self.saved_preferences.game, cx));
+        self.shell.wizard.include_snapshots = self.saved_preferences.game.show_snapshots;
         let version = self.versions.first().map_or("1.20.6", String::as_str);
         self.form = Some(Form::Instance(InstanceForm {
             name: input("My Minecraft", "Game name", cx),
@@ -64,53 +99,7 @@ impl Block {
     }
 
     pub(super) fn onboarding(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let compact = window.viewport_size().width < px(720.);
-        let step = self.shell.onboarding.step;
-        let mut body = match (&self.form, step) {
-            (Some(Form::Instance(form)), Step::Game) => self.onboarding_game(form, cx),
-            (_, Step::Account) => self.onboarding_account(cx),
-            (Some(Form::Instance(form)), Step::Review) => self.onboarding_review(form, cx),
-            _ => self
-                .setup_caption("Preparing your game…")
-                .into_any_element(),
-        };
-        if let Some(error) = &self.shell.onboarding.error {
-            body = div()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .child(body)
-                .child(
-                    div()
-                        .id("onboarding-error")
-                        .debug_selector(|| "onboarding-error".into())
-                        .rounded_md()
-                        .border_1()
-                        .border_color(rgb(self.palette.border))
-                        .p_3()
-                        .text_sm()
-                        .child(error.clone()),
-                )
-                .into_any_element();
-        }
-        if !self.preferences.reduce_motion {
-            let backwards = self.shell.wizard.backwards;
-            body = div()
-                .relative()
-                .w_full()
-                .child(body)
-                .with_animation(
-                    ("first-run-content", self.shell.wizard.revision),
-                    Animation::new(Duration::from_millis(320))
-                        .with_easing(|t| 1. - (1. - t).powi(3)),
-                    move |element, progress| {
-                        element
-                            .left(px((1. - progress) * if backwards { -24. } else { 24. }))
-                            .opacity(progress)
-                    },
-                )
-                .into_any_element();
-        }
+        let compact = patterns::is_narrow(window.viewport_size());
         div()
             .id("first-run")
             .debug_selector(|| "first-run".into())
@@ -123,55 +112,140 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .children((!compact).then(|| self.onboarding_brand()))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .id("onboarding-body")
-                                    .debug_selector(|| "onboarding-body".into())
-                                    .flex_1()
-                                    .min_h_0()
-                                    .overflow_y_scroll()
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .min_h_full()
-                                            .flex()
-                                            .flex_col()
-                                            .justify_center()
-                                            .px(if compact { px(24.) } else { px(48.) })
-                                            .py_6()
-                                            .child(
-                                                div()
-                                                    .w_full()
-                                                    .max_w(px(480.))
-                                                    .mx_auto()
-                                                    .child(body),
-                                            ),
-                                    ),
-                            ),
-                    ),
+                    .children((!compact).then(|| self.onboarding_brand(cx)))
+                    .child(div().flex_1().min_w_0().min_h_0().h_full().child(
+                        self.transition_content(
+                            super::motion::Scope::Wizard,
+                            self.render_onboarding_transition_body(window, cx),
+                            window,
+                            cx,
+                        ),
+                    )),
             )
-            .child(self.onboarding_footer(compact, cx))
+            .child(self.onboarding_footer(window, cx))
             .into_any_element()
     }
 
-    fn onboarding_brand(&self) -> impl IntoElement + use<> {
-        let current = self.shell.onboarding.step.index();
+    pub(super) fn render_onboarding_transition_body(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let compact = patterns::is_narrow(window.viewport_size());
+        let step = self.shell.onboarding.step;
+        let mut body = match (&self.form, step) {
+            (Some(Form::Instance(form)), Step::Game) => self.onboarding_game(form, compact, cx),
+            (_, Step::Account) => self.onboarding_account(cx),
+            (Some(Form::Instance(form)), Step::Review) => self.onboarding_review(form, cx),
+            _ => self
+                .setup_caption("Preparing your game…")
+                .into_any_element(),
+        };
+        if let Some(error) = &self.shell.onboarding.error {
+            let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Alert);
+            semantic.set_label(error.clone());
+            body = div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(body)
+                .child(
+                    div()
+                        .id("onboarding-error")
+                        .debug_selector(|| "onboarding-error".into())
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(self.palette.destructive))
+                        .text_color(rgb(self.palette.destructive))
+                        .p_3()
+                        .text_sm()
+                        .accessibility(semantic, false, |_, _, _| {})
+                        .child(error.clone()),
+                )
+                .into_any_element();
+        }
         div()
-            .w(relative(0.34))
+            .id("onboarding-body")
+            .debug_selector(|| "onboarding-body".into())
+            .size_full()
+            .min_h_0()
+            .scroll_area(
+                &self.shell.onboarding.scroll,
+                "Setup steps",
+                self.palette,
+                false,
+            )
+            .child(
+                div()
+                    .id("onboarding-content")
+                    .debug_selector(|| "onboarding-content".into())
+                    .w_full()
+                    .min_h_full()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .px(if compact { px(24.) } else { px(48.) })
+                    .py_6()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(620.))
+                            .mx_auto()
+                            .children(compact.then(|| {
+                                div()
+                                    .mb_5()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(super::shell::brand(56.))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .child(self.setup_caption("WELCOME TO BLOCK"))
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .child("A little setup. A whole new world."),
+                                            ),
+                                    )
+                            }))
+                            .child(body),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn onboarding_brand(&self, cx: &gpui::App) -> impl IntoElement + use<> {
+        let ready = [
+            self.onboarding_game_ready(cx),
+            self.shell.onboarding.account_decided || self.shell.onboarding.account.is_some(),
+            self.onboarding_progress == Progress::Created,
+        ];
+        let steps = [
+            components::StepperStep {
+                title: "Your game",
+                description: "Choose your components",
+                complete: ready[0],
+            },
+            components::StepperStep {
+                title: "Your account",
+                description: "Choose who is playing",
+                complete: ready[1],
+            },
+            components::StepperStep {
+                title: "Ready to go",
+                description: "Review and create",
+                complete: ready[2],
+            },
+        ];
+        div()
+            .w(relative(BROWSER_FRACTION))
             .flex_shrink_0()
             .h_full()
+            .min_h_0()
             .px_8()
             .py_6()
-            .bg(rgb(self.palette.surface))
+            .bg(rgb(self.palette.sidebar))
             .flex()
             .flex_col()
             .child(
@@ -192,56 +266,14 @@ impl Block {
                     )
                     .child(self.setup_caption("A little setup. A whole new world.")),
             )
-            .child(
-                div().flex().flex_col().gap_3().children(
-                    ["Your game", "Your account", "Ready to go"]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, label)| {
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .text_color(rgb(if index == current {
-                                    self.palette.foreground
-                                } else {
-                                    self.palette.muted
-                                }))
-                                .child(
-                                    div()
-                                        .size(px(22.))
-                                        .rounded_full()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .border_1()
-                                        .border_color(rgb(if index == current {
-                                            self.palette.primary
-                                        } else {
-                                            self.palette.border
-                                        }))
-                                        .bg(rgb(if index == current {
-                                            self.palette.primary
-                                        } else {
-                                            self.palette.surface
-                                        }))
-                                        .text_color(rgb(if index == current {
-                                            self.palette.on_primary
-                                        } else {
-                                            self.palette.muted
-                                        }))
-                                        .text_xs()
-                                        .child(if index < current {
-                                            "✓".to_owned()
-                                        } else {
-                                            (index + 1).to_string()
-                                        }),
-                                )
-                                .child(label)
-                        }),
-                ),
-            )
+            .child(components::stepper(
+                "onboarding-steps",
+                "Welcome setup",
+                &steps,
+                self.shell.onboarding.step.index(),
+                false,
+                self.palette,
+            ))
     }
 
     fn setup_caption(&self, text: impl Into<gpui::SharedString>) -> gpui::Div {
@@ -251,8 +283,25 @@ impl Block {
             .child(text.into())
     }
 
-    fn setup_heading(&self, eyebrow: &str, title: &str, description: &str) -> gpui::Div {
-        div()
+    fn setup_heading(
+        &self,
+        eyebrow: &str,
+        title: &str,
+        description: &str,
+    ) -> gpui::Stateful<gpui::Div> {
+        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Heading);
+        semantic.set_label(format!(
+            "Step {} of 3. {title}",
+            self.shell.onboarding.step.index() + 1
+        ));
+        let mut heading = div()
+            .id("onboarding-step-heading")
+            .debug_selector(|| "onboarding-step-heading".into())
+            .accessibility(semantic, false, |_, _, _| {});
+        if let Some(focus) = &self.shell.onboarding.heading_focus {
+            heading = heading.track_focus(focus);
+        }
+        heading
             .flex()
             .flex_col()
             .gap_2()
@@ -271,125 +320,58 @@ impl Block {
             .child(self.setup_caption(description.to_owned()))
     }
 
-    fn onboarding_game(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        if let Some(page) = self.shell.wizard.page {
-            return match page {
-                WizardPage::Version => self.wizard_version(form, cx).into_any_element(),
-                WizardPage::Loader => self.wizard_loader(form, cx).into_any_element(),
-                WizardPage::Location => self.wizard_location(form, cx).into_any_element(),
-            };
-        }
-        div()
-            .flex()
-            .flex_col()
-            .gap_6()
-            .child(self.setup_heading(
-                "01 / YOUR GAME",
-                "Your first Minecraft.",
-                "Start with a name. We’ll take care of the setup.",
-            ))
-            .child(field("Game name", &form.name))
-            .child(self.setup_option(
-                "wizard-component-version",
-                "Minecraft",
-                &form.version.read(cx).value(),
-                WizardPage::Version,
-                cx,
-            ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        self.button(
-                            "onboarding-options",
-                            if self.shell.onboarding.options {
-                                "Fewer options"
-                            } else {
-                                "More options"
-                            },
-                            UiAction::OnboardingOptions,
-                            cx,
-                        )
-                        .bg(gpui::transparent_black())
-                        .border_color(gpui::transparent_black())
-                        .px_0()
-                        .py_0()
-                        .text_color(rgb(self.palette.muted)),
-                    )
-                    .children(self.shell.onboarding.options.then(|| {
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(self.setup_option(
-                                "wizard-component-loader",
-                                "Mod loader",
-                                if form.neoforge {
-                                    "NeoForge 20.6.144"
-                                } else {
-                                    "Vanilla"
-                                },
-                                WizardPage::Loader,
-                                cx,
-                            ))
-                            .child(self.setup_option(
-                                "wizard-component-location",
-                                "Game folder",
-                                if form.directory.read(cx).value().is_empty() {
-                                    "Automatic"
-                                } else {
-                                    "Custom folder"
-                                },
-                                WizardPage::Location,
-                                cx,
-                            ))
-                    })),
-            )
-            .child(self.setup_caption("Java and memory are configured automatically."))
-            .into_any_element()
-    }
-
-    fn setup_option(
+    fn onboarding_game(
         &self,
-        id: &str,
-        title: &str,
-        value: &str,
-        page: WizardPage,
+        form: &InstanceForm,
+        compact: bool,
         cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        self.button(id.to_owned(), "", UiAction::WizardPage(Some(page)), cx)
-            .w_full()
-            .min_h(px(64.))
-            .p_4()
-            .bg(gpui::transparent_black())
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(self.setup_caption(title.to_owned()))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(value.to_owned()),
-                    ),
-            )
-            .child(div().text_color(rgb(self.palette.muted)).child("›"))
+    ) -> gpui::AnyElement {
+        let version = form.version.read(cx).value();
+        let configuration = self.wizard_configuration_summary(cx);
+        let name = patterns::reveal_field(
+            components::field_with(
+                "Game name",
+                &form.name,
+                self.palette,
+                FieldOptions {
+                    required: true,
+                    error: self
+                        .shell
+                        .onboarding
+                        .error
+                        .as_ref()
+                        .filter(|_| {
+                            self.shell.onboarding.error_field == Some(WizardField::GameName)
+                        })
+                        .cloned()
+                        .map(Into::into),
+                    ..FieldOptions::default()
+                },
+            ),
+            self.shell.onboarding.scroll.clone(),
+            self.shell.onboarding.reveal.clone(),
+            WizardField::GameName,
+        )
+        .id("onboarding-game-name")
+        .debug_selector(|| "onboarding-game-name".into());
+        div().flex().flex_col().gap_6()
+            .child(self.setup_heading("01 / YOUR GAME", "Your first Minecraft.", "Start with a name. Choose components now or keep the defaults."))
+            .children(self.onboarding_game_ready(cx).then(|| components::badge("Game configuration ready", self.palette, BadgeVariant::Success)))
+            .child(name)
+            .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(if compact { 2 } else { 4 }).gap_3()
+                .child(self.wizard_component("version", "Minecraft", &version, WizardPage::Version, cx))
+                .child(self.wizard_component("loader", "Mod loader", if form.neoforge { "NeoForge 20.6.144" } else { "Vanilla" }, WizardPage::Loader, cx))
+                .child(self.wizard_unavailable("optifine", "OptiFine", "Installation is not supported yet.", true))
+                .child(self.wizard_component("location", "Configuration", &configuration, WizardPage::Location, cx)))
+            .child(self.setup_caption("Your choices remain a draft until you create the game. Java and required files are downloaded from verified sources.").id("onboarding-draft-note").debug_selector(|| "onboarding-draft-note".into()))
+            .into_any_element()
     }
 
     fn onboarding_account(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let selected = self
             .accounts
             .iter()
-            .find(|account| Some(account_id(account)) == self.selected_account);
+            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
         let mut body = div().flex().flex_col().gap_6().child(self.setup_heading(
             "02 / YOUR ACCOUNT",
             "Who’s playing?",
@@ -397,27 +379,19 @@ impl Block {
         ));
         if let Some(account) = selected {
             body = body.child(
-                div()
-                    .rounded_xl()
-                    .bg(rgb(self.palette.surface))
-                    .p_5()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(self.setup_caption("Account ready"))
-                    .child(div().text_xl().child(account.player_name.clone()))
-                    .child(self.setup_caption("Microsoft · Minecraft: Java Edition")),
+                components::card(self.palette)
+                    .child(div().flex().items_center().gap_3()
+                        .child(components::avatar_fallback(&account.player_name, self.palette, 40., AvatarState::Unavailable))
+                        .child(div().flex_1().min_w_0().child(div().text_lg().child(account.player_name.clone()))
+                            .child(self.setup_caption("Microsoft · Minecraft: Java Edition"))))
+                    .child(components::badge("Account saved", self.palette, BadgeVariant::Success))
+                    .child(self.setup_caption("Authorization has saved this account to your device. Leaving setup keeps the saved account.")),
             );
         } else {
             body = body.child(
-                div()
-                    .rounded_xl()
-                    .bg(rgb(self.palette.surface))
-                    .p_5()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
+                components::card(self.palette)
                     .child(microsoft_mark())
+                    .children(self.busy.then(|| components::avatar_fallback("", self.palette, 32., AvatarState::Loading)))
                     .child(
                         div()
                             .font_weight(gpui::FontWeight::MEDIUM)
@@ -428,10 +402,11 @@ impl Block {
                             }),
                     )
                     .child(self.setup_caption(if self.busy {
-                        "Block will continue when sign-in is complete."
+                        "Complete Microsoft authorization in your browser. The account is saved when authorization succeeds."
                     } else {
                         "Sign in securely in your browser."
                     }))
+                    .children(self.busy.then(|| self.setup_caption(self.status.clone())))
                     .child(if self.busy {
                         self.button(
                             "onboarding-cancel-sign-in",
@@ -450,19 +425,7 @@ impl Block {
             );
         }
         if !self.busy {
-            body = body.children(
-                self.accounts
-                    .iter()
-                    .filter(|account| Some(account_id(account)) != self.selected_account)
-                    .map(|account| {
-                        self.button(
-                            format!("onboarding-account-{}", account_id(account)),
-                            account.player_name.clone(),
-                            UiAction::SelectAccount(account_id(account)),
-                            cx,
-                        )
-                    }),
-            );
+            body = body.child(self.onboarding_account_actions(selected.is_some(), cx));
             if selected.is_none() {
                 body = body.child(
                     self.button(
@@ -481,64 +444,170 @@ impl Block {
         body.into_any_element()
     }
 
+    fn onboarding_account_actions(
+        &self,
+        has_selection: bool,
+        cx: &Context<'_, Self>,
+    ) -> impl IntoElement + use<> {
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .children((!self.accounts.is_empty()).then(|| {
+                components::button(
+                    "onboarding-account-different",
+                    "Use a different account",
+                    self.palette,
+                    ButtonVariant::Outline,
+                    ControlState::default(),
+                    cx.listener(|view, &(): &(), window, cx| {
+                        view.handle(UiAction::OnboardingChooseAccount, window, cx);
+                    }),
+                )
+            }))
+            .children(has_selection.then(|| {
+                components::button(
+                    "onboarding-account-add",
+                    "Add an account",
+                    self.palette,
+                    ButtonVariant::Ghost,
+                    ControlState::default(),
+                    cx.listener(|view, &(): &(), window, cx| {
+                        view.handle(UiAction::SignIn, window, cx);
+                    }),
+                )
+            }))
+    }
+
     fn onboarding_review(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let created = self.onboarding_progress == Progress::Created;
         let account = self
             .accounts
             .iter()
-            .find(|account| Some(account_id(account)) == self.selected_account);
-        let rows = [
-            ("Game", form.name.read(cx).value()),
+            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        let rows = self.onboarding_review_rows(form, cx);
+        div().flex().flex_col().gap_6()
+            .child(self.setup_heading("03 / READY TO GO", "A world of possibilities.", if created { "Your game has been saved. Finish to return to Home." } else { "Review your choices. Each Change button returns to its draft." }))
+            .child(components::card(self.palette).py_0().px_4().children(rows.into_iter().enumerate().map(|(index, (title, value, action))| {
+                let mut row = div().py_3().flex().gap_3().items_center()
+                    .child(self.setup_caption(title).flex_shrink_0().w(px(76.)))
+                    .child(div().flex_1().min_w_0().text_sm().whitespace_normal().child(value))
+                    .children((!created).then(|| components::button_sized(
+                        format!("onboarding-review-change-{index}"), "Change", self.palette, ButtonVariant::Ghost, ButtonSize::Small,
+                        ControlState { disabled: self.busy, ..ControlState::default() },
+                        cx.listener(move |view, &(): &(), window, cx| view.handle(action.clone(), window, cx)),
+                    )));
+                if index != 0 { row = row.border_t_1().border_color(rgb(self.palette.border)); }
+                row
+            })))
+            .children(created.then(|| components::badge("Game saved", self.palette, BadgeVariant::Primary)))
+            .children((self.busy && created).then(|| components::progress(ProgressState::Indeterminate, self.palette)))
+            .children(self.busy.then(|| self.setup_caption(self.status.clone())))
+            .child(self.setup_caption(if account.is_some() {
+                "The account, game catalog and setup preference are saved in separate steps. Downloads can be retried from Home if they fail."
+            } else {
+                "Your game can download without an account. Sign in before you play; download errors can be retried from Home."
+            })).into_any_element()
+    }
+
+    fn onboarding_review_rows(
+        &self,
+        form: &InstanceForm,
+        cx: &Context<'_, Self>,
+    ) -> [(&'static str, String, UiAction); 9] {
+        let account = self
+            .accounts
+            .iter()
+            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        let profile = self.shell.wizard.profile.as_ref();
+        let directory = form.directory.read(cx).value();
+        let runtime = profile.map_or_else(
+            || "Managed Java".into(),
+            |profile| {
+                if profile.managed {
+                    "Managed Java".into()
+                } else {
+                    profile.java.read(cx).value()
+                }
+            },
+        );
+        let memory = profile.map_or_else(
+            || "Default".into(),
+            |profile| format!("{} MiB", profile.memory.read(cx).value()),
+        );
+        let window = profile.map_or_else(
+            || "Default".into(),
+            |profile| {
+                format!(
+                    "{} × {}{}",
+                    profile.width.read(cx).value(),
+                    profile.height.read(cx).value(),
+                    if profile.fullscreen {
+                        " · Fullscreen"
+                    } else {
+                        " · Windowed"
+                    }
+                )
+            },
+        );
+        [
+            (
+                "Game",
+                form.name.read(cx).value(),
+                UiAction::OnboardingChange(Step::Game),
+            ),
+            (
+                "Initial Profile",
+                form.name.read(cx).value(),
+                UiAction::OnboardingChange(Step::Game),
+            ),
             (
                 "Minecraft",
-                format!(
-                    "{} · {}",
-                    form.version.read(cx).value(),
-                    if form.neoforge { "NeoForge" } else { "Vanilla" }
-                ),
+                form.version.read(cx).value(),
+                UiAction::OnboardingSection(WizardPage::Version),
+            ),
+            (
+                "Mod loader",
+                if form.neoforge {
+                    "NeoForge 20.6.144".into()
+                } else {
+                    "Vanilla".into()
+                },
+                UiAction::OnboardingSection(WizardPage::Loader),
+            ),
+            (
+                "Game folder",
+                if directory.is_empty() {
+                    "Automatic".into()
+                } else {
+                    directory
+                },
+                UiAction::OnboardingSection(WizardPage::Location),
+            ),
+            (
+                "Java",
+                runtime,
+                UiAction::OnboardingSection(WizardPage::Location),
+            ),
+            (
+                "Memory",
+                memory,
+                UiAction::OnboardingSection(WizardPage::Location),
+            ),
+            (
+                "Window",
+                window,
+                UiAction::OnboardingSection(WizardPage::Location),
             ),
             (
                 "Account",
                 account.map_or_else(
-                    || "Sign in later".to_owned(),
+                    || "Sign in later".into(),
                     |account| account.player_name.clone(),
                 ),
+                UiAction::OnboardingChange(Step::Account),
             ),
-        ];
-        div()
-            .flex()
-            .flex_col()
-            .gap_6()
-            .child(self.setup_heading(
-                "03 / READY TO GO",
-                "A world of possibilities.",
-                "Your game is ready to be created.",
-            ))
-            .child(
-                div()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(rgb(self.palette.border))
-                    .px_4()
-                    .children(rows.into_iter().enumerate().map(|(index, (title, value))| {
-                        let mut row = div()
-                            .py_4()
-                            .flex()
-                            .gap_4()
-                            .items_center()
-                            .child(self.setup_caption(title).flex_shrink_0().w(px(88.)))
-                            .child(div().flex_1().min_w_0().text_sm().child(value));
-                        if index != 0 {
-                            row = row.border_t_1().border_color(rgb(self.palette.border));
-                        }
-                        row
-                    })),
-            )
-            .child(self.setup_caption(if account.is_some() {
-                "We’ll download the game in the background. Your worlds start on the next screen."
-            } else {
-                "We’ll download the game in the background. Sign in before you play."
-            }))
-            .into_any_element()
+        ]
     }
 
     fn setup_primary(
@@ -547,138 +616,192 @@ impl Block {
         label: &str,
         action: UiAction,
         cx: &Context<'_, Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        self.button(id.to_owned(), label.to_owned(), action, cx)
-            .h(px(38.))
-            .px_4()
-            .bg(rgb(self.palette.primary))
-            .border_color(rgb(self.palette.primary))
-            .text_color(rgb(self.palette.on_primary))
-            .flex()
-            .items_center()
-            .justify_center()
+    ) -> components::Control {
+        components::button_sized(
+            id.to_owned(),
+            label.to_owned(),
+            self.palette,
+            ButtonVariant::Primary,
+            ButtonSize::Large,
+            ControlState {
+                disabled: self.busy,
+                ..ControlState::default()
+            },
+            cx.listener(move |view, &(): &(), window, cx| view.handle(action.clone(), window, cx)),
+        )
     }
 
-    fn onboarding_footer(&self, compact: bool, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    fn onboarding_footer(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let step = self.shell.onboarding.step;
-        let subpage = self.shell.wizard.page.is_some();
+        let compact = patterns::is_narrow(window.viewport_size());
         let created = self.onboarding_progress == Progress::Created;
         let has_account = self
             .accounts
             .iter()
-            .any(|account| Some(account_id(account)) == self.selected_account);
+            .any(|account| Some(account_id(account)) == self.shell.onboarding.account);
         let blocked = !created && (self.busy || (step == Step::Account && !has_account));
+        let creating = self.busy && step == Step::Review && !created;
         let label = if created {
             "Finish setup"
-        } else if subpage {
-            "Done"
+        } else if creating {
+            "Creating…"
         } else if step == Step::Review {
-            if compact {
-                "Create game"
-            } else {
-                "Create and download"
-            }
+            "Create game"
         } else {
             "Continue"
         };
-        let mut footer = div()
+        let skip_disabled = creating;
+        let reason = self.onboarding_footer_reason(has_account, cx);
+        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
+        semantic.set_label(reason.clone());
+        patterns::management_footer(window.viewport_size(), self.palette)
             .id("onboarding-footer")
             .debug_selector(|| "onboarding-footer".into())
-            .h(if compact { px(104.) } else { px(72.) })
-            .flex_shrink_0()
-            .px(if compact { px(12.) } else { px(24.) })
-            .border_t_1()
-            .border_color(rgb(self.palette.border))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .child(if self.busy && step == Step::Review && !created {
-                div()
-                    .id("onboarding-skip-disabled")
-                    .px_3()
-                    .py_2()
-                    .text_color(rgb(self.palette.muted))
-                    .opacity(0.4)
-                    .child("Skip setup")
-                    .into_any_element()
-            } else {
-                self.button(
-                    "onboarding-skip",
-                    "Skip setup",
-                    UiAction::OnboardingSkip,
-                    cx,
-                )
-                .px(if compact { px(4.) } else { px(12.) })
-                .bg(gpui::transparent_black())
-                .border_color(gpui::transparent_black())
-                .text_color(rgb(self.palette.muted))
-                .into_any_element()
-            })
+            .min_w_0()
+            .flex_col()
+            .justify_center()
+            .items_start()
+            .gap_1()
             .child(
                 div()
-                    .flex_1()
+                    .w_full()
+                    .id("onboarding-footer-reason")
+                    .debug_selector(|| "onboarding-footer-reason".into())
+                    .text_xs()
+                    .text_color(rgb(if self.shell.onboarding.error.is_some() {
+                        self.palette.destructive
+                    } else {
+                        self.palette.muted
+                    }))
+                    .truncate()
+                    .accessibility(semantic, false, |_, _, _| {})
+                    .child(reason),
+            )
+            .child(
+                div()
                     .w_full()
                     .flex()
                     .items_center()
-                    .justify_end()
-                    .gap_2()
-                    .children((step != Step::Game || subpage).then(|| {
-                        if self.busy || created {
-                            div()
-                                .px_3()
-                                .py_2()
-                                .opacity(0.4)
-                                .child("Back")
-                                .into_any_element()
+                    .justify_between()
+                    .gap(px(if compact { 4. } else { 12. }))
+                    .child(components::button_sized(
+                        if skip_disabled {
+                            "onboarding-skip-disabled"
                         } else {
-                            self.button("welcome-back", "Back", UiAction::OnboardingBack, cx)
-                                .px_2()
-                                .bg(gpui::transparent_black())
-                                .border_color(gpui::transparent_black())
-                                .into_any_element()
-                        }
-                    }))
-                    .child(self.onboarding_next_action(label, blocked, cx)),
-            );
-        if compact {
-            footer = footer.flex_col().items_start().py_2().gap_1();
-        }
-        footer.into_any_element()
-    }
-
-    fn onboarding_next_action(
-        &self,
-        label: &str,
-        blocked: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
-        if !blocked {
-            return self
-                .setup_primary("welcome-next", label, UiAction::OnboardingNext, cx)
-                .into_any_element();
-        }
-        div()
-            .id("onboarding-next-disabled")
-            .debug_selector(|| "onboarding-next-disabled".into())
-            .h(px(38.))
-            .px_4()
-            .rounded_md()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(self.palette.primary))
-            .text_color(rgb(self.palette.on_primary))
-            .opacity(0.35)
-            .child(if self.busy && self.shell.onboarding.step == Step::Review {
-                "Creating…".to_owned()
-            } else {
-                label.to_owned()
-            })
+                            "onboarding-skip"
+                        },
+                        if compact {
+                            "Set up later"
+                        } else {
+                            "Skip setup"
+                        },
+                        self.palette,
+                        ButtonVariant::Ghost,
+                        ButtonSize::Small,
+                        ControlState {
+                            disabled: skip_disabled,
+                            ..ControlState::default()
+                        },
+                        cx.listener(|view, &(): &(), window, cx| {
+                            view.handle(UiAction::OnboardingSkip, window, cx);
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(if compact { 4. } else { 8. }))
+                            .children((step != Step::Game).then(|| {
+                                components::button_sized(
+                                    "welcome-back",
+                                    "Back",
+                                    self.palette,
+                                    ButtonVariant::Ghost,
+                                    ButtonSize::Small,
+                                    ControlState {
+                                        disabled: self.busy || created,
+                                        ..ControlState::default()
+                                    },
+                                    cx.listener(|view, &(): &(), window, cx| {
+                                        view.handle(UiAction::OnboardingBack, window, cx);
+                                    }),
+                                )
+                            }))
+                            .child(self.onboarding_advance_button(blocked, creating, label, cx)),
+                    ),
+            )
             .into_any_element()
     }
 
-    pub(super) fn advance_onboarding(&mut self, cx: &Context<'_, Self>) {
+    fn onboarding_advance_button(
+        &self,
+        blocked: bool,
+        creating: bool,
+        label: &'static str,
+        cx: &Context<'_, Self>,
+    ) -> components::Control {
+        components::button(
+            if blocked {
+                "onboarding-next-disabled"
+            } else {
+                "welcome-next"
+            },
+            label,
+            self.palette,
+            ButtonVariant::Primary,
+            ControlState {
+                disabled: blocked,
+                busy: creating,
+                invalid: self.shell.onboarding.error.is_some(),
+            },
+            cx.listener(|view, &(): &(), window, cx| {
+                view.handle(UiAction::OnboardingNext, window, cx);
+            }),
+        )
+    }
+
+    fn onboarding_footer_reason(&self, has_account: bool, cx: &gpui::App) -> String {
+        if self.onboarding_progress == Progress::Created {
+            "Game saved · Finish setup when ready".into()
+        } else if self.busy {
+            self.status.clone()
+        } else if let Some(error) = &self.shell.onboarding.error {
+            error.clone()
+        } else if self.shell.onboarding.step == Step::Account && !has_account {
+            "Choose an account or select “I’ll sign in later”".into()
+        } else if !self.onboarding_game_ready(cx) {
+            "Review your game configuration before continuing".into()
+        } else if self.shell.onboarding.step == Step::Review {
+            "Ready to create · Downloads may continue after setup".into()
+        } else {
+            "Your choices stay in this draft".into()
+        }
+    }
+
+    fn onboarding_game_ready(&self, cx: &gpui::App) -> bool {
+        let Some(Form::Instance(form)) = &self.form else {
+            return false;
+        };
+        let name = form.name.read(cx).value();
+        let version = form.version.read(cx).value();
+        let directory = form.directory.read(cx).value();
+        !name.trim().is_empty()
+            && name.len() <= 160
+            && !name.chars().any(char::is_control)
+            && !version.trim().is_empty()
+            && version.len() <= 80
+            && !version.chars().any(char::is_control)
+            && (!form.neoforge || version.trim() == "1.20.6")
+            && (directory.trim().is_empty() || std::path::Path::new(directory.trim()).is_absolute())
+            && self
+                .shell
+                .wizard
+                .profile
+                .as_ref()
+                .is_some_and(|profile| profile.values(cx).is_ok())
+    }
+
+    pub(super) fn advance_onboarding(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.tab != Tab::Onboarding {
             return;
         }
@@ -690,43 +813,308 @@ impl Block {
             return;
         }
         self.shell.onboarding.error = None;
-        if self.shell.wizard.page.is_some() {
-            if self.validate_instance_draft(cx) {
-                self.shell.wizard.open_page(None);
-            }
-            return;
-        }
+        self.shell.onboarding.error_field = None;
         match self.shell.onboarding.step {
             Step::Game => {
-                if !self.validate_instance_draft(cx) {
+                if !self.validate_onboarding_game(window, cx) {
                     return;
                 }
-                self.shell.onboarding.step = Step::Account;
+                self.change_onboarding_step(Step::Account, window, cx);
             }
-            Step::Account => self.shell.onboarding.step = Step::Review,
-            Step::Review => {
-                self.save_instance(cx);
-                return;
+            Step::Account => {
+                self.shell.onboarding.account_decided = true;
+                self.change_onboarding_step(Step::Review, window, cx);
             }
+            Step::Review => self.submit_onboarding(window, cx),
         }
-        self.shell.wizard.backwards = false;
-        self.shell.wizard.revision = self.shell.wizard.revision.wrapping_add(1);
     }
 
-    pub(super) fn back_onboarding(&mut self) {
+    pub(super) fn change_onboarding_step(
+        &mut self,
+        step: Step,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if self.busy || self.onboarding_progress == Progress::Created {
             return;
         }
-        self.shell.onboarding.error = None;
-        if self.shell.wizard.page.is_some() {
-            self.shell.wizard.open_page(None);
+        self.shell.wizard.backwards = step.index() < self.shell.onboarding.step.index();
+        self.motion.direction = if self.shell.wizard.backwards {
+            super::motion::Direction::Back
         } else {
-            self.shell.onboarding.step = match self.shell.onboarding.step {
-                Step::Review => Step::Account,
-                Step::Account | Step::Game => Step::Game,
+            super::motion::Direction::Forward
+        };
+        self.motion_dirty = true;
+        self.shell.onboarding.step = step;
+        self.shell.onboarding.error = None;
+        self.shell.onboarding.error_field = None;
+        self.shell
+            .onboarding
+            .scroll
+            .set_offset(point(px(0.), px(0.)));
+        self.shell.wizard.revision = self.shell.wizard.revision.wrapping_add(1);
+        if let Some(focus) = &self.shell.onboarding.heading_focus {
+            focus.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn back_onboarding(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.shell.wizard.page.is_some() {
+            self.finish_onboarding_section(true, window, cx);
+            return;
+        }
+        let step = match self.shell.onboarding.step {
+            Step::Review => Step::Account,
+            Step::Account | Step::Game => Step::Game,
+        };
+        self.change_onboarding_step(step, window, cx);
+    }
+
+    pub(super) fn choose_onboarding_account(&mut self, id: String) {
+        if self
+            .accounts
+            .iter()
+            .any(|account| account_id(account) == id)
+        {
+            self.shell.onboarding.account = Some(id);
+            self.shell.onboarding.account_decided = true;
+            self.shell.onboarding.error = None;
+        }
+    }
+
+    pub(super) fn open_onboarding_section(
+        &mut self,
+        page: WizardPage,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.busy || self.onboarding_progress == Progress::Created || self.tab != Tab::Onboarding
+        {
+            return;
+        }
+        self.shell.onboarding.error = None;
+        self.open_game_wizard_page(Some(page), cx);
+        self.motion_dirty = true;
+        self.shell
+            .overlays
+            .open(Surface::OnboardingSection(page), window, cx);
+        let input = match page {
+            WizardPage::Version => self.shell.wizard.version_search.as_ref(),
+            WizardPage::Location => match &self.form {
+                Some(Form::Instance(form)) => Some(&form.directory),
+                _ => None,
+            },
+            WizardPage::Loader => None,
+        };
+        if let Some(input) = input {
+            input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+    }
+
+    pub(super) fn finish_onboarding_section(
+        &mut self,
+        cancel: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(page) = self
+            .shell
+            .overlays
+            .top()
+            .and_then(|layer| match layer.kind {
+                Surface::OnboardingSection(page) => Some(page),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        if self.busy
+            || (!cancel
+                && self
+                    .form_inputs()
+                    .iter()
+                    .any(|input| input.read(cx).is_composing()))
+        {
+            return;
+        }
+        if cancel {
+            self.cancel_component_draft(cx);
+        } else {
+            if !self.validate_wizard_section(page, cx) {
+                self.focus_wizard_error(window, cx);
+                return;
+            }
+            self.open_game_wizard_page(None, cx);
+        }
+        self.shell.overlays.close(window, &self.focus, cx);
+        self.motion.direction = super::motion::Direction::Back;
+        self.motion_dirty = true;
+        cx.notify();
+    }
+
+    pub(super) fn render_onboarding_section(
+        &self,
+        page: WizardPage,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let Some(Form::Instance(form)) = &self.form else {
+            return div().into_any_element();
+        };
+        let mut error_semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Alert);
+        error_semantic.set_label(self.shell.wizard.error.clone().unwrap_or_default());
+        let content = match page {
+            WizardPage::Version => self.wizard_version(form, cx).into_any_element(),
+            WizardPage::Loader => self.wizard_loader(form, cx).into_any_element(),
+            WizardPage::Location => self.wizard_configuration(form, cx).into_any_element(),
+        };
+        div()
+            .id("onboarding-section")
+            .debug_selector(|| "onboarding-section".into())
+            .w_full()
+            .min_h_0()
+            .max_h(window.viewport_size().height - px(64.))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .id("onboarding-section-scroll")
+                    .debug_selector(|| "onboarding-section-scroll".into())
+                    .min_h_0()
+                    .flex_1()
+                    .scroll_area(
+                        &self.shell.wizard.body_scroll,
+                        "Game configuration",
+                        self.palette,
+                        false,
+                    )
+                    .p_5()
+                    .child(content)
+                    .children(self.shell.wizard.error.as_ref().map(|error| {
+                        div()
+                            .id("onboarding-section-error")
+                            .debug_selector(|| "onboarding-section-error".into())
+                            .mt_3()
+                            .text_sm()
+                            .text_color(rgb(self.palette.destructive))
+                            .accessibility(error_semantic.clone(), false, |_, _, _| {})
+                            .child(error.clone())
+                    })),
+            )
+            .child(
+                patterns::management_footer(window.viewport_size(), self.palette)
+                    .id("onboarding-section-footer")
+                    .debug_selector(|| "onboarding-section-footer".into())
+                    .justify_end()
+                    .child(components::button(
+                        "onboarding-section-cancel",
+                        "Cancel",
+                        self.palette,
+                        ButtonVariant::Ghost,
+                        ControlState::default(),
+                        cx.listener(|view, &(): &(), window, cx| {
+                            view.handle(UiAction::OnboardingSectionCancel, window, cx);
+                        }),
+                    ))
+                    .child(components::button(
+                        "onboarding-section-done",
+                        "Done",
+                        self.palette,
+                        ButtonVariant::Primary,
+                        ControlState::default(),
+                        cx.listener(|view, &(): &(), window, cx| {
+                            view.handle(UiAction::OnboardingSectionDone, window, cx);
+                        }),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn validate_onboarding_game(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if self.validate_instance_draft(cx) {
+            return true;
+        }
+        let field = match &self.form {
+            Some(Form::Instance(form))
+                if form.name.read(cx).value().trim().is_empty()
+                    || form.name.read(cx).value().len() > 160
+                    || form.name.read(cx).value().chars().any(char::is_control) =>
+            {
+                WizardField::GameName
+            }
+            Some(Form::Instance(form))
+                if form.version.read(cx).value().trim().is_empty()
+                    || (form.neoforge && form.version.read(cx).value().trim() != "1.20.6") =>
+            {
+                WizardField::Version
+            }
+            _ => WizardField::Directory,
+        };
+        self.shell.onboarding.error = Some(self.status.clone());
+        self.shell.onboarding.error_field = Some(field);
+        if field == WizardField::GameName {
+            self.shell.onboarding.step = Step::Game;
+            self.shell.onboarding.reveal.set(Some(field));
+            if let Some(Form::Instance(form)) = &self.form {
+                form.name.read(cx).focus_handle(cx).focus(window, cx);
+            }
+        } else {
+            let page = if field == WizardField::Version {
+                WizardPage::Version
+            } else {
+                WizardPage::Location
             };
-            self.shell.wizard.backwards = true;
-            self.shell.wizard.revision = self.shell.wizard.revision.wrapping_add(1);
+            self.open_onboarding_section(page, window, cx);
+            self.set_wizard_error(self.status.clone(), cx);
+            self.focus_wizard_error(window, cx);
+        }
+        false
+    }
+
+    fn submit_onboarding(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if !self.validate_onboarding_game(window, cx) {
+            return;
+        }
+        let Some(Form::Instance(form)) = &self.form else {
+            return;
+        };
+        let name = form.name.read(cx).value();
+        let version = form.version.read(cx).value();
+        let directory = form.directory.read(cx).value();
+        let neoforge = form.neoforge;
+        let Some(profile) = &self.shell.wizard.profile else {
+            return;
+        };
+        let mut values = match profile.values(cx) {
+            Ok(values) => values,
+            Err(error) => {
+                let error = error.to_string();
+                self.open_onboarding_section(WizardPage::Location, window, cx);
+                self.set_wizard_error(error, cx);
+                self.focus_wizard_error(window, cx);
+                return;
+            }
+        };
+        values.name.clone_from(&name);
+        values.target_id = None;
+        let defaults = values.defaults.clone();
+        self.begin_cancellable("Creating your game and preparing verified downloads");
+        self.mark_creation();
+        if let Some(engine) = &self.engine {
+            engine.create_instance_with_profile(
+                name,
+                version,
+                (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim())),
+                neoforge,
+                defaults,
+                Some(values),
+                self.cancel.clone(),
+            );
         }
     }
 
@@ -743,12 +1131,21 @@ impl Block {
             self.report(format!("Could not finish setup: {error}"));
             return false;
         }
+        self.selected_account = self.shell.onboarding.account.clone().filter(|id| {
+            self.accounts
+                .iter()
+                .any(|account| account_id(account) == *id)
+        });
         self.saved_preferences = preferences.clone();
         self.preferences = preferences;
         self.tab = Tab::Home;
         self.form = None;
         self.pending_window_size = Some(gpui::size(px(432.), px(768.)));
         self.shell.revision = self.shell.revision.wrapping_add(1);
+        self.push_toast(
+            "Setup saved · Continue on Home".into(),
+            super::feedback::ToastKind::Success,
+        );
         true
     }
 }
@@ -769,3 +1166,7 @@ fn microsoft_mark() -> impl IntoElement {
             }),
         )
 }
+
+#[cfg(test)]
+#[path = "onboarding_tests.rs"]
+mod tests;

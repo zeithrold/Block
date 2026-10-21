@@ -22,7 +22,7 @@ struct FrameworkProbe {
 impl FrameworkProbe {
     fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let focus = cx.focus_handle();
-        focus.focus(window);
+        focus.focus(window, cx);
         Self {
             focus,
             launches: 0,
@@ -115,6 +115,6 @@ fn framework_smoke_supplies_a_simulated_save_path(cx: &TestAppContext) {
     assert!(cx.did_prompt_for_new_path());
     cx.simulate_new_path_selection(|base| Some(base.join("chosen.json")));
     assert!(
-        matches!(cx.executor().block_test(selection), Ok(Ok(Some(path))) if path == Path::new("probe").join("chosen.json"))
+        matches!(cx.foreground_executor().block_test(selection), Ok(Ok(Some(path))) if path == Path::new("probe").join("chosen.json"))
     );
 }

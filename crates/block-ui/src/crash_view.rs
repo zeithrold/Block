@@ -78,6 +78,7 @@ impl CrashView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
+        super::initialize(cx);
         cx.bind_keys([
             KeyBinding::new("tab", NextControl, Some("CrashHelp")),
             KeyBinding::new("shift-tab", PreviousControl, Some("CrashHelp")),
@@ -86,7 +87,7 @@ impl CrashView {
             KeyBinding::new("escape", CloseHelp, Some("CrashHelp")),
         ]);
         let focus = cx.focus_handle();
-        focus.focus(window);
+        focus.focus(window, cx);
         Self {
             report,
             report_directory,
@@ -100,7 +101,7 @@ impl CrashView {
     }
 
     fn handle(&mut self, action: HelpAction, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.focus.focus(window);
+        self.focus.focus(window, cx);
         if let Some(index) = ACTIONS.iter().position(|candidate| *candidate == action) {
             self.focused_control = index;
         }
@@ -387,7 +388,7 @@ mod tests {
     ) {
         let returned = Rc::new(Cell::new(0));
         let returned_for_view = Rc::clone(&returned);
-        let (view, cx) = cx.add_window_view(move |window, cx| {
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             CrashView::new(
                 report(),
                 std::env::temp_dir(),
@@ -398,10 +399,10 @@ mod tests {
         });
         assert!(!view.read_with(cx, |view, _| view.show_details));
         assert!(cx.debug_bounds("crash-technical-details").is_none());
-        cx.simulate_keystrokes("tab tab tab tab enter");
+        crate::test_support::press(cx, "tab tab tab tab enter");
         assert!(view.read_with(cx, |view, _| view.show_details));
         assert_eq!(returned.get(), 0);
-        cx.simulate_keystrokes("shift-tab shift-tab shift-tab shift-tab enter");
+        crate::test_support::press(cx, "shift-tab shift-tab shift-tab shift-tab enter");
         assert_eq!(returned.get(), 1);
     }
 
@@ -409,10 +410,10 @@ mod tests {
     fn copy_summary_uses_sanitized_diagnosis_without_dumping_game_output(
         cx: &mut gpui::TestAppContext,
     ) {
-        let (_, cx) = cx.add_window_view(|window, cx| {
+        let (_, cx) = crate::test_support::window(cx, |window, cx| {
             CrashView::new(report(), std::env::temp_dir(), |_, _| {}, window, cx)
         });
-        cx.simulate_keystrokes("tab tab tab enter");
+        crate::test_support::press(cx, "tab tab tab enter");
         let text = cx
             .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
             .unwrap_or_default();
@@ -432,10 +433,10 @@ mod tests {
                 directory.path().join("not-an-attachment.txt"),
                 "original logs",
             )?;
-            let (view, cx) = cx.add_window_view(move |window, cx| {
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
                 CrashView::new(report(), report_directory, |_, _| {}, window, cx)
             });
-            cx.simulate_keystrokes("tab tab enter");
+            crate::test_support::press(cx, "tab tab enter");
             assert!(cx.did_prompt_for_new_path());
             assert!(view.read_with(cx, |view, _| view.exporting));
             assert!(!directory.path().join("export.json").exists());

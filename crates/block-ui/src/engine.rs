@@ -1,19 +1,20 @@
+#![expect(
+    clippy::redundant_pub_crate,
+    reason = "Engine types are exposed only within this private UI module."
+)]
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
 
 use anyhow::{Context as _, ensure};
 use block_auth::{Account, AuthenticatedSession, MicrosoftAuth};
 use block_launcher::{
-    CancellationToken, DownloadEvent, Store,
-    catalog::{Catalog, Profile, Snapshot},
+    CancellationToken, Store,
+    catalog::{Catalog, Profile, ProfileAppearance, ProfileConfiguration, Snapshot},
     command::JavaCommand,
     crash::{CrashReport, ExitOutcome},
     executor::{ExecutionEvent, Executor},
@@ -32,15 +33,63 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{appearance::Preferences, settings::GameDefaults};
 
+#[derive(Clone, Debug)]
+pub(super) struct ProfileDraftValues {
+    pub name: String,
+    pub defaults: GameDefaults,
+    pub appearance: ProfileAppearance,
+    pub target_id: Option<String>,
+    pub server: block_launcher::catalog::ServerPreferences,
+}
+
+impl ProfileDraftValues {
+    fn configuration(self) -> anyhow::Result<ProfileConfiguration> {
+        self.defaults.validate()?;
+        let mut game_args = vec![
+            "--width".into(),
+            self.defaults.width.to_string(),
+            "--height".into(),
+            self.defaults.height.to_string(),
+        ];
+        if self.defaults.fullscreen {
+            game_args.push("--fullscreen".into());
+        }
+        Ok(ProfileConfiguration {
+            name: self.name.trim().to_owned(),
+            runtime: if self.defaults.java.trim().is_empty() {
+                block_launcher::recipe::RuntimeSelection::Managed
+            } else {
+                block_launcher::recipe::RuntimeSelection::Local {
+                    java: PathBuf::from(self.defaults.java.trim()),
+                }
+            },
+            memory_mib: self.defaults.memory_mib,
+            jvm_args: super::parse_arguments(&self.defaults.jvm_arguments)?,
+            game_args,
+            appearance: self.appearance,
+            inheritance: block_launcher::catalog::ProfileInheritance::default(),
+            server: self.server,
+            target_id: self.target_id.unwrap_or_else(|| "vanilla".into()),
+        })
+    }
+}
+
 // Browser URLs contain transient authorization state and deliberately have no Debug representation.
 #[expect(
     clippy::redundant_pub_crate,
     reason = "This private module exposes items only to its parent view."
 )]
 pub(crate) enum Message {
+    ForOperation {
+        operation: u64,
+        message: Box<Self>,
+    },
     Versions(Result<Vec<VersionEntry>, String>),
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
+    SignedIn(Account),
+    AuthStage(block_auth::SignInStage),
+    ConnectionTest(super::connection_test::Request, Result<u16, String>),
     Browser(String),
     Created {
         instance: String,
@@ -48,7 +97,7 @@ pub(crate) enum Message {
     },
     Recipe(Result<LaunchRecipe, String>),
     Status(String),
-    Progress(usize),
+    Downloads(Arc<Mutex<super::tasks::DownloadTracker>>),
     Log(String),
     Command(String),
     Session(Box<RunRecord>),
@@ -60,6 +109,64 @@ pub(crate) enum Message {
     Finished(Result<String, String>),
 }
 
+/// A task captures its identity when it starts. Late results cannot adopt the
+/// identity of a later task that happens to use the same channel.
+#[derive(Clone, Debug)]
+struct EventSender {
+    sender: Sender<Message>,
+    operation: Option<u64>,
+}
+
+impl From<Sender<Message>> for EventSender {
+    fn from(sender: Sender<Message>) -> Self {
+        Self {
+            sender,
+            operation: None,
+        }
+    }
+}
+
+impl EventSender {
+    fn wrap(&self, message: Message) -> Message {
+        // Detached sessions and crash presentation have their own run identity.
+        if matches!(message, Message::Session(_) | Message::Crash { .. }) {
+            return message;
+        }
+        match self.operation {
+            Some(operation) => Message::ForOperation {
+                operation,
+                message: Box::new(message),
+            },
+            None => message,
+        }
+    }
+
+    async fn send(
+        &self,
+        message: Message,
+    ) -> Result<(), Box<tokio::sync::mpsc::error::SendError<Message>>> {
+        self.sender.send(self.wrap(message)).await.map_err(Box::new)
+    }
+
+    fn try_send(
+        &self,
+        message: Message,
+    ) -> Result<(), Box<tokio::sync::mpsc::error::TrySendError<Message>>> {
+        self.sender.try_send(self.wrap(message)).map_err(Box::new)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+
+    fn unscoped(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            operation: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[expect(
     clippy::redundant_pub_crate,
@@ -67,7 +174,7 @@ pub(crate) enum Message {
 )]
 pub(crate) struct Engine {
     runtime: Arc<tokio::runtime::Runtime>,
-    sender: Sender<Message>,
+    sender: EventSender,
     pub root: PathBuf,
 }
 
@@ -94,22 +201,26 @@ impl Engine {
         let (sender, receiver) = channel(256);
         let engine = Self {
             runtime,
-            sender,
+            sender: sender.into(),
             root,
         };
         engine.watch_sessions();
         Ok((engine, receiver))
     }
 
+    pub(super) const fn begin_operation(&mut self, operation: u64) {
+        self.sender.operation = Some(operation);
+    }
+
     fn watch_sessions(&self) {
         let root = self.root.clone();
-        let sender = self.sender.clone();
+        let sender = self.sender.unscoped();
         self.runtime.spawn(observe_sessions(root, sender));
     }
 
     pub(super) fn load_catalog(&self) {
         let root = self.root.clone();
-        let sender = self.sender.clone();
+        let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
             send_catalog(&root, &sender).await;
             let accounts = tokio::task::spawn_blocking(move || load_accounts(&root)).await;
@@ -125,9 +236,30 @@ impl Engine {
         });
     }
 
+    pub(super) fn test_connection(&self, request: super::connection_test::Request) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let result = async {
+                let store = Store::with_options(
+                    root.join("cache"),
+                    false,
+                    Arc::new(|_| {}),
+                    request.options.clone(),
+                )?;
+                store
+                    .probe_connection(super::connection_test::ENDPOINT)
+                    .await
+            }
+            .await
+            .map_err(|error: anyhow::Error| format!("{error:#}"));
+            let _ = sender.send(Message::ConnectionTest(request, result)).await;
+        });
+    }
+
     pub(super) fn load_versions(&self) {
         let root = self.root.clone();
-        let sender = self.sender.clone();
+        let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
             let result = version_index(
                 root,
@@ -142,32 +274,47 @@ impl Engine {
         });
     }
 
-    pub(super) fn create_instance(
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The draft commit passes explicit instance and profile boundaries."
+    )]
+    pub(super) fn create_instance_with_profile(
         &self,
         name: String,
         version: String,
         directory: Option<PathBuf>,
         neoforge: bool,
         defaults: GameDefaults,
+        profile: Option<ProfileDraftValues>,
         cancel: CancellationToken,
     ) {
         let root = self.root.clone();
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
             let result = async {
-                defaults.validate()?;
+                let configuration = profile
+                    .unwrap_or_else(|| ProfileDraftValues {
+                        name: name.clone(),
+                        defaults,
+                        appearance: ProfileAppearance::default(),
+                        target_id: None,
+                        server: block_launcher::catalog::ServerPreferences::default(),
+                    })
+                    .configuration()?;
+                let mut configuration = configuration;
+                if neoforge && configuration.target_id == "vanilla" {
+                    configuration.target_id = "neoforge-20.6.144".into();
+                }
                 let catalog_root = root.clone();
                 let (instance, profile) = tokio::task::spawn_blocking(move || {
                     let catalog = Catalog::open(catalog_root)?;
-                    let (instance, mut profile) = catalog.create_instance(
+                    catalog.create_instance_configured(
                         name,
                         version,
                         directory,
                         neoforge.then(|| "20.6.144".to_owned()),
-                    )?;
-                    defaults.apply_to(&mut profile)?;
-                    catalog.save_profile(profile.clone())?;
-                    Ok::<_, anyhow::Error>((instance, profile))
+                        configuration,
+                    )
                 })
                 .await??;
                 let _ = sender
@@ -177,13 +324,41 @@ impl Engine {
                     })
                     .await;
                 send_catalog(&root, &sender).await;
-                let library = library(root.clone(), &sender)?;
+                let library = library(root.clone(), &sender).await?;
                 library
                     .install(&instance.id, &profile.target_id, &cancel)
                     .await?;
                 Ok::<_, anyhow::Error>("Installation complete · ready to play".to_owned())
             }
             .await;
+            send_catalog(&root, &sender).await;
+            finish(&sender, result).await;
+        });
+    }
+
+    pub(super) fn create_profile_draft(&self, instance: String, values: ProfileDraftValues) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let catalog_root = root.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                Catalog::open(catalog_root)?
+                    .create_profile_configured(&instance, values.configuration()?)
+            })
+            .await;
+            let result = match result {
+                Ok(Ok(profile)) => {
+                    let _ = sender
+                        .send(Message::Created {
+                            instance: profile.instance_id,
+                            profile: profile.id,
+                        })
+                        .await;
+                    Ok("Profile created · existing installation preserved".into())
+                }
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(error.into()),
+            };
             send_catalog(&root, &sender).await;
             finish(&sender, result).await;
         });
@@ -203,13 +378,6 @@ impl Engine {
         );
     }
 
-    pub(super) fn create_profile(&self, instance: String, name: String) {
-        self.catalog_change(
-            move |catalog| catalog.create_profile(&instance, name).map(|_| ()),
-            "Profile created",
-        );
-    }
-
     pub(super) fn copy_profile(&self, id: String, name: String) {
         self.catalog_change(
             move |catalog| catalog.copy_profile(&id, name).map(|_| ()),
@@ -221,6 +389,17 @@ impl Engine {
         self.catalog_change(
             move |catalog| catalog.delete_profile(&id),
             "Profile deleted · game data preserved",
+        );
+    }
+
+    pub(super) fn save_instance(
+        &self,
+        id: String,
+        configuration: block_launcher::catalog::InstanceConfiguration,
+    ) {
+        self.catalog_change(
+            move |catalog| catalog.save_instance(&id, configuration),
+            "Instance settings saved",
         );
     }
 
@@ -249,7 +428,8 @@ impl Engine {
         let sender = self.sender.clone();
         self.runtime.spawn(async move {
             let result = async {
-                library(root.clone(), &sender)?
+                library(root.clone(), &sender)
+                    .await?
                     .install(&instance, &target, &cancel)
                     .await?;
                 Ok("Repair complete · ready to play".to_owned())
@@ -267,7 +447,10 @@ impl Engine {
             let result = async {
                 // Reject unreadable/corrupt metadata before creating an OS credential.
                 let accounts = load_accounts(&root)?;
-                let auth = auth()?;
+                let observed = sender.clone();
+                let auth = auth()?.with_stage_observer(Arc::new(move |stage| {
+                    let _ = observed.try_send(Message::AuthStage(stage));
+                }));
                 let pending = auth.begin_sign_in().await?;
                 ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
                 let _ = sender
@@ -287,6 +470,7 @@ impl Engine {
                         return Err(error);
                     }
                 };
+                let _ = sender.send(Message::AuthStage(block_auth::SignInStage::SaveMetadata)).await;
                 if let Err(error) = save_accounts(&root, &accounts) {
                     if !existed {
                         auth.sign_out(&account).await.context("Account metadata could not be saved, and the new credential could not be removed from secure storage")?;
@@ -295,6 +479,7 @@ impl Engine {
                 }
                 let name = account.player_name.clone();
                 let _ = sender.send(Message::Accounts(Ok(accounts))).await;
+                let _ = sender.send(Message::SignedIn(account)).await;
                 Ok(format!(
                     "Signed in as {name} · Java Edition ownership verified"
                 ))
@@ -376,7 +561,7 @@ impl Engine {
 
     pub(super) fn stop_session(&self, id: String) {
         let root = self.root.clone();
-        let sender = self.sender.clone();
+        let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
             match session_host::stop(&root, &id).await {
                 Ok(record) => {
@@ -394,7 +579,7 @@ impl Engine {
     }
 
     pub(super) fn load_recipe(&self, path: PathBuf) {
-        let sender = self.sender.clone();
+        let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
             let result = LaunchRecipe::load(&path).await;
             let _ = sender
@@ -454,17 +639,18 @@ fn game_session(session: &AuthenticatedSession) -> GameSession {
     }
 }
 
-fn library(root: PathBuf, sender: &Sender<Message>) -> anyhow::Result<Library> {
+async fn library(root: PathBuf, sender: &EventSender) -> anyhow::Result<Library> {
     let options = Preferences::load(&root)?.downloads;
-    let progress = sender.clone();
-    let completed = AtomicUsize::new(0);
+    let tracker = Arc::new(Mutex::new(super::tasks::DownloadTracker::default()));
+    sender
+        .send(Message::Downloads(tracker.clone()))
+        .await
+        .map_err(|_| anyhow::anyhow!("launcher window closed before downloads started"))?;
     let download = Arc::new(move |event| {
-        if let DownloadEvent::Complete { .. } = event {
-            let count = completed.fetch_add(1, Ordering::Relaxed) + 1;
-            if count.is_multiple_of(10) {
-                let _ = progress.try_send(Message::Progress(count));
-            }
-        }
+        tracker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .apply(event);
     });
     let events = sender.clone();
     Library::with_options(
@@ -483,7 +669,7 @@ async fn version_index(root: PathBuf, url: &str) -> anyhow::Result<Vec<VersionEn
     Ok(index.versions)
 }
 
-fn forward_event(sender: &Sender<Message>, event: ExecutionEvent) {
+fn forward_event(sender: &EventSender, event: ExecutionEvent) {
     let message = match event {
         ExecutionEvent::Stage { name } => Message::Status(name),
         ExecutionEvent::Started { pid } => {
@@ -501,7 +687,7 @@ fn forward_event(sender: &Sender<Message>, event: ExecutionEvent) {
     let _ = sender.try_send(message);
 }
 
-async fn observe_sessions(root: PathBuf, sender: Sender<Message>) {
+async fn observe_sessions(root: PathBuf, sender: EventSender) {
     let mut seen: HashMap<String, (u64, RunState)> = HashMap::new();
     let mut reported_failure = false;
     while !sender.is_closed() {
@@ -546,7 +732,7 @@ async fn observe_sessions(root: PathBuf, sender: Sender<Message>) {
 
 async fn observe_active_sessions(
     root: &Path,
-    sender: &Sender<Message>,
+    sender: &EventSender,
     seen: &mut HashMap<String, (u64, RunState)>,
     active: Vec<RunRecord>,
 ) -> bool {
@@ -592,7 +778,7 @@ async fn check_live_session(root: &Path, mut record: RunRecord) -> RunRecord {
 
 async fn publish_session(
     root: &Path,
-    sender: &Sender<Message>,
+    sender: &EventSender,
     seen: &mut HashMap<String, (u64, RunState)>,
     record: RunRecord,
 ) -> bool {
@@ -638,7 +824,7 @@ async fn publish_session(
     true
 }
 
-async fn send_catalog(root: &Path, sender: &Sender<Message>) {
+async fn send_catalog(root: &Path, sender: &EventSender) {
     let root = root.to_owned();
     let result = tokio::task::spawn_blocking(move || Catalog::open(root)?.snapshot()).await;
     let result = match result {
@@ -652,7 +838,7 @@ async fn send_catalog(root: &Path, sender: &Sender<Message>) {
         .await;
 }
 
-async fn finish(sender: &Sender<Message>, result: anyhow::Result<String>) {
+async fn finish(sender: &EventSender, result: anyhow::Result<String>) {
     let _ = sender
         .send(Message::Finished(
             result.map_err(|error| format!("{error:#}")),
@@ -703,7 +889,7 @@ fn save_accounts(root: &Path, accounts: &[Account]) -> anyhow::Result<()> {
 async fn run_recipe(
     recipe: LaunchRecipe,
     root: PathBuf,
-    sender: Sender<Message>,
+    sender: EventSender,
     cancel: CancellationToken,
 ) -> anyhow::Result<Option<i32>> {
     let options = Preferences::load(&root)?.downloads;
@@ -922,7 +1108,7 @@ mod tests {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
         let engine = super::Engine {
             runtime: runtime.clone(),
-            sender,
+            sender: sender.into(),
             root: directory.path().to_owned(),
         };
         engine.sign_in(block_launcher::CancellationToken::new());
@@ -956,7 +1142,7 @@ mod tests {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(32);
         let engine = super::Engine {
             runtime: runtime.clone(),
-            sender,
+            sender: sender.into(),
             root: root.path().to_owned(),
         };
         let java = std::env::current_exe()?;
@@ -971,12 +1157,13 @@ mod tests {
         };
         let cancel = CancellationToken::new();
         cancel.cancel(); // Test profile creation, with installation prevented from networking.
-        engine.create_instance(
+        engine.create_instance_with_profile(
             "Configured".into(),
             "26.3".into(),
             None,
             false,
             defaults,
+            None,
             cancel,
         );
         let profile_id = runtime.block_on(async {
@@ -1029,9 +1216,11 @@ mod tests {
                 url: format!("http://{}", proxy.local_addr()?),
             };
             preferences.save(root.path())?;
-            let (sender, _) = tokio::sync::mpsc::channel(2);
+            let (sender, _receiver) = tokio::sync::mpsc::channel(2);
             assert_eq!(
-                super::library(root.path().to_owned(), &sender)?.download_options(),
+                super::library(root.path().to_owned(), &sender.into())
+                    .await?
+                    .download_options(),
                 &preferences.downloads
             );
             let server = tokio::spawn(async move {

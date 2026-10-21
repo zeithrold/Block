@@ -9,8 +9,8 @@ use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
 use gpui::{
-    App, AppContext as _, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds,
-    WindowDecorations, WindowOptions, px, size,
+    App, AppContext as _, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowDecorations,
+    WindowOptions, px, size,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
@@ -73,31 +73,38 @@ fn run(args: Args) -> anyhow::Result<()> {
         let report = session_host::read_crash(&root, id)?;
         return crash_application(root, report);
     }
-    Application::new().run(move |cx: &mut App| {
-        configure_application(cx);
-        if let Err(error) = open_launcher(
-            cx,
-            LaunchOptions {
-                recipe: args.recipe,
-                launch: args.launch,
-                profile: args.profile,
-                data_dir: args.data_dir,
-                system_window_chrome: false,
-            },
-        ) {
-            eprintln!("Failed to open the Block window: {error:#}");
-            cx.quit();
-        }
-        cx.activate(true);
-    });
+    gpui_platform::application()
+        .with_assets(block_ui::UiAssets)
+        .run(move |cx: &mut App| {
+            if let Err(error) = block_ui::load_fonts(cx) {
+                eprintln!("Could not register bundled fonts: {error:#}");
+            }
+            configure_application(cx);
+            if let Err(error) = open_launcher(
+                cx,
+                LaunchOptions {
+                    recipe: args.recipe,
+                    launch: args.launch,
+                    profile: args.profile,
+                    data_dir: args.data_dir,
+                    system_window_chrome: false,
+                    build_info: block_ui::BuildInfo::default(),
+                },
+            ) {
+                eprintln!("Failed to open the Block window: {error:#}");
+                cx.quit();
+            }
+            cx.activate(true);
+        });
     Ok(())
 }
 
 fn configure_application(cx: &mut App) {
+    block_ui::initialize(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     #[cfg(not(target_os = "linux"))]
-    cx.on_window_closed(|cx| {
+    cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
             cx.quit();
         }
@@ -129,10 +136,18 @@ fn window_options(cx: &App, title: &str) -> WindowOptions {
 }
 
 fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()> {
+    options.build_info = block_ui::BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        source_sha256: option_env!("BLOCK_SOURCE_SHA256"),
+        source_commit: option_env!("BLOCK_SOURCE_COMMIT"),
+    };
     let window_options = window_options(cx, "Block");
     options.system_window_chrome = window_options.titlebar.is_some();
     cx.open_window(window_options, |window, cx| {
-        cx.new(|cx| Block::new(window, cx, options))
+        let view = cx.new(|cx| Block::new(window, cx, options));
+        cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
     })?;
     Ok(())
 }
@@ -141,33 +156,40 @@ fn crash_application(root: PathBuf, report: CrashReport) -> anyhow::Result<()> {
     let directory = session_host::report_directory(&root, &report.context.run_id)?;
     let run_id = report.context.run_id.clone();
     let profile = report.context.profile_id.clone();
-    Application::new().run(move |cx: &mut App| {
-        configure_application(cx);
-        let return_root = root.clone();
-        let return_to_profile = move |window: &mut gpui::Window, cx: &mut App| {
-            let options = LaunchOptions {
-                profile: Some(profile.clone()),
-                data_dir: Some(return_root.clone()),
-                ..Default::default()
+    gpui_platform::application()
+        .with_assets(block_ui::UiAssets)
+        .run(move |cx: &mut App| {
+            if let Err(error) = block_ui::load_fonts(cx) {
+                eprintln!("Could not register bundled fonts: {error:#}");
+            }
+            configure_application(cx);
+            let return_root = root.clone();
+            let return_to_profile = move |window: &mut gpui::Window, cx: &mut App| {
+                let options = LaunchOptions {
+                    profile: Some(profile.clone()),
+                    data_dir: Some(return_root.clone()),
+                    ..Default::default()
+                };
+                match open_launcher(cx, options) {
+                    Ok(()) => window.remove_window(),
+                    Err(error) => eprintln!("Could not return to the instance: {error:#}"),
+                }
             };
-            match open_launcher(cx, options) {
-                Ok(()) => window.remove_window(),
-                Err(error) => eprintln!("Could not return to the instance: {error:#}"),
+            let options = window_options(cx, "Block · Crash help");
+            match cx.open_window(options, |window, cx| {
+                let view =
+                    cx.new(|cx| CrashView::new(report, directory, return_to_profile, window, cx));
+                cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
+            }) {
+                Ok(_) => {
+                    let _ = session_host::mark_seen(&root, &run_id);
+                }
+                Err(error) => {
+                    eprintln!("Could not open crash help: {error:#}");
+                    cx.quit();
+                }
             }
-        };
-        let options = window_options(cx, "Block · Crash help");
-        match cx.open_window(options, |window, cx| {
-            cx.new(|cx| CrashView::new(report, directory, return_to_profile, window, cx))
-        }) {
-            Ok(_) => {
-                let _ = session_host::mark_seen(&root, &run_id);
-            }
-            Err(error) => {
-                eprintln!("Could not open crash help: {error:#}");
-                cx.quit();
-            }
-        }
-        cx.activate(true);
-    });
+            cx.activate(true);
+        });
     Ok(())
 }

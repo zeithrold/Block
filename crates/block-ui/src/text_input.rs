@@ -54,8 +54,25 @@ struct Cut;
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
 #[action(namespace = text_input)]
 struct Copy;
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = text_input)]
+struct Undo;
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = text_input)]
+struct Redo;
+
+#[derive(Clone, Debug)]
+struct EditSnapshot {
+    content: SharedString,
+    selection: Range<usize>,
+    reversed: bool,
+}
 
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Selection, composition and native accessibility flags are independent input states."
+)]
 #[expect(
     clippy::redundant_pub_crate,
     reason = "This private module exposes items only to its parent view."
@@ -71,12 +88,28 @@ pub(crate) struct TextInput {
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
     scroll_offset: Pixels,
+    undo: Vec<EditSnapshot>,
+    redo: Vec<EditSnapshot>,
+    composition_before: Option<EditSnapshot>,
+    read_only: bool,
+    accessible_label: String,
+    accessible_description: String,
+    invalid: bool,
+    required: bool,
+    search: bool,
 }
 
 impl TextInput {
+    pub(super) fn set_placeholder(&mut self, placeholder: &str, cx: &mut Context<'_, Self>) {
+        if self.placeholder.as_ref() != placeholder {
+            self.placeholder = placeholder.to_owned().into();
+            cx.notify();
+        }
+    }
+
     pub(super) fn new(value: &str, placeholder: &str, cx: &Context<'_, Self>) -> Self {
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle: cx.focus_handle().tab_stop(true),
             content: value.to_owned().into(),
             placeholder: placeholder.to_owned().into(),
             selected_range: value.len()..value.len(),
@@ -86,6 +119,85 @@ impl TextInput {
             last_bounds: None,
             is_selecting: false,
             scroll_offset: px(0.),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            composition_before: None,
+            read_only: false,
+            accessible_label: placeholder.to_owned(),
+            accessible_description: String::new(),
+            invalid: false,
+            required: false,
+            search: false,
+        }
+    }
+
+    pub(super) const fn is_composing(&self) -> bool {
+        self.marked_range.is_some()
+    }
+
+    /// An independent visual copy for an inert outgoing transition. The live
+    /// editor keeps its IME session, undo history and focus. The inert transition
+    /// scope isolates this copy while preserving the editor's original appearance.
+    pub(super) fn frozen(&self, cx: &Context<'_, Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            content: self.content.clone(),
+            placeholder: self.placeholder.clone(),
+            selected_range: self.selected_range.clone(),
+            selection_reversed: self.selection_reversed,
+            marked_range: self.marked_range.clone(),
+            last_layout: None,
+            last_bounds: None,
+            is_selecting: false,
+            scroll_offset: self.scroll_offset,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            composition_before: None,
+            read_only: self.read_only,
+            accessible_label: self.accessible_label.clone(),
+            accessible_description: self.accessible_description.clone(),
+            invalid: self.invalid,
+            required: self.required,
+            search: self.search,
+        }
+    }
+
+    pub(super) fn set_read_only(&mut self, read_only: bool, cx: &mut Context<'_, Self>) {
+        if self.read_only != read_only {
+            self.read_only = read_only;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_search(&mut self, search: bool, cx: &mut Context<'_, Self>) {
+        if self.search != search {
+            self.search = search;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_accessible_label(&mut self, label: &str, cx: &mut Context<'_, Self>) {
+        if self.accessible_label != label {
+            label.clone_into(&mut self.accessible_label);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_accessible_details(
+        &mut self,
+        description: &str,
+        invalid: bool,
+        required: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.accessible_description != description
+            || self.invalid != invalid
+            || self.required != required
+        {
+            description.clone_into(&mut self.accessible_description);
+            self.invalid = invalid;
+            self.required = required;
+            cx.notify();
         }
     }
 
@@ -98,7 +210,56 @@ impl TextInput {
         self.selected_range = value.len()..value.len();
         self.selection_reversed = false;
         self.marked_range = None;
+        self.composition_before = None;
+        self.undo.clear();
+        self.redo.clear();
+        self.scroll_offset = px(0.);
         cx.notify();
+    }
+
+    fn snapshot(&self) -> EditSnapshot {
+        EditSnapshot {
+            content: self.content.clone(),
+            selection: self.selected_range.clone(),
+            reversed: self.selection_reversed,
+        }
+    }
+
+    fn remember(&mut self, previous: EditSnapshot) {
+        if previous.content != self.content {
+            if self.undo.len() == 100 {
+                self.undo.remove(0);
+            }
+            self.undo.push(previous);
+            self.redo.clear();
+        }
+    }
+
+    fn restore(&mut self, snapshot: EditSnapshot, cx: &mut Context<'_, Self>) {
+        self.content = snapshot.content;
+        self.selected_range = snapshot.selection;
+        self.selection_reversed = snapshot.reversed;
+        cx.notify();
+    }
+
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<'_, Self>) {
+        if !self.read_only
+            && self.marked_range.is_none()
+            && let Some(previous) = self.undo.pop()
+        {
+            self.redo.push(self.snapshot());
+            self.restore(previous, cx);
+        }
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<'_, Self>) {
+        if !self.read_only
+            && self.marked_range.is_none()
+            && let Some(next) = self.redo.pop()
+        {
+            self.undo.push(self.snapshot());
+            self.restore(next, cx);
+        }
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<'_, Self>) {
@@ -139,6 +300,9 @@ impl TextInput {
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.read_only {
+            return;
+        }
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx);
         }
@@ -146,6 +310,9 @@ impl TextInput {
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.read_only {
+            return;
+        }
         if self.selected_range.is_empty() {
             self.select_to(self.next_boundary(self.cursor_offset()), cx);
         }
@@ -158,7 +325,7 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.focus_handle.focus(window);
+        self.focus_handle.focus(window, cx);
         self.is_selecting = true;
 
         if event.modifiers.shift {
@@ -211,6 +378,9 @@ impl TextInput {
         }
     }
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.read_only {
+            return;
+        }
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -354,6 +524,9 @@ impl EntityInputHandler for TextInput {
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<'_, Self>) {
         self.marked_range = None;
+        if let Some(previous) = self.composition_before.take() {
+            self.remember(previous);
+        }
     }
 
     fn replace_text_in_range(
@@ -363,6 +536,13 @@ impl EntityInputHandler for TextInput {
         _: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.read_only {
+            return;
+        }
+        let previous = self
+            .composition_before
+            .take()
+            .unwrap_or_else(|| self.snapshot());
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -375,6 +555,8 @@ impl EntityInputHandler for TextInput {
                 .into();
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range.take();
+        self.selection_reversed = false;
+        self.remember(previous);
         cx.notify();
     }
 
@@ -386,6 +568,12 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.read_only {
+            return;
+        }
+        if self.composition_before.is_none() {
+            self.composition_before = Some(self.snapshot());
+        }
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -450,6 +638,32 @@ impl EntityInputHandler for TextInput {
         }
         let utf8_index = last_layout.index_for_x(line_point.x + self.scroll_offset)?;
         Some(self.offset_to_utf16(utf8_index))
+    }
+
+    fn set_selected_text_range(
+        &mut self,
+        range_utf16: Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.is_composing() {
+            return;
+        }
+        self.selected_range = self.range_from_utf16(&range_utf16);
+        self.selection_reversed = false;
+        cx.notify();
+    }
+
+    fn text_length_utf16(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<'_, Self>,
+    ) -> Option<usize> {
+        Some(self.offset_to_utf16(self.content.len()))
+    }
+
+    fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<'_, Self>) -> bool {
+        !self.read_only
     }
 }
 
@@ -628,7 +842,14 @@ impl Element for TextElement {
         let Some(line) = prepaint.line.take() else {
             return;
         };
-        let _ = line.paint(prepaint.origin, window.line_height(), window, cx);
+        let _ = line.paint(
+            prepaint.origin,
+            window.line_height(),
+            gpui::TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()
@@ -645,10 +866,73 @@ impl Element for TextElement {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The native editor keeps its semantic, keyboard, IME and pointer contracts on one element."
+    )]
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::TextInput);
+        semantic.set_label(self.accessible_label.clone());
+        semantic.set_description(self.accessible_description.clone());
+        semantic.set_value(self.content.to_string());
+        semantic.add_action(gpui::accesskit::Action::Focus);
+        if self.read_only {
+            semantic.set_read_only();
+        } else {
+            semantic.add_action(gpui::accesskit::Action::SetValue);
+            semantic.add_action(gpui::accesskit::Action::ReplaceSelectedText);
+        }
+        if self.invalid {
+            semantic.set_invalid(gpui::accesskit::Invalid::True);
+        }
+        if self.required {
+            semantic.set_required();
+        }
+        let palette = cx
+            .try_global::<super::Palette>()
+            .copied()
+            .unwrap_or(super::Palette::LIGHT);
+        let border = if self.invalid {
+            palette.destructive
+        } else if self.search {
+            palette.secondary
+        } else {
+            palette.input
+        };
+        let ring = if self.invalid {
+            palette.destructive
+        } else {
+            palette.ring
+        };
         div()
+            .id("text-input")
+            .accessibility(
+                semantic,
+                self.focus_handle.is_focused(window),
+                cx.listener(
+                    |input, request: &gpui::accesskit::ActionRequest, window, cx| {
+                        if input.read_only || input.is_composing() {
+                            return;
+                        }
+                        if let Some(gpui::accesskit::ActionData::Value(value)) = &request.data {
+                            match request.action {
+                                gpui::accesskit::Action::SetValue => {
+                                    let length = input.offset_to_utf16(input.content.len());
+                                    input.replace_text_in_range(Some(0..length), value, window, cx);
+                                }
+                                gpui::accesskit::Action::ReplaceSelectedText => {
+                                    input.replace_text_in_range(None, value, window, cx);
+                                }
+                                _ => {}
+                            }
+                        }
+                    },
+                ),
+            )
             .flex()
             .key_context("TextInput")
+            .items_center()
+            .gap(px(8.))
             .track_focus(&self.focus_handle(cx))
             .tab_index(0)
             .cursor(CursorStyle::IBeam)
@@ -665,6 +949,32 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(|input, _: &gpui_base::actions::Cancel, _, cx| {
+                if !input.is_composing() {
+                    cx.propagate();
+                }
+            }))
+            .on_action(
+                cx.listener(|input, _: &gpui_base::actions::Confirm, _, cx| {
+                    if !input.is_composing() {
+                        cx.propagate();
+                    }
+                }),
+            )
+            .on_key_down(cx.listener(|input, event: &gpui::KeyDownEvent, _, cx| {
+                // App-level Enter/Escape must not submit or dismiss a surface
+                // while the input method owns an unfinished composition.
+                if input.marked_range.is_some()
+                    && matches!(
+                        event.keystroke.key.as_str(),
+                        "enter" | "escape" | "up" | "down"
+                    )
+                {
+                    cx.stop_propagation();
+                }
+            }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -672,24 +982,34 @@ impl Render for TextInput {
             .w_full()
             .min_w_0()
             .overflow_hidden()
-            .line_height(px(22.))
-            .text_size(px(14.))
+            .h(px(super::design::CONTROL_HEIGHT))
+            .px(px(10.))
+            .py(px(5.))
+            .line_height(px(super::design::BODY_LINE_HEIGHT))
+            .text_size(px(super::design::BODY_FONT_SIZE))
+            .rounded(px(super::design::CONTROL_RADIUS))
+            .border_1()
+            .border_color(rgb(border))
+            .bg(rgb(if self.search {
+                palette.secondary
+            } else {
+                palette.input_background
+            }))
+            .opacity(if self.read_only { 0.65 } else { 1. })
+            .focus(move |style| {
+                style
+                    .border_color(rgb(ring))
+                    .shadow(super::design::focus_ring(ring))
+            })
+            .children(
+                self.search
+                    .then(|| super::design::Icon::Search.render(14., palette.muted)),
+            )
             .child(
                 div()
-                    .h(px(36.))
-                    .w_full()
-                    .px_3()
-                    .py_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(cx
-                        .try_global::<super::Palette>()
-                        .map_or(super::Palette::DARK.border, |palette| palette.border)))
-                    .bg(rgb(cx
-                        .try_global::<super::Palette>()
-                        .map_or(super::Palette::DARK.surface, |palette| {
-                            palette.surface
-                        })))
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(super::design::BODY_LINE_HEIGHT))
                     .child(TextElement { input: cx.entity() }),
             )
     }
@@ -723,6 +1043,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-c", Copy, Some("TextInput")),
         KeyBinding::new("cmd-x", Cut, Some("TextInput")),
         KeyBinding::new("ctrl-x", Cut, Some("TextInput")),
+        KeyBinding::new("cmd-z", Undo, Some("TextInput")),
+        KeyBinding::new("ctrl-z", Undo, Some("TextInput")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("TextInput")),
+        KeyBinding::new("ctrl-shift-z", Redo, Some("TextInput")),
+        KeyBinding::new("ctrl-y", Redo, Some("TextInput")),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some("TextInput")),
     ]);
 }
@@ -743,17 +1068,65 @@ mod tests {
     use gpui::{EntityInputHandler as _, Focusable as _};
 
     #[gpui::test]
+    fn retained_input_preserves_editability_appearance_and_owns_independent_state(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) =
+            cx.add_window_view(|_, cx| super::TextInput::new("中文 draft", "Name", cx));
+        for read_only in [false, true] {
+            view.update(cx, |input, cx| {
+                input.set_read_only(read_only, cx);
+                let frozen = input.frozen(cx);
+                assert_eq!(frozen.read_only, input.read_only);
+                assert_eq!(frozen.content, input.content);
+                assert_ne!(frozen.focus_handle, input.focus_handle);
+                assert!(frozen.undo.is_empty() && frozen.redo.is_empty());
+                input.set_value("Live draft changed", cx);
+                assert_ne!(frozen.content, input.content);
+                input.set_value("中文 draft", cx);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn composition_commits_as_one_undo_unit_and_new_edits_clear_redo(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            super::bind_keys(cx);
+            let input = super::TextInput::new("World ", "Text", cx);
+            input.focus_handle(cx).focus(window, cx);
+            input
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
+                input.replace_and_mark_text_in_range(None, "zhong", None, window, cx);
+                input.replace_and_mark_text_in_range(None, "中文🧱", None, window, cx);
+                input.replace_text_in_range(None, "中文🧱", window, cx);
+            });
+        });
+        crate::test_support::press(cx, "cmd-z");
+        assert_eq!(view.read_with(cx, |input, _| input.value()), "World ");
+        crate::test_support::press(cx, "cmd-shift-z");
+        assert_eq!(view.read_with(cx, |input, _| input.value()), "World 中文🧱");
+        crate::test_support::press(cx, "cmd-z");
+        cx.simulate_input("新世界");
+        crate::test_support::press(cx, "cmd-shift-z");
+        assert_eq!(view.read_with(cx, |input, _| input.value()), "World 新世界");
+    }
+
+    #[gpui::test]
     fn input_backspace_deletes_a_grapheme_and_ime_selection_is_relative_to_inserted_text(
         cx: &mut gpui::TestAppContext,
     ) {
         let (view, cx) = cx.add_window_view(|window, cx| {
             super::bind_keys(cx);
             let input = super::TextInput::new("prefix ", "Text", cx);
-            input.focus_handle(cx).focus(window);
+            input.focus_handle(cx).focus(window, cx);
             input
         });
         cx.simulate_input("世界 🧱");
-        cx.simulate_keystrokes("backspace");
+        crate::test_support::press(cx, "backspace");
         assert_eq!(view.read_with(cx, |input, _| input.value()), "prefix 世界 ");
         cx.update(|window, cx| {
             view.update(cx, |input, cx| {

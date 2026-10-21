@@ -16,11 +16,26 @@ pub(super) fn home_size(window: &Window, cx: &App) -> Size<Pixels> {
     })
 }
 
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "Only the parent UI module uses this helper."
+)]
+pub(super) fn management_size(window: &Window, cx: &App) -> Size<Pixels> {
+    let preferred = size(px(960.), px(600.));
+    window.display(cx).map_or(preferred, |display| {
+        fit(display.bounds(), window.bounds(), preferred)
+    })
+}
+
 const fn preferred_size() -> Size<Pixels> {
     size(px(432.), px(768.))
 }
 
 fn fit_home(display: Bounds<Pixels>, window: Bounds<Pixels>) -> Size<Pixels> {
+    fit(display, window, preferred_size())
+}
+
+fn fit(display: Bounds<Pixels>, window: Bounds<Pixels>, preferred: Size<Pixels>) -> Size<Pixels> {
     let left = window.origin.x.max(display.origin.x + px(16.));
     let top = window.origin.y.max(display.origin.y + px(32.));
     let available = size(
@@ -28,8 +43,8 @@ fn fit_home(display: Bounds<Pixels>, window: Bounds<Pixels>) -> Size<Pixels> {
         display.bottom() - top - px(64.),
     );
     size(
-        available.width.clamp(px(360.), preferred_size().width),
-        available.height.clamp(px(540.), preferred_size().height),
+        available.width.clamp(px(360.), preferred.width),
+        available.height.clamp(px(540.), preferred.height),
     )
 }
 
@@ -91,9 +106,18 @@ mod tests {
     fn compact_home_keeps_primary_action_and_profile_switcher_visible(
         cx: &mut gpui::TestAppContext,
     ) {
-        let (view, cx) = cx.add_window_view(crate::tests::test_view);
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         let fitted = fit_home(bounds(0., 0., 1280., 800.), bounds(200., 100., 960., 600.));
         view.update(cx, |view, cx| {
+            let fixture = crate::test_support::test_account();
+            assert!(fixture.is_ok(), "{fixture:?}");
+            let Ok(account) = fixture else {
+                return;
+            };
+            view.selected_account = Some(crate::account_id(&account));
+            view.accounts = vec![account];
+            view.snapshot = crate::test_support::ready_snapshot();
+            view.normalize_selection();
             view.tab = crate::Tab::Home;
             view.preferences.reduce_motion = true;
             cx.notify();

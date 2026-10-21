@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 block-ui.workspace = true
 gpui.workspace = true
+gpui_platform.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 block-launcher.workspace = true
