@@ -1,4 +1,7 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -20,12 +23,39 @@ const ENTITLEMENTS: &str = "https://api.minecraftservices.com/entitlements/mcsto
 const PROFILE: &str = "https://api.minecraftservices.com/minecraft/profile";
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 
+/// Observed work stages contain no URLs, account identifiers or credentials.
+/// A stage begins immediately before the real operation; it is not a percentage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SignInStage {
+    /// Check the operating system credential store before authorization.
+    SecureStorage,
+    /// Wait for the one-use localhost PKCE callback.
+    BrowserAuthorization,
+    /// Exchange the returned authorization code.
+    MicrosoftAuthorization,
+    /// Authenticate the Microsoft session with Xbox Live.
+    XboxAuthentication,
+    /// Authorize access to Minecraft services.
+    XboxAuthorization,
+    /// Obtain a Minecraft session.
+    MinecraftAuthentication,
+    /// Verify Java Edition entitlement.
+    Ownership,
+    /// Resolve and validate the player profile.
+    PlayerProfile,
+    /// Save the refresh credential in the operating system store.
+    SaveCredential,
+    /// Save public account metadata after the credential has been saved.
+    SaveMetadata,
+}
+
 /// Public desktop Microsoft authentication. No client-secret setting exists.
 #[derive(Clone)]
 pub struct MicrosoftAuth {
     client_id: String,
     client: Client,
     test_base_url: Option<String>,
+    stage_observer: Option<Arc<dyn Fn(SignInStage) + Send + Sync>>,
 }
 
 impl std::fmt::Debug for MicrosoftAuth {
@@ -60,7 +90,21 @@ impl MicrosoftAuth {
             client_id: parsed.to_string(),
             client,
             test_base_url: None,
+            stage_observer: None,
         })
+    }
+
+    /// Observe actual authentication work without exposing secret request data.
+    #[must_use]
+    pub fn with_stage_observer(mut self, observer: Arc<dyn Fn(SignInStage) + Send + Sync>) -> Self {
+        self.stage_observer = Some(observer);
+        self
+    }
+
+    fn stage(&self, stage: SignInStage) {
+        if let Some(observer) = &self.stage_observer {
+            observer(stage);
+        }
     }
 
     /// Bind a one-use localhost callback and prepare a PKCE URL for the system browser.
@@ -70,6 +114,7 @@ impl MicrosoftAuth {
     /// # Errors
     /// Returns a secure-store, local callback or operating-system randomness error.
     pub async fn begin_sign_in(&self) -> Result<PendingSignIn> {
+        self.stage(SignInStage::SecureStorage);
         credentials::probe_secure_storage().await?;
         PendingSignIn::new(&self.client_id).await
     }
@@ -87,6 +132,7 @@ impl MicrosoftAuth {
         if pending.client_id != self.client_id {
             return Err(AuthError::ClientIdChanged);
         }
+        self.stage(SignInStage::BrowserAuthorization);
         let code = pending.receive_code(cancellation).await?;
         let microsoft: MicrosoftTokens = self
             .request(
@@ -107,6 +153,7 @@ impl MicrosoftAuth {
         let session = self
             .minecraft_session(&microsoft.access_token, cancellation)
             .await?;
+        self.stage(SignInStage::SaveCredential);
         credentials::save(session.account.credential_ref.clone(), refresh).await?;
         Ok(session)
     }
@@ -262,6 +309,21 @@ impl MicrosoftAuth {
         stage: &'static str,
         cancellation: &CancellationToken,
     ) -> Result<T> {
+        if cancellation.is_cancelled() {
+            return Err(AuthError::Cancelled);
+        }
+        let observed = match stage {
+            "Microsoft authorization" => Some(SignInStage::MicrosoftAuthorization),
+            "Xbox authentication" => Some(SignInStage::XboxAuthentication),
+            "Xbox authorization" => Some(SignInStage::XboxAuthorization),
+            "Minecraft authentication" => Some(SignInStage::MinecraftAuthentication),
+            "Minecraft ownership" => Some(SignInStage::Ownership),
+            "Minecraft profile" => Some(SignInStage::PlayerProfile),
+            _ => None,
+        };
+        if let Some(observed) = observed {
+            self.stage(observed);
+        }
         tokio::select! {
             biased;
             () = cancellation.cancelled() => Err(AuthError::Cancelled),
@@ -629,12 +691,32 @@ mod tests {
         .await?;
         let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
         auth.test_base_url = Some(base);
+        let stages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = stages.clone();
+        auth = auth.with_stage_observer(Arc::new(move |stage| {
+            observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(stage);
+        }));
         let session = auth
             .minecraft_session(
                 &SecretString::new("synthetic-microsoft".into()),
                 &CancellationToken::new(),
             )
             .await?;
+        assert_eq!(
+            *stages
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            [
+                SignInStage::XboxAuthentication,
+                SignInStage::XboxAuthorization,
+                SignInStage::MinecraftAuthentication,
+                SignInStage::Ownership,
+                SignInStage::PlayerProfile,
+            ]
+        );
         assert_eq!(session.account.player_name, "SyntheticUser");
         assert_eq!(session.expose_access_token(), "synthetic-minecraft");
         assert!(!session.needs_refresh());

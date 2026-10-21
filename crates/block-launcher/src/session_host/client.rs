@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context as _, ensure};
-use sha1::Digest as _;
 use tokio::io::AsyncWriteExt as _;
 
 use super::{RunRecord, RunState, now_ms, storage, wire};
@@ -20,7 +19,7 @@ fn starting_record(root: &Path, profile_id: &str) -> anyhow::Result<(Catalog, Ru
     let catalog = Catalog::open(root)?;
     let snapshot = catalog.snapshot()?;
     let (instance, profile, target) = snapshot.selection(profile_id)?;
-    let fingerprint = format!("{:x}", sha1::Sha1::digest(serde_json::to_vec(profile)?));
+    let fingerprint = snapshot.launch_fingerprint(profile_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     storage::create_directory(catalog.root(), &id)?;
     let record = RunRecord {

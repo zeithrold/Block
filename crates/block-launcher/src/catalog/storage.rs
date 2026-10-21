@@ -8,7 +8,8 @@ use anyhow::{Context as _, ensure};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, ProfileMode, Snapshot,
+    DataPolicy, InstallStatus, Instance, InstanceConfiguration, InstanceSettings, LaunchTarget,
+    LoaderKind, Profile, ProfileConfiguration, ProfileInheritance, ProfileMode, Snapshot,
     validate_directory, validate_id, validate_name,
 };
 use crate::recipe::{Compatibility, RuntimeSelection};
@@ -287,6 +288,37 @@ impl Catalog {
         directory: Option<PathBuf>,
         loader_version: Option<String>,
     ) -> anyhow::Result<(Instance, Profile)> {
+        let target_id = loader_version.as_ref().map_or_else(
+            || "vanilla".to_owned(),
+            |version| format!("neoforge-{version}"),
+        );
+        self.create_instance_configured(
+            name,
+            minecraft_version,
+            directory,
+            loader_version,
+            ProfileConfiguration {
+                name: "Default".into(),
+                target_id,
+                ..ProfileConfiguration::default()
+            },
+        )
+    }
+
+    /// Create an Instance and its fully configured first Profile in one commit.
+    /// Bundled names are kept equal; Separated mode preserves the supplied name.
+    /// # Errors
+    /// Invalid configuration is rejected before creating directories or metadata.
+    /// A failed catalog commit removes only newly created directories that are
+    /// still empty; existing directories and user files are never removed.
+    pub fn create_instance_configured(
+        &self,
+        name: String,
+        minecraft_version: String,
+        directory: Option<PathBuf>,
+        loader_version: Option<String>,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<(Instance, Profile)> {
         validate_name(&name)?;
         ensure!(
             !minecraft_version.is_empty()
@@ -303,8 +335,6 @@ impl Catalog {
         let id = uuid::Uuid::new_v4().to_string();
         let directory = directory.unwrap_or_else(|| self.root.join("instances").join(&id));
         validate_directory(&directory)?;
-        fs::create_dir_all(&directory)?;
-        let directory = directory.canonicalize()?;
         let mut instance = Instance {
             id,
             name,
@@ -317,24 +347,26 @@ impl Catalog {
                 manifest: None,
                 status: InstallStatus::Pending,
             }],
+            settings: None,
         };
-        let target_id = loader_version.map_or_else(
-            || "vanilla".to_owned(),
-            |version| {
-                let id = format!("neoforge-{version}");
-                instance.targets.push(LaunchTarget {
-                    id: id.clone(),
-                    kind: LoaderKind::NeoForge,
-                    loader_version: Some(version),
-                    manifest: None,
-                    status: InstallStatus::Pending,
-                });
-                id
-            },
-        );
-        let mut profile = new_profile(&instance, "Default".into());
-        profile.target_id = target_id;
-        self.transaction(true, |state| {
+        if let Some(version) = loader_version {
+            instance.targets.push(LaunchTarget {
+                id: format!("neoforge-{version}"),
+                kind: LoaderKind::NeoForge,
+                loader_version: Some(version),
+                manifest: None,
+                status: InstallStatus::Pending,
+            });
+        }
+        let mut profile = configured_profile(&instance, configuration)?;
+        instance.settings = Some(InstanceSettings::from_profile(&profile)?);
+        profile.inheritance = ProfileInheritance {
+            runtime: true,
+            window: true,
+        };
+        let mut prepared = PreparedInstanceDirectory::new(&instance.directory)?;
+        instance.directory = instance.directory.canonicalize()?;
+        let created = self.transaction(true, |state| {
             if state.profile_mode == ProfileMode::Bundled {
                 profile.name.clone_from(&instance.name);
             }
@@ -349,13 +381,33 @@ impl Catalog {
             state.instances.push(instance.clone());
             state.profiles.push(profile.clone());
             Ok((instance, profile))
-        })
+        })?;
+        prepared.committed = true;
+        Ok(created)
     }
 
     /// # Errors
     /// Fails for a missing installation or invalid name.
     pub fn create_profile(&self, instance_id: &str, name: String) -> anyhow::Result<Profile> {
-        validate_name(&name)?;
+        self.create_profile_configured(
+            instance_id,
+            ProfileConfiguration {
+                name,
+                ..ProfileConfiguration::default()
+            },
+        )
+    }
+
+    /// Validate all supplied settings and create a Profile in one metadata commit.
+    /// No default Profile is saved before applying its configured values.
+    /// # Errors
+    /// Rejects Bundled mode, a missing Instance or invalid launch settings without
+    /// modifying the saved catalog or creating game-data directories.
+    pub fn create_profile_configured(
+        &self,
+        instance_id: &str,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<Profile> {
         self.transaction(true, |state| {
             ensure!(
                 state.profile_mode == ProfileMode::Separated,
@@ -366,7 +418,7 @@ impl Catalog {
                 .iter()
                 .find(|i| i.id == instance_id)
                 .context("installation no longer exists")?;
-            let profile = new_profile(instance, name);
+            let profile = configured_profile(instance, configuration)?;
             state.profiles.push(profile.clone());
             Ok(profile)
         })
@@ -396,6 +448,35 @@ impl Catalog {
                 "moving profiles between installations is not supported"
             );
             *old = profile;
+            Ok(())
+        })
+    }
+
+    /// Save only editable Instance metadata; never relocate game data.
+    /// # Errors
+    /// Invalid fields or catalog failures leave the original document untouched.
+    pub fn save_instance(
+        &self,
+        id: &str,
+        configuration: InstanceConfiguration,
+    ) -> anyhow::Result<()> {
+        validate_name(&configuration.name)?;
+        configuration.settings.validate()?;
+        self.transaction(true, |state| {
+            let instance = state
+                .instances
+                .iter_mut()
+                .find(|instance| instance.id == id)
+                .context("installation no longer exists")?;
+            instance.name = configuration.name;
+            instance.settings = Some(configuration.settings);
+            if state.profile_mode == ProfileMode::Bundled {
+                for profile in &mut state.profiles {
+                    if profile.instance_id == id {
+                        profile.name.clone_from(&instance.name);
+                    }
+                }
+            }
             Ok(())
         })
     }
@@ -526,6 +607,84 @@ fn reject_symlink(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Only empty directories created by this operation are eligible for rollback.
+/// A concurrent writer makes `remove_dir` fail safely rather than losing its data.
+#[derive(Debug)]
+struct PreparedInstanceDirectory {
+    created: Vec<PathBuf>,
+    committed: bool,
+}
+
+impl PreparedInstanceDirectory {
+    fn new(directory: &Path) -> anyhow::Result<Self> {
+        let mut missing = Vec::new();
+        let mut ancestor = directory;
+        loop {
+            match fs::metadata(ancestor) {
+                Ok(metadata) => {
+                    ensure!(metadata.is_dir(), "installation path is not a directory");
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    missing.push(ancestor.to_path_buf());
+                    ancestor = ancestor
+                        .parent()
+                        .context("installation path has no parent")?;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let mut prepared = Self {
+            created: Vec::new(),
+            committed: false,
+        };
+        for path in missing.into_iter().rev() {
+            match fs::create_dir(&path) {
+                Ok(()) => prepared.created.push(path),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    ensure!(path.is_dir(), "installation path is not a directory");
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(prepared)
+    }
+}
+
+impl Drop for PreparedInstanceDirectory {
+    fn drop(&mut self) {
+        if !self.committed {
+            for path in self.created.iter().rev() {
+                let _ = fs::remove_dir(path);
+            }
+        }
+    }
+}
+
+fn configured_profile(
+    instance: &Instance,
+    configuration: ProfileConfiguration,
+) -> anyhow::Result<Profile> {
+    let mut profile = new_profile(instance, configuration.name);
+    profile.target_id = configuration.target_id;
+    ensure!(
+        instance
+            .targets
+            .iter()
+            .any(|target| target.id == profile.target_id),
+        "launch target does not belong to this instance"
+    );
+    profile.runtime = configuration.runtime;
+    profile.memory_mib = configuration.memory_mib;
+    profile.jvm_args = configuration.jvm_args;
+    profile.game_args = configuration.game_args;
+    profile.appearance = configuration.appearance;
+    profile.inheritance = configuration.inheritance;
+    profile.server = configuration.server;
+    profile.validate()?;
+    Ok(profile)
+}
+
 fn new_profile(instance: &Instance, name: String) -> Profile {
     Profile {
         id: uuid::Uuid::new_v4().to_string(),
@@ -538,6 +697,9 @@ fn new_profile(instance: &Instance, name: String) -> Profile {
         game_args: Vec::new(),
         data_policy: DataPolicy::Isolated,
         default_account: None,
+        appearance: super::ProfileAppearance::default(),
+        inheritance: ProfileInheritance::default(),
+        server: super::ServerPreferences::default(),
         compatibility: if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
             Compatibility::LinuxArm64Lwjgl3
         } else {
@@ -552,6 +714,9 @@ fn validate_snapshot(state: &Snapshot) -> anyhow::Result<()> {
         validate_id(&instance.id)?;
         validate_name(&instance.name)?;
         validate_directory(&instance.directory)?;
+        if let Some(settings) = &instance.settings {
+            settings.validate()?;
+        }
         ensure!(ids.insert(&instance.id), "duplicate installation ID");
         let mut targets = std::collections::BTreeSet::new();
         for target in &instance.targets {

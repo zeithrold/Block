@@ -10,7 +10,7 @@ mod secret;
 
 pub use callback::PendingSignIn;
 pub use credentials::probe_secure_storage;
-pub use microsoft::MicrosoftAuth;
+pub use microsoft::{MicrosoftAuth, SignInStage};
 pub use secret::SecretString;
 
 use std::time::{Duration, SystemTime};

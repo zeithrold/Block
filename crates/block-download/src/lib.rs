@@ -130,10 +130,23 @@ pub struct Resource {
 
 #[derive(Debug, Clone)]
 pub enum DownloadEvent {
-    Started { sha1: String, size: u64 },
-    Bytes { sha1: String, bytes: usize },
-    Complete { sha1: String, cached: bool },
-    Retry { url: String, attempt: u32 },
+    Started {
+        sha1: String,
+        size: u64,
+    },
+    Bytes {
+        sha1: String,
+        bytes: usize,
+    },
+    Complete {
+        sha1: String,
+        cached: bool,
+    },
+    Retry {
+        sha1: String,
+        url: String,
+        attempt: u32,
+    },
 }
 
 pub type EventSink = Arc<dyn Fn(DownloadEvent) + Send + Sync>;
@@ -160,6 +173,27 @@ impl fmt::Debug for Store {
 }
 
 impl Store {
+    /// Check an endpoint through this store's actual HTTP client and proxy.
+    /// No response body, object cache, credentials or preferences are written.
+    ///
+    /// # Errors
+    /// Offline stores, transport failures, a ten-second deadline and HTTP errors
+    /// are reported as failures rather than treating a connection as success.
+    pub async fn probe_connection(&self, url: &str) -> anyhow::Result<u16> {
+        ensure!(
+            !self.offline,
+            "Connection testing is unavailable in offline mode"
+        );
+        let response = self
+            .client
+            .head(url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(response.status().as_u16())
+    }
+
     /// Create a reusable HTTP client and cache.
     ///
     /// # Errors
@@ -450,6 +484,7 @@ impl Store {
                         return Err(error).with_context(|| resource.url.clone());
                     }
                     (self.events)(DownloadEvent::Retry {
+                        sha1: resource.sha1.clone(),
                         url: resource.url.clone(),
                         attempt: attempt + 1,
                     });

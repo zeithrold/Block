@@ -192,10 +192,9 @@ impl Library {
         let state = self.catalog.snapshot()?;
         let (instance, profile, target) = state.selection(profile_id)?;
         if let Some(expected) = profile_fingerprint {
-            use sha1::Digest as _;
             ensure!(
-                format!("{:x}", sha1::Sha1::digest(serde_json::to_vec(profile)?)) == expected,
-                "Profile settings changed while starting. Select the profile and click Play again."
+                state.launch_fingerprint(profile_id)? == expected,
+                "Launch settings changed while starting. Select the profile and click Play again."
             );
         }
         ensure!(
@@ -231,7 +230,7 @@ impl Library {
             .await
             .context("installation metadata unavailable; choose Repair")?;
         let mut plan = compile(&recipe, &metadata)?;
-        plan.command.game_args.extend(profile.game_args.clone());
+        apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;
         adapt(&mut plan, &metadata.parsed.manifest, target, manifest)?;
         let executor = Executor::new(offline, self.events.clone());
         let prepared = match run_id {
@@ -252,13 +251,27 @@ fn recipe(instance: &Instance, profile: &Profile, source: RecipeSource) -> Launc
         session: OfflineSession::Offline {
             username: "Preparation".into(),
         },
-        runtime: profile.runtime.clone(),
+        runtime: profile.effective_runtime(instance),
         target: None,
         compatibility: profile.compatibility,
         memory_mib: profile.memory_mib,
         jvm_args: profile.jvm_args.clone(),
         features: BTreeMap::new(),
     }
+}
+
+fn apply_profile_arguments(
+    plan: &mut ExecutionPlan,
+    instance: &Instance,
+    profile: &Profile,
+    manifest: &minecraft_manifest::model::VersionManifest,
+) -> anyhow::Result<()> {
+    let server = profile.server.launch_arguments(manifest)?;
+    plan.command
+        .game_args
+        .extend(profile.effective_game_args(instance));
+    plan.command.game_args.extend(server);
+    Ok(())
 }
 
 fn adapt(
@@ -329,4 +342,146 @@ async fn resolve_for_host(
         };
     }
     Ok(metadata)
+}
+
+#[cfg(test)]
+mod instance_defaults_tests {
+    use crate::{
+        catalog::{Catalog, InstanceConfiguration, InstanceSettings},
+        platform::Target,
+        recipe::{ParsedRecipe, RecipeSource, RuntimeSelection},
+        resolver::ResolvedMetadata,
+    };
+    use std::{collections::BTreeMap, path::Path};
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The integration follows persisted defaults through production compilation and installed-manifest Quick Play rejection."
+    )]
+    fn persisted_defaults_feed_the_real_recipe_and_compiled_launch_arguments() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let catalog = Catalog::open(root.path())?;
+        let (instance, mut profile) =
+            catalog.create_instance("Plan".into(), "1.20.6".into(), None, None)?;
+        let java = std::env::current_exe()?;
+        catalog.save_instance(
+            &instance.id,
+            InstanceConfiguration {
+                name: instance.name.clone(),
+                settings: InstanceSettings {
+                    runtime: RuntimeSelection::Local { java: java.clone() },
+                    width: 1410,
+                    height: 810,
+                    fullscreen: true,
+                },
+            },
+        )?;
+        profile.game_args = vec![
+            "--width".into(),
+            "999".into(),
+            "--server".into(),
+            "example.invalid".into(),
+        ];
+        catalog.save_profile(profile.clone())?;
+        let state = catalog.snapshot()?;
+        let (instance, profile, _) = state.selection(&profile.id)?;
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../minecraft-manifest/tests/fixtures/official");
+        let index: minecraft_manifest::model::VersionIndex =
+            minecraft_manifest::decode(&std::fs::read(fixtures.join("version_manifest_v2.json"))?)?;
+        let entry = index
+            .versions
+            .iter()
+            .find(|entry| entry.id == "1.20.6")
+            .ok_or_else(|| anyhow::anyhow!("official fixture missing"))?;
+        let fixture = fixtures
+            .join("versions")
+            .join(format!("{}.json", entry.sha1));
+        let recipe = super::recipe(
+            instance,
+            profile,
+            RecipeSource::LocalManifest {
+                path: fixture.clone(),
+            },
+        );
+        assert!(matches!(&recipe.runtime, RuntimeSelection::Local { java: path } if path == &java));
+        let metadata = ResolvedMetadata {
+            parsed: ParsedRecipe {
+                manifest: minecraft_manifest::decode(&std::fs::read(fixture)?)?,
+                manifest_sha1: "0".repeat(40),
+            },
+            target: Target::host()?,
+            assets: minecraft_manifest::resources::AssetObjects {
+                objects: BTreeMap::new(),
+                virtual_layout: None,
+                map_to_resources: None,
+            },
+            runtime: None,
+            library_overrides: BTreeMap::new(),
+        };
+        let mut plan = crate::plan::compile(&recipe, &metadata)?;
+        super::apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;
+        assert_eq!(
+            plan.command
+                .game_args
+                .iter()
+                .filter(|argument| argument.as_str() == "--width")
+                .count(),
+            1
+        );
+        assert!(plan.command.game_args.ends_with(&[
+            "--server".into(),
+            "example.invalid".into(),
+            "--width".into(),
+            "1410".into(),
+            "--height".into(),
+            "810".into(),
+            "--fullscreen".into()
+        ]));
+        assert!(
+            !plan
+                .command
+                .game_args
+                .iter()
+                .any(|argument| argument == "999")
+        );
+        // Persisted typed server preferences reach the same production argument
+        // boundary after compilation; legacy raw arguments are kept only when
+        // automatic Quick Play is disabled.
+        let mut quick_play = profile.clone();
+        quick_play
+            .game_args
+            .retain(|argument| argument != "--server" && argument != "example.invalid");
+        quick_play.server = crate::catalog::ServerPreferences {
+            address: "play.example.com:25566".into(),
+            connect_on_launch: true,
+        };
+        catalog.save_profile(quick_play.clone())?;
+        let restored = catalog.snapshot()?;
+        let (instance, quick_play, _) = restored.selection(&quick_play.id)?;
+        let mut plan = crate::plan::compile(&recipe, &metadata)?;
+        super::apply_profile_arguments(&mut plan, instance, quick_play, &metadata.parsed.manifest)?;
+        assert!(plan.command.game_args.ends_with(&[
+            "--quickPlayMultiplayer".into(),
+            "play.example.com:25566".into()
+        ]));
+        assert_eq!(
+            plan.command
+                .game_args
+                .iter()
+                .filter(|argument| argument.as_str() == "--quickPlayMultiplayer")
+                .count(),
+            1
+        );
+        let legacy = minecraft_manifest::decode(&std::fs::read(fixtures.join("../1.12.2.json"))?)?;
+        let before = plan.command.game_args.clone();
+        assert!(super::apply_profile_arguments(&mut plan, instance, quick_play, &legacy).is_err());
+        assert_eq!(
+            plan.command.game_args, before,
+            "unsupported Quick Play leaves the compiled plan untouched"
+        );
+        Ok(())
+    }
 }
