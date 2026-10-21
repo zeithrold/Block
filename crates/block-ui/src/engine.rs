@@ -17,7 +17,7 @@ use block_auth::{
 };
 use block_launcher::{
     CancellationToken, Store,
-    catalog::{Catalog, Profile, ProfileAppearance, ProfileConfiguration, Snapshot},
+    catalog::{Catalog, LoaderKind, Profile, ProfileAppearance, ProfileConfiguration, Snapshot},
     command::JavaCommand,
     crash::{CrashReport, ExitOutcome},
     executor::{ExecutionEvent, Executor},
@@ -90,6 +90,10 @@ pub(crate) enum Message {
         message: Box<Self>,
     },
     Versions(Result<Vec<VersionEntry>, String>),
+    LoaderVersions {
+        request: uuid::Uuid,
+        result: Result<Vec<block_launcher::install::fabric::LoaderVersion>, String>,
+    },
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
     AuthlibCharacters(Vec<block_auth::AuthlibProfile>),
@@ -296,6 +300,34 @@ impl Engine {
         });
     }
 
+    pub(super) fn loader_versions(
+        &self,
+        request: uuid::Uuid,
+        kind: LoaderKind,
+        minecraft: String,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let result = async {
+                let options = Preferences::load(&root)?.downloads;
+                let store = Store::with_options(root, false, Arc::new(|_| {}), options)?;
+                block_launcher::install::fabric::versions(
+                    &kind,
+                    &minecraft,
+                    &ResolveContext { store, cancel },
+                )
+                .await
+            }
+            .await
+            .map_err(|error| format!("{error:#}"));
+            let _ = sender
+                .send(Message::LoaderVersions { request, result })
+                .await;
+        });
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "The draft commit passes explicit instance and profile boundaries."
@@ -305,7 +337,7 @@ impl Engine {
         name: String,
         version: String,
         directory: Option<PathBuf>,
-        neoforge: bool,
+        loader: Option<(LoaderKind, String)>,
         defaults: GameDefaults,
         profile: Option<ProfileDraftValues>,
         cancel: CancellationToken,
@@ -324,17 +356,17 @@ impl Engine {
                     })
                     .configuration()?;
                 let mut configuration = configuration;
-                if neoforge && configuration.target_id == "vanilla" {
-                    configuration.target_id = "neoforge-20.6.144".into();
+                if let Some((kind, version)) = &loader {
+                    configuration.target_id = format!("{}-{version}", kind.name().to_lowercase());
                 }
                 let catalog_root = root.clone();
                 let (instance, profile) = tokio::task::spawn_blocking(move || {
                     let catalog = Catalog::open(catalog_root)?;
-                    catalog.create_instance_configured(
+                    catalog.create_instance_with_loader(
                         name,
                         version,
                         directory,
-                        neoforge.then(|| "20.6.144".to_owned()),
+                        loader,
                         configuration,
                     )
                 })
@@ -1896,7 +1928,7 @@ mod tests {
             "Configured".into(),
             "26.3".into(),
             None,
-            false,
+            None,
             defaults,
             None,
             cancel,
@@ -1929,6 +1961,75 @@ mod tests {
             state.selection(&existing.id)?.1.game_args,
             existing.game_args
         );
+        Ok(())
+    }
+
+    #[test]
+    fn selected_loader_reaches_atomic_creation_instead_of_falling_back_to_vanilla()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()?,
+        );
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(32);
+        let engine = super::Engine {
+            runtime: runtime.clone(),
+            sender: sender.into(),
+            root: root.path().into(),
+            prepared_sign_in: Default::default(),
+            pending_authlib: Default::default(),
+            prepared_authlib: Default::default(),
+        };
+        for (kind, version) in [
+            (super::LoaderKind::Fabric, "0.16.14"),
+            (super::LoaderKind::Quilt, "0.29.2"),
+        ] {
+            let cancel = super::CancellationToken::new();
+            cancel.cancel();
+            engine.create_instance_with_profile(
+                kind.name().into(),
+                "1.20.6".into(),
+                None,
+                Some((kind.clone(), version.into())),
+                super::GameDefaults::default(),
+                None,
+                cancel,
+            );
+            let profile = runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    let mut profile = None;
+                    while let Some(message) = receiver.recv().await {
+                        match message {
+                            super::Message::Created { profile: id, .. } => profile = Some(id),
+                            super::Message::Finished(result) => {
+                                assert!(result.is_err());
+                                return profile
+                                    .ok_or_else(|| anyhow::anyhow!("Missing saved profile"));
+                            }
+                            _ => {}
+                        }
+                    }
+                    anyhow::bail!("Creation channel closed")
+                })
+                .await
+            })??;
+            let state = super::Catalog::open(root.path())?.snapshot()?;
+            let (instance, saved, target) = state.selection(&profile)?;
+            assert_eq!(instance.minecraft_version, "1.20.6");
+            assert_eq!(
+                saved.target_id,
+                format!("{}-{version}", kind.name().to_lowercase())
+            );
+            assert_eq!(target.kind, kind);
+            assert_eq!(target.loader_version.as_deref(), Some(version));
+            assert!(matches!(
+                target.status,
+                block_launcher::catalog::InstallStatus::Failed { .. }
+            ));
+        }
         Ok(())
     }
 

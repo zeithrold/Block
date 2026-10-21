@@ -28,7 +28,7 @@ use super::{
     input, note, patterns,
 };
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) enum CollectionLoad {
     Loading,
     #[default]

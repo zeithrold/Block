@@ -769,6 +769,7 @@ dependencies = [
  "gpui-pre-platform",
  "minecraft-manifest",
  "objc2-app-kit 0.3.2",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

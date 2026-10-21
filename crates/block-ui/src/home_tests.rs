@@ -44,6 +44,8 @@ fn home_retries_a_failed_download_without_an_account_or_a_second_instance(
         let root = tempfile::tempdir()?;
         let mut preferences = crate::appearance::Preferences::default();
         preferences.downloads.proxy = ProxyMode::Http { url: proxy_url };
+        // This fixture rejects one connection; transport retry policy is tested separately.
+        preferences.downloads.max_retries = 0;
         preferences.save(root.path())?;
         let catalog = Catalog::open(root.path())?;
         let (instance, profile) =

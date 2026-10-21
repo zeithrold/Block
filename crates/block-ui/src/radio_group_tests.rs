@@ -234,19 +234,19 @@ fn real_wizard_loader_group_changes_only_its_checkpoint_and_skips_unsupported_lo
     settle(cx);
     assert!(view.read_with(
         cx,
-        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if form.neoforge)
+        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if form.is_neoforge())
     ));
     cx.simulate_keystrokes("end");
     settle(cx);
     assert!(view.read_with(
         cx,
-        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if form.neoforge)
+        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if form.loader == block_launcher::catalog::LoaderKind::Quilt)
     ));
     assert!(view.read_with(cx, |view, _| view.snapshot.instances.is_empty()));
     click(cx, "wizard-back");
     assert!(view.read_with(
         cx,
-        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if !form.neoforge)
+        |view, _| matches!(&view.form, Some(crate::Form::Instance(form)) if !form.is_neoforge())
     ));
 }
 #[gpui::test]

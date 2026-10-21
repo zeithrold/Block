@@ -201,7 +201,9 @@ enum UiAction {
     SelectAccount(String),
     CreateInstance,
     SaveInstance,
-    ToggleLoader,
+    WizardLoader(block_launcher::catalog::LoaderKind),
+    WizardLoaderBuild(String),
+    ReloadLoaderVersions,
     BrowseInstall,
     SelectVersion(String),
     EditProfile,
@@ -259,7 +261,27 @@ struct InstanceForm {
     name: Entity<TextInput>,
     version: Entity<TextInput>,
     directory: Entity<TextInput>,
-    neoforge: bool,
+    loader: block_launcher::catalog::LoaderKind,
+    loader_version: Option<String>,
+}
+
+impl InstanceForm {
+    fn is_neoforge(&self) -> bool {
+        self.loader == block_launcher::catalog::LoaderKind::NeoForge
+    }
+
+    fn loader_label(&self) -> String {
+        self.loader_version.as_ref().map_or_else(
+            || self.loader.name().to_owned(),
+            |version| format!("{} {version}", self.loader.name()),
+        )
+    }
+
+    fn selected_loader(&self) -> Option<(block_launcher::catalog::LoaderKind, String)> {
+        self.loader_version
+            .as_ref()
+            .map(|version| (self.loader.clone(), version.clone()))
+    }
 }
 
 #[derive(Debug)]
@@ -641,6 +663,9 @@ impl Block {
                 Message::Versions(Err(error)) => {
                     self.version_load = browser::CollectionLoad::Failed(error.clone());
                     self.push_log(format!("Version list unavailable: {error}"));
+                }
+                Message::LoaderVersions { request, result } => {
+                    self.receive_loader_versions(request, result, cx)
                 }
                 Message::Browser(url) => {
                     if !self.cancel.is_cancelled() {
@@ -1427,15 +1452,9 @@ impl Block {
                     }
                 }
             }
-            UiAction::ToggleLoader => {
-                if let Some(Form::Instance(form)) = &mut self.form {
-                    form.neoforge = !form.neoforge;
-                    if form.neoforge {
-                        form.version
-                            .update(cx, |field, cx| field.set_value("1.20.6", cx));
-                    }
-                }
-            }
+            UiAction::WizardLoader(kind) => self.choose_wizard_loader(kind, cx),
+            UiAction::WizardLoaderBuild(version) => self.choose_wizard_loader_build(version, cx),
+            UiAction::ReloadLoaderVersions => self.load_wizard_loader_versions(true, cx),
             UiAction::SelectVersion(version) => self.set_wizard_version(version, cx),
             UiAction::BrowseInstall => self.browse_install(cx),
             UiAction::SaveInstance => {
@@ -1458,6 +1477,7 @@ impl Block {
                     self.cancel_profile_editor(window, cx);
                 } else if self.tab != Tab::Onboarding {
                     self.form = None;
+                    self.shell.wizard.cancel_loader_request();
                 }
             }
             UiAction::NewProfile => {
@@ -1713,13 +1733,16 @@ impl Block {
                     .profile
                     .as_ref()
                     .map_or_else(Vec::new, |profile| vec![&profile.name]),
-                Some(WizardPage::Loader) if form.neoforge => self
-                    .shell
-                    .wizard
-                    .loader_search
-                    .as_ref()
-                    .into_iter()
-                    .collect(),
+                Some(WizardPage::Loader)
+                    if form.loader != block_launcher::catalog::LoaderKind::Vanilla =>
+                {
+                    self.shell
+                        .wizard
+                        .loader_search
+                        .as_ref()
+                        .into_iter()
+                        .collect()
+                }
                 Some(WizardPage::Loader) | None => Vec::new(),
             },
             Some(Form::Profile(form)) => {
@@ -1775,8 +1798,10 @@ impl Block {
             Some("Choose a Minecraft version")
         } else if version.len() > 80 || version.chars().any(char::is_control) {
             Some("Use a Minecraft version of at most 80 UTF-8 bytes without control characters")
-        } else if form.neoforge && version.trim() != "1.20.6" {
+        } else if form.is_neoforge() && version.trim() != "1.20.6" {
             Some("NeoForge 20.6.144 requires Minecraft 1.20.6")
+        } else if self.wizard_loader_issue(cx).is_some() {
+            Some("Choose a compatible loader build in Mod loader before continuing")
         } else if !directory.trim().is_empty() && !PathBuf::from(directory.trim()).is_absolute() {
             Some("Choose an absolute installation directory")
         } else {
@@ -2811,7 +2836,7 @@ mod tests {
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
         click_selector(cx, "wizard-loader-neoforge");
-        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.neoforge && form.version.read(cx).value() == "1.20.6")));
+        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6")));
         assert!(!view.read_with(cx, |view, _| view.busy));
     }
 

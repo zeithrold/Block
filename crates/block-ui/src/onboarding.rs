@@ -94,7 +94,8 @@ impl Block {
             name: input("My Minecraft", "Game name", cx),
             version: input(version, "Minecraft version", cx),
             directory: input("", "Automatic installation location", cx),
-            neoforge: false,
+            loader: block_launcher::catalog::LoaderKind::Vanilla,
+            loader_version: None,
         }));
     }
 
@@ -351,7 +352,7 @@ impl Block {
             .child(name)
             .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(if compact { 2 } else { 4 }).gap_3()
                 .child(self.wizard_component("version", "Minecraft", &version, WizardPage::Version, cx))
-                .child(self.wizard_component("loader", "Mod loader", if form.neoforge { "NeoForge 20.6.144" } else { "Vanilla" }, WizardPage::Loader, cx))
+                .child(self.wizard_component("loader", "Mod loader", &form.loader_label(), WizardPage::Loader, cx))
                 .child(self.wizard_unavailable("optifine", "OptiFine", "Installation is not supported yet.", true))
                 .child(self.wizard_component("location", "Configuration", &configuration, WizardPage::Location, cx)))
             .child(self.setup_caption("Your choices remain a draft until you create the game. Java and required files are downloaded from verified sources.").id("onboarding-draft-note").debug_selector(|| "onboarding-draft-note".into()))
@@ -561,11 +562,7 @@ impl Block {
             ),
             (
                 "Mod loader",
-                if form.neoforge {
-                    "NeoForge 20.6.144".into()
-                } else {
-                    "Vanilla".into()
-                },
+                form.loader_label(),
                 UiAction::OnboardingSection(WizardPage::Loader),
             ),
             (
@@ -782,7 +779,8 @@ impl Block {
             && !version.trim().is_empty()
             && version.len() <= 80
             && !version.chars().any(char::is_control)
-            && (!form.neoforge || version.trim() == "1.20.6")
+            && (!form.is_neoforge() || version.trim() == "1.20.6")
+            && self.wizard_loader_issue(cx).is_none()
             && (directory.trim().is_empty() || std::path::Path::new(directory.trim()).is_absolute())
             && self
                 .shell
@@ -1049,10 +1047,11 @@ impl Block {
             }
             Some(Form::Instance(form))
                 if form.version.read(cx).value().trim().is_empty()
-                    || (form.neoforge && form.version.read(cx).value().trim() != "1.20.6") =>
+                    || (form.is_neoforge() && form.version.read(cx).value().trim() != "1.20.6") =>
             {
                 WizardField::Version
             }
+            _ if self.wizard_loader_issue(cx).is_some() => WizardField::Loader,
             _ => WizardField::Directory,
         };
         self.shell.onboarding.error = Some(self.status.clone());
@@ -1066,6 +1065,8 @@ impl Block {
         } else {
             let page = if field == WizardField::Version {
                 WizardPage::Version
+            } else if field == WizardField::Loader {
+                WizardPage::Loader
             } else {
                 WizardPage::Location
             };
@@ -1086,7 +1087,7 @@ impl Block {
         let name = form.name.read(cx).value();
         let version = form.version.read(cx).value();
         let directory = form.directory.read(cx).value();
-        let neoforge = form.neoforge;
+        let loader = form.selected_loader();
         let Some(profile) = &self.shell.wizard.profile else {
             return;
         };
@@ -1110,7 +1111,7 @@ impl Block {
                 name,
                 version,
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim())),
-                neoforge,
+                loader,
                 defaults,
                 Some(values),
                 self.cancel.clone(),

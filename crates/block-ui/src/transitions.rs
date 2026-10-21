@@ -227,7 +227,8 @@ impl Block {
                 name: frozen_input(&form.name, cx),
                 version: frozen_input(&form.version, cx),
                 directory: frozen_input(&form.directory, cx),
-                neoforge: form.neoforge,
+                loader: form.loader.clone(),
+                loader_version: form.loader_version.clone(),
             }),
             Form::Profile(form) => Form::Profile(Box::new(ProfileForm {
                 original: form.original.clone(),

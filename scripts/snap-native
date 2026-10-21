@@ -70,6 +70,8 @@ def main():
                         dialog = name in {
                             "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
                             "download-files", "wizard-version-picker", "wizard-loader-picker",
+                            "wizard-fabric-picker", "wizard-quilt-picker", "wizard-loader-loading",
+                            "wizard-loader-error", "wizard-loader-empty",
                             "wizard-configuration", "welcome-version-picker", "remove-confirmation",
                             "remove-account-confirmation", "remove-provider-confirmation", "separate-confirmation", "games-help",
                             "welcome-settings", "welcome-about",

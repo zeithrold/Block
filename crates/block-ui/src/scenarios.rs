@@ -73,6 +73,11 @@ pub const SCENARIOS: &[&str] = &[
     "download-files",
     "wizard-version-picker",
     "wizard-loader-picker",
+    "wizard-fabric-picker",
+    "wizard-quilt-picker",
+    "wizard-loader-loading",
+    "wizard-loader-error",
+    "wizard-loader-empty",
     "wizard-configuration",
     "welcome-version-picker",
     "remove-confirmation",
@@ -227,12 +232,55 @@ impl Block {
             }
             let page = match name {
                 "wizard-version-picker" => Some(WizardPage::Version),
-                "wizard-loader-picker" => Some(WizardPage::Loader),
+                "wizard-loader-picker"
+                | "wizard-fabric-picker"
+                | "wizard-quilt-picker"
+                | "wizard-loader-loading"
+                | "wizard-loader-error"
+                | "wizard-loader-empty" => Some(WizardPage::Loader),
                 "wizard-configuration" => Some(WizardPage::Location),
                 _ => None,
             };
             if let Some(page) = page {
                 self.handle(UiAction::WizardPage(Some(page)), window, cx);
+            }
+            if matches!(
+                name,
+                "wizard-fabric-picker"
+                    | "wizard-quilt-picker"
+                    | "wizard-loader-loading"
+                    | "wizard-loader-error"
+                    | "wizard-loader-empty"
+            ) {
+                let kind = if name == "wizard-quilt-picker" {
+                    LoaderKind::Quilt
+                } else {
+                    LoaderKind::Fabric
+                };
+                let version = if kind == LoaderKind::Quilt {
+                    "0.29.2"
+                } else {
+                    "0.16.14"
+                };
+                if let Some(super::Form::Instance(form)) = &mut self.form {
+                    form.loader = kind.clone();
+                    form.loader_version = (!matches!(
+                        name,
+                        "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty"
+                    ))
+                    .then(|| version.into());
+                    self.shell.wizard.loader_catalog = Some(super::game_wizard::LoaderCatalog {
+                        request: uuid::Uuid::new_v4(), minecraft: form.version.read(cx).value(), kind,
+                        builds: if matches!(name, "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty") { Vec::new() } else {
+                            vec![block_launcher::install::fabric::LoaderVersion {version: version.into(), stable: true}, block_launcher::install::fabric::LoaderVersion { version: "0.16.0-beta.1".into(), stable: false }]
+                        },
+                        load: match name {
+                            "wizard-loader-loading" => CollectionLoad::Loading,
+                            "wizard-loader-error" => CollectionLoad::Failed("The official catalog could not be reached. Check your connection and retry.".into()),
+                            _ => CollectionLoad::Ready,
+                        },
+                    });
+                }
             }
         }
         if name.starts_with("accounts-")

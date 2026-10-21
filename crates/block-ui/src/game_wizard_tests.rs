@@ -177,13 +177,14 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
                 .update(cx, |field, cx| field.set_value("1.20.6", cx));
             form.directory
                 .update(cx, |field, cx| field.set_value(&directory, cx));
-            form.neoforge = true;
+            form.loader = block_launcher::catalog::LoaderKind::NeoForge;
+            form.loader_version = Some("20.6.144".into());
         }
         view.back_game_wizard(cx);
         if let Some(Form::Instance(form)) = &view.form {
             assert_eq!(form.version.read(cx).value(), "1.21.1");
             assert_eq!(form.directory.read(cx).value(), "");
-            assert!(!form.neoforge);
+            assert!(!form.is_neoforge());
         }
         assert_eq!(view.snapshot.instances.len(), 1);
         view.open_game_wizard_page(Some(WizardPage::Location), cx);
@@ -226,7 +227,7 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
     assert!(crate::test_support::control_bounds(cx, "wizard-loader-picker").is_some());
     click(cx, "wizard-loader-neoforge");
     view.read_with(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.neoforge && form.version.read(cx).value() == "1.20.6"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
     });
     view.update(cx, |view, cx| {
         if let Some(search) = &view.shell.wizard.loader_search {
@@ -247,11 +248,11 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
     click(cx, "wizard-loader-fabric");
     assert!(view.read_with(
         cx,
-        |view, _| matches!(&view.form, Some(Form::Instance(form)) if form.neoforge)
+        |view, _| matches!(&view.form, Some(Form::Instance(form)) if form.loader == block_launcher::catalog::LoaderKind::Fabric && form.loader_version.is_none())
     ));
     click(cx, "wizard-back");
     view.read_with(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.neoforge && form.version.read(cx).value() == "1.21.1"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.is_neoforge() && form.version.read(cx).value() == "1.21.1"));
     });
 }
 
@@ -534,7 +535,8 @@ fn incompatible_version_notice_is_draft_only_and_cancel_restores_the_loader(
         view.versions = vec!["1.20.6".into(), "1.21.1".into()];
         view.begin_game_wizard(cx);
         if let Some(Form::Instance(form)) = &mut view.form {
-            form.neoforge = true;
+            form.loader = block_launcher::catalog::LoaderKind::NeoForge;
+            form.loader_version = Some("20.6.144".into());
         }
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
         view.set_wizard_version(" 1.21.1 ".into(), cx);
@@ -543,10 +545,10 @@ fn incompatible_version_notice_is_draft_only_and_cancel_restores_the_loader(
     cx.simulate_resize(size(px(960.), px(600.)));
     cx.run_until_parked();
 
-    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.neoforge && form.version.read(cx).value() == "1.21.1")); });
+    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.is_neoforge() && form.version.read(cx).value() == "1.21.1")); });
     click(cx, "wizard-back");
     view.update(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.neoforge && form.version.read(cx).value() == "1.20.6"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
         assert!(view.shell.wizard.version_notice.is_none());
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
         view.set_wizard_version("1.20.6".into(), cx);
@@ -950,4 +952,124 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
         view.read_with(cx, |view, _| view.snapshot.profiles.len()),
         1
     );
+}
+
+fn loader_build(version: &str, stable: bool) -> block_launcher::install::fabric::LoaderVersion {
+    block_launcher::install::fabric::LoaderVersion {
+        version: version.into(),
+        stable,
+    }
+}
+
+#[gpui::test]
+fn loader_selection_is_a_local_draft_and_cancel_rejects_the_cancelled_catalog_result(
+    cx: &mut TestAppContext,
+) {
+    use block_launcher::catalog::LoaderKind;
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_game_wizard(cx);
+        view.visual_only = true;
+        view
+    });
+    view.update(cx, |view, cx| {
+        view.open_game_wizard_page(Some(WizardPage::Loader), cx);
+        view.choose_wizard_loader(LoaderKind::Fabric, cx);
+        let request = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        assert!(request.is_some());
+        if let Some(request) = request {
+            view.receive_loader_versions(request, Ok(vec![loader_build("0.9.0", true), loader_build("0.20.0-beta.1", false), loader_build("0.19.5", true)]), cx);
+        }
+        assert!(view.wizard_loader_issue(cx).is_none());
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.as_deref() == Some("0.19.5")));
+        view.choose_wizard_loader_build("0.9.0".into(), cx);
+        view.advance_game_wizard(cx);
+        assert!(view.shell.wizard.page.is_none());
+        assert!(view.snapshot.instances.is_empty());
+        view.open_game_wizard_page(Some(WizardPage::Loader), cx);
+        view.choose_wizard_loader(LoaderKind::Quilt, cx);
+        let cancelled = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        let cancel = view.shell.wizard.loader_request.as_ref().map(|request| request.0.clone());
+        view.cancel_component_draft(cx);
+        assert!(cancel.is_some_and(|cancel| cancel.is_cancelled()));
+        if let Some(request) = cancelled { view.receive_loader_versions(request, Ok(vec![loader_build("0.29.2", true)]), cx); }
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader == LoaderKind::Fabric && form.loader_version.as_deref() == Some("0.9.0")));
+        assert!(view.wizard_loader_issue(cx).is_none());
+        assert!(view.snapshot.instances.is_empty());
+    });
+}
+
+#[gpui::test]
+fn changing_minecraft_keeps_the_loader_but_cancels_old_mappings_and_rejects_late_results(
+    cx: &mut TestAppContext,
+) {
+    use block_launcher::catalog::LoaderKind;
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_game_wizard(cx);
+        view.visual_only = true;
+        view
+    });
+    view.update(cx, |view, cx| {
+        view.set_wizard_version("1.20.6".into(), cx);
+        view.choose_wizard_loader(LoaderKind::Fabric, cx);
+        let old = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        let cancel = view.shell.wizard.loader_request.as_ref().map(|request| request.0.clone());
+        view.set_wizard_version("1.21.1".into(), cx);
+        assert!(cancel.is_some_and(|cancel| cancel.is_cancelled()));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader == LoaderKind::Fabric && form.loader_version.is_none()));
+        if let Some(request) = old { view.receive_loader_versions(request, Ok(vec![loader_build("0.15.0", true)]), cx); }
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.is_none()));
+        let current = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        assert_ne!(old, current);
+        if let Some(request) = current { view.receive_loader_versions(request, Ok(vec![loader_build("0.16.14", true)]), cx); }
+        assert!(view.wizard_loader_issue(cx).is_none());
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.as_deref() == Some("0.16.14") && form.version.read(cx).value() == "1.21.1"));
+        assert!(view.shell.wizard.version_notice.is_some());
+        view.choose_wizard_loader(LoaderKind::Quilt, cx);
+        assert!(view.shell.wizard.version_notice.is_none());
+        assert!(view.snapshot.instances.is_empty());
+    });
+}
+
+#[gpui::test]
+fn loader_empty_error_retry_and_delisted_build_states_cannot_be_committed_as_vanilla(
+    cx: &mut TestAppContext,
+) {
+    use block_launcher::catalog::LoaderKind;
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_onboarding(cx);
+        view.visual_only = true;
+        view.open_game_wizard_page(Some(WizardPage::Loader), cx);
+        view.choose_wizard_loader(LoaderKind::Quilt, cx);
+        view
+    });
+    view.update(cx, |view, cx| {
+        assert!(view.wizard_loader_issue(cx).is_some());
+        let request = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = request { view.receive_loader_versions(request, Err("Fixture throttle".into()), cx); }
+        assert!(!view.validate_instance_draft(cx));
+        view.advance_game_wizard(cx);
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
+        view.load_wizard_loader_versions(true, cx);
+        let next = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = request { view.receive_loader_versions(request, Ok(vec![loader_build("0.1.0", true)]), cx); }
+        if let Some(request) = next { view.receive_loader_versions(request, Ok(Vec::new()), cx); }
+        assert!(!view.validate_instance_draft(cx));
+        view.choose_wizard_loader_build("not-listed".into(), cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.is_none()));
+        view.load_wizard_loader_versions(true, cx);
+        let loaded = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = loaded { view.receive_loader_versions(request, Ok(vec![loader_build("0.29.2", true)]), cx); }
+        assert!(view.validate_instance_draft(cx));
+        view.load_wizard_loader_versions(true, cx);
+        let refresh = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
+        if let Some(request) = refresh { view.receive_loader_versions(request, Ok(vec![loader_build("0.30.0", true)]), cx); }
+        assert!(!view.validate_instance_draft(cx));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader == LoaderKind::Quilt && form.loader_version.is_none()));
+        view.choose_wizard_loader_build("0.30.0".into(), cx);
+        assert!(view.validate_instance_draft(cx));
+        assert!(view.snapshot.instances.is_empty());
+    });
 }
