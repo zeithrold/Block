@@ -319,11 +319,24 @@ impl Block {
         let title = if home { "" } else { self.navigation_title() };
         div()
             .id("window-chrome")
-            .h(px(if narrow { 40. } else { 56. }))
+            .h(px(if home {
+                52.
+            } else if narrow {
+                40.
+            } else {
+                56.
+            }))
             .border_b_1()
             .border_color(rgb(self.palette.border))
             .flex_shrink_0()
             .px_4()
+            .pl(px(
+                if cfg!(target_os = "macos") && self.shell.system_window_chrome {
+                    80.
+                } else {
+                    16.
+                },
+            ))
             .flex()
             .items_center()
             .gap_2()
@@ -331,7 +344,7 @@ impl Block {
                 div().text_sm().child("Block").into_any_element()
             } else {
                 self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
-                    .child(super::design::Icon::More.render(18., self.palette.muted))
+                    .child(super::design::Icon::Menu.render(18., self.palette.muted))
                     .into_any_element()
             })
             .child(
@@ -406,14 +419,21 @@ impl Block {
             .flex_col()
             .px_6()
             .pb_6()
-            .gap_3()
+            .gap_0()
             .child(self.home_identity(account, window, cx))
-            .child(
-                div()
-                    .id("home-status")
-                    .text_xs()
-                    .text_color(rgb(self.palette.muted))
-                    .child(self.status.clone()),
+            .children(
+                (!matches!(
+                    self.status.as_str(),
+                    "Welcome to Block" | "UI scenario fixture"
+                ))
+                .then(|| {
+                    div()
+                        .id("home-status")
+                        .mb_3()
+                        .text_xs()
+                        .text_color(rgb(self.palette.muted))
+                        .child(self.status.clone())
+                }),
             );
         content = content.child(self.home_task(window, cx));
         if self.busy {
@@ -444,27 +464,57 @@ impl Block {
         let description = profile
             .map_or("Start a new adventure", |profile| profile.name.as_str())
             .to_owned();
+        let icon = match &action {
+            UiAction::Play => super::design::Icon::Play,
+            UiAction::SignIn => super::design::Icon::Account,
+            UiAction::CreateInstance => super::design::Icon::Plus,
+            _ => super::design::Icon::Download,
+        };
         let primary = self
-            .button("home-play", label, action, cx)
-            .flex_1()
+            .button("home-play", "", action, cx)
+            .w_full()
             .min_w_0()
             .h(px(80.))
-            .rounded_lg()
+            .rounded_xl()
             .px_5()
-            .flex_col()
-            .items_start()
+            .items_center()
             .justify_center()
             .text_xl()
             .bg(rgb(self.palette.primary))
             .text_color(rgb(self.palette.on_primary))
-            .child(div().text_xs().truncate().child(description));
-        content = content.children(self.home_version(cx)).child(
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .relative()
+                    .left(px(-6.))
+                    .child(icon.render(20., self.palette.on_primary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap_1()
+                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(label))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .text_color(rgb(self.palette.on_primary).opacity(0.65))
+                                    .truncate()
+                                    .child(description.clone()),
+                            ),
+                    ),
+            );
+        let tooltip = self.home_version().unwrap_or(description);
+        content = content.child(
             div()
-                .flex()
-                .gap_1()
+                .relative()
                 .h(px(80.))
                 .flex_shrink_0()
-                .child(primary)
+                .child(super::tooltip::trigger(primary, tooltip, cx))
                 .child(
                     self.button(
                         "home-profiles",
@@ -472,8 +522,24 @@ impl Block {
                         UiAction::Drawer(Some(Drawer::Profiles)),
                         cx,
                     )
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .w(px(56.))
                     .h_full()
-                    .child(super::design::Icon::ChevronDown.render(18., self.palette.muted)),
+                    .rounded_xl()
+                    .border_0()
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(24.))
+                            .bottom(px(24.))
+                            .w(px(1.))
+                            .bg(rgb(self.palette.on_primary))
+                            .opacity(0.2),
+                    )
+                    .child(super::design::Icon::ChevronDown.render(20., self.palette.on_primary)),
                 ),
         );
         content.into_any_element()
@@ -507,31 +573,58 @@ impl Block {
             .flex_col()
             .items_center()
             .justify_center()
-            .gap_4()
+            .gap_6()
             .text_center();
         if let Some(account) = account {
             let provider = match account.provider {
-                block_auth::AccountProvider::Microsoft => "Microsoft",
+                block_auth::AccountProvider::Microsoft => "Microsoft Account",
             };
             let palette = self.palette;
 
             identity = identity
                 .child(
                     div()
-                        .text_2xl()
                         .max_w_full()
-                        .truncate()
-                        .child(name.to_owned()),
-                )
-                .child(
-                    div()
-                        .id("home-account-type")
-                        .debug_selector(|| "home-account-type".into())
-                        .child(super::components::badge(
-                            provider,
-                            palette,
-                            super::components::BadgeVariant::Outline,
-                        )),
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .max_w_full()
+                                .truncate()
+                                .child(name.to_owned()),
+                        )
+                        .child(
+                            div()
+                                .id("home-account-type")
+                                .debug_selector(|| "home-account-type".into())
+                                .child(
+                                    super::components::badge(
+                                        provider,
+                                        palette,
+                                        super::components::BadgeVariant::Secondary,
+                                    )
+                                    .h(px(24.))
+                                    .border_0()
+                                    .bg(rgb(
+                                        if palette.background == super::Palette::DARK.background {
+                                            0x172336
+                                        } else {
+                                            0xebf2fb
+                                        },
+                                    ))
+                                    .text_color(rgb(
+                                        if palette.background == super::Palette::DARK.background {
+                                            0x93baf1
+                                        } else {
+                                            0x526e8e
+                                        },
+                                    )),
+                                ),
+                        ),
                 )
                 .child(self.home_avatar(name, window, cx));
         } else {
@@ -555,6 +648,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let palette = self.palette;
+        let avatar_size = ((f32::from(window.viewport_size().width) - 48.) * 0.45).clamp(96., 176.);
         let (hover, hover_running) = self
             .shell
             .home
@@ -573,15 +667,19 @@ impl Block {
             )
             .h_auto()
             .rounded_xl()
-            .p_4()
+            .p_0()
             .border_0()
             .bg(gpui::hsla(0., 0., 0., 0.))
-            .child(super::components::avatar_fallback(
-                name,
-                palette,
-                144.,
-                super::components::AvatarState::Fallback,
-            ));
+            .child(
+                super::components::avatar_fallback(
+                    name,
+                    palette,
+                    avatar_size,
+                    super::components::AvatarState::Fallback,
+                )
+                .rounded_2xl()
+                .text_size(px(36.)),
+            );
         div()
             .id("home-avatar-halo")
             .relative()
@@ -610,8 +708,7 @@ impl Block {
             .child(super::tooltip::trigger(avatar, "Switch account", cx))
     }
 
-    fn home_version(&self, cx: &Context<'_, Self>) -> Option<gpui::Stateful<gpui::Div>> {
-        use super::components::{BadgeVariant, badge};
+    fn home_version(&self) -> Option<String> {
         let profile = self.profile()?;
         let (instance, _, target) = self.snapshot.selection(&profile.id).ok()?;
         let kind = self
@@ -619,20 +716,12 @@ impl Block {
             .iter()
             .find(|entry| entry.id == instance.minecraft_version)
             .map(|entry| entry.kind);
-        let (release, color) = match kind {
-            Some(minecraft_manifest::model::VersionType::Release) => {
-                ("Stable release", BadgeVariant::Success)
-            }
-            Some(minecraft_manifest::model::VersionType::Snapshot) => {
-                ("Snapshot", BadgeVariant::Warning)
-            }
-            Some(minecraft_manifest::model::VersionType::OldBeta) => {
-                ("Old beta", BadgeVariant::Secondary)
-            }
-            Some(minecraft_manifest::model::VersionType::OldAlpha) => {
-                ("Old alpha", BadgeVariant::Secondary)
-            }
-            None => ("Type unverified", BadgeVariant::Outline),
+        let release = match kind {
+            Some(minecraft_manifest::model::VersionType::Release) => "Stable release",
+            Some(minecraft_manifest::model::VersionType::Snapshot) => "Snapshot",
+            Some(minecraft_manifest::model::VersionType::OldBeta) => "Old beta",
+            Some(minecraft_manifest::model::VersionType::OldAlpha) => "Old alpha",
+            None => "Type unverified",
         };
         let loader = match target.kind {
             block_launcher::catalog::LoaderKind::Vanilla => "Vanilla".to_owned(),
@@ -653,24 +742,7 @@ impl Block {
             }
         );
 
-        Some(super::tooltip::trigger(
-            div()
-                .id("home-version")
-                .debug_selector(|| "home-version".into())
-                .tab_index(0)
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .child(badge(
-                    instance.minecraft_version.clone(),
-                    self.palette,
-                    color,
-                ))
-                .child(badge(release, self.palette, color))
-                .child(badge(loader, self.palette, BadgeVariant::Secondary)),
-            description,
-            cx,
-        ))
+        Some(description)
     }
 
     fn home_task(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {

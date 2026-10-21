@@ -19,11 +19,13 @@ guard CGPreflightScreenCaptureAccess() else {
     exit(3)
 }
 let pid = pid_t(CommandLine.arguments[1])!
-if CommandLine.arguments.count > 2 {
+if CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "--terminate" {
     NSRunningApplication(processIdentifier: pid)?.terminate()
     exit(0)
 }
-let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+// Floating panels can be hidden when another application is active. Window-ID
+// capture still returns their rendered content; retain this process's panels.
+let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 for info in windows {
     guard info[kCGWindowOwnerPID as String] as? Int == Int(pid),
           let id = info[kCGWindowNumber as String] as? Int,
@@ -75,7 +77,6 @@ def main():
                         required = 2 if dialog else 1
                         deadline = time.monotonic() + 12
                         last = None
-                        activated = False
                         stable = time.monotonic()
                         while time.monotonic() < deadline:
                             if app.poll() is not None:
@@ -84,10 +85,6 @@ def main():
                             if result.returncode:
                                 raise RuntimeError(result.stderr.strip())
                             windows = sorted([line.split("\t", 3) for line in result.stdout.splitlines()], key=lambda row: int(row[0]))
-                            if windows and not activated:
-                                subprocess.run(["osascript", "-e", f'tell application "System Events" to set frontmost of first process whose unix id is {app.pid} to true'], check=True, capture_output=True)
-                                activated = True
-                                stable = time.monotonic()
                             if windows != last:
                                 last, stable = windows, time.monotonic()
                             if len(windows) >= required and time.monotonic() - stable >= 1:

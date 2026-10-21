@@ -310,7 +310,7 @@ impl Block {
         let mut rows = div()
             .id("selector-results")
             .debug_selector(|| "selector-results".into())
-            .h((window.viewport_size().height - px(340.)).clamp(px(120.), px(220.)))
+            .h((window.viewport_size().height - px(220.)).clamp(px(120.), px(360.)))
             .min_h_0()
             .flex_shrink_0()
             .children(choices.iter().enumerate().map(|(index, choice)| {

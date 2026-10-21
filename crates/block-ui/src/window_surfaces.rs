@@ -516,7 +516,7 @@ impl Surface {
             Self::OnboardingSection(_) | Self::WizardSection(_) => (760., 520.),
             Self::Auth => (960., 600.),
             Self::Drawer(Drawer::Downloads) | Self::DownloadFiles(_) => (600., 460.),
-            Self::Drawer(_) => (432., 460.),
+            Self::Drawer(_) => (432., 600.),
             _ => (460., 300.),
         };
         size(px(width), px(height))

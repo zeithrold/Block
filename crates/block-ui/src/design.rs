@@ -64,6 +64,7 @@ pub(super) enum Icon {
     ArrowLeft,
     ArrowRight,
     More,
+    Menu,
     Info,
     Error,
     Warning,
@@ -234,6 +235,11 @@ impl Icon {
             Self::ArrowRight,
             "icons/arrow-right.svg",
             include_bytes!("../assets/icons/arrow-right.svg"),
+        ),
+        (
+            Self::Menu,
+            "icons/menu.svg",
+            include_bytes!("../assets/icons/menu.svg"),
         ),
         (
             Self::More,

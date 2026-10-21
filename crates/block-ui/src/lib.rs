@@ -1858,7 +1858,8 @@ impl Block {
             | UiAction::Play
             | UiAction::WizardNext
             | UiAction::OnboardingNext
-            | UiAction::SignIn => components::ButtonVariant::Primary,
+            | UiAction::SignIn
+            | UiAction::Drawer(Some(Drawer::Profiles)) => components::ButtonVariant::Primary,
             UiAction::SignOut(_) | UiAction::ConfirmDelete => {
                 components::ButtonVariant::Destructive
             }

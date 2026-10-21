@@ -68,7 +68,7 @@ Keep one checkout per host at `~/block-src` and update it with `git fetch`. Neve
   - Turn dialogs and drawers into separate GPUI windows.
   - Delete the overlay, inert, paint-scale and accessibility code.
 - [x] **P2 Comparison tool:** a `--scenario` debug flag, a native screenshot script and a side-by-side board.
-- [ ] **P3 Inventory:** list every prototype page, state and feature in `STATUS.md` as the completion checklist.
+- [x] **P3 Inventory:** list every prototype page, state and feature in `STATUS.md` as the completion checklist.
 - [ ] **P4 Pages.** Each page ships with its full real backend:
   - [ ] Home
   - [ ] Accounts and sign-in: Microsoft PKCE and Device Code; Authlib-injector with provider management and launch injection; Offline

@@ -1,12 +1,12 @@
 # Block Pilot Status
 
-Updated: 2026-10-21. This is implementation status, not a completion claim.
+Updated: 2026-10-22. This is implementation status, not a completion claim.
 
 ## Baseline and foundations
 
 - [x] Freeze the unchanged React product reference: Block-UI commit `fd2713b` (local only).
 - [x] Migrate decisions and remove old evidence before staging; push retained baseline `5c634fe` to main.
-- [x] Native-window baseline CI on Windows AMD64, Linux AMD64 and macOS ARM64 (`def4a1b`).
+- [x] Native-window/scenario baseline CI on Windows AMD64, Linux AMD64 and macOS ARM64 (`c82964f`).
 - [x] Remove vendored framework patches; published GPUI 0.3.9 / Base 0.8.0 compile unchanged.
 - [x] Fixed-size/native-chrome implementation; macOS real Welcome 960×600 and separate version picker 760×520 captured.
 - [x] Independent dialog-window implementation: focus existing purposes, preserve drafts, reject stale results and close children with parents.
@@ -91,11 +91,12 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 - [ ] Light/dark layouts, spacing, typography, icons, states and short displays — actual native screenshots for user review.
 - [ ] Page/detail/wizard transitions and correct directions — upstream opacity/offset, 460 ms easing and reduced motion.
 - [ ] Text input/IME, clipboard, search, scrolling, keyboard actions and draft/error preservation — real interactive workflows.
-- [ ] Complete prototype route/component/option walk — extend grouped inventory for any discovered product behavior.
+- [x] Prototype route/component/option inventory: Home selectors/launch/downloads; Accounts/wizard/providers; Bundled/Separated games and component/settings subpages; five Settings sections; About/Welcome and shared navigation. Demo-only routes, sample identities/catalogs/progress and browser channels are excluded from product behavior.
 
 ## Verification
 
-- Baseline `5c634fe`: local full `just check` passed 381 tests. Native-window fixes `def4a1b` passed CI run `39625139939`. Scenario tooling and dialog layout changes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests; their CI remains pending.
+- Native-window/scenario baseline `c82964f` passed three-platform CI run `39628760512`. Current Home/selector changes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests; their CI remains pending.
+- Old ui-parity evidence was removed before staging. `gpui-product-progress.md` already existed in earlier history; its current-tree deletion does not rewrite those prior commits.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
 - `scripts/snap-native --no-build` captured 40 debug UI scenarios in both themes (118 primary/child images); `scripts/parity-board` built `target/parity-shots/index.html`. Release compilation excludes scenario flags and fixture code.
 - The React reference server is available at `http://127.0.0.1:5173/`; the separate prototype screenshot task has not supplied its images. The board labels missing reference shots explicitly. Current native fixture records cover implemented Microsoft/Vanilla/NeoForge models; additional provider/loader scenarios await their real implementations.
@@ -105,6 +106,9 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.
 - Local auth fixtures and UI scenarios are separate from live-provider sign-in and actual game acceptance.
+- The prototype's outer page padding is not launcher content. Compare cropped Home at 432×768 and management content at 960×600 logical pixels; browser viewport dimensions must allow for that padding.
+- Home visual work: square initial fallback, provider badge, centered launch icon/text and integrated Profile selector; official version details remain in the launch tooltip. Reserve macOS traffic-light space and give account/Profile windows usable list height. Real account avatars and full Home acceptance remain open.
+- Screenshot capture includes the launched process's allocated windows, including inactive floating panels; their actual CGWindowID capture was inspected. It does not require System Events activation.
 - Required user review/sign-in/smoke pending means implementation readiness can be reported, but Pilot completion cannot.
 
 ## Needs-user
