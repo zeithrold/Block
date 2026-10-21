@@ -20,6 +20,7 @@ pub(super) enum Appearance {
 pub(super) struct Preferences {
     pub appearance: Appearance,
     pub reduce_motion: bool,
+    pub onboarding_complete: bool,
 }
 
 impl Preferences {
@@ -98,6 +99,7 @@ mod tests {
         let preferences = Preferences {
             appearance: Appearance::Dark,
             reduce_motion: true,
+            ..Preferences::default()
         };
         preferences.save(root.path())?;
         assert_eq!(Preferences::load(root.path())?, preferences);

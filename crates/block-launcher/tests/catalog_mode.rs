@@ -10,6 +10,7 @@ fn new_catalog_bundles_and_rejects_shared_profiles_without_writing() -> anyhow::
     assert_eq!(catalog.snapshot()?.profile_mode, ProfileMode::Bundled);
     let (instance, profile) =
         catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+    assert_eq!(profile.name, instance.name);
     let path = root.path().join("catalog.json");
     let original = fs::read(&path)?;
     assert!(
@@ -56,6 +57,9 @@ fn conversion_is_durable_one_way_and_preserves_worlds_and_settings() -> anyhow::
     catalog.create_profile(&instance.id, "Extra".into())?;
     catalog.copy_profile(&profile.id, "Copy".into())?;
     assert_eq!(catalog.snapshot()?.profiles.len(), 3);
+    let (_, separated_profile) =
+        catalog.create_instance("Separated game".into(), "1.20.6".into(), None, None)?;
+    assert_eq!(separated_profile.name, "Default");
     Ok(())
 }
 

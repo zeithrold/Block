@@ -29,7 +29,7 @@ rustup component add rustfmt clippy
 just run
 ```
 
-Sign in with Microsoft through the system browser, create an Instance, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
+On first launch, complete the 8:5 welcome guide and choose an appearance. Block then opens its portrait Home. Sign in with Microsoft through the system browser, create a game through Setup and Review, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
 
 Each Instance can have several Profiles. A Profile selects its launch target, Java, memory, additional arguments, default account and **Shared** or **Isolated** mutable game data. Copying a Profile copies settings and preserves its data policy: Isolated copies get a new directory; Shared copies continue sharing the Instance directory. Deleting a Profile keeps game files. Shared assets, libraries and managed Java remain in the content-addressed cache. A canonical game-directory lock prevents simultaneous writers.
 
@@ -110,3 +110,5 @@ The workspace enables Clippy's `all`, `pedantic`, and `nursery` groups. Addition
 ## Minecraft manifest experiment
 
 See [the experiment notes](experiments/minecraft-manifests/README.md) for the schema coverage, recorded full-corpus results, and reproduction steps. The parser is a separate workspace crate; the desktop application remains the default member.
+
+Native experience migration and platform receipts: [GPUI product progress](docs/gpui-product-progress.md). Desktop packaging and the `one.ztd.block` product identity: [packaging](packaging/README.md).

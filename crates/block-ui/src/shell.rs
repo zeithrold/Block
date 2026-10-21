@@ -40,9 +40,11 @@ pub(super) struct ShellState {
     pub return_focus: Option<gpui::FocusHandle>,
     pub backwards: bool,
     pub confirm_separation: bool,
+    pub wizard: super::game_wizard::WizardState,
+    pub onboarding_step: usize,
 }
 
-fn brand(size: f32) -> impl IntoElement {
+pub(super) fn brand(size: f32) -> impl IntoElement {
     img(BRAND.clone()).size(px(size))
 }
 
@@ -55,6 +57,8 @@ impl Block {
         let home = self.tab == Tab::Home && self.form.is_none();
         let content = if home {
             self.home(cx).into_any_element()
+        } else if self.tab == Tab::Onboarding {
+            self.onboarding(cx).into_any_element()
         } else {
             self.management(cx).into_any_element()
         };
@@ -87,36 +91,56 @@ impl Block {
             .bg(rgb(self.palette.background))
             .text_color(rgb(self.palette.foreground))
             .text_size(px(14.))
-            .child(
-                div()
-                    .h(px(52.))
-                    .flex_shrink_0()
-                    .px_4()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(self.button(
-                        "app-menu",
-                        "☰  Block",
-                        UiAction::Drawer(Some(Drawer::Menu)),
-                        cx,
-                    ))
-                    .child(if home {
-                        self.button(
-                            "downloads",
-                            "Downloads",
-                            UiAction::Drawer(Some(Drawer::Downloads)),
-                            cx,
-                        )
-                    } else {
-                        self.button("back-home", "← Home", UiAction::Tab(Tab::Home), cx)
-                    }),
-            )
+            .child(self.chrome(home, cx))
             .child(div().flex_1().min_h_0().child(content));
         if let Some(drawer) = self.shell.drawer {
             root = root.child(self.drawer(drawer, cx));
         }
         root
+    }
+
+    fn chrome(&self, home: bool, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        let first_run = self.tab == Tab::Onboarding;
+        div()
+            .id("window-chrome")
+            .h(px(48.))
+            .flex_shrink_0()
+            .px_4()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(if first_run {
+                div().text_sm().child("Block · Welcome").into_any_element()
+            } else {
+                self.button("app-menu", "☰", UiAction::Drawer(Some(Drawer::Menu)), cx)
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .id("window-drag-region")
+                    .flex_1()
+                    .h_full()
+                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                        if event.click_count == 2 {
+                            window.zoom_window();
+                        } else {
+                            window.start_window_move();
+                        }
+                    }),
+            )
+            .children((!first_run).then(|| {
+                if home {
+                    self.button(
+                        "downloads",
+                        "Downloads",
+                        UiAction::Drawer(Some(Drawer::Downloads)),
+                        cx,
+                    )
+                } else {
+                    self.button("back-home", "← Home", UiAction::Tab(Tab::Home), cx)
+                }
+            }))
+            .child(window_controls(cx))
     }
 
     fn animate(
@@ -375,7 +399,7 @@ impl Block {
                 Tab::Profiles => self.profiles_page(cx).into_any_element(),
                 Tab::Settings => self.settings(cx).into_any_element(),
                 Tab::About => self.about(cx).into_any_element(),
-                Tab::Home | Tab::Instances => self.instance_page(cx).into_any_element(),
+                Tab::Home | Tab::Onboarding | Tab::Instances => self.instance_page(cx).into_any_element(),
             },
         };
         let mut detail = div()
@@ -444,6 +468,15 @@ impl Block {
             .child(note(
                 "Built with Rust and GPUI. Brand artwork from Block-Icon, icon-v4.",
             ))
+            .child(
+                div()
+                    .id("product-website")
+                    .px_3()
+                    .py_2()
+                    .cursor_pointer()
+                    .on_click(|_, _, cx| cx.open_url("https://block.ztd.one"))
+                    .child("block.ztd.one"),
+            )
             .child(self.button(
                 "show-output",
                 if self.show_output {
@@ -547,6 +580,7 @@ impl Block {
         let sheet = self.animate(content.into_any_element(), "drawer", true);
         div()
             .absolute()
+            .occlude()
             .inset_0()
             .flex()
             .flex_col()
@@ -561,4 +595,32 @@ impl Block {
                     .child(sheet),
             )
     }
+}
+
+fn window_controls<T: 'static>(cx: &Context<'_, T>) -> impl IntoElement + use<T> {
+    div()
+        .flex()
+        .gap_1()
+        .child(
+            div()
+                .id("window-minimize")
+                .tab_index(0)
+                .px_3()
+                .py_2()
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(0x0073_7373)))
+                .on_click(cx.listener(|_, _, window, _| window.minimize_window()))
+                .child("−"),
+        )
+        .child(
+            div()
+                .id("window-close")
+                .tab_index(0)
+                .px_3()
+                .py_2()
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(0x00dc_2626)))
+                .on_click(cx.listener(|_, _, window, _| window.remove_window()))
+                .child("×"),
+        )
 }

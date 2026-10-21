@@ -3,6 +3,8 @@
 mod appearance;
 mod crash_view;
 mod engine;
+mod game_wizard;
+mod onboarding;
 mod shell;
 mod text_input;
 
@@ -32,6 +34,7 @@ use tokio::sync::mpsc::Receiver;
 
 use appearance::{Appearance, Palette, Preferences};
 use engine::{Engine, Message};
+use game_wizard::{WizardPage, WizardStep};
 use shell::{Drawer, ShellState};
 use text_input::TextInput;
 
@@ -48,6 +51,7 @@ pub struct LaunchOptions {
 enum Tab {
     #[default]
     Home,
+    Onboarding,
     Instances,
     Profiles,
     Accounts,
@@ -65,6 +69,11 @@ enum UiAction {
     ResetPreferences,
     ConfirmSeparate(bool),
     SeparateProfiles,
+    WizardNext,
+    WizardBack,
+    WizardPage(Option<WizardPage>),
+    OnboardingNext,
+    OnboardingBack,
     SelectInstance(String),
     SelectProfile(String),
     SelectAccount(String),
@@ -246,6 +255,14 @@ impl Block {
                 format!("Could not read preferences: {error}"),
             ),
         };
+        let tab = if preferences.onboarding_complete {
+            Tab::Home
+        } else {
+            Tab::Onboarding
+        };
+        if tab == Tab::Home {
+            window.resize(gpui::size(px(432.), px(768.)));
+        }
         let mut view = Self {
             shell: ShellState::default(),
             saved_preferences: preferences.clone(),
@@ -258,7 +275,7 @@ impl Block {
             selected_profile: None,
             pending_profile: options.profile,
             selected_account: None,
-            tab: Tab::Home,
+            tab,
             form: None,
             engine,
             messages,
@@ -619,6 +636,11 @@ impl Block {
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
         let previous_page = (self.tab, self.form.is_some());
         match action {
+            UiAction::OnboardingNext => self.advance_onboarding(window),
+            UiAction::OnboardingBack => {
+                self.shell.onboarding_step = self.shell.onboarding_step.saturating_sub(1);
+                self.shell.revision = self.shell.revision.wrapping_add(1);
+            }
             UiAction::Tab(tab) => {
                 if self.tab == Tab::Settings && tab != Tab::Settings {
                     self.preferences = self.saved_preferences.clone();
@@ -646,7 +668,12 @@ impl Block {
             UiAction::ReduceMotion => {
                 self.preferences.reduce_motion = !self.preferences.reduce_motion;
             }
-            UiAction::ResetPreferences => self.preferences = Preferences::default(),
+            UiAction::ResetPreferences => {
+                self.preferences = Preferences {
+                    onboarding_complete: self.saved_preferences.onboarding_complete,
+                    ..Preferences::default()
+                };
+            }
             UiAction::SavePreferences => {
                 match self
                     .engine
@@ -694,6 +721,7 @@ impl Block {
                 self.shell.drawer = None;
             }
             UiAction::CreateInstance => {
+                self.shell.wizard = game_wizard::WizardState::default();
                 self.tab = Tab::Instances;
                 self.form = Some(Form::Instance(InstanceForm {
                     name: input("My Minecraft", "Instance name", cx),
@@ -701,6 +729,17 @@ impl Block {
                     directory: input("", "Automatic installation location", cx),
                     neoforge: false,
                 }));
+            }
+            UiAction::WizardNext => {
+                if self.validate_instance_draft(cx) {
+                    self.shell.wizard.next();
+                    self.focus_field(false, window, cx);
+                }
+            }
+            UiAction::WizardBack => self.shell.wizard.back(),
+            UiAction::WizardPage(page) => {
+                self.shell.wizard.open_page(page);
+                self.focus_field(false, window, cx);
             }
             UiAction::ToggleLoader => {
                 if let Some(Form::Instance(form)) = &mut self.form {
@@ -848,7 +887,12 @@ impl Block {
 
     fn focus_field(&self, backwards: bool, window: &mut Window, cx: &Context<'_, Self>) {
         let fields = match &self.form {
-            Some(Form::Instance(form)) => vec![&form.name, &form.version, &form.directory],
+            Some(Form::Instance(form)) => match self.shell.wizard.page {
+                Some(WizardPage::Version) => vec![&form.version],
+                Some(WizardPage::Location) => vec![&form.directory],
+                None if self.shell.wizard.step == WizardStep::Setup => vec![&form.name],
+                Some(WizardPage::Loader) | None => Vec::new(),
+            },
             Some(Form::Profile(form)) => {
                 let mut fields = vec![&form.name, &form.memory];
                 if !form.managed {
@@ -866,6 +910,14 @@ impl Block {
                 return;
             }
         };
+        if fields.is_empty() {
+            if backwards {
+                window.focus_prev();
+            } else {
+                window.focus_next();
+            }
+            return;
+        }
         let selected = fields
             .iter()
             .position(|field| field.read(cx).focus_handle(cx).is_focused(window));
@@ -877,6 +929,26 @@ impl Block {
             }
         });
         fields[index].read(cx).focus_handle(cx).focus(window);
+    }
+
+    fn validate_instance_draft(&mut self, cx: &Context<'_, Self>) -> bool {
+        let Some(Form::Instance(form)) = &self.form else {
+            return false;
+        };
+        let directory = form.directory.read(cx).value();
+        let message = if form.name.read(cx).value().trim().is_empty() {
+            Some("Enter a game name")
+        } else if form.version.read(cx).value().trim().is_empty() {
+            Some("Choose a Minecraft version")
+        } else if !directory.trim().is_empty() && !PathBuf::from(directory.trim()).is_absolute() {
+            Some("Choose an absolute installation directory")
+        } else {
+            None
+        };
+        message.is_none_or(|message| {
+            self.report(message.into());
+            false
+        })
     }
 
     fn save_instance(&mut self, cx: &Context<'_, Self>) {
@@ -1285,18 +1357,7 @@ impl Block {
         form: &InstanceForm,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        panel().gap_3().child(div().text_2xl().child("Create an instance"))
-            .child(field("Name", &form.name))
-            .child(field("Minecraft version", &form.version))
-            .child(div().flex().flex_wrap().gap_2().children(self.versions.iter().take(8).enumerate().map(|(index, version)| self.button(format!("version-{index}"), version.clone(), UiAction::SelectVersion(version.clone()), cx))))
-            .child(note("Choose a release above, or type an exact Minecraft version. Native platform compatibility is checked before installation."))
-            .child(self.button("loader-toggle", if form.neoforge { "NeoForge 20.6.144 · Minecraft 1.20.6" } else { "Vanilla · click to choose NeoForge" }, UiAction::ToggleLoader, cx))
-            .child(field("Installation location (optional)", &form.directory))
-            .child(self.button("browse-install", "Choose folder…", UiAction::BrowseInstall, cx))
-            .child(note("Leave the location empty to use Block's data folder. Downloads are verified and shared safely; the default profile uses isolated game data."))
-            .child(div().flex().flex_wrap().gap_2()
-                .child(self.button("install-instance", "Create and install", UiAction::SaveInstance, cx))
-                .child(self.button("cancel-instance", "Cancel", UiAction::CancelForm, cx)))
+        self.render_game_wizard(form, cx)
     }
 
     fn profile_form(&self, form: &ProfileForm, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
@@ -1585,6 +1646,52 @@ mod tests {
     }
 
     #[gpui::test]
+    fn first_run_onboarding_saves_only_on_completion_and_default_reset_keeps_it(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, _messages) = super::Engine::with_root(root.path().into())?;
+            let (view, cx) = cx.add_window_view(test_view);
+            cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.tab = super::Tab::Onboarding;
+                cx.notify();
+            });
+            click_selector(cx, "welcome-next");
+            assert_eq!(view.read_with(cx, |view, _| view.shell.onboarding_step), 1);
+            click_selector(cx, "welcome-dark");
+            assert!(!root.path().join("preferences.json").exists());
+            click_selector(cx, "welcome-next");
+            assert_eq!(
+                view.read_with(cx, |view, _| view.tab),
+                super::Tab::Onboarding
+            );
+            click_selector(cx, "welcome-next");
+            assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Home);
+            let saved = super::Preferences::load(root.path())?;
+            assert!(saved.onboarding_complete);
+            assert_eq!(saved.appearance, super::Appearance::Dark);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.handle(super::UiAction::Tab(super::Tab::Settings), window, cx);
+                    view.handle(super::UiAction::ResetPreferences, window, cx);
+                });
+            });
+            assert!(view.read_with(cx, |view, _| view.preferences.onboarding_complete));
+            assert!(
+                block_launcher::catalog::Catalog::open(root.path())?
+                    .snapshot()?
+                    .instances
+                    .is_empty()
+            );
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
     fn native_home_menu_settings_preview_cancel_and_escape(cx: &mut gpui::TestAppContext) {
         let (view, cx) = cx.add_window_view(test_view);
         cx.update(|window, cx| {
@@ -1801,6 +1908,7 @@ mod tests {
             return;
         };
         cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
         cx.simulate_keystrokes("cmd-a");
         cx.simulate_input("世界 🧱");
         assert_eq!(
@@ -1810,7 +1918,8 @@ mod tests {
             }),
             "世界 🧱"
         );
-        cx.simulate_keystrokes("tab cmd-a");
+        click_selector(cx, "wizard-component-version");
+        cx.simulate_keystrokes("cmd-a");
         cx.simulate_input("1.20.1");
         assert_eq!(
             view.read_with(cx, |view, cx| match &view.form {
@@ -1819,14 +1928,119 @@ mod tests {
             }),
             "1.20.1"
         );
-        let bounds = cx.debug_bounds("loader-toggle");
-        assert!(bounds.is_some());
-        let Some(bounds) = bounds else {
-            return;
-        };
-        cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        click_selector(cx, "wizard-next");
+        click_selector(cx, "wizard-component-loader");
+        click_selector(cx, "wizard-loader-neoforge");
         assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.neoforge && form.version.read(cx).value() == "1.20.6")));
         assert!(!view.read_with(cx, |view, _| view.busy));
+    }
+
+    #[gpui::test]
+    fn game_wizard_keeps_component_drafts_and_cancel_never_writes_catalog(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+            catalog.create_instance("Existing game".into(), "1.20.6".into(), None, None)?;
+            let original = std::fs::read(root.path().join("catalog.json"))?;
+            let snapshot = catalog.snapshot()?;
+            let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
+            let (view, cx) = cx.add_window_view(test_view);
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.apply_catalog(snapshot);
+                cx.notify();
+            });
+            click_selector(cx, "create-instance");
+            cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            cx.simulate_keystrokes("cmd-a");
+            cx.simulate_input("世界 draft");
+            click_selector(cx, "wizard-component-version");
+            cx.simulate_keystrokes("cmd-a");
+            cx.simulate_input("1.20.1");
+            click_selector(cx, "wizard-next");
+            click_selector(cx, "wizard-component-location");
+            let directory = root.path().join("future-game");
+            cx.simulate_input(&directory.to_string_lossy());
+            click_selector(cx, "wizard-next");
+            click_selector(cx, "wizard-component-version");
+            assert!(view.read_with(cx, |view, cx| {
+                matches!(&view.form, Some(super::Form::Instance(form))
+                    if form.name.read(cx).value() == "世界 draft"
+                        && form.version.read(cx).value() == "1.20.1"
+                        && form.directory.read(cx).value() == directory.to_string_lossy())
+            }));
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            click_selector(cx, "cancel-instance");
+            assert!(view.read_with(cx, |view, _| view.form.is_none()));
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            assert!(!directory.exists());
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn game_wizard_review_starts_real_install_only_after_final_confirmation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+            let (existing, _) =
+                catalog.create_instance("Existing game".into(), "1.20.6".into(), None, None)?;
+            let original = std::fs::read(root.path().join("catalog.json"))?;
+            let snapshot = catalog.snapshot()?;
+            let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
+            let (view, cx) = cx.add_window_view(test_view);
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.apply_catalog(snapshot);
+                cx.notify();
+            });
+            click_selector(cx, "create-instance");
+            cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            view.update(cx, |view, cx| {
+                if let Some(super::Form::Instance(form)) = &view.form {
+                    form.directory.update(cx, |field, cx| {
+                        field.set_value(&existing.directory.to_string_lossy(), cx);
+                    });
+                }
+            });
+            click_selector(cx, "wizard-next");
+            assert_eq!(
+                view.read_with(cx, |view, _| view.shell.wizard.step),
+                super::game_wizard::WizardStep::Review
+            );
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            click_selector(cx, "wizard-back");
+            click_selector(cx, "wizard-next");
+            click_selector(cx, "wizard-next");
+            assert!(view.read_with(cx, |view, _| view.busy));
+            // The real engine rejects this overlapping location before network
+            // installation. That failure proves the final action reached it.
+            for _ in 0..200 {
+                view.update(cx, super::Block::poll);
+                if !view.read_with(cx, |view, _| view.busy) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            assert!(view.read_with(cx, |view, _| {
+                view.status
+                    .contains("installation directory overlaps another instance")
+            }));
+            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            assert_eq!(catalog.snapshot()?.instances.len(), 1);
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[gpui::test]

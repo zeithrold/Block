@@ -9,6 +9,11 @@
       "asset": "block.svg",
       "source": "Native/Block-Icon/icon-v4.svg",
       "sha256": "5eacbcad36291a48dff83119633d328182a4e6fbf50e788e64f348241ec4f27a"
+    },
+    {
+      "asset": "block-1024.png",
+      "source": "Native/Block-Icon/icon-v4-1024.png",
+      "sha256": "df8f446c4aa94a688718997d9e77ec9a48c86cbd46dc86592f49754bf9f4ec6d"
     }
   ]
 }

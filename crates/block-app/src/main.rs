@@ -5,7 +5,7 @@ use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
 use gpui::{
-    App, AppContext as _, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds,
+    App, AppContext as _, Application, Bounds, KeyBinding, WindowBounds, WindowDecorations,
     WindowOptions, px, size,
 };
 
@@ -94,13 +94,12 @@ fn configure_application(cx: &mut App) {
     .detach();
 }
 
-fn window_options(cx: &App, title: &str) -> WindowOptions {
+fn window_options(cx: &App, _title: &str) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
     WindowOptions {
-        titlebar: Some(TitlebarOptions {
-            title: Some(title.to_owned().into()),
-            ..Default::default()
-        }),
+        titlebar: None,
+        window_decorations: Some(WindowDecorations::Client),
+        app_id: Some("one.ztd.block".into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(360.0), px(540.0))),
         ..Default::default()
@@ -108,12 +107,7 @@ fn window_options(cx: &App, title: &str) -> WindowOptions {
 }
 
 fn open_launcher(cx: &mut App, options: LaunchOptions) -> anyhow::Result<()> {
-    let mut window_options = window_options(cx, "Block");
-    window_options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(
-        None,
-        size(px(432.0), px(768.0)),
-        cx,
-    )));
+    let window_options = window_options(cx, "Block");
     cx.open_window(window_options, |window, cx| {
         cx.new(|cx| Block::new(window, cx, options))
     })?;

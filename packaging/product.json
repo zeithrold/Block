@@ -1,0 +1,10 @@
+{
+  "name": "Block",
+  "executable": "block",
+  "application_id": "one.ztd.block",
+  "website": "https://block.ztd.one",
+  "description": "Minecraft Java Edition launcher",
+  "icon_png": "crates/block-ui/assets/block.png",
+  "icon_macos_png": "crates/block-ui/assets/block-1024.png",
+  "icon_svg": "crates/block-ui/assets/block.svg"
+}

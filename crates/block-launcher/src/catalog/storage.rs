@@ -335,6 +335,9 @@ impl Catalog {
         let mut profile = new_profile(&instance, "Default".into());
         profile.target_id = target_id;
         self.transaction(true, |state| {
+            if state.profile_mode == ProfileMode::Bundled {
+                profile.name.clone_from(&instance.name);
+            }
             ensure!(
                 !state
                     .instances
