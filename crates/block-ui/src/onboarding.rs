@@ -142,8 +142,6 @@ impl Block {
                 .into_any_element(),
         };
         if let Some(error) = &self.shell.onboarding.error {
-            let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Alert);
-            semantic.set_label(error.clone());
             body = div()
                 .flex()
                 .flex_col()
@@ -159,7 +157,6 @@ impl Block {
                         .text_color(rgb(self.palette.destructive))
                         .p_3()
                         .text_sm()
-                        .accessibility(semantic, false, |_, _, _| {})
                         .child(error.clone()),
                 )
                 .into_any_element();
@@ -289,15 +286,9 @@ impl Block {
         title: &str,
         description: &str,
     ) -> gpui::Stateful<gpui::Div> {
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Heading);
-        semantic.set_label(format!(
-            "Step {} of 3. {title}",
-            self.shell.onboarding.step.index() + 1
-        ));
         let mut heading = div()
             .id("onboarding-step-heading")
-            .debug_selector(|| "onboarding-step-heading".into())
-            .accessibility(semantic, false, |_, _, _| {});
+            .debug_selector(|| "onboarding-step-heading".into());
         if let Some(focus) = &self.shell.onboarding.heading_focus {
             heading = heading.track_focus(focus);
         }
@@ -652,8 +643,7 @@ impl Block {
         };
         let skip_disabled = creating;
         let reason = self.onboarding_footer_reason(has_account, cx);
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(reason.clone());
+
         patterns::management_footer(window.viewport_size(), self.palette)
             .id("onboarding-footer")
             .debug_selector(|| "onboarding-footer".into())
@@ -674,7 +664,6 @@ impl Block {
                         self.palette.muted
                     }))
                     .truncate()
-                    .accessibility(semantic, false, |_, _, _| {})
                     .child(reason),
             )
             .child(
@@ -893,11 +882,22 @@ impl Block {
         {
             return;
         }
+        if self
+            .shell
+            .surfaces
+            .layers()
+            .any(|entry| matches!(entry.kind, Surface::OnboardingSection(_)))
+        {
+            self.shell
+                .surfaces
+                .open(Surface::OnboardingSection(page), window, cx);
+            return;
+        }
         self.shell.onboarding.error = None;
         self.open_game_wizard_page(Some(page), cx);
         self.motion_dirty = true;
         self.shell
-            .overlays
+            .surfaces
             .open(Surface::OnboardingSection(page), window, cx);
         let input = match page {
             WizardPage::Version => self.shell.wizard.version_search.as_ref(),
@@ -920,7 +920,7 @@ impl Block {
     ) {
         let Some(page) = self
             .shell
-            .overlays
+            .surfaces
             .top()
             .and_then(|layer| match layer.kind {
                 Surface::OnboardingSection(page) => Some(page),
@@ -947,7 +947,7 @@ impl Block {
             }
             self.open_game_wizard_page(None, cx);
         }
-        self.shell.overlays.close(window, &self.focus, cx);
+        self.shell.surfaces.close(window, &self.focus, cx);
         self.motion.direction = super::motion::Direction::Back;
         self.motion_dirty = true;
         cx.notify();
@@ -962,8 +962,7 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return div().into_any_element();
         };
-        let mut error_semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Alert);
-        error_semantic.set_label(self.shell.wizard.error.clone().unwrap_or_default());
+
         let content = match page {
             WizardPage::Version => self.wizard_version(form, cx).into_any_element(),
             WizardPage::Loader => self.wizard_loader(form, cx).into_any_element(),
@@ -998,7 +997,6 @@ impl Block {
                             .mt_3()
                             .text_sm()
                             .text_color(rgb(self.palette.destructive))
-                            .accessibility(error_semantic.clone(), false, |_, _, _| {})
                             .child(error.clone())
                     })),
             )

@@ -127,11 +127,21 @@ impl Block {
         };
         let count = tracker.transfers().count();
         let completed = tracker.verified();
-        let trigger = motion::disclosure_trigger("download-expand", "Observed resources", &self.shell.downloads.disclosure,
-            self.palette, self.motion_preferences(), cx,
-            cx.listener(|view, (): &(), _, cx| { view.expand_downloads(cx); cx.notify(); }))
-            .accessibility_description(format!("{completed} verified of {count} observed resources. The overall download plan is unknown."))
-            .h_auto().min_w_0().p_2();
+        let trigger = motion::disclosure_trigger(
+            "download-expand",
+            "Observed resources",
+            &self.shell.downloads.disclosure,
+            self.palette,
+            self.motion_preferences(),
+            cx,
+            cx.listener(|view, (): &(), _, cx| {
+                view.expand_downloads(cx);
+                cx.notify();
+            }),
+        )
+        .h_auto()
+        .min_w_0()
+        .p_2();
         let groups = div()
             .flex()
             .flex_col()
@@ -182,8 +192,6 @@ impl Block {
                 view.handle(UiAction::DownloadFiles(group), window, cx);
             }),
         )
-        .accessibility_label(format!("Open {}", group.label()))
-        .accessibility_description(format!("{} observed resources", files.len()))
         .w_full()
         .h_auto()
         .min_h(px(64.))
@@ -264,12 +272,7 @@ impl Block {
         } else {
             ProgressState::from_counts(file.received, file.size)
         };
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Group);
-        semantic.set_label(format!("Resource {}", file.id));
-        semantic.set_description(format!(
-            "{status}. {} bytes received. {} retries.",
-            file.received, file.retries
-        ));
+
         div()
             .id(gpui::SharedString::from(format!(
                 "download-file-{}",
@@ -279,7 +282,6 @@ impl Block {
                 let id = format!("download-file-{}", file.id);
                 move || id
             })
-            .accessibility(semantic, false, |_, _, _| {})
             .min_w_0()
             .flex()
             .flex_col()

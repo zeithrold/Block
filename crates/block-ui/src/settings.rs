@@ -883,7 +883,6 @@ impl Block {
                                 view.handle(UiAction::SettingsPage(index), window, cx);
                             }),
                         )
-                        .accessibility_label(label)
                         .w_full()
                         .h(px(40.))
                         .gap_3()
@@ -1197,8 +1196,7 @@ impl Block {
                 }
             },
         );
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(friendly.clone());
+
         let step = |increase: bool| {
             components::button_sized(
                 if increase {
@@ -1224,11 +1222,6 @@ impl Block {
                 },
                 cx.listener(move |view, (): &(), _, cx| view.adjust_settings_memory(increase, cx)),
             )
-            .accessibility_label(if increase {
-                "Increase memory by 256 MiB"
-            } else {
-                "Decrease memory by 256 MiB"
-            })
             .child(
                 if increase { Icon::Plus } else { Icon::Minus }
                     .render(14., self.palette.foreground),
@@ -1237,7 +1230,7 @@ impl Block {
         div().min_w_0().flex().flex_col().gap_2()
             .child(self.settings_field(draft, SettingsField::Memory, "Default memory (MiB)", Some("Allowed: 256–65536 MiB. Step: 256 MiB. Arrow Up/Down adjusts the focused value.")))
             .child(div().flex().items_center().gap_2().child(step(false)).child(step(true))
-                .child(note(friendly).id("settings-memory-friendly").accessibility(semantic, false, |_, _, _| {})))
+                .child(note(friendly).id("settings-memory-friendly")))
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.modifiers == gpui::Modifiers::none()
                     && matches!(event.keystroke.key.as_str(), "up" | "down")
@@ -1489,7 +1482,15 @@ mod tests {
         let bounds = cx.debug_bounds("save-preferences");
         assert!(bounds.is_some());
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
         }
         cx.run_until_parked();
         cx.executor()

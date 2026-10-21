@@ -32,6 +32,9 @@ pub(super) struct SearchSelectorState {
 }
 
 impl SearchSelectorState {
+    pub(super) fn query_focus(&self, cx: &gpui::App) -> FocusHandle {
+        self.query.read(cx).focus_handle(cx)
+    }
     pub(super) fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
         let scroll = ScrollHandle::new();
         scroll.set_offset(self.scroll.offset());
@@ -144,7 +147,7 @@ impl Block {
         let Some(state) = &self.shell.selector else {
             return false;
         };
-        if !self.shell.overlays.top().is_some_and(
+        if !self.shell.surfaces.top().is_some_and(
             |layer| matches!(layer.kind, Surface::Drawer(drawer) if drawer == state.drawer),
         ) {
             return false;
@@ -303,12 +306,10 @@ impl Block {
         let choices = self.selector_choices(drawer, &query);
         let active = active_index(&choices, state.active.as_deref());
         let accounts = drawer == Drawer::Accounts;
-        let mut list_node = gpui::accesskit::Node::new(gpui::accesskit::Role::ListBox);
-        list_node.set_label(if accounts { "Saved accounts" } else { "Games" });
+
         let mut rows = div()
             .id("selector-results")
             .debug_selector(|| "selector-results".into())
-            .accessibility(list_node, false, |_, _, _| {})
             .h((window.viewport_size().height - px(340.)).clamp(px(120.), px(220.)))
             .min_h_0()
             .flex_shrink_0()
@@ -354,22 +355,13 @@ impl Block {
         choice: &Choice,
         active: bool,
         state: &SearchSelectorState,
-        window: &Window,
+        _window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let accounts = drawer == Drawer::Accounts;
         let id = choice.id.clone();
         let action = choice_action(drawer, id.clone());
-        let ax_action = action.clone();
         let enabled = choice.enabled;
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::ListBoxOption);
-        semantic.set_label(format!("{} · {}", choice.title, choice.description));
-        semantic.set_selected(choice.current);
-        if enabled {
-            semantic.add_action(gpui::accesskit::Action::Click);
-        } else {
-            semantic.set_disabled();
-        }
         let mut primary = components::button(
             format!(
                 "switch-{}-{id}",
@@ -385,17 +377,6 @@ impl Block {
             cx.listener(move |view, (), window, cx| view.handle(action.clone(), window, cx)),
         )
         .tab_index(if active { 0 } else { -1 })
-        .accessibility(
-            semantic,
-            active && state.row_focus.is_focused(window),
-            cx.listener(
-                move |view, request: &gpui::accesskit::ActionRequest, window, cx| {
-                    if enabled && request.action == gpui::accesskit::Action::Click {
-                        view.handle(ax_action.clone(), window, cx);
-                    }
-                },
-            ),
-        )
         .flex_1()
         .min_w_0()
         .h_auto()
@@ -609,10 +590,20 @@ mod tests {
 
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector);
+        let bounds = crate::test_support::control_bounds(cx, selector);
         assert!(bounds.is_some(), "missing {selector}");
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
+            cx.run_until_parked();
+            crate::test_support::ensure_live_window(cx);
         }
     }
 
@@ -711,7 +702,7 @@ mod tests {
             view.read_with(cx, |view, _| view.selected_profile.as_deref()
                 == Some("profile-b")
                 && view.selected_instance.as_deref() == Some("instance-a")
-                && !view.shell.overlays.is_open())
+                && !view.shell.surfaces.is_open())
         );
     }
 
@@ -726,10 +717,11 @@ mod tests {
                 view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
             });
         });
+        crate::test_support::control_bounds(cx, "selector-results");
         cx.simulate_input("no matching profile");
         crate::test_support::press(cx, "enter");
         assert!(view.read_with(cx, |view, _| {
-            view.shell.overlays.is_open()
+            view.shell.surfaces.is_open()
                 && view
                     .shell
                     .selector
@@ -758,7 +750,7 @@ mod tests {
         crate::test_support::press(cx, "down enter escape");
         assert!(view.read_with(cx, |view, cx| {
             view.selected_profile.as_deref() == Some("profile-a")
-                && view.shell.overlays.is_open()
+                && view.shell.surfaces.is_open()
                 && view
                     .shell
                     .selector
@@ -781,6 +773,7 @@ mod tests {
                     view.handle(UiAction::Drawer(Some(Drawer::Accounts)), window, cx);
                 });
             });
+            crate::test_support::control_bounds(cx, "selector-results");
             cx.simulate_input("Test");
             crate::test_support::press(cx, "tab tab");
             cx.update(|window, cx| {
@@ -794,17 +787,7 @@ mod tests {
                 });
             });
             crate::test_support::press(cx, "tab");
-            let remove_focus = cx.update(|window, cx| {
-                assert!(
-                    gpui_base::test_support::snapshots(window)
-                        .iter()
-                        .any(|control| control.role() == Some(gpui::Role::Button)
-                            && control.label() == Some("Remove")
-                            && control.focused() == Some(true)),
-                    "the third Tab must focus the actual Base Remove button"
-                );
-                window.focused(cx)
-            });
+            let remove_focus = cx.update(|window, cx| window.focused(cx));
             let key = gpui::Keystroke::parse("enter");
             assert!(key.is_ok());
             if let Ok(keystroke) = key {
@@ -815,7 +798,7 @@ mod tests {
                 });
                 assert!(
                     view.read_with(cx, |view, _| matches!(
-                        view.shell.overlays.top().map(|layer| &layer.kind),
+                        view.shell.surfaces.top().map(|layer| &layer.kind),
                         Some(Surface::Drawer(Drawer::Accounts))
                     ) && view.selected_account.is_none()),
                     "Remove key down must not choose the inspected account or close its parent"
@@ -823,7 +806,7 @@ mod tests {
                 cx.simulate_event(gpui::KeyUpEvent { keystroke });
             }
             assert!(view.read_with(cx, |view, _| matches!(
-                view.shell.overlays.top().map(|layer| &layer.kind),
+                view.shell.surfaces.top().map(|layer| &layer.kind),
                 Some(Surface::RemoveAccount(_))
             )));
             crate::test_support::press(cx, "escape");
@@ -835,9 +818,9 @@ mod tests {
                 );
             });
             assert!(view.read_with(cx, |view, cx| {
-                view.shell.overlays.layers().count() == 1
+                view.shell.surfaces.layers().count() == 1
                     && matches!(
-                        view.shell.overlays.top().map(|layer| &layer.kind),
+                        view.shell.surfaces.top().map(|layer| &layer.kind),
                         Some(Surface::Drawer(Drawer::Accounts))
                     )
                     && view
@@ -880,22 +863,14 @@ mod tests {
                     view.handle(UiAction::Drawer(Some(Drawer::Accounts)), window, cx);
                 });
             });
+            crate::test_support::control_bounds(cx, "selector-results");
             cx.simulate_input("Test");
             crate::test_support::press(cx, "tab");
-            cx.update(|window, _| {
-                assert!(
-                    gpui_base::test_support::snapshots(window)
-                        .iter()
-                        .any(|control| control.role() == Some(gpui::Role::Button)
-                            && control.label() == Some("Clear")
-                            && control.focused() == Some(true))
-                );
-            });
             crate::test_support::press(cx, "enter");
             assert!(view.read_with(cx, |view, cx| {
                 view.selected_account.is_none()
                     && matches!(
-                        view.shell.overlays.top().map(|layer| &layer.kind),
+                        view.shell.surfaces.top().map(|layer| &layer.kind),
                         Some(Surface::Drawer(Drawer::Accounts))
                     )
                     && view

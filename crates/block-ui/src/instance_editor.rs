@@ -543,10 +543,20 @@ mod tests {
 
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector);
+        let bounds = crate::test_support::control_bounds(cx, selector);
         assert!(bounds.is_some(), "missing {selector}");
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
+            cx.run_until_parked();
+            crate::test_support::ensure_live_window(cx);
         }
     }
 

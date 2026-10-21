@@ -7,7 +7,7 @@
 use super::{
     Block, Form, InstanceForm, ProfileForm, Tab, frozen_input,
     motion::{self, Direction, Layer, MotionStyle, Preferences, Scope, Transition},
-    shell::{Drawer, ShellState, Surface},
+    shell::ShellState,
 };
 use gpui::{
     AnyElement, Context, EntityId, Global, IntoElement as _, ParentElement as _, Styled as _,
@@ -29,7 +29,6 @@ pub(super) struct MotionState {
     pub page: Scene,
     pub detail: Scene,
     pub wizard: Scene,
-    pub overlays: Vec<Scene>,
     pub direction: Direction,
 }
 impl Default for MotionState {
@@ -38,7 +37,6 @@ impl Default for MotionState {
             page: Scene::new(Scope::Page),
             detail: Scene::new(Scope::Detail),
             wizard: Scene::new(Scope::Wizard),
-            overlays: Vec::new(),
             direction: Direction::Forward,
         }
     }
@@ -67,13 +65,7 @@ impl MotionState {
             Scope::Page => &self.page,
             Scope::Detail => &self.detail,
             Scope::Wizard => &self.wizard,
-            Scope::Overlay => unreachable!("overlay layers have their own lifetimes"),
         }
-    }
-    pub(super) fn captures_input(&self) -> bool {
-        self.overlays
-            .iter()
-            .any(|scene| scene.current().is_some() || scene.outgoing().is_some())
     }
 }
 
@@ -88,18 +80,6 @@ impl Block {
         }
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
-        let overlay_keys: Vec<_> = self
-            .shell
-            .overlays
-            .layers()
-            .map(|layer| layer.revision.to_string())
-            .collect();
-        self.motion_dirty |= self
-            .motion
-            .overlays
-            .iter()
-            .filter_map(|scene| scene.current().map(|layer| &layer.key))
-            .ne(overlay_keys.iter());
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = format!(
@@ -147,7 +127,7 @@ impl Block {
             self.motion.page.reconcile(
                 Some(Layer {
                     key: page,
-                    snapshot: snapshot.clone(),
+                    _snapshot: snapshot.clone(),
                 }),
                 self.motion.direction,
                 MotionStyle::Navigation,
@@ -157,7 +137,7 @@ impl Block {
             self.motion.detail.reconcile(
                 Some(Layer {
                     key: detail,
-                    snapshot: snapshot.clone(),
+                    _snapshot: snapshot.clone(),
                 }),
                 self.motion.direction,
                 MotionStyle::Navigation,
@@ -167,7 +147,7 @@ impl Block {
             self.motion.wizard.reconcile(
                 wizard.map(|key| Layer {
                     key,
-                    snapshot: snapshot.clone(),
+                    _snapshot: snapshot.clone(),
                 }),
                 self.motion.direction,
                 MotionStyle::Navigation,
@@ -180,36 +160,6 @@ impl Block {
             } else if wizard_changed {
                 self.motion.detail.settle();
             }
-            let layers: Vec<_> = self.shell.overlays.layers().collect();
-            while self.motion.overlays.len() < layers.len() {
-                self.motion.overlays.push(Scene::new(Scope::Overlay));
-            }
-            for (index, scene) in self.motion.overlays.iter_mut().enumerate() {
-                let layer = layers.get(index);
-                let style = layer.map_or_else(
-                    || {
-                        scene.current().map_or(MotionStyle::Dialog, |old| {
-                            old.snapshot
-                                .shell
-                                .overlays
-                                .layers()
-                                .nth(index)
-                                .map_or(MotionStyle::Dialog, |layer| overlay_style(&layer.kind))
-                        })
-                    },
-                    |layer| overlay_style(&layer.kind),
-                );
-                scene.reconcile(
-                    layer.map(|layer| Layer {
-                        key: layer.revision.to_string(),
-                        snapshot: snapshot.clone(),
-                    }),
-                    self.motion.direction,
-                    style,
-                    now,
-                    preferences,
-                );
-            }
             self.motion_dirty = false;
         }
         let mut running = false;
@@ -219,7 +169,6 @@ impl Block {
             &mut self.motion.wizard,
         ]
         .into_iter()
-        .chain(self.motion.overlays.iter_mut())
         .enumerate()
         {
             running |= scene
@@ -228,14 +177,6 @@ impl Block {
         }
         if running {
             window.request_animation_frame();
-        }
-        while self
-            .motion
-            .overlays
-            .last()
-            .is_some_and(|scene| scene.current().is_none() && scene.outgoing().is_none())
-        {
-            self.motion.overlays.pop();
         }
     }
 
@@ -250,7 +191,7 @@ impl Block {
         &self,
         scope: Scope,
         content: AnyElement,
-        window: &Window,
+        _window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         if self.visual_only {
@@ -261,54 +202,19 @@ impl Block {
         // prepare_motion has already settled elapsed transitions; the immutable
         // renderer samples the same frame without changing lifetime ownership.
         let frame = scene.sample(now, self.motion_preferences());
-        let mut viewport = div()
+        let viewport = div()
             .size_full()
             .min_w_0()
             .min_h_0()
             .relative()
             .overflow_hidden();
-        if let (Some(pose), Some(outgoing)) = (frame.outgoing, scene.outgoing()) {
-            let old = match scope {
-                Scope::Page => outgoing.snapshot.render_page_body(window, cx),
-                Scope::Wizard => outgoing.snapshot.render_wizard_body(window, cx),
-                Scope::Detail => outgoing.snapshot.render_detail_body(window, cx),
-                Scope::Overlay => unreachable!("overlays use their own presentation"),
-            };
-            viewport = viewport.child(motion::layer(
-                ("motion-old", scope as usize),
-                pose,
-                true,
-                old,
-            ));
-        }
         viewport
             .child(motion::layer(
                 ("motion-current", scope as usize),
                 frame.current.unwrap_or_default(),
-                false,
                 content,
             ))
             .into_any_element()
-    }
-
-    pub(super) fn render_wizard_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
-        if self.shell.auth.is_some() {
-            self.render_auth_transition_body(window, cx)
-        } else if self.tab == Tab::Onboarding {
-            self.render_onboarding_transition_body(window, cx)
-        } else if matches!(self.form, Some(Form::Instance(_))) {
-            self.render_game_wizard_transition_body(window, cx)
-        } else {
-            div().into_any_element()
-        }
-    }
-
-    pub(super) fn render_detail_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
-        if self.tab == Tab::Settings {
-            self.render_settings_detail(window, cx)
-        } else {
-            self.browser_detail_content(window, cx)
-        }
     }
 
     fn visual_snapshot(&self, cx: &mut Context<'_, Self>) -> Self {
@@ -394,9 +300,8 @@ impl ShellState {
     fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
         Self {
             home: self.home.clone(),
-            drawer_swipe: self.drawer_swipe.clone(),
             connection: self.connection.clone(),
-            overlays: self.overlays.snapshot(),
+            surfaces: self.surfaces.snapshot(),
             home_scroll: frozen_scroll(&self.home_scroll),
             about_scroll: frozen_scroll(&self.about_scroll),
             output_scroll: frozen_scroll(&self.output_scroll),
@@ -421,19 +326,6 @@ impl ShellState {
         }
     }
 }
-const fn overlay_style(surface: &Surface) -> MotionStyle {
-    match surface {
-        Surface::Drawer(Drawer::Menu) | Surface::Select(_) => MotionStyle::Menu {
-            edge: motion::Edge::Bottom,
-            align_trigger: false,
-        },
-        Surface::Drawer(_) | Surface::DownloadFiles(_) => MotionStyle::Drawer {
-            edge: motion::Edge::Bottom,
-        },
-        _ => MotionStyle::Dialog,
-    }
-}
-
 fn frozen_scroll(source: &gpui::ScrollHandle) -> gpui::ScrollHandle {
     let scroll = gpui::ScrollHandle::new();
     scroll.set_offset(source.offset());

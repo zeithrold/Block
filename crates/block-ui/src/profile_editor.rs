@@ -377,8 +377,6 @@ impl Block {
 
     fn profile_save_error(&self) -> Option<gpui::Stateful<gpui::Div>> {
         self.shell.editor.save_error.as_ref().map(|error| {
-            let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Alert);
-            semantic.set_label(error.clone());
             div()
                 .id("profile-save-error")
                 .debug_selector(|| "profile-save-error".into())
@@ -390,7 +388,6 @@ impl Block {
                 .text_color(gpui::rgb(self.palette.destructive))
                 .whitespace_normal()
                 .line_clamp(3)
-                .accessibility(semantic, false, |_, _, _| {})
                 .child(error.clone())
         })
     }

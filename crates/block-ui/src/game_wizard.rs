@@ -1216,7 +1216,22 @@ impl Block {
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
         let review = state.step == WizardStep::Review;
-        match state.page {
+        let page = state.page.filter(|_| {
+            !self.shell.surfaces.layers().any(|entry| {
+                matches!(
+                    entry.kind,
+                    super::shell::Surface::WizardSection(_)
+                        | super::shell::Surface::OnboardingSection(_)
+                )
+            }) || self.shell.surfaces.top().is_some_and(|entry| {
+                matches!(
+                    entry.kind,
+                    super::shell::Surface::WizardSection(_)
+                        | super::shell::Surface::OnboardingSection(_)
+                )
+            })
+        });
+        match page {
             Some(WizardPage::Version) => self.wizard_version(form, cx).into_any_element(),
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
             Some(WizardPage::Location) => self.wizard_location(form, cx).into_any_element(),
@@ -1966,8 +1981,6 @@ impl Block {
                 view.handle(UiAction::WizardPage(Some(page)), window, cx);
             }),
         )
-        .accessibility_label(format!("Configure {title}"))
-        .accessibility_description(value.to_owned())
         // Grid stretch supplies the column width. A percentage width makes
         // Taffy's intrinsic aspect-ratio row use the entire grid's width.
         .w_auto()
@@ -2027,8 +2040,6 @@ impl Block {
             },
             |&(), _, _| {},
         )
-        .accessibility_label(format!("{title}: unavailable"))
-        .accessibility_description(reason.to_owned())
         .w_auto()
         .h_auto()
         .min_w_0()
@@ -2159,9 +2170,7 @@ impl Block {
         let versions = self.matching_wizard_versions(form, cx);
         let count = versions.len();
         let result = if count == 1 { "result" } else { "results" };
-        let mut results = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        results.set_label(format!("{count} version {result}"));
-        results.set_live(gpui::accesskit::Live::Polite);
+
         div().id("wizard-version-picker").flex().flex_col().gap_4()
             .on_key_down(cx.listener(Self::move_wizard_version))
             .child(div().text_xl().child("Minecraft version"))
@@ -2174,7 +2183,7 @@ impl Block {
             .child(components::checkbox("wizard-snapshots", "Include snapshots and early builds", self.shell.wizard.include_snapshots,
                 self.palette, ControlState { disabled: self.busy || self.version_catalog.is_empty(), ..ControlState::default() },
                 cx.listener(|view, &(): &(), window, cx| view.handle(UiAction::WizardSnapshots, window, cx))))
-            .child(div().id("wizard-version-result-count").accessibility(results, false, |_, _, _| {})
+            .child(div().id("wizard-version-result-count")
                 .text_xs().text_color(rgb(self.palette.muted)).child(format!("{count} {result}")))
             .child(self.wizard_version_list(form, versions, cx))
             .child(components::field_with("Selected version ID", &form.version, self.palette, FieldOptions {
@@ -2198,15 +2207,11 @@ impl Block {
             CollectionLoad::Ready if !previous => ("Official metadata is unavailable", "No official metadata is available yet. Release types remain unverified until it loads.".to_owned(), Some("Reload catalog")),
             CollectionLoad::Ready => ("Official version catalog", format!("{} versions loaded. The selected version’s type comes from this metadata.", self.version_catalog.len()), Some("Refresh catalog")),
         };
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(title);
-        semantic.set_description(detail.clone());
-        semantic.set_live(gpui::accesskit::Live::Polite);
+
         let loading = matches!(self.version_load, CollectionLoad::Loading);
         if matches!(self.version_load, CollectionLoad::Ready) && previous {
             return div()
                 .id("wizard-version-catalog-status")
-                .accessibility(semantic, false, |_, _, _| {})
                 .flex()
                 .items_center()
                 .justify_between()
@@ -2224,7 +2229,6 @@ impl Block {
         }
         components::card(self.palette)
             .id("wizard-version-catalog-status")
-            .accessibility(semantic, false, |_, _, _| {})
             .p_3()
             .gap_2()
             .child(
@@ -2262,13 +2266,9 @@ impl Block {
                 "Exact version ID · release type unverified until official metadata loads".into()
             } else { "Exact version ID · not found in the loaded official catalog; installation will verify it".into() }
         }, |entry| format!("Official catalog · {}", Self::wizard_version_kind(entry.kind)));
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label("Selected version source");
-        semantic.set_description(source.clone());
-        semantic.set_live(gpui::accesskit::Live::Polite);
+
         div()
             .id("wizard-selected-version-source")
-            .accessibility(semantic, false, |_, _, _| {})
             .flex()
             .flex_col()
             .gap_2()
@@ -2297,12 +2297,8 @@ impl Block {
     }
 
     fn wizard_version_notice(&self, notice: &str) -> gpui::Stateful<gpui::Div> {
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(notice.to_owned());
-        semantic.set_live(gpui::accesskit::Live::Polite);
         div()
             .id("wizard-version-change-notice")
-            .accessibility(semantic, false, |_, _, _| {})
             .rounded_lg()
             .p_3()
             .bg(rgb(self.palette.secondary))
@@ -2333,22 +2329,93 @@ impl Block {
                 cx,
             )
             .with_scroll(self.shell.wizard.version_scroll.clone());
-        group.container().debug_selector(|| "wizard-version-list".into()).max_h(px(280.)).flex().flex_col().gap_2()
-            .children(versions.into_iter().enumerate().map(|(index, (version, kind))| {
-                let active = version == selected;
-                let neoforge_available = version == "1.20.6";
-                let id = version.clone();
-                group.item(&id, components::radio(format!("wizard-version-{index}"), version.clone(), active, self.palette,
-                    ControlState { disabled: self.busy, ..ControlState::default() }, cx.listener(move |view, &(): &(), window, cx| view.handle(UiAction::SelectVersion(version.clone()), window, cx)))
-                    .accessibility_description(if neoforge_available { "Available installers: Vanilla and NeoForge 20.6.144." } else { "Available installer: Vanilla. No supported mod loader for this version." })
-                    .w_full().min_w_0().px_3().py_2().border_color(rgb(if active { self.palette.primary } else { self.palette.border }))
-                    .child(components::badge(if neoforge_available { "NeoForge" } else { "Vanilla" }, self.palette, BadgeVariant::Outline))
-                    .bg(rgb(if active { self.palette.secondary } else { self.palette.background })).child(div().flex_1())
-                    .children(kind.map(|kind| components::badge(Self::wizard_version_kind(kind), self.palette,
-                        if kind == minecraft_manifest::model::VersionType::Release { BadgeVariant::Success } else { BadgeVariant::Warning }))))
+        group
+            .container()
+            .debug_selector(|| "wizard-version-list".into())
+            .max_h(px(280.))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(
+                versions
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (version, kind))| {
+                        let active = version == selected;
+                        let neoforge_available = version == "1.20.6";
+                        let id = version.clone();
+                        group.item(
+                            &id,
+                            components::radio(
+                                format!("wizard-version-{index}"),
+                                version.clone(),
+                                active,
+                                self.palette,
+                                ControlState {
+                                    disabled: self.busy,
+                                    ..ControlState::default()
+                                },
+                                cx.listener(move |view, &(): &(), window, cx| {
+                                    view.handle(
+                                        UiAction::SelectVersion(version.clone()),
+                                        window,
+                                        cx,
+                                    )
+                                }),
+                            )
+                            .w_full()
+                            .min_w_0()
+                            .px_3()
+                            .py_2()
+                            .border_color(rgb(if active {
+                                self.palette.primary
+                            } else {
+                                self.palette.border
+                            }))
+                            .child(components::badge(
+                                if neoforge_available {
+                                    "NeoForge"
+                                } else {
+                                    "Vanilla"
+                                },
+                                self.palette,
+                                BadgeVariant::Outline,
+                            ))
+                            .bg(rgb(if active {
+                                self.palette.secondary
+                            } else {
+                                self.palette.background
+                            }))
+                            .child(div().flex_1())
+                            .children(kind.map(|kind| {
+                                components::badge(
+                                    Self::wizard_version_kind(kind),
+                                    self.palette,
+                                    if kind == minecraft_manifest::model::VersionType::Release {
+                                        BadgeVariant::Success
+                                    } else {
+                                        BadgeVariant::Warning
+                                    },
+                                )
+                            })),
+                        )
+                    }),
+            )
+            .children(empty.then(|| {
+                patterns::empty_state(
+                    "No matching versions",
+                    "Try another search. Your selected version is preserved.",
+                    self.palette,
+                )
             }))
-            .children(empty.then(|| patterns::empty_state("No matching versions", "Try another search. Your selected version is preserved.", self.palette)))
-            .scroll_area(&self.shell.wizard.version_scroll, "Minecraft versions", self.palette, false).tab_index(-1).tab_stop(false)
+            .scroll_area(
+                &self.shell.wizard.version_scroll,
+                "Minecraft versions",
+                self.palette,
+                false,
+            )
+            .tab_index(-1)
+            .tab_stop(false)
     }
 
     fn wizard_loader_choice(
@@ -2377,13 +2444,6 @@ impl Block {
                 }
             }),
         )
-        .accessibility_description(if neoforge.is_none() {
-            "This loader does not have an installer in Block yet"
-        } else if neoforge == Some(true) {
-            "One supported build: 20.6.144 for Minecraft 1.20.6"
-        } else {
-            "Play the original Minecraft game without a mod loader"
-        })
         .w_full()
         .min_w_0()
         .h_auto()

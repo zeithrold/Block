@@ -22,7 +22,7 @@ pub(super) enum Control {
 impl Control {
     pub(super) fn button(
         id: SharedString,
-        label: SharedString,
+        _label: SharedString,
         role: Role,
         disabled: bool,
         on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
@@ -30,7 +30,6 @@ impl Control {
         Self::Button(Box::new(
             gpui_base::Button::new(id)
                 .role(role)
-                .accessibility_label(label)
                 .disabled(disabled)
                 .on_click(move |_, window, cx| {
                     on_activate(&(), window, cx);
@@ -41,7 +40,7 @@ impl Control {
 
     pub(super) fn checkbox(
         id: SharedString,
-        label: SharedString,
+        _label: SharedString,
         checked: bool,
         disabled: bool,
         on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
@@ -50,7 +49,6 @@ impl Control {
             gpui_base::Checkbox::new(id)
                 .checked(checked)
                 .disabled(disabled)
-                .accessibility_label(label)
                 .on_change(move |_, _, window, cx| {
                     on_activate(&(), window, cx);
                     cx.stop_propagation();
@@ -60,7 +58,7 @@ impl Control {
 
     pub(super) fn radio(
         id: SharedString,
-        label: SharedString,
+        _label: SharedString,
         checked: bool,
         disabled: bool,
         on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
@@ -68,7 +66,6 @@ impl Control {
         let mut radio = gpui_base::Radio::new(id)
             .checked(checked)
             .disabled(disabled)
-            .accessibility_label(label)
             .on_change(move |_, _, window, cx| {
                 on_activate(&(), window, cx);
                 cx.stop_propagation();
@@ -112,17 +109,6 @@ impl Control {
             Self::Radio(control) => {
                 Self::Radio(Box::new((*control).tab_index(index).tab_stop(index >= 0)))
             }
-        }
-    }
-
-    pub(super) fn accessibility_label(self, label: impl Into<SharedString>) -> Self {
-        let label = label.into();
-        match self {
-            Self::Button(control) => Self::Button(Box::new((*control).accessibility_label(label))),
-            Self::Checkbox(control) => {
-                Self::Checkbox(Box::new((*control).accessibility_label(label)))
-            }
-            Self::Radio(control) => Self::Radio(Box::new((*control).accessibility_label(label))),
         }
     }
 }

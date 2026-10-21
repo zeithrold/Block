@@ -21,8 +21,6 @@ mod motion;
 #[cfg(test)]
 mod native_regressions;
 mod onboarding;
-mod overlay;
-mod overlay_drawer;
 mod patterns;
 mod platform;
 mod profile_editor;
@@ -40,6 +38,7 @@ mod text_input;
 mod tooltip;
 mod transitions;
 mod window_geometry;
+mod window_surfaces;
 
 pub use about::BuildInfo;
 pub use crash_view::CrashView;
@@ -956,6 +955,7 @@ impl Block {
         reason = "Concrete UI actions are kept in one dispatcher without a controller framework."
     )]
     fn handle(&mut self, action: UiAction, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.shell.surfaces.activate(window);
         self.motion_dirty = true;
         self.motion.direction = if matches!(
             action,
@@ -973,9 +973,6 @@ impl Block {
         } else {
             motion::Direction::Forward
         };
-        if self.shell.auth.is_some() && matches!(action, UiAction::Tab(_)) {
-            return;
-        }
         if matches!(
             action,
             UiAction::SaveInstance
@@ -1005,7 +1002,7 @@ impl Block {
             UiAction::OnboardingChange(step) => self.change_onboarding_step(step, window, cx),
             UiAction::OnboardingChooseAccount => {
                 self.shell
-                    .overlays
+                    .surfaces
                     .open(shell::Surface::Drawer(Drawer::Accounts), window, cx);
                 self.open_selector(Drawer::Accounts, window, cx);
             }
@@ -1027,12 +1024,15 @@ impl Block {
                 self.complete_onboarding();
             }
             UiAction::Tab(tab) => {
+                if self.shell.auth.is_some() {
+                    self.cancel_auth(window, cx);
+                }
                 if self.tab == Tab::Onboarding && matches!(tab, Tab::Settings | Tab::About) {
                     if tab == Tab::Settings {
                         self.open_settings(cx);
                     }
                     self.shell
-                        .overlays
+                        .surfaces
                         .open(shell::Surface::GuideInformation(tab), window, cx);
                     cx.notify();
                     return;
@@ -1051,7 +1051,7 @@ impl Block {
                 if tab == Tab::Onboarding {
                     self.begin_onboarding(cx);
                 }
-                self.shell.overlays.clear(window, &self.focus, cx);
+                self.shell.surfaces.clear(window, &self.focus, cx);
                 if tab == Tab::Home {
                     window.resize(window_geometry::home_size(window, cx));
                 } else if previous_page.0 == Tab::Home {
@@ -1060,26 +1060,44 @@ impl Block {
             }
             UiAction::DownloadFiles(group) => {
                 self.shell
-                    .overlays
+                    .surfaces
                     .open(shell::Surface::DownloadFiles(group), window, cx);
             }
             UiAction::Drawer(drawer) => {
                 if drawer == Some(Drawer::Menu) {
                     self.open_app_menu_at(None, window, cx);
                 } else if let Some(drawer) = drawer {
-                    self.shell
-                        .overlays
-                        .open(shell::Surface::Drawer(drawer), window, cx);
-                    self.open_selector(drawer, window, cx);
+                    if self
+                        .shell
+                        .surfaces
+                        .open(shell::Surface::Drawer(drawer), window, cx)
+                    {
+                        self.open_selector(drawer, window, cx);
+                    }
                 } else if self
                     .shell
-                    .overlays
+                    .surfaces
+                    .top()
+                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::Auth))
+                {
+                    self.cancel_auth(window, cx);
+                } else if self
+                    .shell
+                    .surfaces
+                    .top()
+                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::WizardSection(_)))
+                {
+                    self.cancel_component_draft(cx);
+                    self.shell.surfaces.close(window, &self.focus, cx);
+                } else if self
+                    .shell
+                    .surfaces
                     .top()
                     .is_some_and(|layer| matches!(layer.kind, shell::Surface::OnboardingSection(_)))
                 {
                     self.finish_onboarding_section(true, window, cx);
                 } else {
-                    let closed = self.shell.overlays.close(window, &self.focus, cx);
+                    let closed = self.shell.surfaces.close(window, &self.focus, cx);
                     if matches!(
                         closed,
                         Some(shell::Surface::GuideInformation(Tab::Settings))
@@ -1114,14 +1132,14 @@ impl Block {
             UiAction::ConfirmSeparate(confirm) => {
                 if confirm {
                     self.shell
-                        .overlays
+                        .surfaces
                         .open(shell::Surface::SeparateProfiles, window, cx);
                 } else {
-                    self.shell.overlays.close(window, &self.focus, cx);
+                    self.shell.surfaces.close(window, &self.focus, cx);
                 }
             }
             UiAction::SeparateProfiles => {
-                self.shell.overlays.close(window, &self.focus, cx);
+                self.shell.surfaces.close(window, &self.focus, cx);
                 self.begin("Enabling separated profiles");
                 if let Some(engine) = &self.engine {
                     engine.separate_profiles();
@@ -1145,12 +1163,13 @@ impl Block {
                 self.collection_mut().detail_visible = true;
                 self.form = None;
             }
-            UiAction::GamesHelp => self
-                .shell
-                .overlays
-                .open(shell::Surface::GamesHelp, window, cx),
+            UiAction::GamesHelp => {
+                self.shell
+                    .surfaces
+                    .open(shell::Surface::GamesHelp, window, cx);
+            }
             UiAction::ProfileModeSettings => {
-                self.shell.overlays.clear(window, &self.focus, cx);
+                self.shell.surfaces.clear(window, &self.focus, cx);
                 self.open_settings(cx);
                 self.tab = Tab::Settings;
                 self.select_settings_page(2, window, cx);
@@ -1207,7 +1226,7 @@ impl Block {
                     "Game selected · ready on Home".into(),
                     feedback::ToastKind::Info,
                 );
-                self.shell.overlays.clear(window, &self.focus, cx);
+                self.shell.surfaces.clear(window, &self.focus, cx);
                 self.form = None;
                 self.apply_profile_account();
             }
@@ -1218,7 +1237,7 @@ impl Block {
                     self.selected_account = Some(id);
                 }
                 self.push_toast("Account selected".into(), feedback::ToastKind::Info);
-                self.shell.overlays.clear(window, &self.focus, cx);
+                self.shell.surfaces.clear(window, &self.focus, cx);
             }
             UiAction::CreateInstance => self.begin_game_wizard(cx),
             UiAction::WizardKind(is_new) => self.wizard_kind(is_new, cx),
@@ -1260,7 +1279,7 @@ impl Block {
             UiAction::WizardProfileConnect => self.wizard_profile_connect(),
             UiAction::DismissToast => self.shell.toast = None,
             UiAction::SelectValue(action) => {
-                self.shell.overlays.close(window, &self.focus, cx);
+                self.shell.surfaces.close(window, &self.focus, cx);
                 self.handle(*action, window, cx);
             }
             UiAction::ProfileIcon(icon) => {
@@ -1289,8 +1308,36 @@ impl Block {
                         self.finish_onboarding_section(false, window, cx);
                     }
                 } else {
+                    if page.is_none()
+                        && self
+                            .shell
+                            .wizard
+                            .page
+                            .is_some_and(|page| !self.validate_wizard_section(page, cx))
+                    {
+                        self.focus_wizard_error(window, cx);
+                        return;
+                    }
+                    if let Some(page) = page
+                        && self
+                            .shell
+                            .surfaces
+                            .layers()
+                            .any(|entry| matches!(entry.kind, shell::Surface::WizardSection(_)))
+                    {
+                        self.shell
+                            .surfaces
+                            .open(shell::Surface::WizardSection(page), window, cx);
+                        return;
+                    }
                     self.open_game_wizard_page(page, cx);
-                    self.focus_field(false, window, cx);
+                    if let Some(page) = page {
+                        self.shell
+                            .surfaces
+                            .open(shell::Surface::WizardSection(page), window, cx);
+                    } else if self.shell.wizard.page.is_none() {
+                        self.shell.surfaces.close(window, &self.focus, cx);
+                    }
                 }
             }
             UiAction::ToggleLoader => {
@@ -1359,7 +1406,7 @@ impl Block {
                     .any(|profile| profile.id == id)
                 {
                     self.shell
-                        .overlays
+                        .surfaces
                         .open(shell::Surface::DeleteProfile(id), window, cx);
                 } else {
                     self.report(
@@ -1370,14 +1417,14 @@ impl Block {
             UiAction::ConfirmDelete => {
                 let id = self
                     .shell
-                    .overlays
+                    .surfaces
                     .top()
                     .and_then(|layer| match &layer.kind {
                         shell::Surface::DeleteProfile(id) => Some(id.clone()),
                         _ => None,
                     });
                 if let Some(id) = id {
-                    self.shell.overlays.close(window, &self.focus, cx);
+                    self.shell.surfaces.close(window, &self.focus, cx);
                     self.begin("Deleting profile metadata");
                     if let Some(engine) = &self.engine {
                         engine.delete_profile(id);
@@ -1401,12 +1448,12 @@ impl Block {
             UiAction::AuthReopen => self.reopen_auth(cx),
             UiAction::RequestSignOut(id) => {
                 self.shell
-                    .overlays
+                    .surfaces
                     .open(shell::Surface::RemoveAccount(id), window, cx);
             }
             UiAction::SignOut(id) => {
                 if let Some(account) = self.accounts.iter().find(|a| account_id(a) == id).cloned() {
-                    self.shell.overlays.close(window, &self.focus, cx);
+                    self.shell.surfaces.close(window, &self.focus, cx);
                     self.begin("Removing saved credentials");
                     if let Some(engine) = &self.engine {
                         engine.sign_out(account);
@@ -1448,7 +1495,7 @@ impl Block {
             self.shell.backwards = self.tab == Tab::Home || self.form.is_none() && previous_page.1;
             self.shell.revision = self.shell.revision.wrapping_add(1);
         }
-        if focus_first && !self.shell.overlays.is_open() {
+        if focus_first && !self.shell.surfaces.is_open() {
             self.focus_field(false, window, cx);
         }
         self.sync_form_inputs(cx);
@@ -1494,26 +1541,6 @@ impl Block {
     }
 
     fn move_focus(&mut self, backwards: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let entering = self.shell.overlays.is_open()
-            && self.motion.overlays.last().is_some_and(|scene| {
-                scene
-                    .sample(cx.background_executor().now(), self.motion_preferences())
-                    .current
-                    .is_some_and(|pose| pose.scale < 1.)
-            });
-        if entering {
-            if let Some(scene) = self.motion.overlays.last_mut() {
-                scene.settle();
-            }
-            let view = cx.weak_entity();
-            cx.notify();
-            window.defer(cx, move |window, cx| {
-                window.refresh();
-                window.draw(cx).clear(cx);
-                let _ = view.update(cx, |view, cx| view.move_focus(backwards, window, cx));
-            });
-            return;
-        }
         base_overlay::advance_focus(backwards, window, cx);
     }
 
@@ -1826,14 +1853,6 @@ impl Block {
         };
         let id = id.into();
         let visible_label = label.into();
-        let accessible_label = match id.as_ref() {
-            "app-menu" => "Open menu".to_owned(),
-            "toast-dismiss" => "Dismiss notification".to_owned(),
-            "home-profiles" => "Switch game".to_owned(),
-            "sign-in" if visible_label.as_ref() == "+" => "Add account".to_owned(),
-            "create-instance" if visible_label.as_ref() == "+" => "Create game".to_owned(),
-            _ => visible_label.to_string(),
-        };
         let on_activate = cx.listener(move |view, (): &(), window, cx| {
             if view.busy && !Self::available_while_busy(&action) {
                 return;
@@ -1878,10 +1897,16 @@ impl Block {
                 },
                 on_activate,
             )
-        }
-        .accessibility_label(accessible_label);
+        };
         if choice.is_some() || profile_actions || product_choice.is_some() {
-            control.on_prepaint_bounds(move |_, bounds, _, _| anchor.set(Some(bounds)))
+            control.child(
+                gpui::canvas(
+                    move |bounds, _, _| anchor.set(Some(bounds)),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
         } else {
             control
         }
@@ -1994,6 +2019,7 @@ impl Render for Block {
         }
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
+        let previous_window = self.shell.surfaces.enter_window(window);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();
         window.set_window_title(&if self.tab == Tab::Home && self.shell.auth.is_none() {
@@ -2001,7 +2027,9 @@ impl Render for Block {
         } else {
             format!("Block · {title}")
         });
-        self.render_shell(window, cx).into_any_element()
+        let content = self.render_shell(window, cx).into_any_element();
+        self.shell.surfaces.restore_window(previous_window);
+        content
     }
 }
 
@@ -2027,13 +2055,11 @@ fn note(text: impl Into<SharedString>) -> gpui::Stateful<gpui::Div> {
     caller.file().hash(&mut identity);
     caller.line().hash(&mut identity);
     caller.column().hash(&mut identity);
-    let mut node = gpui::accesskit::Node::new(gpui::accesskit::Role::Label);
-    node.set_label(text.to_string());
+
     div()
         .id(("description", identity.finish()))
         .text_xs()
         .opacity(0.65)
-        .accessibility(node, false, |_, _, _| {})
         .child(text)
 }
 
@@ -2221,10 +2247,18 @@ mod tests {
         // so the hitboxes belong to the current view rather than its first frame.
         cx.update(|window, _| window.refresh());
         cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector);
+        let bounds = crate::test_support::control_bounds(cx, selector);
         assert!(bounds.is_some(), "missing selector: {selector}");
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
         }
     }
 
@@ -2621,7 +2655,15 @@ mod tests {
         let Some(bounds) = bounds else {
             return;
         };
+        let window_count = cx.windows().len();
         cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        if cx.windows().len() > window_count
+            && let Some(window) = cx.windows().last()
+        {
+            *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+        }
+        crate::test_support::ensure_live_window(cx);
         cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
         crate::test_support::press(cx, "cmd-a");
         cx.simulate_input("世界 🧱");
@@ -2672,7 +2714,7 @@ mod tests {
             "wizard-unavailable-optifine",
             "wizard-component-location",
         ] {
-            let bounds = cx.debug_bounds(selector);
+            let bounds = crate::test_support::control_bounds(cx, selector);
             assert!(bounds.is_some(), "missing {selector}");
             let Some(bounds) = bounds else {
                 return;
@@ -2890,7 +2932,15 @@ mod tests {
         let Some(bounds) = bounds else {
             return;
         };
+        let window_count = cx.windows().len();
         cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        if cx.windows().len() > window_count
+            && let Some(window) = cx.windows().last()
+        {
+            *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+        }
+        crate::test_support::ensure_live_window(cx);
         view.update(cx, |view, cx| {
             if let Some(super::Form::Profile(form)) = &view.form {
                 form.memory

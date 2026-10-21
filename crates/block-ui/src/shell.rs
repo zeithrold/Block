@@ -40,13 +40,14 @@ pub(super) enum Surface {
     GamesHelp,
     GuideInformation(Tab),
     OnboardingSection(super::WizardPage),
+    WizardSection(super::WizardPage),
+    Auth,
     Select(super::select::SelectState<UiAction>),
 }
 
 #[derive(Debug, Default)]
 pub(super) struct ShellState {
-    pub overlays: super::overlay::OverlayHost<Surface>,
-    pub drawer_swipe: super::overlay_drawer::State,
+    pub surfaces: super::window_surfaces::SurfaceWindows,
     pub connection: super::connection_test::State,
     pub downloads: super::downloads::State,
     pub home_scroll: gpui::ScrollHandle,
@@ -103,7 +104,7 @@ impl HomeState {
 impl ShellState {
     #[cfg(test)]
     pub(super) fn drawer(&self) -> Option<Drawer> {
-        self.overlays.top().and_then(|layer| match layer.kind {
+        self.surfaces.top().and_then(|layer| match layer.kind {
             Surface::Drawer(drawer) => Some(drawer),
             Surface::Select(ref state) if state.menu == Some(super::select::MenuKind::App) => {
                 Some(Drawer::Menu)
@@ -115,6 +116,8 @@ impl ShellState {
             | Surface::GamesHelp
             | Surface::GuideInformation(_)
             | Surface::OnboardingSection(_)
+            | Surface::WizardSection(_)
+            | Surface::Auth
             | Surface::Select(_) => None,
         })
     }
@@ -130,31 +133,28 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let home = self.tab == Tab::Home && self.form.is_none() && self.shell.auth.is_none();
+        let home = self.tab == Tab::Home && self.form.is_none();
         let content = self.transition_content(
             super::motion::Scope::Page,
             self.render_page_body(window, cx),
             window,
             cx,
         );
-        let modal = self.motion.captures_input();
         let mut root = div()
             .id("block-shell")
             .debug_selector(|| "block-shell".into())
             .key_context("LauncherForm")
+            .capture_any_mouse_down(
+                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
+            )
+            .capture_key_down(
+                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
+            )
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
-                    if view.dismiss_tooltip(window, cx) {
-                        cx.stop_propagation();
-                        return;
-                    }
-                    if view.motion.captures_input() && !view.shell.overlays.is_open() {
-                        cx.stop_propagation();
-                        return;
-                    }
                     // Base Dialog owns Escape while a surface is mounted.
-                    if !view.shell.overlays.is_open() {
+                    if !view.shell.surfaces.is_open() {
                         if view.shell.auth.is_some() {
                             view.handle(UiAction::AuthCancel, window, cx);
                             cx.stop_propagation();
@@ -183,15 +183,9 @@ impl Block {
             .text_color(rgb(self.palette.foreground))
             .text_size(px(14.))
             .font_family(super::design::FONT_FAMILY)
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .inert(modal)
-                    .child(self.chrome(window, home, cx)),
-            )
-            .child(div().flex_1().min_h_0().inert(modal).child(content));
-        root = root.children(self.render_overlay_motion(window, cx));
-        root = root.child(self.render_tooltip(window, cx));
+            .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
+            .child(div().flex_1().min_h_0().child(content));
+        root = root.children(self.render_popups(window, cx));
         if let Some(toast) = &self.shell.toast {
             root = root.child(self.render_toast(toast, window, cx));
         }
@@ -204,9 +198,6 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let mut node = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        node.set_label(toast.message.clone());
-        node.set_live(gpui::accesskit::Live::Polite);
         let (icon, color) = match toast.kind {
             super::feedback::ToastKind::Success => {
                 (super::design::Icon::Check, self.palette.success)
@@ -218,7 +209,7 @@ impl Block {
                 (super::design::Icon::Info, self.palette.foreground)
             }
         };
-        let rail = if self.tab == Tab::Home && self.form.is_none() && self.shell.auth.is_none() {
+        let rail = if self.tab == Tab::Home && self.form.is_none() {
             104.
         } else if super::patterns::is_narrow(window.viewport_size()) {
             super::design::NARROW_FOOTER
@@ -237,7 +228,6 @@ impl Block {
                 div()
                     .id("toast")
                     .debug_selector(|| "toast".into())
-                    .accessibility(node, false, |_, _, _| {})
                     .occlude()
                     .max_w(px(560.))
                     .p_3()
@@ -258,9 +248,6 @@ impl Block {
     }
 
     pub(super) fn navigation_title(&self) -> &'static str {
-        if self.shell.auth.is_some() {
-            return "Add account";
-        }
         if self.shell.instance_editor.is_some() {
             return "Instance settings";
         }
@@ -326,14 +313,15 @@ impl Block {
         home: bool,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let authenticating = self.shell.auth.is_some();
+        let authenticating = false;
         let first_run = self.tab == Tab::Onboarding;
         let narrow = super::patterns::is_narrow(window.viewport_size());
         let title = if home { "" } else { self.navigation_title() };
         div()
             .id("window-chrome")
             .h(px(if narrow { 40. } else { 56. }))
-            .border_b_1().border_color(rgb(self.palette.border))
+            .border_b_1()
+            .border_color(rgb(self.palette.border))
             .flex_shrink_0()
             .px_4()
             .flex()
@@ -348,34 +336,43 @@ impl Block {
             })
             .child(
                 div()
-                    .id("window-drag-region")
+                    .id("window-title")
                     .flex_1()
-                    .h_full().flex().items_center().min_w_0()
-                    .child(div().truncate().text_sm().child(title))
-                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
-                        if event.click_count == 2 {
-                            window.zoom_window();
-                        } else {
-                            window.start_window_move();
-                        }
-                    }),
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .min_w_0()
+                    .child(div().truncate().text_sm().child(title)),
             )
             .children((!first_run && !authenticating).then(|| {
                 if home {
-                    div().children((self.busy && self.downloads.is_some()).then(|| super::tooltip::trigger(
-                        self.button("downloads", "", UiAction::Drawer(Some(Drawer::Downloads)), cx)
-                            .accessibility_label("View downloads")
-                            .accessibility_expanded(self.shell.overlays.top().is_some_and(|layer| matches!(layer.kind, Surface::Drawer(Drawer::Downloads) | Surface::DownloadFiles(_))))
-                            .accessibility_description("Real download activity. The overall resource total is not known.")
-                            .child(super::components::progress_ring(super::components::ProgressState::Indeterminate, self.palette)), "View downloads", cx)))
+                    div()
+                        .children((self.busy && self.downloads.is_some()).then(|| {
+                            super::tooltip::trigger(
+                                self.button(
+                                    "downloads",
+                                    "",
+                                    UiAction::Drawer(Some(Drawer::Downloads)),
+                                    cx,
+                                )
+                                .child(
+                                    super::components::progress_ring(
+                                        super::components::ProgressState::Indeterminate,
+                                        self.palette,
+                                    ),
+                                ),
+                                "View downloads",
+                                cx,
+                            )
+                        }))
                         .into_any_element()
                 } else {
                     let (label, action) = self.contextual_back();
                     self.button("back-home", label, action, cx)
-                        .child(super::design::Icon::ArrowLeft.render(16., self.palette.muted)).into_any_element()
+                        .child(super::design::Icon::ArrowLeft.render(16., self.palette.muted))
+                        .into_any_element()
                 }
             }))
-            .children((!self.shell.system_window_chrome).then(|| window_controls(self.palette, cx)))
     }
 
     pub(super) fn render_page_body(
@@ -383,9 +380,6 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
-        if self.shell.auth.is_some() {
-            return self.render_auth_wizard(window, cx).into_any_element();
-        }
         if self.tab == Tab::Onboarding {
             return self.onboarding(window, cx);
         }
@@ -404,9 +398,7 @@ impl Block {
             .accounts
             .iter()
             .find(|account| Some(account_id(account)) == self.selected_account);
-        let mut status = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        status.set_label(self.status.clone());
-        status.set_live(gpui::accesskit::Live::Polite);
+
         let mut content = div()
             .size_full()
             .min_h_0()
@@ -419,7 +411,6 @@ impl Block {
             .child(
                 div()
                     .id("home-status")
-                    .accessibility(status, false, |_, _, _| {})
                     .text_xs()
                     .text_color(rgb(self.palette.muted))
                     .child(self.status.clone()),
@@ -466,7 +457,6 @@ impl Block {
             .text_xl()
             .bg(rgb(self.palette.primary))
             .text_color(rgb(self.palette.on_primary))
-            .accessibility_description(description.clone())
             .child(div().text_xs().truncate().child(description));
         content = content.children(self.home_version(cx)).child(
             div()
@@ -483,10 +473,6 @@ impl Block {
                         cx,
                     )
                     .h_full()
-                    .accessibility_label("Switch game")
-                    .accessibility_expanded(self.shell.overlays.top().is_some_and(|layer| {
-                        matches!(layer.kind, Surface::Drawer(Drawer::Profiles))
-                    }))
                     .child(super::design::Icon::ChevronDown.render(18., self.palette.muted)),
                 ),
         );
@@ -528,8 +514,7 @@ impl Block {
                 block_auth::AccountProvider::Microsoft => "Microsoft",
             };
             let palette = self.palette;
-            let mut badge = gpui::accesskit::Node::new(gpui::accesskit::Role::Label);
-            badge.set_label(format!("Account type: {provider} · Java Edition"));
+
             identity = identity
                 .child(
                     div()
@@ -542,7 +527,6 @@ impl Block {
                     div()
                         .id("home-account-type")
                         .debug_selector(|| "home-account-type".into())
-                        .accessibility(badge, false, |_, _, _| {})
                         .child(super::components::badge(
                             provider,
                             palette,
@@ -592,13 +576,6 @@ impl Block {
             .p_4()
             .border_0()
             .bg(gpui::hsla(0., 0., 0., 0.))
-            .accessibility_label("Switch account")
-            .accessibility_expanded(
-                self.shell
-                    .overlays
-                    .top()
-                    .is_some_and(|layer| matches!(layer.kind, Surface::Drawer(Drawer::Accounts))),
-            )
             .child(super::components::avatar_fallback(
                 name,
                 palette,
@@ -628,9 +605,7 @@ impl Block {
                             0x00e5_e5e5
                         },
                     ))
-                    .opacity(hover)
-                    .paint_scale(0.25_f32.mul_add(hover, 0.75), gpui::point(0.5, 0.5))
-                    .inert(true),
+                    .opacity(hover),
             )
             .child(super::tooltip::trigger(avatar, "Switch account", cx))
     }
@@ -677,14 +652,11 @@ impl Block {
                 ". Type verified by the official version catalog."
             }
         );
-        let mut node = gpui::accesskit::Node::new(gpui::accesskit::Role::Group);
-        node.set_label("Selected game version");
-        node.set_description(description.clone());
+
         Some(super::tooltip::trigger(
             div()
                 .id("home-version")
                 .debug_selector(|| "home-version".into())
-                .accessibility(node, true, |_, _, _| {})
                 .tab_index(0)
                 .flex()
                 .flex_wrap()
@@ -774,9 +746,7 @@ impl Block {
             super::components::ProgressState::Indeterminate,
             |(received, size)| super::components::ProgressState::from_counts(received, size),
         );
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(format!("{}: {}", panel.phase, panel.status));
-        semantic.set_live(gpui::accesskit::Live::Polite);
+
         div()
             .id("home-task")
             .debug_selector(|| "home-task".into())
@@ -799,18 +769,13 @@ impl Block {
                         div()
                             .id("home-task-phase")
                             .debug_selector(|| "home-task-phase".into())
-                            .accessibility(semantic, false, |_, _, _| {})
                             .text_sm()
                             .child(panel.phase),
                     )
                     .child(div().text_xs().truncate().child(panel.status.clone()))
                     .children(
-                        (panel.phase != "Running" && panel.phase != "Monitoring interrupted").then(
-                            || {
-                                super::components::progress(progress, self.palette)
-                                    .accessibility_label("Task progress")
-                            },
-                        ),
+                        (panel.phase != "Running" && panel.phase != "Monitoring interrupted")
+                            .then(|| super::components::progress(progress, self.palette)),
                     )
                     .child(note(panel.resource.map_or_else(
                         || {
@@ -829,7 +794,6 @@ impl Block {
             )
             .children(self.can_stop().then(|| {
                 self.button("home-stop", "", UiAction::Stop, cx)
-                    .accessibility_label("Stop current operation")
                     .child(super::design::Icon::Stop.render(14., self.palette.foreground))
             }))
     }
@@ -851,197 +815,28 @@ impl Block {
         self.render_settings(window, cx)
     }
 
-    fn render_overlay_motion(
+    pub(super) fn render_surface_window(
         &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> Vec<gpui::AnyElement> {
-        let mut result = Vec::new();
-        let now = cx.background_executor().now();
-        for (index, scene) in self.motion.overlays.iter().enumerate() {
-            let frame = scene.sample(now, self.motion_preferences());
-            if frame.captures_input {
-                result.push(
-                    div()
-                        .id(("overlay-shield", index))
-                        .absolute()
-                        .inset_0()
-                        .occlude()
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .into_any_element(),
-                );
-            }
-            if let (Some(pose), Some(old)) = (frame.outgoing, scene.outgoing())
-                && let Some(layer) = old.snapshot.shell.overlays.layers().nth(index)
-            {
-                result.push(
-                    old.snapshot
-                        .overlay_presentation(
-                            layer,
-                            OverlayPresentation {
-                                pose,
-                                backdrop_opacity: frame.backdrop_opacity,
-                                inert: true,
-                            },
-                            window,
-                            cx,
-                        )
-                        .into_any_element(),
-                );
-            }
-            if let Some(pose) = frame.current
-                && let Some(layer) = self.shell.overlays.layers().nth(index)
-            {
-                result.push(
-                    self.overlay_presentation(
-                        layer,
-                        OverlayPresentation {
-                            pose,
-                            backdrop_opacity: frame.backdrop_opacity,
-                            inert: index + 1 < self.shell.overlays.layers().count(),
-                        },
-                        window,
-                        cx,
-                    )
-                    .into_any_element(),
-                );
-            }
-        }
-        result
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "All overlay surfaces share one positioning, focus and dismissal implementation."
-    )]
-    fn overlay_presentation(
-        &self,
-        layer: &super::overlay::Layer<Surface>,
-        presentation: OverlayPresentation,
+        layer: &super::window_surfaces::SurfaceWindow,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let menu = matches!(layer.kind, Surface::Drawer(Drawer::Menu));
-        let popup = menu || matches!(layer.kind, Surface::Select(_));
-        let dialog = !matches!(
-            layer.kind,
-            Surface::Drawer(_) | Surface::Select(_) | Surface::DownloadFiles(_)
-        );
         let viewport = window.viewport_size();
-        let (role, title) = match &layer.kind {
-            Surface::Drawer(Drawer::Menu) => (gpui::accesskit::Role::Menu, "Block menu"),
-            Surface::Drawer(Drawer::Accounts) => (gpui::accesskit::Role::Dialog, "Switch account"),
-            Surface::Drawer(Drawer::Profiles) => (gpui::accesskit::Role::Dialog, "Switch game"),
-            Surface::Drawer(Drawer::Downloads) => (gpui::accesskit::Role::Dialog, "Downloads"),
-            Surface::DownloadFiles(group) => (gpui::accesskit::Role::Dialog, group.label()),
-            Surface::DeleteProfile(_) => (gpui::accesskit::Role::Dialog, "Delete profile"),
-            Surface::RemoveAccount(_) => (gpui::accesskit::Role::Dialog, "Remove account"),
-            Surface::SeparateProfiles => {
-                (gpui::accesskit::Role::Dialog, "Enable separated profiles")
-            }
-            Surface::GamesHelp => (gpui::accesskit::Role::Dialog, "Instances and Profiles"),
-            Surface::GuideInformation(tab) => (
-                gpui::accesskit::Role::Dialog,
-                if *tab == Tab::Settings {
-                    "Settings"
-                } else {
-                    "About Block"
-                },
-            ),
-            Surface::OnboardingSection(_) => (gpui::accesskit::Role::Dialog, "Game configuration"),
-            Surface::Select(state) => (
-                if state.menu.is_some() {
-                    gpui::accesskit::Role::Menu
-                } else {
-                    gpui::accesskit::Role::ListBox
-                },
-                state.title.as_str(),
-            ),
-        };
-        let content_role = if role == gpui::accesskit::Role::Dialog {
-            gpui::accesskit::Role::Group
-        } else {
-            role
-        };
-        let content_title = if content_role == gpui::accesskit::Role::Group {
-            ""
-        } else {
-            title
-        };
-        let mut semantic = gpui::accesskit::Node::new(content_role);
-        semantic.set_label(content_title);
         let content = div()
-            .id(("overlay-content", layer.revision))
-            .debug_selector(|| "drawer-sheet".into())
-            .accessibility(semantic, false, |_, _, _| {})
-            .tab_group()
-            .occlude()
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_key_down(
-                cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
-                    if view.select_key(event, window, cx) {
-                        cx.stop_propagation();
-                        return;
-                    }
-                    if view.shell.overlays.top().is_some_and(|layer| {
-                        matches!(
-                            layer.kind,
-                            Surface::Drawer(Drawer::Accounts | Drawer::Profiles)
-                                | Surface::OnboardingSection(_)
-                        )
-                    }) {
-                        return;
-                    }
-                    if matches!(event.keystroke.key.as_str(), "down" | "up" | "home" | "end") {
-                        let backwards = matches!(event.keystroke.key.as_str(), "up" | "end");
-                        if matches!(event.keystroke.key.as_str(), "home" | "end")
-                            && let Some(layer) = view.shell.overlays.top()
-                        {
-                            layer.focus.focus(window, cx);
-                        }
-                        view.move_focus(backwards, window, cx);
-                        cx.stop_propagation();
-                    }
-                }),
-            )
-            .max_h((viewport.height - px(64.)).max(px(160.)))
-            .p_5()
+            .id(("surface-content", layer.revision))
+            .size_full()
+            .min_h_0()
             .flex()
             .flex_col()
             .gap_3()
-            .rounded_xl()
-            .border_1()
-            .border_color(rgb(self.palette.border))
-            .bg(rgb(self.palette.popover));
-        let mut content = super::scroll_area::viewport_with_role(
+            .p_5();
+        let mut content = super::scroll_area::viewport(
             content,
             &layer.scroll,
-            content_title,
+            layer.kind.title(),
             self.palette,
             false,
-            content_role,
-        )
-        .tab_index(-1)
-        .tab_stop(false);
-        let draggable = matches!(
-            layer.kind,
-            Surface::Drawer(Drawer::Accounts | Drawer::Profiles | Drawer::Downloads)
         );
-        if draggable {
-            let revision = layer.revision;
-            content = content
-                .child(self.drawer_swipe_handle(revision, cx))
-                .on_prepaint_bounds({
-                    let view = cx.weak_entity();
-                    move |_, bounds, _, cx| {
-                        let _ = view.update(cx, |view, _| {
-                            view.shell
-                                .drawer_swipe
-                                .record_height(revision, bounds.size.height);
-                        });
-                    }
-                });
-        }
         content = match &layer.kind {
             Surface::Drawer(Drawer::Menu) => content,
             Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => content
@@ -1065,228 +860,104 @@ impl Block {
             Surface::GuideInformation(tab) => content.p_0().child(div().h((viewport.height - px(160.)).max(px(220.))).w_full().min_h_0()
                 .child(if *tab == Tab::Settings { self.render_settings(window, cx).into_any_element() } else { self.render_about(window, cx).into_any_element() })),
             Surface::OnboardingSection(page) => content.p_0().gap_0().overflow_hidden().child(self.render_onboarding_section(*page, window, cx)),
+            Surface::Auth => content.p_0().child(self.render_auth_wizard(window, cx)),
+            Surface::WizardSection(_) => content.p_0().child(self.render_game_wizard_transition_body(window, cx))
+                .child(self.button("section-done", "Done", UiAction::WizardPage(None), cx))
+                .child(self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)),
             Surface::Select(state) => content.p_1().gap_0().rounded_lg().child(self.select_options(state, cx)),
         };
-        if !popup && !matches!(layer.kind, Surface::OnboardingSection(_)) {
-            content = content.child(self.button(
-                "close-drawer",
-                if dialog { "Cancel" } else { "Close" },
-                UiAction::Drawer(None),
-                cx,
-            ));
+        if !matches!(
+            layer.kind,
+            Surface::OnboardingSection(_)
+                | Surface::WizardSection(_)
+                | Surface::Auth
+                | Surface::Select(_)
+        ) {
+            content =
+                content.child(self.button("close-drawer", "Close", UiAction::Drawer(None), cx));
         }
-        let mut motion_viewport = viewport;
-        if !popup && !dialog {
-            motion_viewport.height = (viewport.height - px(48.)).min(px(460.));
-        }
-        let mut offset = presentation.pose.offset(motion_viewport);
-        let swipe = self.shell.drawer_swipe.frame(
-            layer.revision,
-            motion_viewport.height,
-            cx.background_executor().now(),
-            self.motion_preferences(),
-        );
-        if draggable {
-            offset.y += swipe.offset;
-            if swipe.running {
-                window.request_animation_frame();
-            }
-        }
-        content = content
+        div()
+            .id(("surface-window", layer.revision))
+            .key_context("LauncherForm")
+            .track_focus(&layer.focus)
+            .capture_any_mouse_down(
+                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
+            )
+            .capture_key_down(
+                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
+            )
+            .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
+                view.move_focus(false, window, cx)
+            }))
+            .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
+                view.move_focus(true, window, cx)
+            }))
+            .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    view.handle(UiAction::Drawer(None), window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .size_full()
+            .min_h_0()
             .relative()
-            .left(offset.x)
-            .top(offset.y)
-            .opacity(presentation.pose.opacity);
-        let mut backdrop = div()
-            .id(("overlay-backdrop", layer.revision))
-            .inert(presentation.inert)
-            .absolute()
-            .inset_0();
-        if presentation.pose.scale < 1. && !presentation.inert {
-            // Scaling suppresses descendant input geometry. Keep the current
-            // focus identity on the unscaled host until the first keyboard
-            // event finishes the entrance and is routed to the real control.
-            // Otherwise even Escape has no dispatch path during the 100 ms.
-            let revision = layer.revision;
-            backdrop = backdrop
-                .track_focus(&window.focused(cx).unwrap_or_else(|| layer.focus.clone()))
-                .on_key_down(
-                    cx.listener(move |view, event: &gpui::KeyDownEvent, window, cx| {
-                        if view
-                            .shell
-                            .overlays
-                            .top()
-                            .is_none_or(|top| top.revision != revision)
-                        {
-                            return;
-                        }
-                        if let Some(scene) = view.motion.overlays.last_mut() {
-                            scene.settle();
-                        }
-                        let event = event.clone();
-                        cx.notify();
-                        if !popup && event.keystroke.key_char.is_some() {
-                            // Install the real input handler before AppKit returns
-                            // to its native IME. Do not synthesize printable text.
-                            window.defer(cx, |window, cx| {
-                                window.refresh();
-                                window.draw(cx).clear(cx);
-                            });
-                            return;
-                        }
-                        window.defer(cx, move |window, cx| {
-                            window.refresh();
-                            if !event.is_held {
-                                window.dispatch_keystroke(event.keystroke, cx);
-                            }
-                        });
-                        cx.stop_propagation();
-                    }),
-                );
-        }
-        if popup {
-            let anchor = if let Surface::Select(state) = &layer.kind {
-                state.anchor
-            } else {
-                gpui::point(px(12.), px(52.))
-            };
-            // The shared Select records its trigger's left/bottom plus a 6px
-            // gap. Use that actual anchor even when the popup snaps sideways
-            // to fit the window, rather than scaling about a guessed corner.
-            let scale_origin = gpui::point(
-                anchor.x + offset.x,
-                anchor.y
-                    - px(if matches!(layer.kind, Surface::Select(_)) {
-                        6.
-                    } else {
-                        8.
-                    })
-                    + offset.y,
-            );
-            backdrop = backdrop.child(
-                gpui_base::Positioner::corner(gpui::Anchor::TopLeft, anchor)
-                    .margin(px(8.))
-                    .occlude()
-                    .child(
-                        content
-                            .paint_scale_at(presentation.pose.scale, scale_origin)
-                            .w(if let Surface::Select(state) = &layer.kind {
-                                state.width.min((viewport.width - px(16.)).max(px(1.)))
-                            } else {
-                                px(224.).min((viewport.width - px(16.)).max(px(1.)))
-                            }),
-                    ),
-            );
-        } else {
-            backdrop = backdrop
-                .bg(gpui::hsla(
-                    0.,
-                    0.,
-                    0.,
-                    (112. / 255.)
-                        * presentation.backdrop_opacity
-                        * if draggable { swipe.backdrop } else { 1. },
-                ))
-                .flex();
-            if dialog {
-                backdrop = backdrop.items_center().justify_center().p_4().child(
-                    content
-                        .paint_scale(presentation.pose.scale, gpui::point(0.5, 0.5))
-                        .w_full()
-                        .max_w(px(if matches!(layer.kind, Surface::GuideInformation(_)) {
-                            900.
-                        } else {
-                            440.
-                        })),
-                );
-            } else {
-                backdrop = backdrop.flex_col().justify_end().child(
-                    content
-                        .w_full()
-                        .max_h((viewport.height - px(48.)).min(px(460.))),
-                );
-            }
-        }
-        super::base_overlay::Modal {
-            view: cx.weak_entity(),
-            focus: layer.focus.clone(),
-            revision: layer.revision,
-            label: title.to_owned().into(),
-            depth: self
-                .shell
-                .overlays
-                .layers()
-                .position(|entry| entry.revision == layer.revision)
-                .unwrap_or(0),
-            inert: presentation.inert,
-            content: backdrop.into_any_element(),
-        }
+            .bg(rgb(self.palette.background))
+            .text_color(rgb(self.palette.foreground))
+            .text_size(px(14.))
+            .font_family(super::design::FONT_FAMILY)
+            .child(content)
+            .children(self.render_popups(window, cx))
+    }
+
+    fn render_popups(&self, window: &Window, cx: &Context<'_, Self>) -> Vec<gpui::AnyElement> {
+        self.shell
+            .surfaces
+            .layers()
+            .filter_map(|layer| {
+                let Surface::Select(state) = &layer.kind else {
+                    return None;
+                };
+                if layer.parent.window_id() != window.window_handle().window_id() {
+                    return None;
+                }
+                Some(
+                    gpui_base::Positioner::corner(gpui::Anchor::TopLeft, state.anchor)
+                        .margin(px(8.))
+                        .child(
+                            div()
+                                .id(("select-popup", layer.revision))
+                                .debug_selector(|| "drawer-sheet".into())
+                                .track_focus(&layer.focus)
+                                .key_context("LauncherForm")
+                                .on_mouse_down_out(cx.listener(|view, _, window, cx| {
+                                    view.handle(UiAction::Drawer(None), window, cx);
+                                }))
+                                .on_key_down(cx.listener(|view, event, window, cx| {
+                                    if view.select_key(event, window, cx) {
+                                        cx.stop_propagation();
+                                    } else if event.keystroke.key == "escape" {
+                                        view.handle(UiAction::Drawer(None), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }))
+                                .w(state
+                                    .width
+                                    .min((window.viewport_size().width - px(16.)).max(px(1.))))
+                                .max_h((window.viewport_size().height - px(24.)).max(px(100.)))
+                                .p_1()
+                                .rounded_lg()
+                                .border_1()
+                                .border_color(rgb(self.palette.border))
+                                .bg(rgb(self.palette.popover))
+                                .child(self.select_options(state, cx)),
+                        )
+                        .into_any_element(),
+                )
+            })
+            .collect()
     }
 }
 
 #[cfg(test)]
 #[path = "home_tests.rs"]
 mod home_tests;
-
-#[derive(Clone, Copy)]
-struct OverlayPresentation {
-    pose: super::motion::Pose,
-    backdrop_opacity: f32,
-    inert: bool,
-}
-
-#[derive(Clone, Copy)]
-enum WindowControl {
-    Minimize,
-    Close,
-}
-
-fn apply_window_control(control: WindowControl, window: &mut Window) {
-    match control {
-        WindowControl::Minimize => window.minimize_window(),
-        WindowControl::Close => window.remove_window(),
-    }
-}
-
-fn window_controls(palette: super::Palette, cx: &Context<'_, Block>) -> impl IntoElement + use<> {
-    div().flex().gap_1().children(
-        [
-            (
-                "window-minimize",
-                super::design::Icon::Minus,
-                WindowControl::Minimize,
-            ),
-            (
-                "window-close",
-                super::design::Icon::Close,
-                WindowControl::Close,
-            ),
-        ]
-        .map(|(id, icon, control)| {
-            let control = super::components::button_sized(
-                id,
-                "",
-                palette,
-                super::components::ButtonVariant::Ghost,
-                super::components::ButtonSize::Icon,
-                super::components::ControlState::default(),
-                cx.listener(move |_, (): &(), window, _| apply_window_control(control, window)),
-            )
-            .child(icon.render(16., palette.muted))
-            .accessibility_label(if matches!(control, WindowControl::Close) {
-                "Close Block"
-            } else {
-                "Minimize Block"
-            });
-            super::tooltip::trigger(
-                control,
-                if id == "window-close" {
-                    "Close Block"
-                } else {
-                    "Minimize Block"
-                },
-                cx,
-            )
-        }),
-    )
-}

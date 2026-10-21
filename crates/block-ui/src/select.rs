@@ -195,7 +195,7 @@ impl<A> SelectState<A> {
 impl Block {
     fn can_open_select(&self, identity: &SelectIdentity) -> bool {
         (!self.busy || Self::available_while_busy(&identity.action()))
-            && !self.shell.overlays.layers().any(|layer| {
+            && !self.shell.surfaces.layers().any(|layer| {
                 matches!(&layer.kind, Surface::Select(state) if &state.identity == identity)
             })
     }
@@ -382,9 +382,9 @@ impl Block {
         kind: ProductChoice,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
-        let focus = self.shell.overlays.trigger_focus(id, cx);
+        let focus = self.shell.surfaces.trigger_focus(id, cx);
         let disabled = self.busy && !Self::available_while_busy(&UiAction::OpenProductSelect(kind));
-        let open = self.shell.overlays.top().is_some_and(
+        let open = self.shell.surfaces.top().is_some_and(
             |layer| matches!(&layer.kind, Surface::Select(state) if state.product == Some(kind)),
         );
         let anchor = Rc::new(Cell::new(None));
@@ -396,8 +396,8 @@ impl Block {
             .open(open)
             .disabled(disabled)
             .focus_handle(&focus)
-            .accessibility_label(label)
-            .accessibility_value(value.to_owned())
+
+
             .on_open_change(move |open, window, cx| {
                 let _ = view.update(cx, |view, cx| {
                     if open {
@@ -408,10 +408,10 @@ impl Block {
                             window,
                             cx,
                         );
-                    } else if view.shell.overlays.top().is_some_and(|layer|
+                    } else if view.shell.surfaces.top().is_some_and(|layer|
                         matches!(&layer.kind, Surface::Select(state) if state.product == Some(kind))) {
                         // Base owns focus restoration for its own Cancel path.
-                        view.shell.overlays.discard();
+                        view.shell.surfaces.discard();
                     }
                     view.motion_dirty = true;
                     cx.notify();
@@ -426,9 +426,9 @@ impl Block {
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .on_prepaint_bounds({
+                .child({
                     let anchor = pointer_anchor.clone();
-                    move |_, bounds, _, _| anchor.set(Some(bounds))
+                    gpui::canvas(move |bounds, _, _| anchor.set(Some(bounds)), |_, _, _, _| {}).absolute().inset_0()
                 })
                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |view, _, window, cx| {
                     if disabled { return; }
@@ -491,7 +491,7 @@ impl Block {
             .position(|choice| choice.selected)
             .unwrap_or(0);
         let focus = cx.focus_handle().tab_stop(true);
-        self.shell.overlays.open(
+        self.shell.surfaces.open(
             Surface::Select(SelectState {
                 title: title.into(),
                 choices,
@@ -651,7 +651,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> bool {
-        let Some(layer) = self.shell.overlays.top_mut() else {
+        let Some(layer) = self.shell.surfaces.top_mut() else {
             return false;
         };
         let Surface::Select(state) = &mut layer.kind else {
@@ -734,7 +734,7 @@ impl Block {
         state: &SelectState<UiAction>,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
-        let revision = self.shell.overlays.layers().find_map(|layer| {
+        let revision = self.shell.surfaces.layers().find_map(|layer| {
             matches!(&layer.kind, Surface::Select(current) if current.focus == state.focus)
                 .then_some(layer.revision)
         });
@@ -750,7 +750,7 @@ impl Block {
             };
             let action = choice.action.clone();
             let on_activate = cx.listener(move |view, (): &(), window, cx| {
-                if !view.shell.overlays.top().is_some_and(|layer| {
+                if !view.shell.surfaces.top().is_some_and(|layer| {
                     Some(layer.revision) == revision && matches!(layer.kind, Surface::Select(_))
                 }) {
                     return;
@@ -795,12 +795,7 @@ impl Block {
                     .flex_row_reverse()
                     .justify_end()
                     .gap_2()
-                    .child(item.icon.render(16., self.palette.muted))
-                    .accessibility_current(if choice.selected {
-                        gpui::accesskit::AriaCurrent::Page
-                    } else {
-                        gpui::accesskit::AriaCurrent::False
-                    });
+                    .child(item.icon.render(16., self.palette.muted));
                 if choice.selected {
                     option = option.bg(rgb(self.palette.accent));
                 }

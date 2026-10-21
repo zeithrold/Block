@@ -47,24 +47,22 @@ pub(super) fn window<V: gpui::Render + 'static>(
     reason = "Test key sequences are static valid GPUI bindings."
 )]
 pub(super) fn press(cx: &mut gpui::VisualTestContext, keys: &str) {
+    if let Some(window) = cx.windows().last().copied() {
+        *cx = gpui::VisualTestContext::from_window(window, &cx.cx);
+    }
     for key in keys.split(' ') {
         let keystroke = gpui::Keystroke::parse(key).expect("valid test keystroke");
+        let pressed_in = gpui::VisualContext::window_handle(cx);
         cx.simulate_keystrokes(key);
-        cx.simulate_event(gpui::KeyUpEvent { keystroke });
+        if cx
+            .windows()
+            .iter()
+            .any(|window| window.window_id() == pressed_in.window_id())
+        {
+            cx.simulate_event(gpui::KeyUpEvent { keystroke });
+        }
+        ensure_live_window(cx);
     }
-}
-
-/// A headless `TestPlatform` with the production `CoreText` shaper/rasterizer.
-/// The ordinary deterministic context intentionally uses `NoopTextSystem` and
-/// submits no glyph sprites. This helper creates no platform window or `AppKit`
-/// application; use it only for native font/paint behavior regressions.
-#[cfg(target_os = "macos")]
-pub(super) fn core_text_context(name: &'static str) -> gpui::TestAppContext {
-    gpui::TestAppContext::build_with_text_system(
-        gpui::TestDispatcher::new(0),
-        Some(name),
-        std::sync::Arc::new(gpui_text::AppleTextSystem::new()),
-    )
 }
 
 pub(super) fn ready_snapshot() -> Snapshot {
@@ -113,4 +111,46 @@ pub(super) fn test_account() -> anyhow::Result<Account> {
         client_id: "synthetic-public-client".into(),
         credential_ref: "synthetic-no-credentials".into(),
     })
+}
+
+/// Locate the real product control in its owning window after dialog migration.
+pub(super) fn control_bounds(
+    cx: &mut gpui::VisualTestContext,
+    selector: &'static str,
+) -> Option<gpui::Bounds<gpui::Pixels>> {
+    cx.run_until_parked();
+    let alias = match selector {
+        "wizard-next" => Some("section-done"),
+        "wizard-back" => Some("section-cancel"),
+        _ => None,
+    };
+    if let Some(alias) = alias {
+        for window in cx.windows().into_iter().rev() {
+            let mut candidate = gpui::VisualTestContext::from_window(window, &cx.cx);
+            if let Some(bounds) = candidate.debug_bounds(alias) {
+                *cx = candidate;
+                return Some(bounds);
+            }
+        }
+    }
+    for window in cx.windows().into_iter().rev() {
+        let mut candidate = gpui::VisualTestContext::from_window(window, &cx.cx);
+        if let Some(bounds) = candidate.debug_bounds(selector) {
+            *cx = candidate;
+            return Some(bounds);
+        }
+    }
+    None
+}
+
+pub(super) fn ensure_live_window(cx: &mut gpui::VisualTestContext) {
+    let current = gpui::VisualContext::window_handle(cx);
+    let windows = cx.windows();
+    if !windows
+        .iter()
+        .any(|window| window.window_id() == current.window_id())
+        && let Some(window) = windows.last()
+    {
+        *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+    }
 }

@@ -19,7 +19,7 @@ use super::{
     Block, Tab, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState, ProgressState},
     design::Icon,
-    note, patterns, window_geometry,
+    note, patterns,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,7 +58,6 @@ pub(super) struct AuthWizard {
     error: Option<String>,
     return_tab: Tab,
     return_size: Size<Pixels>,
-    return_focus: Option<FocusHandle>,
     focus: Option<FocusHandle>,
     body_scroll: ScrollHandle,
     rail_scroll: ScrollHandle,
@@ -91,7 +90,6 @@ impl AuthWizard {
             error: self.error.clone(),
             return_tab: self.return_tab,
             return_size: self.return_size,
-            return_focus: None,
             focus: Some(cx.focus_handle()),
             body_scroll,
             rail_scroll,
@@ -120,26 +118,26 @@ impl AuthWizard {
 
 impl Block {
     pub(super) fn open_auth_wizard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy || self.shell.auth.is_some() {
+        if self.shell.auth.is_some() {
+            self.shell
+                .surfaces
+                .open(super::shell::Surface::Auth, window, cx);
             return;
         }
-        let return_focus = if self.shell.overlays.is_open() {
-            Some(self.focus.clone())
-        } else {
-            window.focused(cx)
-        };
+        if self.busy {
+            return;
+        }
         let focus = cx.focus_handle();
         let wizard = AuthWizard {
             return_tab: self.tab,
             return_size: window.viewport_size(),
-            return_focus,
             focus: Some(focus.clone()),
             ..AuthWizard::default()
         };
-        self.shell.overlays.clear(window, &self.focus, cx);
         self.shell.auth = Some(wizard);
-        window.resize(window_geometry::management_size(window, cx));
-        focus.focus(window, cx);
+        self.shell
+            .surfaces
+            .open(super::shell::Surface::Auth, window, cx);
         cx.notify();
     }
 
@@ -311,23 +309,17 @@ impl Block {
     }
 
     fn close_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(state) = self.shell.auth.take() else {
+        if self.shell.auth.take().is_none() {
             return;
-        };
-        self.tab = state.return_tab;
-        let dimensions = if self.tab == Tab::Home {
-            window_geometry::home_size(window, cx)
-        } else if state.return_size.width > px(0.) && state.return_size.height > px(0.) {
-            state.return_size
-        } else {
-            window_geometry::management_size(window, cx)
-        };
-        window.resize(dimensions);
-        state
-            .return_focus
-            .as_ref()
-            .unwrap_or(&self.focus)
-            .focus(window, cx);
+        }
+        if self
+            .shell
+            .surfaces
+            .top()
+            .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Auth))
+        {
+            self.shell.surfaces.close(window, &self.focus, cx);
+        }
         cx.notify();
     }
 
@@ -389,7 +381,7 @@ impl Block {
             .flex_col()
             .tab_group()
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" && !view.shell.overlays.is_open() {
+                if event.keystroke.key == "escape" && !view.shell.surfaces.is_open() {
                     view.cancel_auth(window, cx);
                     cx.stop_propagation();
                 }
@@ -747,10 +739,20 @@ mod tests {
 
     fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector);
+        let bounds = crate::test_support::control_bounds(cx, selector);
         assert!(bounds.is_some(), "missing {selector}");
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
+            cx.run_until_parked();
+            crate::test_support::ensure_live_window(cx);
         }
     }
 
@@ -1007,12 +1009,16 @@ mod tests {
                             saved_account: (phase == Phase::Complete).then(|| account.clone()),
                             ..AuthWizard::default()
                         });
+                        view.shell
+                            .surfaces
+                            .open(crate::shell::Surface::Auth, window, cx);
                         view
                     });
+                    crate::test_support::control_bounds(cx, "auth-body");
                     cx.simulate_resize(size(px(width), px(height)));
                     cx.run_until_parked();
-                    let body = cx.debug_bounds("auth-body");
-                    let footer = cx.debug_bounds("auth-footer");
+                    let body = crate::test_support::control_bounds(cx, "auth-body");
+                    let footer = crate::test_support::control_bounds(cx, "auth-footer");
                     assert!(body.is_some() && footer.is_some());
                     let (Some(body), Some(footer)) = (body, footer) else {
                         continue;

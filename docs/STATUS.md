@@ -5,10 +5,12 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 ## Baseline and foundations
 
 - [x] Freeze the unchanged React product reference: Block-UI commit `fd2713b` (local only).
-- [ ] Migrate current decisions, remove old evidence before staging, commit retained work and push; check CI.
-- [ ] Remove vendored framework patches; use published GPUI 0.3.9 / Base 0.8.0 unchanged.
-- [ ] Fixed-size windows, upstream native chrome and fit-to-display sizing.
-- [ ] Independent dialog windows: focus existing instances, preserve drafts, reject stale results, close with parent.
+- [x] Migrate decisions and remove old evidence before staging; push retained baseline `5c634fe` to main.
+- [ ] Current-source CI on Windows AMD64, Linux AMD64 and macOS ARM64.
+- [x] Remove vendored framework patches; published GPUI 0.3.9 / Base 0.8.0 compile unchanged.
+- [x] Fixed-size/native-chrome implementation; macOS real Welcome 960×600 and separate version picker 760×520 captured.
+- [x] Independent dialog-window implementation: focus existing purposes, preserve drafts, reject stale results and close children with parents.
+- [ ] Finish cross-platform CI and remote interactive acceptance for the new window implementation.
 - [ ] Native scenario runner, real window screenshots and prototype/native comparison board.
 - [ ] UI-only smoke on Windows AMD64, Linux AMD64 and Linux ARM64 after window migration.
 
@@ -88,7 +90,8 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Current worktree checks, baseline CI and current-source remote UI smoke are pending; historical passes do not establish these results.
+- Baseline `5c634fe`: local full `just check` passed 381 tests. Current upstream/native-window implementation passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests. CI and remote UI smoke remain pending.
+- Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
 - Required supported launches: macOS Vanilla/Fabric/Quilt/Forge/NeoForge/OptiFine plus Authlib injection; three remote hosts Vanilla/Fabric/modern Forge.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.
@@ -102,11 +105,12 @@ Updated: 2026-10-21. This is implementation status, not a completion claim.
 | Native light/dark screenshots and comparison review | Prepare for 2026-10-22; do not block independent work on immediate taste approval. |
 | Microsoft PKCE/Device Code live sign-in | Morning of 2026-10-22 Asia/Taipei, when user is available; batch hosts, do not start expiring codes early. |
 | Azure public client flow setting | Required before real Device Code verification. |
-| macOS Screen Recording permission | Check during native capture; request only if missing. |
+| macOS Screen Recording permission | Available; actual Welcome/version-picker capture succeeded. No user action needed. |
 | OptiFine official JAR | User downloads when needed, launcher automates installation. |
 | Authlib provider account | Optional live-provider verification; local fixture otherwise. |
 
 ## v0 notes
 
 - Architecture governance, file splitting, layering and lint tidy-up remain deferred.
+- Pedantic/nursery lint groups are disabled; preserve existing expectations, clippy::all, the deny list and unsafe_code=forbid.
 - Accessibility, release packaging/signing and mirror sources remain deferred; required existing notice/reference fixes are in scope.

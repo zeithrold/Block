@@ -125,7 +125,6 @@ fn category_panel(kind: BrowserKind, rows: impl IntoElement) -> gpui::AnyElement
     });
     div()
         .id("games-category-panel")
-        .accessibility(panel, false, |_, _, _| {})
         .flex()
         .flex_col()
         .flex_1()
@@ -171,7 +170,6 @@ impl Block {
                 field.update(cx, |input, cx| {
                     input.set_search(true, cx);
                     input.set_placeholder(&label, cx);
-                    input.set_accessible_label(kind.search(), cx);
                 });
             }
         }
@@ -583,7 +581,6 @@ impl Block {
             heading = heading.child(
                 div()
                     .id("games-tabs")
-                    .accessibility(tab_list, false, |_, _, _| {})
                     .flex()
                     .items_center()
                     .gap_2()
@@ -672,7 +669,6 @@ impl Block {
         let mut rows = div()
             .id("collection-list")
             .debug_selector(|| "collection-list".into())
-            .accessibility(semantic, false, |_, _, _| {})
             .flex_1()
             .min_h_0()
             .flex()
@@ -793,7 +789,6 @@ impl Block {
             },
             cx.listener(move |view, (): &(), window, cx| view.handle(action.clone(), window, cx)),
         )
-        .accessibility_label(label)
     }
 
     fn browser_tab(
@@ -817,7 +812,6 @@ impl Block {
         )
         .track_focus(&self.browser_tab_focus(tab, cx).tab_stop(self.tab == tab))
         .tab_index(if self.tab == tab { 0 } else { -1 })
-        .accessibility_selected(self.tab == tab)
         .flex_1()
         .bg(rgb(if self.tab == tab {
             self.palette.background
@@ -865,7 +859,6 @@ impl Block {
             ControlState::default(),
             cx.listener(|view, (): &(), window, cx| view.handle(UiAction::GamesHelp, window, cx)),
         )
-        .accessibility_label("Instance and Profile explained")
         .w(px(28.))
         .p_0()
         .child(Icon::Help.render(16., self.palette.muted));
@@ -892,13 +885,6 @@ impl Block {
                 view.handle(UiAction::Inspect(id.clone()), window, cx);
             }),
         )
-        .accessibility_label(format!("View {}", record.title))
-        .accessibility_selected(inspected)
-        .accessibility_description(if record.current {
-            "Current selection on Home"
-        } else {
-            ""
-        })
         .track_focus(&focus)
         .w_full()
         .h_auto()
@@ -1001,7 +987,6 @@ impl Block {
         semantic.set_label(label.to_string());
         div()
             .id("browser-status")
-            .accessibility(semantic, false, |_, _, _| {})
             .p_5()
             .py_8()
             .flex()
@@ -1149,7 +1134,6 @@ impl Block {
                             self.button("profile-actions", "", UiAction::ProfileActions, cx)
                                 .w(px(32.))
                                 .p_0()
-                                .accessibility_label("Profile actions")
                                 .child(Icon::More.render(16., self.palette.foreground)),
                         ),
                 );
@@ -1292,8 +1276,6 @@ impl Block {
                 view.handle(UiAction::Inspect(id.clone()), window, cx);
             }),
         )
-        .accessibility_label(format!("View {}", record.title))
-        .accessibility_selected(self.inspected_record().as_deref() == Some(record.id.as_str()))
         .w_full()
         .h(px(64.))
         .p_0()
@@ -1492,7 +1474,6 @@ impl Block {
                             view.handle(action.clone(), window, cx);
                         }),
                     )
-                    .accessibility_label(format!("Edit {label}"))
                     .w(relative(width))
                     .h_auto()
                     .min_h(px(112.))
@@ -1515,7 +1496,6 @@ impl Block {
                 grid = grid.child(
                     components::card(self.palette)
                         .id(id)
-                        .accessibility(semantic, false, |_, _, _| {})
                         .w(relative(width))
                         .min_h(px(112.))
                         .p_4()
@@ -1570,7 +1550,6 @@ impl Block {
                 .flex()
                 .items_center()
                 .gap_3()
-                .accessibility_label(format!("View Profile {}", profile.name))
                 .child(components::profile_avatar(
                     profile.appearance,
                     self.palette,
@@ -1607,7 +1586,6 @@ impl Block {
                 .w_full()
                 .p_4()
                 .rounded_xl()
-                .accessibility_label(format!("View Instance {}", instance.name))
                 .flex()
                 .items_center()
                 .gap_3()

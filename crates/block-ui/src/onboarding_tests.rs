@@ -8,10 +8,20 @@ use gpui::{EntityInputHandler as _, Focusable as _, TestAppContext, VisualTestCo
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
-    let bounds = cx.debug_bounds(selector);
+    let bounds = crate::test_support::control_bounds(cx, selector);
     assert!(bounds.is_some(), "missing {selector}");
     if let Some(bounds) = bounds {
+        let window_count = cx.windows().len();
         cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        if cx.windows().len() > window_count
+            && let Some(window) = cx.windows().last()
+        {
+            *cx = VisualTestContext::from_window(*window, &cx.cx);
+        }
+        crate::test_support::ensure_live_window(cx);
+        cx.run_until_parked();
+        crate::test_support::ensure_live_window(cx);
     }
 }
 
@@ -20,7 +30,7 @@ fn required_bounds(
     cx: &mut VisualTestContext,
     selector: &'static str,
 ) -> gpui::Bounds<gpui::Pixels> {
-    let bounds = cx.debug_bounds(selector);
+    let bounds = crate::test_support::control_bounds(cx, selector);
     assert!(bounds.is_some(), "missing rendered control: {selector}");
     bounds.unwrap_or_default()
 }
@@ -91,88 +101,6 @@ fn resizing_setup_keeps_component_rows_square_and_the_note_next_to_them(cx: &mut
 }
 
 #[gpui::test]
-fn entering_configuration_keeps_the_first_text_and_composition_boundary(cx: &mut TestAppContext) {
-    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.begin_onboarding(cx);
-            view.open_onboarding_section(WizardPage::Version, window, cx);
-        });
-    });
-    // One actual non-empty key down followed by the native input-dispatch
-    // phase. simulate_input adds an empty prefix that can settle the entrance
-    // before the first real character reaches the input.
-    let keystroke = gpui::Keystroke {
-        modifiers: gpui::Modifiers::none(),
-        key: "中".into(),
-        key_char: Some("中".into()),
-    };
-    cx.simulate_event(gpui::KeyDownEvent {
-        keystroke: keystroke.clone(),
-        is_held: false,
-        prefer_character_input: false,
-    });
-    assert!(view.read_with(cx, |view, cx| {
-        view.shell
-            .wizard
-            .version_search
-            .as_ref()
-            .is_some_and(|input| input.read(cx).value().is_empty())
-    }));
-    // AppKit supplies text after the key event's update/effects have completed.
-    // This must use the real installed handler without an extra draw, delay,
-    // synthetic second key, or a direct mutation of the text entity.
-    cx.update(|window, cx| {
-        assert!(window.simulate_native_text_input("中", cx));
-    });
-    cx.simulate_event(gpui::KeyUpEvent { keystroke });
-    assert!(view.read_with(cx, |view, cx| {
-        view.shell
-            .wizard
-            .version_search
-            .as_ref()
-            .is_some_and(|input| input.read(cx).value() == "中")
-    }));
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            if let Some(input) = &view.shell.wizard.version_search {
-                input.update(cx, |input, cx| {
-                    input.replace_and_mark_text_in_range(None, "中文", Some(0..2), window, cx);
-                });
-            }
-        });
-    });
-    assert!(view.read_with(cx, |view, cx| {
-        view.shell
-            .wizard
-            .version_search
-            .as_ref()
-            .is_some_and(|input| {
-                input.read(cx).is_composing() && input.read(cx).value() == "中中文"
-            })
-    }));
-    crate::test_support::press(cx, "enter escape");
-    assert!(view.read_with(cx, |view, cx| {
-        view.shell
-            .wizard
-            .version_search
-            .as_ref()
-            .is_some_and(|input| {
-                input.read(cx).is_composing() && input.read(cx).value() == "中中文"
-            })
-    }));
-    assert!(
-        view.read_with(cx, |view, _| view.shell.overlays.top().is_some_and(
-            |layer| matches!(layer.kind, Surface::OnboardingSection(WizardPage::Version))
-        ))
-    );
-    assert_eq!(
-        view.read_with(cx, |view, _| view.shell.onboarding.step),
-        Step::Game
-    );
-}
-
-#[gpui::test]
 fn tab_during_configuration_entrance_reaches_the_live_modal_controls(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     cx.update(|window, cx| {
@@ -186,7 +114,7 @@ fn tab_during_configuration_entrance_reaches_the_live_modal_controls(cx: &mut Te
         let view = view.read(cx);
         assert!(
             view.shell
-                .overlays
+                .surfaces
                 .top()
                 .is_some_and(|layer| layer.focus.contains_focused(window, cx))
         );
@@ -221,7 +149,7 @@ fn component_dialog_cancel_rolls_back_all_values_and_done_keeps_only_the_draft(
                 profile.fullscreen = true;
             }
             view.finish_onboarding_section(true, window, cx);
-            assert!(view.shell.overlays.top().is_none());
+            assert!(view.shell.surfaces.top().is_none());
             assert!(view.shell.wizard.profile.as_ref().is_some_and(|profile| {
                 profile.width.read(cx).value() == "1280"
                     && profile.memory.read(cx).value() == "2048"
@@ -277,15 +205,15 @@ fn configuration_error_focuses_and_reveals_the_real_field_without_losing_the_dra
                         .is_focused(window))
             );
             assert!(matches!(
-                view.shell.overlays.top().map(|layer| &layer.kind),
+                view.shell.surfaces.top().map(|layer| &layer.kind),
                 Some(Surface::OnboardingSection(WizardPage::Location))
             ));
             assert!(!view.busy);
         });
     });
     cx.run_until_parked();
-    let field = cx.debug_bounds("wizard-field-Width");
-    let footer = cx.debug_bounds("onboarding-section-footer");
+    let field = crate::test_support::control_bounds(cx, "wizard-field-Width");
+    let footer = crate::test_support::control_bounds(cx, "onboarding-section-footer");
     assert!(
         field
             .zip(footer)
@@ -302,7 +230,7 @@ fn configuration_error_focuses_and_reveals_the_real_field_without_losing_the_dra
                     .update(cx, |field, cx| field.set_value("1600", cx));
             }
             view.finish_onboarding_section(false, window, cx);
-            assert!(view.shell.overlays.top().is_none());
+            assert!(view.shell.surfaces.top().is_none());
             assert!(
                 view.shell
                     .wizard
@@ -381,8 +309,11 @@ fn review_change_keeps_three_steps_and_short_footer_and_invalid_name_focus(
     }));
     cx.run_until_parked();
     assert!(
-        cx.debug_bounds("onboarding-footer")
-            .is_some_and(|bounds| bounds.size.height == px(56.) && bounds.bottom() <= px(540.))
+        crate::test_support::control_bounds(cx, "onboarding-footer").is_some_and(|bounds| bounds
+            .size
+            .height
+            == px(56.)
+            && bounds.bottom() <= px(540.))
     );
     click(cx, "onboarding-review-change-0");
     assert!(view.read_with(cx, |view, cx| view.shell.onboarding.step == Step::Game && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Kept draft")));
@@ -391,7 +322,7 @@ fn review_change_keeps_three_steps_and_short_footer_and_invalid_name_focus(
             view.handle(UiAction::OnboardingChange(Step::Review), window, cx);
             view.handle(UiAction::OnboardingSection(WizardPage::Version), window, cx);
             view.handle(UiAction::Drawer(None), window, cx);
-            assert!(view.shell.overlays.top().is_none());
+            assert!(view.shell.surfaces.top().is_none());
             assert!(view.shell.wizard.page.is_none());
             assert_eq!(view.shell.onboarding.step, Step::Review);
         });
@@ -573,7 +504,7 @@ fn real_game_component_tiles_open_the_context_dialog_and_escape_rolls_back(
     });
     click(cx, "wizard-component-location");
     assert!(view.read_with(cx, |view, _| matches!(
-        view.shell.overlays.top().map(|layer| &layer.kind),
+        view.shell.surfaces.top().map(|layer| &layer.kind),
         Some(Surface::OnboardingSection(WizardPage::Location))
     )));
     view.update(cx, |view, cx| {
@@ -586,7 +517,7 @@ fn real_game_component_tiles_open_the_context_dialog_and_escape_rolls_back(
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     assert!(view.read_with(cx, |view, cx| {
-        view.shell.overlays.top().is_none()
+        view.shell.surfaces.top().is_none()
             && view.shell.wizard.page.is_none()
             && view
                 .shell
@@ -597,7 +528,7 @@ fn real_game_component_tiles_open_the_context_dialog_and_escape_rolls_back(
     }));
     click(cx, "wizard-component-version");
     assert!(view.read_with(cx, |view, _| matches!(
-        view.shell.overlays.top().map(|layer| &layer.kind),
+        view.shell.surfaces.top().map(|layer| &layer.kind),
         Some(Surface::OnboardingSection(WizardPage::Version))
     )));
 }

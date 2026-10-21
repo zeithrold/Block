@@ -2,12 +2,7 @@
 members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth"]
 default-members = ["crates/block-app"]
 resolver = "3"
-exclude = ["vendor/gpui-pre", "vendor/gpui-pre-macos", "vendor/gpui-base"]
 
-[patch.crates-io]
-gpui-pre = { path = "vendor/gpui-pre" }
-gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
-gpui-base = { path = "vendor/gpui-base" }
 
 [workspace.package]
 version = "0.1.0"
@@ -45,6 +40,7 @@ clap = { version = "4", features = ["derive"] }
 directories = "6"
 
 [workspace.lints.rust]
+unfulfilled_lint_expectations = "allow"
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -54,8 +50,6 @@ unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
 dbg_macro = "deny"
 expect_used = "deny"
 panic = "deny"

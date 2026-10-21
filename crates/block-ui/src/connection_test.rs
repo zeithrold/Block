@@ -122,9 +122,7 @@ impl Block {
                 Err(error) => format!("Connection test failed: {error}"),
             })
         };
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::Status);
-        semantic.set_label(description.clone());
-        semantic.set_live(gpui::accesskit::Live::Polite);
+
         div()
             .flex()
             .flex_col()
@@ -144,12 +142,7 @@ impl Block {
                 },
                 cx.listener(|view, (): &(), window, cx| view.test_connection(window, cx)),
             ))
-            .child(
-                div()
-                    .id("connection-test-result")
-                    .accessibility(semantic, false, |_, _, _| {})
-                    .child(note(description)),
-            )
+            .child(div().id("connection-test-result").child(note(description)))
     }
 }
 

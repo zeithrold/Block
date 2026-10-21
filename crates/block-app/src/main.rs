@@ -113,21 +113,19 @@ fn configure_application(cx: &mut App) {
 }
 
 fn window_options(cx: &App, title: &str) -> WindowOptions {
-    #[cfg(target_os = "linux")]
-    let system_chrome = gpui::guess_compositor() == "X11";
-    #[cfg(not(target_os = "linux"))]
-    let system_chrome = cfg!(target_os = "windows");
     let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
     WindowOptions {
-        titlebar: system_chrome.then(|| TitlebarOptions {
+        titlebar: Some(TitlebarOptions {
             title: Some(title.to_owned().into()),
+            appears_transparent: cfg!(target_os = "macos"),
             ..Default::default()
         }),
-        window_decorations: Some(if system_chrome {
-            WindowDecorations::Server
-        } else {
+        window_decorations: Some(if cfg!(target_os = "macos") {
             WindowDecorations::Client
+        } else {
+            WindowDecorations::Server
         }),
+        is_resizable: false,
         app_id: Some("one.ztd.block".into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(360.0), px(540.0))),

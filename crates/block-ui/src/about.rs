@@ -252,7 +252,7 @@ impl Block {
                         "about-copy-build", "Copy", self.palette,
                         ButtonVariant::Ghost, ControlState::default(),
                         cx.listener(|view, (), _, cx| view.copy_build_information(cx)),
-                    ).accessibility_label("Copy build information")
+                    )
                         .child(Icon::Copy.render(14., self.palette.muted)), "Copy build information", cx)),
             )
             .child(
@@ -315,10 +315,20 @@ mod tests {
 
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
-        let bounds = cx.debug_bounds(selector);
+        let bounds = crate::test_support::control_bounds(cx, selector);
         assert!(bounds.is_some(), "missing {selector}");
         if let Some(bounds) = bounds {
+            let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            if cx.windows().len() > window_count
+                && let Some(window) = cx.windows().last()
+            {
+                *cx = VisualTestContext::from_window(*window, &cx.cx);
+            }
+            crate::test_support::ensure_live_window(cx);
+            cx.run_until_parked();
+            crate::test_support::ensure_live_window(cx);
         }
     }
 
@@ -388,7 +398,7 @@ mod tests {
                     assert!(footer.right() <= px(width) && footer.bottom() <= px(height));
                     assert!(brand.right() <= body.left());
                     for selector in ["product-website", "show-output"] {
-                        let bounds = cx.debug_bounds(selector);
+                        let bounds = crate::test_support::control_bounds(cx, selector);
                         assert!(bounds.is_some_and(|bounds| bounds.left() >= footer.left()
                             && bounds.right() <= footer.right()
                             && bounds.top() >= footer.top()

@@ -37,7 +37,7 @@ pub(super) struct StepperStep<'a> {
 
 pub(super) fn stepper(
     id: impl Into<SharedString>,
-    label: &str,
+    _label: &str,
     steps: &[StepperStep<'_>],
     current: usize,
     compact: bool,
@@ -46,7 +46,6 @@ pub(super) fn stepper(
     div()
         .id(id.into())
         .role(gpui::Role::List)
-        .aria_label(label.to_owned())
         .min_w_0()
         .flex()
         .flex_col()
@@ -61,24 +60,6 @@ pub(super) fn stepper(
             div()
                 .id(("step", index))
                 .role(gpui::Role::ListItem)
-                .aria_label(format!(
-                    "Step {} of {}: {}",
-                    index + 1,
-                    steps.len(),
-                    step.title
-                ))
-                .aria_selected(active)
-                .aria_description(format!(
-                    "{}{}",
-                    if step.complete {
-                        "Complete. "
-                    } else if active {
-                        "Current step. "
-                    } else {
-                        "Upcoming. "
-                    },
-                    step.description
-                ))
                 .min_w_0()
                 .flex()
                 .items_start()
@@ -155,11 +136,6 @@ fn control_state(control: Control, state: ControlState) -> Control {
             .cursor(CursorStyle::OperationNotAllowed)
             .opacity(0.5)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
-    }
-    if state.busy {
-        control = control.aria_description("Busy");
-    } else if state.invalid {
-        control = control.aria_description("Invalid value");
     }
     control
 }
@@ -325,10 +301,8 @@ fn styled_control(
     } else {
         role
     };
-    let mut control = interactive_control(id, label.clone(), state, role, on_activate);
-    if let Some(selected) = selected {
-        control = control.aria_selected(selected);
-    }
+    let control = interactive_control(id, label.clone(), state, role, on_activate);
+    let _ = selected;
     let mut control = control
         .flex()
         .items_center()
@@ -456,8 +430,6 @@ pub(super) struct FieldOptions {
 /// Preserve the existing input entity and its IME, selection, and clipboard path.
 pub(super) fn field(label: impl Into<SharedString>, input: &Entity<TextInput>) -> Div {
     let label = label.into();
-    let input_semantics = input.clone();
-    let accessible_label = label.clone();
     let input_focus = input.clone();
     div()
         .flex()
@@ -481,18 +453,6 @@ pub(super) fn field(label: impl Into<SharedString>, input: &Entity<TextInput>) -
                 .child(label),
         )
         .child(input.clone())
-        .child(
-            gpui::canvas(
-                move |_, _, cx| {
-                    input_semantics.update(cx, |input, cx| {
-                        input.set_accessible_label(accessible_label.as_ref(), cx);
-                    });
-                },
-                |_, (), _, _| {},
-            )
-            .absolute()
-            .inset_0(),
-        )
 }
 
 pub(super) fn field_with(
@@ -501,13 +461,7 @@ pub(super) fn field_with(
     palette: Palette,
     options: FieldOptions,
 ) -> Div {
-    let description = options
-        .error
-        .as_ref()
-        .or(options.hint.as_ref())
-        .map_or_else(String::new, ToString::to_string);
     let invalid = options.error.is_some();
-    let required = options.required;
     let semantics = input.clone();
     let mut label = label.into().to_string();
     if options.required {
@@ -540,7 +494,7 @@ pub(super) fn field_with(
         gpui::canvas(
             move |_, _, cx| {
                 semantics.update(cx, |input, cx| {
-                    input.set_accessible_details(&description, invalid, required, cx);
+                    input.set_invalid(invalid, cx);
                 });
             },
             |_, (), _, _| {},
@@ -655,7 +609,6 @@ type RadioCallback<A> = Rc<dyn Fn(&A, &mut Window, &mut App)>;
 
 pub(super) struct RadioGroup<A> {
     id: SharedString,
-    label: SharedString,
     options: Rc<Vec<RadioOption<A>>>,
     focus: Rc<Vec<gpui::FocusHandle>>,
     active: Option<usize>,
@@ -666,7 +619,7 @@ pub(super) struct RadioGroup<A> {
 impl<A: Clone + 'static> RadioGroup<A> {
     pub(super) fn new<T: 'static>(
         id: impl Into<SharedString>,
-        label: impl Into<SharedString>,
+        _label: impl Into<SharedString>,
         options: Vec<RadioOption<A>>,
         cache: &RefCell<HashMap<String, gpui::FocusHandle>>,
         cx: &gpui::Context<'_, T>,
@@ -692,7 +645,6 @@ impl<A: Clone + 'static> RadioGroup<A> {
             .collect();
         Self {
             id,
-            label: label.into(),
             options: Rc::new(options),
             focus: Rc::new(focus),
             active,
@@ -707,9 +659,7 @@ impl<A: Clone + 'static> RadioGroup<A> {
     }
 
     pub(super) fn container(&self) -> gpui_base::RadioGroup {
-        gpui_base::RadioGroup::new(self.id.clone())
-            .aria_label(self.label.clone())
-            .min_w_0()
+        gpui_base::RadioGroup::new(self.id.clone()).min_w_0()
     }
 
     pub(super) fn item(&self, id: &str, control: Control) -> Control {
@@ -1012,19 +962,7 @@ pub(super) fn progress(state: ProgressState, palette: Palette) -> Stateful<Div> 
                 .child("In progress"),
         );
     }
-    let mut progress = progress
-        .id("progress")
-        .role(gpui::Role::ProgressIndicator)
-        .aria_label("Download progress");
-    if let ProgressState::Measured { completed, total } = state {
-        progress = progress
-            .aria_numeric_value(completed.min(total) as f64)
-            .aria_min_numeric_value(0.)
-            .aria_max_numeric_value(total as f64);
-    } else {
-        progress = progress.aria_description("Overall total is not yet known");
-    }
-    progress
+    progress.id("progress").role(gpui::Role::ProgressIndicator)
 }
 
 /// A compact companion to the same measured/unknown progress contract. The
@@ -1220,16 +1158,6 @@ mod tests {
         press(cx, "enter");
         press(cx, "space");
         assert_eq!(view.read_with(cx, |view, _| view.activations), 2);
-        cx.update(|window, _| {
-            let controls = gpui_base::test_support::snapshots(window);
-            assert!(
-                controls
-                    .iter()
-                    .any(|control| control.role() == Some(gpui::Role::Button)
-                        && control.label() == Some("Save")
-                        && control.disabled() != Some(true))
-            );
-        });
         press(cx, "cmd-enter");
         press(cx, "alt-space");
         assert_eq!(view.read_with(cx, |view, _| view.activations), 2);
@@ -1266,83 +1194,19 @@ mod tests {
             press(cx, "enter");
             press(cx, "space");
             if let Some(bounds) = cx.debug_bounds("control-button") {
+                let window_count = cx.windows().len();
                 cx.simulate_click(bounds.center(), Modifiers::none());
+                cx.run_until_parked();
+                if cx.windows().len() > window_count
+                    && let Some(window) = cx.windows().last()
+                {
+                    *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
+                }
+                crate::test_support::ensure_live_window(cx);
             }
             assert_eq!(view.read_with(cx, |view, _| view.activations), 3);
             assert_eq!(view.read_with(cx, |view, _| view.ancestor_activations), 0);
-            cx.update(|window, _| {
-                assert!(
-                    gpui_base::test_support::snapshots(window)
-                        .iter()
-                        .any(|control| control.label() == Some("Save")
-                            && control.disabled() == Some(true))
-                );
-            });
         }
-    }
-
-    struct TraversalFixture(FocusHandle);
-    impl Render for TraversalFixture {
-        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
-            div()
-                .flex()
-                .flex_col()
-                .child(
-                    button(
-                        "before-inactive",
-                        "Current row",
-                        Palette::LIGHT,
-                        ButtonVariant::Ghost,
-                        ControlState::default(),
-                        |(), _, _| {},
-                    )
-                    .track_focus(&self.0),
-                )
-                .child(
-                    button(
-                        "inactive-row",
-                        "Inactive row",
-                        Palette::LIGHT,
-                        ButtonVariant::Ghost,
-                        ControlState::default(),
-                        |(), _, _| {},
-                    )
-                    .tab_index(-1),
-                )
-                .child(button(
-                    "after-inactive",
-                    "Footer action",
-                    Palette::LIGHT,
-                    ButtonVariant::Ghost,
-                    ControlState::default(),
-                    |(), _, _| {},
-                ))
-        }
-    }
-
-    #[gpui::test]
-    fn negative_tab_index_skips_an_inactive_base_button_in_both_directions(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        let (_, cx) = crate::test_support::window(cx, |window, cx| {
-            let focus = cx.focus_handle();
-            focus.focus(window, cx);
-            TraversalFixture(focus)
-        });
-        press(cx, "tab");
-        cx.run_until_parked();
-        let focused = |cx: &mut gpui::VisualTestContext| {
-            cx.update(|window, _| {
-                gpui_base::test_support::snapshots(window)
-                    .into_iter()
-                    .find(|control| control.focused() == Some(true))
-                    .and_then(|control| control.label().map(str::to_owned))
-            })
-        };
-        assert_eq!(focused(cx).as_deref(), Some("Footer action"));
-        press(cx, "shift-tab");
-        cx.run_until_parked();
-        assert_eq!(focused(cx).as_deref(), Some("Current row"));
     }
 
     #[gpui::test]

@@ -92,10 +92,7 @@ pub(crate) struct TextInput {
     redo: Vec<EditSnapshot>,
     composition_before: Option<EditSnapshot>,
     read_only: bool,
-    accessible_label: String,
-    accessible_description: String,
     invalid: bool,
-    required: bool,
     search: bool,
 }
 
@@ -123,10 +120,7 @@ impl TextInput {
             redo: Vec::new(),
             composition_before: None,
             read_only: false,
-            accessible_label: placeholder.to_owned(),
-            accessible_description: String::new(),
             invalid: false,
-            required: false,
             search: false,
         }
     }
@@ -154,10 +148,7 @@ impl TextInput {
             redo: Vec::new(),
             composition_before: None,
             read_only: self.read_only,
-            accessible_label: self.accessible_label.clone(),
-            accessible_description: self.accessible_description.clone(),
             invalid: self.invalid,
-            required: self.required,
             search: self.search,
         }
     }
@@ -176,27 +167,9 @@ impl TextInput {
         }
     }
 
-    pub(super) fn set_accessible_label(&mut self, label: &str, cx: &mut Context<'_, Self>) {
-        if self.accessible_label != label {
-            label.clone_into(&mut self.accessible_label);
-            cx.notify();
-        }
-    }
-
-    pub(super) fn set_accessible_details(
-        &mut self,
-        description: &str,
-        invalid: bool,
-        required: bool,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if self.accessible_description != description
-            || self.invalid != invalid
-            || self.required != required
-        {
-            description.clone_into(&mut self.accessible_description);
+    pub(super) fn set_invalid(&mut self, invalid: bool, cx: &mut Context<'_, Self>) {
+        if self.invalid != invalid {
             self.invalid = invalid;
-            self.required = required;
             cx.notify();
         }
     }
@@ -870,24 +843,7 @@ impl Render for TextInput {
         clippy::too_many_lines,
         reason = "The native editor keeps its semantic, keyboard, IME and pointer contracts on one element."
     )]
-    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        let mut semantic = gpui::accesskit::Node::new(gpui::accesskit::Role::TextInput);
-        semantic.set_label(self.accessible_label.clone());
-        semantic.set_description(self.accessible_description.clone());
-        semantic.set_value(self.content.to_string());
-        semantic.add_action(gpui::accesskit::Action::Focus);
-        if self.read_only {
-            semantic.set_read_only();
-        } else {
-            semantic.add_action(gpui::accesskit::Action::SetValue);
-            semantic.add_action(gpui::accesskit::Action::ReplaceSelectedText);
-        }
-        if self.invalid {
-            semantic.set_invalid(gpui::accesskit::Invalid::True);
-        }
-        if self.required {
-            semantic.set_required();
-        }
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let palette = cx
             .try_global::<super::Palette>()
             .copied()
@@ -906,29 +862,6 @@ impl Render for TextInput {
         };
         div()
             .id("text-input")
-            .accessibility(
-                semantic,
-                self.focus_handle.is_focused(window),
-                cx.listener(
-                    |input, request: &gpui::accesskit::ActionRequest, window, cx| {
-                        if input.read_only || input.is_composing() {
-                            return;
-                        }
-                        if let Some(gpui::accesskit::ActionData::Value(value)) = &request.data {
-                            match request.action {
-                                gpui::accesskit::Action::SetValue => {
-                                    let length = input.offset_to_utf16(input.content.len());
-                                    input.replace_text_in_range(Some(0..length), value, window, cx);
-                                }
-                                gpui::accesskit::Action::ReplaceSelectedText => {
-                                    input.replace_text_in_range(None, value, window, cx);
-                                }
-                                _ => {}
-                            }
-                        }
-                    },
-                ),
-            )
             .flex()
             .key_context("TextInput")
             .items_center()
