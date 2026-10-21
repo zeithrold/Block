@@ -10,7 +10,7 @@ mod secret;
 
 pub use callback::PendingSignIn;
 pub use credentials::probe_secure_storage;
-pub use microsoft::{MicrosoftAuth, SignInStage};
+pub use microsoft::{MicrosoftAuth, PendingDeviceSignIn, PreparedMicrosoftSignIn, SignInStage};
 pub use secret::SecretString;
 
 use std::time::{Duration, SystemTime};
@@ -76,6 +76,8 @@ pub enum AuthError {
     Cancelled,
     #[error("Sign-in timed out. Try again and finish authorization in your browser.")]
     TimedOut,
+    #[error("The Microsoft device code expired. Request a new code when you are ready to sign in.")]
+    DeviceCodeExpired,
     #[error("Could not create the local browser callback listener.")]
     CallbackUnavailable,
     #[error("Could not open your default browser. Check your system browser settings.")]
@@ -99,7 +101,7 @@ pub enum AuthError {
     #[error("Microsoft authorization has expired or was revoked. Sign in again.")]
     SignInRequired,
     #[error(
-        "Microsoft application registration rejected public desktop authentication. Check its desktop redirect URI and personal-account permissions."
+        "Microsoft application registration rejected public desktop authentication. Check public client flows, its desktop redirect URI and personal-account permissions."
     )]
     ApplicationRegistration,
     #[error("Create an Xbox profile for this Microsoft account, then sign in again.")]
@@ -122,4 +124,4 @@ pub enum AuthError {
 
 pub type Result<T> = std::result::Result<T, AuthError>;
 
-const MICROSOFT_SCOPE: &str = "XboxLive.SignIn XboxLive.offline_access";
+const MICROSOFT_SCOPE: &str = "XboxLive.signin XboxLive.offline_access";

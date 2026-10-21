@@ -16,6 +16,7 @@ use crate::{
 };
 
 const TOKEN: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+const DEVICE_CODE: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
 const XBOX: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
 const MINECRAFT: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
@@ -29,6 +30,8 @@ const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 pub enum SignInStage {
     /// Check the operating system credential store before authorization.
     SecureStorage,
+    /// Request the short-lived code the user enters on Microsoft's website.
+    DeviceAuthorization,
     /// Wait for the one-use localhost PKCE callback.
     BrowserAuthorization,
     /// Exchange the returned authorization code.
@@ -56,6 +59,77 @@ pub struct MicrosoftAuth {
     client: Client,
     test_base_url: Option<String>,
     stage_observer: Option<Arc<dyn Fn(SignInStage) + Send + Sync>>,
+}
+
+/// An authenticated identity awaiting the user's final save confirmation.
+/// Refresh credentials remain memory-only and are zeroized if setup is abandoned.
+#[derive(Debug)]
+pub struct PreparedMicrosoftSignIn {
+    session: AuthenticatedSession,
+    refresh_token: SecretString,
+}
+
+impl PreparedMicrosoftSignIn {
+    #[must_use]
+    pub const fn account(&self) -> &Account {
+        &self.session.account
+    }
+
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        self.session.needs_refresh()
+    }
+}
+
+/// Transient device authorization state. The polling secret is never displayed,
+/// serialized or included in formatting; the user code is exposed explicitly.
+pub struct PendingDeviceSignIn {
+    client_id: String,
+    device_code: SecretString,
+    user_code: String,
+    verification_uri: String,
+    interval: Duration,
+    expires_at: tokio::time::Instant,
+}
+
+impl std::fmt::Debug for PendingDeviceSignIn {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PendingDeviceSignIn([REDACTED])")
+    }
+}
+
+impl PendingDeviceSignIn {
+    #[must_use]
+    pub fn user_code(&self) -> &str {
+        &self.user_code
+    }
+
+    #[must_use]
+    pub fn verification_uri(&self) -> &str {
+        &self.verification_uri
+    }
+
+    #[must_use]
+    pub fn remaining(&self) -> Duration {
+        self.expires_at
+            .saturating_duration_since(tokio::time::Instant::now())
+    }
+}
+
+#[derive(Deserialize)]
+struct DeviceAuthorization {
+    device_code: SecretString,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: Option<u64>,
+}
+
+enum DevicePoll {
+    Authorized(MicrosoftTokens),
+    Pending,
+    SlowDown(Duration),
+    ConnectionTimeout,
 }
 
 impl std::fmt::Debug for MicrosoftAuth {
@@ -119,8 +193,8 @@ impl MicrosoftAuth {
         PendingSignIn::new(&self.client_id).await
     }
 
-    /// Finish browser authorization, verify Java ownership/profile and securely save
-    /// the refresh token. No usable account is returned if secure storage fails.
+    /// Finish browser authorization and verify Java ownership/profile. The result
+    /// is not persisted until the user confirms it with `save_sign_in`.
     ///
     /// # Errors
     /// Returns explicit cancellation, authorization, ownership, network or secure-store errors.
@@ -128,7 +202,7 @@ impl MicrosoftAuth {
         &self,
         pending: PendingSignIn,
         cancellation: &CancellationToken,
-    ) -> Result<AuthenticatedSession> {
+    ) -> Result<PreparedMicrosoftSignIn> {
         if pending.client_id != self.client_id {
             return Err(AuthError::ClientIdChanged);
         }
@@ -153,9 +227,249 @@ impl MicrosoftAuth {
         let session = self
             .minecraft_session(&microsoft.access_token, cancellation)
             .await?;
+        Ok(PreparedMicrosoftSignIn {
+            session,
+            refresh_token: refresh,
+        })
+    }
+
+    /// Request a new device code only after the user chooses this sign-in method.
+    /// # Errors
+    /// Returns secure-store, cancellation, network or malformed-response errors.
+    pub async fn begin_device_sign_in(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<PendingDeviceSignIn> {
+        self.stage(SignInStage::SecureStorage);
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => return Err(AuthError::Cancelled),
+            result = credentials::probe_secure_storage() => result?,
+        }
+        self.request_device_code(cancellation).await
+    }
+
+    async fn request_device_code(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<PendingDeviceSignIn> {
+        self.stage(SignInStage::DeviceAuthorization);
+        let started = tokio::time::Instant::now();
+        let response: DeviceAuthorization = self
+            .request(
+                self.client
+                    .post(self.endpoint(DEVICE_CODE))
+                    .form(&[("client_id", self.client_id.as_str()), ("scope", SCOPE)]),
+                "Microsoft device authorization",
+                cancellation,
+            )
+            .await?;
+        validate_secret(&response.device_code, "Microsoft device authorization")?;
+        let invalid = || AuthError::InvalidResponse {
+            stage: "Microsoft device authorization",
+        };
+        let interval = response.interval.unwrap_or(5);
+        let uri = url::Url::parse(&response.verification_uri).map_err(|_| invalid())?;
+        if !(1..=3600).contains(&response.expires_in)
+            || !(1..=3600).contains(&interval)
+            || response.user_code.is_empty()
+            || response.user_code.len() > 64
+            || !response
+                .user_code
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || response.verification_uri.len() > 2048
+            || uri.scheme() != "https"
+            || !matches!(
+                uri.host_str(),
+                Some(
+                    "microsoft.com"
+                        | "www.microsoft.com"
+                        | "login.microsoftonline.com"
+                        | "login.live.com"
+                )
+            )
+            || !uri.username().is_empty()
+            || uri.password().is_some()
+            || uri.port().is_some()
+            || uri.fragment().is_some()
+        {
+            return Err(invalid());
+        }
+        let expires_at = started
+            .checked_add(Duration::from_secs(response.expires_in))
+            .ok_or_else(invalid)?;
+        if expires_at <= tokio::time::Instant::now() {
+            return Err(AuthError::DeviceCodeExpired);
+        }
+        Ok(PendingDeviceSignIn {
+            client_id: self.client_id.clone(),
+            device_code: response.device_code,
+            user_code: response.user_code,
+            verification_uri: uri.to_string(),
+            interval: Duration::from_secs(interval),
+            expires_at,
+        })
+    }
+
+    /// Poll at the provider interval, honoring slow_down, throttling and expiry,
+    /// then reuse the same Xbox/Minecraft ownership chain as browser PKCE.
+    /// # Errors
+    /// Returns explicit cancellation/expiry, registration, ownership or network errors.
+    pub async fn complete_device_sign_in(
+        &self,
+        pending: PendingDeviceSignIn,
+        cancellation: &CancellationToken,
+    ) -> Result<PreparedMicrosoftSignIn> {
+        let tokens = self.poll_device_token(pending, cancellation).await?;
+        self.stage(SignInStage::MicrosoftAuthorization);
+        let refresh_token = tokens.refresh_token.ok_or(AuthError::SignInRequired)?;
+        validate_secret(&refresh_token, "Microsoft authorization")?;
+        let session = self
+            .minecraft_session(&tokens.access_token, cancellation)
+            .await?;
+        Ok(PreparedMicrosoftSignIn {
+            session,
+            refresh_token,
+        })
+    }
+
+    async fn poll_device_token(
+        &self,
+        pending: PendingDeviceSignIn,
+        cancellation: &CancellationToken,
+    ) -> Result<MicrosoftTokens> {
+        if pending.client_id != self.client_id {
+            return Err(AuthError::ClientIdChanged);
+        }
+        let mut interval = pending.interval;
+        loop {
+            let now = tokio::time::Instant::now();
+            if now >= pending.expires_at {
+                return Err(AuthError::DeviceCodeExpired);
+            }
+            let wake = now
+                .checked_add(interval)
+                .unwrap_or(pending.expires_at)
+                .min(pending.expires_at);
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(AuthError::Cancelled),
+                () = tokio::time::sleep_until(wake) => (),
+            }
+            if tokio::time::Instant::now() >= pending.expires_at {
+                return Err(AuthError::DeviceCodeExpired);
+            }
+            let polled = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(AuthError::Cancelled),
+                () = tokio::time::sleep_until(pending.expires_at) => return Err(AuthError::DeviceCodeExpired),
+                result = self.device_token_request(&pending) => result?,
+            };
+            match polled {
+                DevicePoll::Authorized(tokens) => return Ok(tokens),
+                DevicePoll::Pending => (),
+                DevicePoll::SlowDown(retry_after) => {
+                    interval = interval
+                        .saturating_add(Duration::from_secs(5))
+                        .max(retry_after)
+                }
+                DevicePoll::ConnectionTimeout => interval = interval.saturating_mul(2),
+            }
+        }
+    }
+
+    async fn device_token_request(&self, pending: &PendingDeviceSignIn) -> Result<DevicePoll> {
+        let stage = "Microsoft device authorization";
+        let mut response = match self
+            .client
+            .post(self.endpoint(TOKEN))
+            .form(&[
+                ("client_id", self.client_id.as_str()),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ("device_code", pending.device_code.expose()),
+            ])
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if error.is_timeout() => return Ok(DevicePoll::ConnectionTimeout),
+            Err(_) => return Err(AuthError::Network { stage }),
+        };
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                value
+                    .parse::<u64>()
+                    .ok()
+                    .map(Duration::from_secs)
+                    .or_else(|| {
+                        httpdate::parse_http_date(value)
+                            .ok()
+                            .map(|date| date.duration_since(SystemTime::now()).unwrap_or_default())
+                    })
+            })
+            .unwrap_or_default();
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(AuthError::InvalidResponse { stage });
+        }
+        let mut body = Zeroizing::new(Vec::new());
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                        return Err(AuthError::InvalidResponse { stage });
+                    }
+                    body.extend_from_slice(&chunk);
+                }
+                Ok(None) => break,
+                Err(error) if error.is_timeout() => return Ok(DevicePoll::ConnectionTimeout),
+                Err(_) => return Err(AuthError::Network { stage }),
+            }
+        }
+        if status.is_success() {
+            let tokens: MicrosoftTokens = decode_response(status, &body, stage)?;
+            validate_secret(&tokens.access_token, stage)?;
+            return Ok(DevicePoll::Authorized(tokens));
+        }
+        let error = serde_json::from_slice::<ServiceError>(&body).ok();
+        match error.as_ref().and_then(|value| value.error.as_deref()) {
+            Some("authorization_pending") if status == StatusCode::BAD_REQUEST => {
+                Ok(DevicePoll::Pending)
+            }
+            Some("slow_down") => Ok(DevicePoll::SlowDown(retry_after)),
+            Some("authorization_declined" | "access_denied") => Err(AuthError::Cancelled),
+            Some("expired_token") => Err(AuthError::DeviceCodeExpired),
+            Some("bad_verification_code") => Err(AuthError::InvalidResponse { stage }),
+            _ if status == StatusCode::TOO_MANY_REQUESTS => Ok(DevicePoll::SlowDown(retry_after)),
+            _ => Err(classify_error(status, stage, error.as_ref())),
+        }
+    }
+
+    /// Persist the prepared refresh token only after final user confirmation.
+    /// # Errors
+    /// Rejects expired preparation, client changes or unavailable secure storage.
+    pub async fn save_sign_in(
+        &self,
+        prepared: PreparedMicrosoftSignIn,
+    ) -> Result<AuthenticatedSession> {
+        self.validate_account(&prepared.session.account)?;
+        if prepared.is_expired() {
+            return Err(AuthError::SignInRequired);
+        }
         self.stage(SignInStage::SaveCredential);
-        credentials::save(session.account.credential_ref.clone(), refresh).await?;
-        Ok(session)
+        credentials::save(
+            prepared.session.account.credential_ref.clone(),
+            prepared.refresh_token,
+        )
+        .await?;
+        Ok(prepared.session)
     }
 
     /// Recheck ownership/profile while obtaining a fresh session from secure storage.
@@ -652,8 +966,13 @@ mod tests {
                     String::from_utf8(bytes)
                         .map_err(|_| std::io::Error::other("Invalid synthetic request"))?,
                 );
+                let throttling = if status == 429 {
+                    "Retry-After: 12\r\n"
+                } else {
+                    ""
+                };
                 let response = format!(
-                    "HTTP/1.1 {status} Synthetic\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status} Synthetic\r\n{throttling}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 stream.write_all(response.as_bytes()).await?;
@@ -845,5 +1164,319 @@ mod tests {
             Some(AuthError::ClientIdChanged)
         );
         Ok(())
+    }
+
+    // Keep the paused runtime runnable while loopback sockets do real I/O.
+    // Otherwise Tokio may jump directly to reqwest's timeout before the OS
+    // delivers the next packet, rather than advancing just the polling clock.
+    async fn device_fixture_io<F: Future>(request: F) -> F::Output {
+        let mut request = std::pin::pin!(request);
+        loop {
+            tokio::select! {
+                biased;
+                result = request.as_mut() => return result,
+                () = tokio::task::yield_now() => (),
+            }
+            tokio::time::advance(Duration::from_millis(5)).await;
+            std::thread::sleep(Duration::from_micros(100));
+        }
+    }
+
+    const DEVICE: &str = r#"{"device_code":"synthetic-private-device","user_code":"ABCD-EFGH","verification_uri":"https://microsoft.com/devicelogin","expires_in":900,"interval":1}"#;
+
+    #[tokio::test(start_paused = true)]
+    async fn device_pending_slow_down_and_http_throttling_observe_real_poll_intervals()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (base, server) = scripted_server(vec![
+            (200, DEVICE),
+            (400, r#"{"error":"authorization_pending"}"#),
+            (400, r#"{"error":"slow_down"}"#),
+            (429, r#"{"error":"throttled"}"#),
+            (
+                200,
+                r#"{"access_token":"synthetic-ms","refresh_token":"synthetic-refresh"}"#,
+            ),
+        ])
+        .await?;
+        let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+        auth.test_base_url = Some(base);
+        let cancel = CancellationToken::new();
+        let pending = device_fixture_io(auth.request_device_code(&cancel)).await?;
+        assert_eq!(pending.user_code(), "ABCD-EFGH");
+        assert_eq!(
+            pending.verification_uri(),
+            "https://microsoft.com/devicelogin"
+        );
+        assert!(!format!("{pending:?}").contains("ABCD"));
+        assert!(!format!("{pending:?}").contains("synthetic-private-device"));
+        let started = tokio::time::Instant::now();
+        let tokens = device_fixture_io(auth.poll_device_token(pending, &cancel)).await?;
+        assert_eq!(tokens.access_token.expose(), "synthetic-ms");
+        assert!(started.elapsed() >= Duration::from_secs(20));
+        let requests = server.await??;
+        assert_eq!(requests.len(), 5);
+        assert!(requests[0].starts_with("POST /devicecode "));
+        assert!(requests[0].contains("client_id=00000000-0000-0000-0000-000000000001"));
+        assert!(requests[0].contains("scope="));
+        for request in &requests[1..] {
+            assert!(request.starts_with("POST /token "));
+            assert!(
+                request
+                    .contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code")
+            );
+            assert!(request.contains("device_code=synthetic-private-device"));
+            assert!(!request.contains("client_secret"));
+            assert!(!request.contains("user_code="));
+        }
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn device_expiry_stops_before_the_default_five_second_first_poll()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (base, server) = scripted_server(vec![(200, r#"{"device_code":"synthetic","user_code":"TEST-CODE","verification_uri":"https://microsoft.com/devicelogin","expires_in":3}"#)]).await?;
+        let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+        auth.test_base_url = Some(base);
+        let cancel = CancellationToken::new();
+        let pending = device_fixture_io(auth.request_device_code(&cancel)).await?;
+        assert_eq!(pending.interval, Duration::from_secs(5));
+        assert_eq!(
+            device_fixture_io(auth.poll_device_token(pending, &cancel))
+                .await
+                .err(),
+            Some(AuthError::DeviceCodeExpired)
+        );
+        assert_eq!(server.await??.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn device_cancellation_and_client_changes_never_poll_or_save_credentials()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for change_client in [false, true] {
+            let (base, server) = scripted_server(vec![(200, DEVICE)]).await?;
+            let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+            auth.test_base_url = Some(base);
+            let cancel = CancellationToken::new();
+            let pending = auth.request_device_code(&cancel).await?;
+            let expected = if change_client {
+                auth.client_id = "00000000-0000-0000-0000-000000000002".into();
+                AuthError::ClientIdChanged
+            } else {
+                cancel.cancel();
+                AuthError::Cancelled
+            };
+            assert_eq!(
+                auth.complete_device_sign_in(pending, &cancel).await.err(),
+                Some(expected)
+            );
+            assert_eq!(server.await??.len(), 1);
+        }
+        let auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert_eq!(
+            auth.begin_device_sign_in(&cancel).await.err(),
+            Some(AuthError::Cancelled)
+        );
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn device_provider_failures_stop_polling_without_echoing_response_bodies()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for (status, response, expected) in [
+            (
+                400,
+                r#"{"error":"authorization_declined","error_description":"PRIVATE_DESCRIPTION"}"#,
+                AuthError::Cancelled,
+            ),
+            (
+                400,
+                r#"{"error":"expired_token","error_description":"PRIVATE_DESCRIPTION"}"#,
+                AuthError::DeviceCodeExpired,
+            ),
+            (
+                400,
+                r#"{"error":"invalid_client","error_description":"PRIVATE_DESCRIPTION"}"#,
+                AuthError::ApplicationRegistration,
+            ),
+            (
+                400,
+                r#"{"error":"bad_verification_code","error_description":"PRIVATE_DESCRIPTION"}"#,
+                AuthError::InvalidResponse {
+                    stage: "Microsoft device authorization",
+                },
+            ),
+            (
+                503,
+                r#"{"error":"authorization_pending","error_description":"PRIVATE_DESCRIPTION"}"#,
+                AuthError::Http {
+                    stage: "Microsoft device authorization",
+                    status: 503,
+                },
+            ),
+        ] {
+            let (base, server) = scripted_server(vec![(200, DEVICE), (status, response)]).await?;
+            let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+            auth.test_base_url = Some(base);
+            let cancel = CancellationToken::new();
+            let pending = device_fixture_io(auth.request_device_code(&cancel)).await?;
+            let error = device_fixture_io(auth.poll_device_token(pending, &cancel))
+                .await
+                .err();
+            assert_eq!(error, Some(expected));
+            assert!(!format!("{error:?}").contains("PRIVATE_DESCRIPTION"));
+            assert_eq!(server.await??.len(), 2);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn device_preparation_rejects_untrusted_links_and_invalid_expiry_or_interval()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        for response in [
+            r#"{"device_code":"synthetic","user_code":"TEST","verification_uri":"http://microsoft.com/devicelogin","expires_in":900}"#,
+            r#"{"device_code":"synthetic","user_code":"TEST","verification_uri":"https://microsoft.com.evil.invalid/devicelogin","expires_in":900}"#,
+            r#"{"device_code":"synthetic","user_code":"TEST","verification_uri":"https://microsoft.com/devicelogin","expires_in":0}"#,
+            r#"{"device_code":"synthetic","user_code":"TEST","verification_uri":"https://microsoft.com/devicelogin","expires_in":900,"interval":0}"#,
+            r#"{"device_code":"","user_code":"TEST","verification_uri":"https://microsoft.com/devicelogin","expires_in":900}"#,
+        ] {
+            let (base, server) = scripted_server(vec![(200, response)]).await?;
+            let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+            auth.test_base_url = Some(base);
+            assert_eq!(
+                auth.request_device_code(&CancellationToken::new())
+                    .await
+                    .err(),
+                Some(AuthError::InvalidResponse {
+                    stage: "Microsoft device authorization"
+                })
+            );
+            assert_eq!(server.await??.len(), 1);
+        }
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn device_approval_reuses_the_real_ownership_chain_and_only_prepares_the_identity()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (base, server) = scripted_server(vec![
+            (200, DEVICE),
+            (
+                200,
+                r#"{"access_token":"synthetic-ms","refresh_token":"synthetic-refresh"}"#,
+            ),
+            (
+                200,
+                r#"{"Token":"synthetic-xbox","DisplayClaims":{"xui":[{"uhs":"123"}]}}"#,
+            ),
+            (
+                200,
+                r#"{"Token":"synthetic-xsts","DisplayClaims":{"xui":[{"uhs":"123"}]}}"#,
+            ),
+            (
+                200,
+                r#"{"access_token":"synthetic-minecraft","token_type":"Bearer","expires_in":3600}"#,
+            ),
+            (200, r#"{"items":[{"name":"game_minecraft"}]}"#),
+            (
+                200,
+                r#"{"id":"00112233445566778899aabbccddeeff","name":"SyntheticUser"}"#,
+            ),
+        ])
+        .await?;
+        let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+        auth.test_base_url = Some(base);
+        let cancel = CancellationToken::new();
+        let pending = device_fixture_io(auth.request_device_code(&cancel)).await?;
+        let prepared = device_fixture_io(auth.complete_device_sign_in(pending, &cancel)).await?;
+        assert_eq!(prepared.account().player_name, "SyntheticUser");
+        assert!(!prepared.is_expired());
+        let formatted = format!("{prepared:?}");
+        assert!(!formatted.contains("synthetic-refresh"));
+        assert!(!formatted.contains("synthetic-minecraft"));
+        let requests = server.await??;
+        assert_eq!(requests.len(), 7);
+        assert!(requests[5].starts_with("GET /mcstore "));
+        assert!(requests[6].starts_with("GET /profile "));
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn device_cancellation_and_expiry_interrupt_an_inflight_token_request()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        device_fixture_io(async {
+            for cancelled in [true, false] {
+                let (base, server) = scripted_server(vec![(200, DEVICE)]).await?;
+                let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+                auth.test_base_url = Some(base);
+                let cancel = CancellationToken::new();
+                let mut pending = auth.request_device_code(&cancel).await?;
+                assert_eq!(server.await??.len(), 1);
+                let listener =
+                    tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+                auth.test_base_url = Some(format!("http://{}", listener.local_addr()?));
+                pending.expires_at = tokio::time::Instant::now() + Duration::from_secs(3);
+                let active_cancel = cancel.clone();
+                let polled =
+                    tokio::spawn(
+                        async move { auth.poll_device_token(pending, &active_cancel).await },
+                    );
+                let (_held_connection, _) = listener.accept().await?;
+                if cancelled {
+                    cancel.cancel();
+                }
+                assert_eq!(
+                    polled.await?.err(),
+                    Some(if cancelled {
+                        AuthError::Cancelled
+                    } else {
+                        AuthError::DeviceCodeExpired
+                    })
+                );
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(1), listener.accept())
+                        .await
+                        .is_err()
+                );
+            }
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
+        .await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn device_connection_timeout_backs_off_instead_of_repeating_at_the_old_interval()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        device_fixture_io(async {
+            let (base, server) = scripted_server(vec![(200, DEVICE)]).await?;
+            let mut auth = MicrosoftAuth::new("00000000-0000-0000-0000-000000000001")?;
+            auth.test_base_url = Some(base);
+            let cancel = CancellationToken::new();
+            let mut pending = auth.request_device_code(&cancel).await?;
+            assert_eq!(server.await??.len(), 1);
+            let listener =
+                tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+            auth.test_base_url = Some(format!("http://{}", listener.local_addr()?));
+            auth.client = Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(1))
+                .build()?;
+            pending.expires_at = tokio::time::Instant::now() + Duration::from_millis(3500);
+            let polled =
+                tokio::spawn(async move { auth.poll_device_token(pending, &cancel).await });
+            let (_held_connection, _) = listener.accept().await?;
+            assert_eq!(polled.await?.err(), Some(AuthError::DeviceCodeExpired));
+            // Without timeout backoff a second connection would be queued at
+            // three seconds, before this grant expires at three and a half.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(1), listener.accept())
+                    .await
+                    .is_err()
+            );
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
+        .await
     }
 }

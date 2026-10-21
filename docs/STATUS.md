@@ -49,8 +49,8 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 
 ### Accounts and sign-in
 - [ ] Account list/detail, current selection, deletion and last-account empty state — persistent accounts and secure token storage.
-- [ ] Microsoft browser PKCE — preserve existing real flow; verify cancellation, refresh, ownership and live sign-in.
-- [ ] Microsoft Device Code — real request/poll, interval/slow_down, expiry/cancel and XBL → XSTS → Minecraft.
+- [ ] Microsoft browser PKCE — ownership/profile verification prepares a memory-only identity; Finish saves credentials/metadata. Local cancellation/refresh/ownership checks pass; live verification remains pending.
+- [ ] Microsoft Device Code — request/poll, interval/slow_down, HTTP throttling/timeout backoff, expiry/cancel, XBL → XSTS → Minecraft and final confirmation implemented; live verification remains pending.
 - [ ] Offline account — validate username and derive UUID v3 from OfflinePlayer:<name>; preserve launch authorization boundaries.
 - [ ] Authlib provider add/edit/remove, discovery and quick-link import — real metadata, HTTPS policy, linked-account rules and caching.
 - [ ] Provider URL/pasted or dropped quick links, duplicate handling and explicit HTTP consent — validated normalization, ALI discovery, persisted consent and password-safe requests.
@@ -95,10 +95,10 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 
 ## Verification
 
-- Native-window/scenario baseline `c82964f` passed three-platform CI run `39628760512`. Current Home/selector changes passed full `just check`: formatting, all-target/all-feature compilation, Clippy and 316 tests; their CI remains pending.
+- Home/selector baseline `22456ac` passed three-platform CI run `39631761937`. Microsoft authorization changes passed full `just check` (328 tests) and release compilation; their CI remains pending.
 - Old ui-parity evidence was removed before staging. `gpui-product-progress.md` already existed in earlier history; its current-tree deletion does not rewrite those prior commits.
 - Native macOS Welcome/version picker captured under `target/parity-shots/native/p1-*-system.png`; closing the parent removed both windows. Visual acceptance remains pending.
-- `scripts/snap-native --no-build` captured 40 debug UI scenarios in both themes (118 primary/child images); `scripts/parity-board` built `target/parity-shots/index.html`. Release compilation excludes scenario flags and fixture code.
+- Native screenshots cover 44 debug UI scenarios in both themes (134 primary/child images), including Microsoft method choice, device request/waiting and final saving. `scripts/parity-board` builds `target/parity-shots/index.html`. Fixture codes are not live authorization codes; release compilation excludes scenario flags/fixtures.
 - The React reference server is available at `http://127.0.0.1:5173/`; the separate prototype screenshot task has not supplied its images. The board labels missing reference shots explicitly. Current native fixture records cover implemented Microsoft/Vanilla/NeoForge models; additional provider/loader scenarios await their real implementations.
 - All three remote hosts completed actual Home → Games → native version-picker smoke, with visible screenshots under `target/parity-shots/{linux-arm64,windows-amd64,linux-amd64}/`. ARM64/Windows used pushed `d97206d`; Linux AMD64 used `def4a1b`. These establish the P1 window baseline, not current-page parity or P5 game verification.
 - Linux ARM64 KDE uses Xwayland `:1` plus session Xauthority and Spectacle; scrot returns black pixels there. Linux AMD64 X11 needs ImageMagick screen-based window capture. Windows captures run in an interactive scheduled task and enumerate visible windows by process ID. Test tasks were removed and the AMD64 VM was stopped softly after capture.
@@ -106,6 +106,8 @@ Updated: 2026-10-22. This is implementation status, not a completion claim.
 - Older supported representatives vary by loader; legacy Forge runs on Windows. Legacy ARM64 investigation/results remain pending.
 - A process PID or generic supervisor Running state does not establish the main menu; observe the game or validate a specific readiness signal.
 - Local auth fixtures and UI scenarios are separate from live-provider sign-in and actual game acceptance.
+- Eight Device Code loopback tests cover the complete ownership chain, poll intervals, slow_down/429, timeout backoff, cancellation during I/O, expiry, malformed links and controlled error mapping. UI regressions cover prepared-versus-saved state, method changes, orphan URLs and parent drafts after delayed save completion.
+- Microsoft preparation does not write account metadata or refresh credentials; final confirmation writes both. First-run's combined new-account/game commit remains required Welcome work. No live device request has been started. The public client ID is present in local .env and must be passed privately to the test app's environment.
 - The prototype's outer page padding is not launcher content. Compare cropped Home at 432×768 and management content at 960×600 logical pixels; browser viewport dimensions must allow for that padding.
 - Home visual work: square initial fallback, provider badge, centered launch icon/text and integrated Profile selector; official version details remain in the launch tooltip. Reserve macOS traffic-light space and give account/Profile windows usable list height. Real account avatars and full Home acceptance remain open.
 - Screenshot capture includes the launched process's allocated windows, including inactive floating panels; their actual CGWindowID capture was inspected. It does not require System Events activation.

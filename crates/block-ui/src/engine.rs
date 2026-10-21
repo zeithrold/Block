@@ -11,7 +11,9 @@ use std::{
 };
 
 use anyhow::{Context as _, ensure};
-use block_auth::{Account, AuthenticatedSession, MicrosoftAuth};
+use block_auth::{
+    Account, AccountRef, AuthenticatedSession, MicrosoftAuth, PreparedMicrosoftSignIn,
+};
 use block_launcher::{
     CancellationToken, Store,
     catalog::{Catalog, Profile, ProfileAppearance, ProfileConfiguration, Snapshot},
@@ -87,7 +89,13 @@ pub(crate) enum Message {
     Versions(Result<Vec<VersionEntry>, String>),
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
+    AuthPrepared(Account),
     SignedIn(Account),
+    DeviceCode {
+        user_code: String,
+        verification_uri: String,
+        expires_at: std::time::Instant,
+    },
     AuthStage(block_auth::SignInStage),
     ConnectionTest(super::connection_test::Request, Result<u16, String>),
     Browser(String),
@@ -176,6 +184,7 @@ pub(crate) struct Engine {
     runtime: Arc<tokio::runtime::Runtime>,
     sender: EventSender,
     pub root: PathBuf,
+    prepared_sign_in: Arc<Mutex<Option<(CancellationToken, PreparedMicrosoftSignIn)>>>,
 }
 
 impl Engine {
@@ -203,6 +212,7 @@ impl Engine {
             runtime,
             sender: sender.into(),
             root,
+            prepared_sign_in: Default::default(),
         };
         engine.watch_sessions();
         Ok((engine, receiver))
@@ -440,9 +450,21 @@ impl Engine {
         });
     }
 
-    pub(super) fn sign_in(&self, cancel: CancellationToken) {
+    pub(super) fn discard_prepared_sign_in(&self) {
+        if let Some((cancel, _)) = self
+            .prepared_sign_in
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            cancel.cancel();
+        }
+    }
+
+    pub(super) fn sign_in(&self, cancel: CancellationToken, device: bool) {
         let root = self.root.clone();
         let sender = self.sender.clone();
+        let pending_account = self.prepared_sign_in.clone();
         self.runtime.spawn(async move {
             let result = async {
                 // Reject unreadable/corrupt metadata before creating an OS credential.
@@ -451,25 +473,62 @@ impl Engine {
                 let auth = auth()?.with_stage_observer(Arc::new(move |stage| {
                     let _ = observed.try_send(Message::AuthStage(stage));
                 }));
-                let pending = auth.begin_sign_in().await?;
-                ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
-                let _ = sender
-                    .send(Message::Browser(pending.authorization_url().to_owned()))
-                    .await;
-                let _ = sender
-                    .send(Message::Status(
-                        "Finish Microsoft sign-in in your browser".into(),
-                    ))
-                    .await;
-                let session = auth.complete_sign_in(pending, &cancel).await?;
-                let account = session.account;
-                let (accounts, existed) = match merge_signed_in_account(accounts, &account) {
-                    Ok(merged) => merged,
-                    Err(error) => {
-                        auth.sign_out(&account).await.context("Could not remove this sign-in's new credential after an account-registration conflict")?;
-                        return Err(error);
-                    }
+                let prepared = if device {
+                    let pending = auth.begin_device_sign_in(&cancel).await?;
+                    ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+                    let _ = sender
+                        .send(Message::DeviceCode {
+                            user_code: pending.user_code().to_owned(),
+                            verification_uri: pending.verification_uri().to_owned(),
+                            expires_at: std::time::Instant::now() + pending.remaining(),
+                        })
+                        .await;
+                    auth.complete_device_sign_in(pending, &cancel).await?
+                } else {
+                    let pending = auth.begin_sign_in().await?;
+                    ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+                    let _ = sender
+                        .send(Message::Browser(pending.authorization_url().to_owned()))
+                        .await;
+                    auth.complete_sign_in(pending, &cancel).await?
                 };
+                let account = prepared.account().clone();
+                // Validate registration conflicts before offering final confirmation.
+                merge_signed_in_account(accounts, &account)?;
+                {
+                    let mut pending = pending_account
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+                    *pending = Some((cancel.clone(), prepared));
+                }
+                let _ = sender.send(Message::AuthPrepared(account)).await;
+                Ok("Identity verified. Finish setup to save this account.".into())
+            }
+            .await;
+            finish(&sender, result).await;
+        });
+    }
+
+    pub(super) fn save_sign_in(&self, expected: AccountRef) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        let pending_account = self.prepared_sign_in.clone();
+        self.runtime.spawn(async move {
+            let result = async {
+                let (cancel, prepared) = {
+                    let mut pending = pending_account.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    ensure!(pending.as_ref().is_some_and(|(_, prepared)| prepared.account().reference == expected), "The prepared identity is no longer available. Sign in again.");
+                    pending.take().context("Prepared sign-in is unavailable")?
+                };
+                ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+                let account = prepared.account().clone();
+                let (accounts, existed) = merge_signed_in_account(load_accounts(&root)?, &account)?;
+                let auth = auth()?.with_stage_observer({
+                    let observed = sender.clone();
+                    Arc::new(move |stage| { let _ = observed.try_send(Message::AuthStage(stage)); })
+                });
+                auth.save_sign_in(prepared).await?;
                 let _ = sender.send(Message::AuthStage(block_auth::SignInStage::SaveMetadata)).await;
                 if let Err(error) = save_accounts(&root, &accounts) {
                     if !existed {
@@ -478,7 +537,8 @@ impl Engine {
                     return Err(error);
                 }
                 let name = account.player_name.clone();
-                let _ = sender.send(Message::Accounts(Ok(accounts))).await;
+                // Durable state remains authoritative even if its child window closed.
+                let _ = sender.unscoped().send(Message::Accounts(Ok(accounts))).await;
                 let _ = sender.send(Message::SignedIn(account)).await;
                 Ok(format!(
                     "Signed in as {name} · Java Edition ownership verified"
@@ -1110,8 +1170,9 @@ mod tests {
             runtime: runtime.clone(),
             sender: sender.into(),
             root: directory.path().to_owned(),
+            prepared_sign_in: Default::default(),
         };
-        engine.sign_in(block_launcher::CancellationToken::new());
+        engine.sign_in(block_launcher::CancellationToken::new(), false);
         let message = runtime.block_on(async {
             tokio::time::timeout(Duration::from_secs(3), receiver.recv()).await
         })?;
@@ -1144,6 +1205,7 @@ mod tests {
             runtime: runtime.clone(),
             sender: sender.into(),
             root: root.path().to_owned(),
+            prepared_sign_in: Default::default(),
         };
         let java = std::env::current_exe()?;
         let defaults = GameDefaults {

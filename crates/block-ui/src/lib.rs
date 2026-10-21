@@ -208,6 +208,10 @@ enum UiAction {
     DefaultAccount(Option<String>),
     SignIn,
     Authenticate,
+    AuthNext,
+    AuthBack,
+    AuthMethod(authentication::Method),
+    CopyDeviceCode,
     AuthCancel,
     AuthFinish,
     AuthReopen,
@@ -355,6 +359,7 @@ enum OperationKind {
     General,
     Install,
     Launch,
+    Account,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -616,7 +621,13 @@ impl Block {
                         self.auth_browser(url, cx);
                     }
                 }
-                Message::SignedIn(account) => self.auth_signed_in(account),
+                Message::AuthPrepared(account) => self.auth_prepared(account),
+                Message::SignedIn(account) => self.auth_saved(account, cx),
+                Message::DeviceCode {
+                    user_code,
+                    verification_uri,
+                    expires_at,
+                } => self.auth_device_code(user_code, verification_uri, expires_at),
                 Message::AuthStage(stage) => self.auth_stage(stage),
                 Message::ConnectionTest(request, result) => {
                     self.connection_finished(request, result, cx);
@@ -653,7 +664,10 @@ impl Block {
                         Ok(status) => {
                             self.push_toast(status.clone(), feedback::ToastKind::Success);
                             self.status = status;
-                            if self.tab != Tab::Onboarding && self.shell.auth.is_none() {
+                            if self.tab != Tab::Onboarding
+                                && self.shell.auth.is_none()
+                                && self.operation_kind != OperationKind::Account
+                            {
                                 self.form = None;
                             }
                         }
@@ -994,6 +1008,7 @@ impl Block {
                 | UiAction::WizardBack
                 | UiAction::OnboardingBack
                 | UiAction::AuthCancel
+                | UiAction::AuthBack
                 | UiAction::AuthFinish
                 | UiAction::ProfilePageCancel
                 | UiAction::ProfilePageDone
@@ -1475,6 +1490,10 @@ impl Block {
             UiAction::Authenticate | UiAction::AuthRetry => self.start_auth(window, cx),
             UiAction::AuthCancel => self.cancel_auth(window, cx),
             UiAction::AuthFinish => self.finish_auth(window, cx),
+            UiAction::AuthNext => self.auth_next(cx),
+            UiAction::AuthBack => self.auth_back(cx),
+            UiAction::AuthMethod(method) => self.change_auth_method(method, window, cx),
+            UiAction::CopyDeviceCode => self.copy_device_code(cx),
             UiAction::AuthReopen => self.reopen_auth(cx),
             UiAction::RequestSignOut(id) => {
                 self.shell
@@ -1485,6 +1504,7 @@ impl Block {
                 if let Some(account) = self.accounts.iter().find(|a| account_id(a) == id).cloned() {
                     self.shell.surfaces.close(window, &self.focus, cx);
                     self.begin("Removing saved credentials");
+                    self.operation_kind = OperationKind::Account;
                     if let Some(engine) = &self.engine {
                         engine.sign_out(account);
                     }
@@ -1869,6 +1889,7 @@ impl Block {
             _ => components::ButtonVariant::Outline,
         };
         let disabled = self.busy && !Self::available_while_busy(&action)
+            || matches!(action, UiAction::SignIn) && self.busy && self.shell.auth.is_none()
             || matches!(action, UiAction::Stop) && !self.can_stop();
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
@@ -1965,6 +1986,10 @@ impl Block {
                 | UiAction::Drawer(_)
                 | UiAction::AuthCancel
                 | UiAction::AuthReopen
+                | UiAction::SignIn
+                | UiAction::AuthBack
+                | UiAction::AuthMethod(_)
+                | UiAction::CopyDeviceCode
                 | UiAction::DismissToast
                 | UiAction::SetAppearance(_)
                 | UiAction::ReduceMotion
@@ -3108,7 +3133,7 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
     }
     #[gpui::test]
-    fn cancelling_sign_in_discards_an_already_queued_browser_request(
+    fn orphan_browser_requests_do_not_become_authorized_by_an_unrelated_new_cancel_token(
         cx: &mut gpui::TestAppContext,
     ) {
         let (view, cx) = crate::test_support::window(cx, test_view);
@@ -3137,9 +3162,6 @@ mod tests {
             view.cancel = block_launcher::CancellationToken::new();
             view.poll(cx);
         });
-        assert_eq!(
-            cx.opened_url().as_deref(),
-            Some("https://example.invalid/new-synthetic-authorization")
-        );
+        assert_eq!(cx.opened_url(), None);
     }
 }
