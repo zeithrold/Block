@@ -45,7 +45,7 @@ mod window_surfaces;
 
 pub use about::BuildInfo;
 pub use crash_view::CrashView;
-pub use design::{Assets as UiAssets, load_fonts};
+pub use design::{UiAssets, load_fonts};
 pub use gpui_base::Root as ProductRoot;
 #[cfg(debug_assertions)]
 pub use scenarios::{SCENARIOS, ScenarioOptions};
@@ -2206,6 +2206,19 @@ impl Block {
     }
 }
 
+/// Keep the component library's theme mode in step with the product palette so
+/// overlay chrome, scrims and inputs render in the same appearance.
+fn sync_component_theme(palette: Palette, cx: &mut gpui::App) {
+    let mode = if palette.background == Palette::DARK.background {
+        gpui_component::ThemeMode::Dark
+    } else {
+        gpui_component::ThemeMode::Light
+    };
+    if gpui_component::Theme::global(cx).mode != mode {
+        gpui_component::Theme::change(mode, None, cx);
+    }
+}
+
 impl Render for Block {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.motion
@@ -2223,6 +2236,7 @@ impl Render for Block {
         }
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
+        sync_component_theme(self.palette, cx);
         let previous_window = self.shell.surfaces.enter_window(window);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();

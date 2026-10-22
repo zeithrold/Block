@@ -808,6 +808,7 @@ dependencies = [
  "directories",
  "gpui-base",
  "gpui-component",
+ "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-apple",
  "gpui-pre-platform",

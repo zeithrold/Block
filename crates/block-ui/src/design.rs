@@ -371,7 +371,7 @@ impl Icon {
 
 /// Native asset source. The application registers this once on `Application::new()`.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Assets;
+pub(crate) struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
@@ -386,6 +386,31 @@ impl AssetSource for Assets {
             .filter(|(_, candidate, _)| candidate.starts_with(path))
             .map(|(_, candidate, _)| SharedString::from(*candidate))
             .collect())
+    }
+}
+
+/// Application asset source: the product's own icons plus the component
+/// library's Lucide set. Native windows register exactly one asset source, so
+/// the two catalogs are merged here instead of replacing each other.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UiAssets;
+
+impl AssetSource for UiAssets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+        match Assets.load(path)? {
+            Some(data) => Ok(Some(data)),
+            None => gpui_kit_assets::Assets.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        let mut paths = Assets.list(path)?;
+        for candidate in gpui_kit_assets::Assets.list(path)? {
+            if !paths.iter().any(|existing| existing == &candidate) {
+                paths.push(candidate);
+            }
+        }
+        Ok(paths)
     }
 }
 
