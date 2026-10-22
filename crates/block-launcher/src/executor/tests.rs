@@ -777,10 +777,7 @@ fn symbolic_links_in_runtime_archives_are_rejected() -> anyhow::Result<()> {
     let error = install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)
         .err()
         .ok_or_else(|| anyhow::anyhow!("a symlinked runtime archive must fail"))?;
-    assert!(
-        format!("{error:#}").contains("link or special"),
-        "{error:#}"
-    );
+    assert!(format!("{error:#}").contains("symlink"), "{error:#}");
     assert!(!directory.exists(), "no partial runtime may look installed");
     Ok(())
 }
@@ -807,5 +804,70 @@ fn unpack_budget_is_bounded() -> anyhow::Result<()> {
         format!("{error:#}").contains("too many entries"),
         "{error:#}"
     );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn safe_relative_runtime_symlinks_are_extracted() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let archive_bytes = tar_gz(|builder| {
+        append_file(builder, "zulu-test/bin/java", b"#!/bin/sh\nexit 0\n", 0o755)?;
+        append_file(builder, "zulu-test/lib/aarch64/libjsig.so", b"sig", 0o644)?;
+        let mut header = tar::Header::new_gnu();
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_cksum();
+        builder.append_link(
+            &mut header,
+            "zulu-test/lib/aarch64/server/libjsig.so",
+            "../libjsig.so",
+        )?;
+        Ok(())
+    })?;
+    let archive = root.path().join("runtime.tar.gz");
+    fs::write(&archive, &archive_bytes)?;
+    let directory = root.path().join("runtimes/linux-arm64/checksum");
+    install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)?;
+    let link = directory.join("lib/aarch64/server/libjsig.so");
+    assert!(fs::symlink_metadata(&link)?.file_type().is_symlink());
+    assert_eq!(
+        fs::read_link(&link)?,
+        PathBuf::from("../libjsig.so"),
+        "the official archive's relative target is preserved"
+    );
+    assert_eq!(fs::read(&link)?, b"sig");
+    Ok(())
+}
+
+#[test]
+fn escaping_relative_runtime_symlink_is_rejected() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let archive_bytes = tar_gz(|builder| {
+        append_file(builder, "zulu-test/bin/java", b"#!/bin/sh\nexit 0\n", 0o755)?;
+        let mut header = tar::Header::new_gnu();
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_cksum();
+        builder.append_link(
+            &mut header,
+            "zulu-test/lib/escape.so",
+            "../../../../escape.so",
+        )?;
+        Ok(())
+    })?;
+    let archive = root.path().join("runtime.tar.gz");
+    fs::write(&archive, &archive_bytes)?;
+    let directory = root.path().join("runtimes/linux-arm64/checksum");
+    let error = install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("an escaping symlink must fail"))?;
+    assert!(
+        format!("{error:#}").contains("escaping symlink"),
+        "{error:#}"
+    );
+    assert!(!directory.exists(), "no partial runtime may look installed");
     Ok(())
 }
