@@ -121,6 +121,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
 | Windows AMD64 | 1.20.6/1.8.9/1.12.2 native Q6/Q10 | 1.16.5 native Q10 | 1.18.2 native Q10 | 1.21.11 + 1.12.2 native Q6 | 1.21.11 native Q6 | 1.21.1/1.16.5/1.12.2 native Q10 | | Forge 1.12.2 native Q6 |
 | Linux AMD64 | 1.20.6 native UI 016c695 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
+| Windows ARM64 | 1.20.6 native launcher UI/install/offline/restart (3f151b4); game blocked by VM OpenGL | | | | | | | 1.16.5 boundary (no official ARM64 Java 8) |
 | Linux ARM64 | 1.16.5/1.18.2 native menus (Azul runtime) 851e23b | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.12.2 picker disabled (native proof) 851e23b |
 
 ## Legacy ARM64
@@ -130,7 +131,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Linux ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1, JNA 5.13, TTS 1.12.4 + slf4j companion | Native wizard → Play → main menu → Stop verified (851e23b) | Narration lacks a native ARM64 flite wrapper; latest.log gets no "Stopping!" line on the managed stop path. |
 | Linux ARM64 1.18.2, plain Zulu 17, LWJGL 3.3.1 | Native wizard → Play → main menu → Stop verified (851e23b) | Narration limitation as above. |
 | Linux ARM64 1.19+ / 1.20.6, LWJGL 3.3.1+ | Official ARM64 natives substituted explicitly in plan and log | Native wizard and Play run pending. |
-| macOS ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1/JNA 5.13 | Failed at window creation | GLFW window-icon error. |
+| macOS ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1/JNA 5.13 (bounded attempt on de9cba4) | Failed at window creation | Confirmed: plan/prepare pass, launch reaches LWJGL 3.3.1 then "GLFW error 65548: Cocoa: Regular windows do not have icons on macOS"; no game window/crash report. Stock 1.16.5 is also rejected by the product gate (no reviewed ARM64 artifact for lwjgl-3.2.1). |
 | macOS ARM64 1.16.5, alternate official GLFW/binding combinations | Failed | Missing 3.4 binding function or incompatible CallbackI interface. |
 | Linux/macOS/Windows ARM64 1.12.2 and 1.8.9, official LWJGL 2 natives | Unsupported selected binaries | Verified archives contain x86/x64 only. The picker keeps them visible but disabled with the inline reason and rejects typed IDs (3e5a801; native Linux ARM64 proof). |
 
@@ -173,12 +174,12 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
 | Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
 | Prototype/native board and behavior acceptance | Windows single-window matrix and boards recaptured at d1be580 (142 images); one grouped review sent, user verdict pending. macOS recapture/native overlay check deferred while the Mac is in use. |
-| Windows ARM64 Q4 run | Cross-build from Windows AMD64 is blocked on a missing VS VC++ ARM64 CRT/toolset component (check passes, final link lacks msvcrt.lib); the VM has the native MSVC ARM64 toolchain. Needs a Mac-idle window to build natively on the VM (or the VS component installed on the AMD64 host). |
-| Windows ARM64 game launch | No official ARM64 Java 8 exists (Azul/Adoptium/Liberica empty; Mojang windows-arm64 has 17/21/25 only). 1.20.6/1.18.2 best effort remains; 1.16.5 and older are a stated boundary. Running x64 Java under emulation is a product decision to confirm, not implemented. |
+| Windows ARM64 Q4 run | Resolved on the VM: native `cargo build -p block-app --bin block` (LLVM for ring, MSVC ARM64) produced the ARM64 launcher; native UI opened, official catalog loaded, 1.20.6 installed with the managed Mojang windows-arm64 Java 21.0.7 runtime, offline account saved and persisted across restart. Game launch reaches Java/LWJGL 3.3.3 with the natives-windows-arm64 substitution but the VMware Fusion ARM64 guest has no OpenGL ICD (`GLFW error 65542 WGL`), so no main menu; VMware Tools for ARM64 installed without a 3D/OpenGL driver. Environment limitation, not a launcher defect. |
+| Windows ARM64 game launch | 1.20.6 native-path evidence: managed Java 21.0.7, LWJGL 3.3.3, Compatibility "Windows ARM64: LWJGL 3.3.3 ... official natives-windows-arm64" and the ARM64 natives on the classpath; blocked from the menu only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 environment-blocked by the same; 1.16.5/1.12.2 have no official ARM64 Java 8. x64 emulation remains a product choice, not implemented. |
 | Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
-| Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
+| Older official OptiFine JAR | 1.16.5 G8 and 1.12.2 G5 standalone validated and launched; G5-as-Forge stays refused (no declared Forge version); C5 (2017 old installer format, no launchwrapper-of.txt) is unsupported. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
-| Real quick-link drag on hosts automation cannot drive | Windows AMD64 done with a real SendInput browser drag. macOS drag still needs the user batch (Mac in use); Linux X11 verified, Wayland documented unsupported. |
+| Real quick-link drag on hosts automation cannot drive | Real browser drags verified on Windows AMD64, macOS (Chrome→zone) and Linux X11; Wayland documented unsupported. No remaining user drag batch. |
 
 ## v0 notes
 
