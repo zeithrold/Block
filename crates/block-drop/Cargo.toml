@@ -11,7 +11,7 @@ async-channel = "2"
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # The X11 stack is already in the workspace through GPUI; this crate only adds
 # the safe XCB bindings it directly uses for XDND.
-x11rb = "0.13"
+x11rb = { version = "0.13", features = ["shape"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-core = "0.62"

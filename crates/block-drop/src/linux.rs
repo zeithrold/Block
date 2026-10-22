@@ -22,9 +22,13 @@ use anyhow::{Result, anyhow};
 use async_channel::Sender as PayloadSender;
 use x11rb::{
     connection::Connection as _,
-    protocol::xproto::{
-        Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConfigureWindowAux,
-        ConnectionExt as _, CreateWindowAux, EventMask, PropMode, StackMode, Window, WindowClass,
+    protocol::{
+        shape::{self, ConnectionExt as _},
+        xproto::{
+            Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering,
+            ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode,
+            Rectangle, StackMode, Window, WindowClass,
+        },
     },
     rust_connection::RustConnection,
     wrapper::ConnectionExt as _,
@@ -232,7 +236,9 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         .map(|root| root.root)
         .ok_or_else(|| anyhow!("the X11 display has no root window"))?;
     // XDND sources look up the immediate child of the root under the pointer, so
-    // the target must be a top-level input-only window, not a child of the app.
+    // the target must be a top-level window, not a child of the app. It is
+    // InputOutput because GTK sources skip InputOnly windows; an empty bounding
+    // shape makes it invisible while the input shape keeps the whole zone hittable.
     connection
         .change_window_attributes(
             parent,
@@ -242,6 +248,7 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
     let window = connection.generate_id()?;
     let aux = CreateWindowAux::new()
         .override_redirect(1)
+        .background_pixel(0)
         .event_mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY);
     connection
         .create_window(
@@ -253,11 +260,12 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
             1,
             1,
             0,
-            WindowClass::INPUT_ONLY,
+            WindowClass::INPUT_OUTPUT,
             x11rb::COPY_FROM_PARENT,
             &aux,
         )
         .map_err(|error| anyhow!("could not create the X11 drop window: {error}"))?;
+    set_shapes(&connection, window, 1, 1)?;
     connection.change_property32(
         PropMode::REPLACE,
         window,
@@ -338,8 +346,43 @@ fn refresh(state: &mut Ready) {
         .height(u32::from(height))
         .stack_mode(StackMode::ABOVE);
     let _ = state.connection.configure_window(state.window, &aux);
+    let _ = set_shapes(&state.connection, state.window, width, height);
     let _ = state.connection.flush();
     state.last_refresh = Instant::now();
+}
+
+/// Makes the overlay invisible (empty bounding shape) but keeps the whole zone
+/// inside its input shape so pointer hit-testing still selects it.
+fn set_shapes(
+    connection: &RustConnection,
+    window: Window,
+    width: u16,
+    height: u16,
+) -> Result<(), x11rb::errors::ConnectionError> {
+    connection.shape_rectangles(
+        shape::SO::SET,
+        shape::SK::BOUNDING,
+        ClipOrdering::UNSORTED,
+        window,
+        0,
+        0,
+        &[],
+    )?;
+    connection.shape_rectangles(
+        shape::SO::SET,
+        shape::SK::INPUT,
+        ClipOrdering::UNSORTED,
+        window,
+        0,
+        0,
+        &[Rectangle {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }],
+    )?;
+    Ok(())
 }
 
 fn handle_event(state: &mut Ready, event: x11rb::protocol::Event) {
