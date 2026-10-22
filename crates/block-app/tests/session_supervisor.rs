@@ -108,9 +108,11 @@ impl Fixture {
                 "rules": [{"action": "allow", "os": {"name": "windows"}}],
                 "downloads": {"artifact": artifact}
             }));
+            let arm64_native = object(&store, b"fixture windows-arm64 natives")?;
             seed_maven(
                 &root,
                 "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows-arm64.jar",
+                &arm64_native,
             )?;
         }
         let mut asset_index = assets;
@@ -207,13 +209,17 @@ impl Drop for Fixture {
     }
 }
 
-fn seed_maven(root: &Path, url: &str) -> anyhow::Result<()> {
+fn seed_maven(root: &Path, url: &str, artifact: &serde_json::Value) -> anyhow::Result<()> {
     let metadata = root.join("metadata");
     fs::create_dir_all(&metadata)?;
     let key = format!("{:x}", Sha1::digest(url.as_bytes()));
     fs::write(
         metadata.join(format!("maven-{key}.json")),
-        serde_json::to_vec(&json!({"sha1": format!("{:040x}", 1), "size": 1, "url": url}))?,
+        serde_json::to_vec(&json!({
+            "sha1": artifact["sha1"],
+            "size": artifact["size"],
+            "url": url
+        }))?,
     )?;
     Ok(())
 }
