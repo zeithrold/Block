@@ -1482,8 +1482,16 @@ impl Block {
                                 .then(|| Icon::Lock.render(14., self.palette.muted)),
                         ),
                 )
-                .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(value))
-                .child(note(description));
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .min_w_0()
+                        .max_w_full()
+                        .truncate()
+                        .child(value),
+                )
+                .child(note(description).min_w_0());
             if let Some(action) = action {
                 grid = grid.child(
                     components::button(
@@ -1539,7 +1547,11 @@ impl Block {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(note(format!("Used by {} Profiles", profiles.len())))
+                    .child(note(if profiles.len() == 1 {
+                        "Used by 1 Profile".to_owned()
+                    } else {
+                        format!("Used by {} Profiles", profiles.len())
+                    }))
                     .child(self.button(
                         "instance-new-profile",
                         "New Profile",
@@ -1672,7 +1684,7 @@ impl Block {
                     .child(card(
                         Icon::Cpu,
                         "Memory",
-                        format!("{} MiB", profile.memory_mib),
+                        components::memory_label(profile.memory_mib),
                         "Maximum allocation",
                     )),
             )
@@ -1766,14 +1778,30 @@ impl Block {
     }
 
     pub(super) fn render_games_help(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let _ = cx;
         div().flex().flex_col().gap_4()
             .child(note("An Instance fixes the game version and mod loader. A Profile stores your launch preferences."))
-            .child(div().id("games-help-body").min_h_0().max_h(px(320.)).overflow_y_scroll().flex().flex_col().gap_3()
-                .child(components::card(self.palette).p_3().child("Instance").child(note("Minecraft version and mod loader are fixed at creation. Its game folder and installation settings belong to this game setup.")))
-                .child(components::card(self.palette).p_3().child("Bundled Profile").child(note("Every Instance has exactly one Profile. Games shows them together in one list.")))
-                .child(components::card(self.palette).p_3().child("Separated Profile").child(note("Several Profiles can share one Instance, with independent accounts, memory and JVM arguments. You can convert from Bundled once; it cannot be reversed.")))
-                .child(note(format!("Current mode: {} Profile", if self.snapshot.profile_mode == ProfileMode::Bundled { "Bundled" } else { "Separated" }))))
-            .child(self.button("games-help-settings", "Profile mode", UiAction::ProfileModeSettings, cx)).into_any_element()
+            .child(
+                div()
+                    .id("games-help-body")
+                    .h(px(300.))
+                    .min_h_0()
+                    .w_full()
+                    .child(
+                        super::scroll_area::viewport(
+                            div().id("games-help-scroll").flex().flex_col().gap_3(),
+                            &self.shell.help_scroll,
+                            "Instances and Profiles",
+                            self.palette,
+                            false,
+                        )
+                        .child(components::card(self.palette).p_3().child("Instance").child(note("Minecraft version and mod loader are fixed at creation. Its game folder and installation settings belong to this game setup.")))
+                        .child(components::card(self.palette).p_3().child("Bundled Profile").child(note("Every Instance has exactly one Profile. Games shows them together in one list.")))
+                        .child(components::card(self.palette).p_3().child("Separated Profile").child(note("Several Profiles can share one Instance, with independent accounts, memory and JVM arguments. You can convert from Bundled once; it cannot be reversed.")))
+                        .child(note(format!("Current mode: {} Profile", if self.snapshot.profile_mode == ProfileMode::Bundled { "Bundled" } else { "Separated" }))),
+                    ),
+            )
+            .into_any_element()
     }
 }
 

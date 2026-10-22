@@ -460,7 +460,7 @@ impl Block {
             .child(components::checkbox("instance-fullscreen", "Start in fullscreen", editor.fullscreen, self.palette,
                 ControlState { disabled: self.busy, ..ControlState::default() },
                 cx.listener(|view, (), window, cx| view.handle(UiAction::InstanceFullscreen, window, cx))))
-            .child(div().flex().flex_col().gap_2().child("Installation directory").child(note(editor.original.directory.display().to_string()))
+            .child(div().flex().flex_col().gap_2().child("Installation directory").child(note(editor.original.directory.display().to_string()).min_w_0().w_full().truncate())
                 .child(note("This location is read-only. Moving an installation requires data migration and is not available here.")))
             .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
             .children(editor.save_error.clone().map(note));

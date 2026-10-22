@@ -62,6 +62,7 @@ pub(super) struct ShellState {
     pub home_scroll: gpui::ScrollHandle,
     pub home: RefCell<HomeState>,
     pub about_scroll: gpui::ScrollHandle,
+    pub help_scroll: gpui::ScrollHandle,
     pub output_scroll: gpui::ScrollHandle,
     pub toast: Option<super::feedback::Toast>,
     pub auth: Option<super::authentication::AuthWizard>,

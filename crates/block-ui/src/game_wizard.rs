@@ -1676,7 +1676,23 @@ impl Block {
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
             Some(WizardPage::OptiFine) => self.wizard_optifine(form, cx).into_any_element(),
             Some(WizardPage::Location) => self.wizard_location(form, cx).into_any_element(),
-            None if review => self.wizard_review(form, cx).into_any_element(),
+            None if review => div()
+                .size_full()
+                .min_h_0()
+                .child(super::scroll_area::viewport(
+                    div()
+                        .id("wizard-review-scroll")
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(self.wizard_review(form, cx)),
+                    &self.shell.wizard.body_scroll,
+                    "Review",
+                    self.palette,
+                    false,
+                ))
+                .into_any_element(),
             None if state.step == WizardStep::GetStarted => {
                 self.wizard_start(cx).into_any_element()
             }
@@ -3315,7 +3331,7 @@ impl Block {
                     .child(div().min_w_0().child(note("NEW PROFILE")).child(profile_name)))) )
             .children([
                 ("Launch target", launch_target),
-                ("Maximum memory", format!("{memory} MiB")),
+                ("Maximum memory", memory.parse::<u32>().map_or_else(|_| memory.clone(), components::memory_label)),
                 ("Server", profile.map_or_else(|| "Choose in game".to_owned(), |profile| { let value = profile.server.read(cx).value(); if value.trim().is_empty() { "Choose in game".into() } else { value } })),
                 ("Automatic connection", if profile.is_some_and(|profile| profile.connect_on_launch) {
                     match automatic_connection {

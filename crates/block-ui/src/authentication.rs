@@ -272,6 +272,11 @@ impl AuthWizard {
                 });
             }
         }
+        if name == "auth-waiting" {
+            // Mirrors the real browser flow, which keeps the URL so the page can
+            // offer "Open browser again" after focus leaves the browser.
+            self.browser_url = Some("https://www.microsoft.com/link".into());
+        }
         if name == "auth-error" {
             self.error = Some("The authorization request expired. Try signing in again.".into());
         }
@@ -690,6 +695,26 @@ impl Block {
             .child(note(
                 "Enter the server details or paste an Authlib quick link.",
             ))
+            .child(
+                div()
+                    .id("provider-drop-zone")
+                    .debug_selector(|| "provider-drop-zone".into())
+                    .w_full()
+                    .p_4()
+                    .rounded_lg()
+                    .border_1()
+                    .border_dashed()
+                    .border_color(rgb(self.palette.border))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(Icon::ExternalLink.render(20., self.palette.muted))
+                    .child(div().text_sm().child("Drop an Authlib quick link here"))
+                    .child(note(
+                        "You can also paste the link into the server address field.",
+                    )),
+            )
             .child(components::field_with(
                 "Display name",
                 &draft.name,
@@ -1874,6 +1899,10 @@ impl Block {
                 "Choose your character",
                 "These characters were returned by your authentication provider.",
             ),
+            Phase::Failed if state.provider == AccountProvider::Offline => (
+                "Check your player name",
+                "Use 1–16 ASCII letters, numbers, or underscores. Your saved accounts are unchanged.",
+            ),
             Phase::Failed => (
                 "Sign-in needs your attention",
                 "Your existing saved accounts are kept. You can try again.",
@@ -1940,6 +1969,14 @@ impl Block {
                 body.child(choices)
                     .children(state.error.as_ref().map(|error| note(error.clone())))
             }
+            Phase::Failed if state.provider == AccountProvider::Offline => body
+                .child(self.auth_information(state, cx))
+                .children(state.error.clone().map(|error| {
+                    div()
+                        .text_sm()
+                        .text_color(rgb(self.palette.destructive))
+                        .child(error)
+                })),
             Phase::Failed => body.child(self.auth_information(state, cx)).child(
                 components::card(self.palette)
                     .border_color(rgb(self.palette.destructive))

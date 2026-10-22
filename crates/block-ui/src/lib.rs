@@ -634,7 +634,7 @@ impl Block {
             match message {
                 Message::ForOperation { .. } => {}
                 Message::Catalog(Ok(snapshot)) => {
-                    self.apply_catalog(snapshot);
+                    self.apply_catalog(snapshot, cx);
                     self.shell.games.load = browser::CollectionLoad::Ready;
                     self.shell.profiles.load = browser::CollectionLoad::Ready;
                 }
@@ -775,7 +775,7 @@ impl Block {
         cx.notify();
     }
 
-    fn apply_catalog(&mut self, snapshot: Snapshot) {
+    fn apply_catalog(&mut self, snapshot: Snapshot, cx: &mut Context<'_, Self>) {
         let previous = self
             .profile()
             .map(|profile| (profile.id.clone(), profile.default_account.clone()));
@@ -784,6 +784,9 @@ impl Block {
             self.select_requested_profile(&profile);
         }
         self.normalize_selection();
+        // The catalog decides Bundled vs Separated browsing, so the selector
+        // labels must follow the loaded mode instead of their creation-time one.
+        self.initialize_browsers(cx);
         if previous
             != self
                 .profile()
@@ -2992,7 +2995,7 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.engine = Some(engine);
                 view.messages = Some(messages);
-                view.apply_catalog(snapshot);
+                view.apply_catalog(snapshot, cx);
                 cx.notify();
             });
             click_selector(cx, "create-instance");
@@ -3045,7 +3048,7 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.engine = Some(engine);
                 view.messages = Some(messages);
-                view.apply_catalog(snapshot);
+                view.apply_catalog(snapshot, cx);
                 cx.notify();
             });
             click_selector(cx, "create-instance");

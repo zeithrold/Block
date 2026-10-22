@@ -1194,7 +1194,10 @@ impl Block {
                 navigation.into_any_element(),
                 detail.into_any_element(),
                 true,
-                self.palette,
+                super::Palette {
+                    sidebar: self.palette.background,
+                    ..self.palette
+                },
             )
             .id("settings-page")
             .into_any_element()
@@ -1252,9 +1255,10 @@ impl Block {
                     .flex_col()
                     .gap_1()
                     .children(categories.map(|(index, id, label, icon)| {
+                        let active = page == index;
                         let mut button = components::button(
                             format!("settings-page-{id}"),
-                            if narrow { "" } else { label },
+                            "",
                             self.palette,
                             components::ButtonVariant::Ghost,
                             ControlState::default(),
@@ -1265,13 +1269,22 @@ impl Block {
                         .w_full()
                         .h(px(40.))
                         .gap_3()
-                        .flex_row_reverse()
-                        .justify_end()
-                        .child(icon.render(16., self.palette.muted));
+                        .justify_start()
+                        .child(icon.render(
+                            16.,
+                            if active {
+                                self.palette.foreground
+                            } else {
+                                self.palette.muted
+                            },
+                        ));
+                        if !narrow {
+                            button = button.child(label);
+                        }
                         if narrow {
                             button = button.justify_center().px_0().gap_0();
                         }
-                        if page == index {
+                        if active {
                             button = button
                                 .bg(rgb(self.palette.accent))
                                 .text_color(rgb(self.palette.foreground));
@@ -1296,7 +1309,7 @@ impl Block {
                         note(if dirty {
                             "Unsaved changes"
                         } else {
-                            "All changes saved"
+                            "Saved for this session"
                         })
                         .into_any_element()
                     }),

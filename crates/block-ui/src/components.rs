@@ -534,6 +534,15 @@ pub(super) enum BadgeVariant {
     Warning,
 }
 
+/// Human memory label: whole GiB stays whole, otherwise one decimal place.
+pub(super) fn memory_label(mib: u32) -> String {
+    if mib.is_multiple_of(1024) {
+        format!("{} GB", mib / 1024)
+    } else {
+        format!("{:.1} GB", f64::from(mib) / 1024.0)
+    }
+}
+
 pub(super) fn badge(
     label: impl Into<SharedString>,
     palette: Palette,
@@ -564,6 +573,7 @@ pub(super) fn badge(
         .items_center()
         .justify_center()
         .flex_shrink_0()
+        .self_center()
         .h(px(20.))
         .px(px(8.))
         .rounded_full()

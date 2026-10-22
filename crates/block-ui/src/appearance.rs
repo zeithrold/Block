@@ -117,10 +117,10 @@ impl Palette {
         success_background: 0x00f0_fdf4,
         warning: 0x00a1_6207,
         warning_background: 0x00fe_fce8,
-        sidebar: 0x00fa_fafa,
+        sidebar: 0x00f5_f5f5,
     };
     pub(super) const DARK: Self = Self {
-        background: 0x000a_0a0a,
+        background: 0x0017_1717,
         surface: 0x0026_2626,
         foreground: 0x00fa_fafa,
         muted: 0x00a3_a3a3,
@@ -140,7 +140,7 @@ impl Palette {
         success_background: 0x0013_2c1c,
         warning: 0x00fa_cc15,
         warning_background: 0x0034_2c12,
-        sidebar: 0x0017_1717,
+        sidebar: 0x0026_2626,
     };
 }
 

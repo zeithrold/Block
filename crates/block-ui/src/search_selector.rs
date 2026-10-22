@@ -76,7 +76,7 @@ impl Block {
             if drawer == Drawer::Accounts {
                 "Search accounts…"
             } else {
-                "Search games…"
+                "Search profiles…"
             },
             cx,
         );

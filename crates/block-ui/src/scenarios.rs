@@ -446,6 +446,7 @@ impl Block {
                 _ => (),
             }
         }
+        self.initialize_browsers(cx);
         let surface = match name {
             "home-profile-drawer" => Some(Surface::Drawer(Drawer::Profiles)),
             "home-account-drawer" => Some(Surface::Drawer(Drawer::Accounts)),

@@ -311,6 +311,7 @@ impl ShellState {
             surfaces: self.surfaces.snapshot(),
             home_scroll: frozen_scroll(&self.home_scroll),
             about_scroll: frozen_scroll(&self.about_scroll),
+            help_scroll: frozen_scroll(&self.help_scroll),
             output_scroll: frozen_scroll(&self.output_scroll),
             downloads: self.downloads.snapshot(),
             toast: self.toast.clone(),
