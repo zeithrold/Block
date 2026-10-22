@@ -98,7 +98,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | About: build/product, brand, links and copy actions | Yes | Pending | Pending | Real information. |
 | Welcome: three steps, drafts, skip, download/retry | Yes | Pending | Pending | No implicit identity on Skip. |
-| Welcome: atomic new-account/game final commit | Yes | Pending | Pending | Identity stays in memory until the final commit; a failed game save rolls it back. |
+| Welcome: atomic new-account/game final commit | Yes | Yes (Windows) | Pending | Identity is memory-only until the final commit; failed save rolls back. Native run 1ac4564. |
 
 ### Cross-page
 
@@ -119,7 +119,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Host | Vanilla | Fabric | Quilt | Forge | NeoForge | OptiFine | Authlib | Older |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
-| Windows AMD64 | 1.20.6 UI 442b94e | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
+| Windows AMD64 | 1.20.6 UI 1ac4564 | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
 | Linux AMD64 | 1.20.6 API 168a6e1 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
 | Linux ARM64 | 1.20.6 API bb901b7 | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.16.5 API manual composition |
 
@@ -135,7 +135,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 ## Verification notes
 
-- Windows intermittent lifecycle failure: bounded repeated host test still required; unwanted Java console fix awaits host validation.
+- Windows intermittent lifecycle failure: bounded repeated host test still required. CREATE_NO_WINDOW validated natively on Windows through install and Play on 1ac4564.
 - Native screenshots cover 71 debug scenarios in light/dark; scenario captures are visual fixtures.
 - Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 Windows scenario shots (228 images) captured at c0a9dc5 with names and dimensions identical to the macOS set.
 - Remote picker captures prove navigation/windows, not native installation/Play.
@@ -144,7 +144,8 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - macOS storage relocation/cleanup followed by game menu passed through the API.
 - Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through.
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
-- CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence.
+- Windows native first-run flow passed on 1ac4564: pending identity discarded on quit, account and game saved together, real 1.20.6 download, Play, main menu and Stop.
+- CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
