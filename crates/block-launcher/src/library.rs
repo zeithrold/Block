@@ -517,7 +517,13 @@ mod instance_defaults_tests {
                 manifest: minecraft_manifest::decode(&std::fs::read(fixture)?)?,
                 manifest_sha1: "0".repeat(40),
             },
-            target: Target::host()?,
+            // Compilation logic is host-independent; pin the reviewed fixture to
+            // Linux x64 so a Linux ARM64 CI host does not require substitutions here.
+            target: Target {
+                os: crate::platform::OperatingSystem::Linux,
+                arch: crate::platform::Architecture::X86_64,
+                os_version: "6.0".into(),
+            },
             assets: minecraft_manifest::resources::AssetObjects {
                 objects: BTreeMap::new(),
                 virtual_layout: None,

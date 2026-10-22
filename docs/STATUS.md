@@ -144,6 +144,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - macOS storage relocation/cleanup followed by game menu passed through the API.
 - Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through.
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
+- CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
