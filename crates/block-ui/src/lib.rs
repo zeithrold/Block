@@ -1109,6 +1109,13 @@ impl Block {
         self.shell.toast = Some(feedback::Toast::new(message, kind));
     }
 
+    /// True while the first-run setup draft is active (the setup page or its
+    /// Settings/About preview), so menu routes cannot bypass setup.
+    fn setup_incomplete(&self) -> bool {
+        !self.preferences.onboarding_complete
+            && (self.tab == Tab::Onboarding || self.shell.guide_preview.is_some())
+    }
+
     fn report(&mut self, error: String) {
         self.push_toast(error.clone(), feedback::ToastKind::Error);
         if self.tab == Tab::Onboarding {
@@ -1273,7 +1280,32 @@ impl Block {
                 if self.shell.auth.is_some() {
                     self.cancel_auth(window, cx);
                 }
-                if self.tab == Tab::Onboarding && matches!(tab, Tab::Settings | Tab::About) {
+                if self.setup_incomplete()
+                    && !matches!(tab, Tab::Onboarding | Tab::Settings | Tab::About)
+                {
+                    // Setup owns navigation until it is finished: keep the draft
+                    // and surface why the requested page is unavailable.
+                    self.leave_guide_preview(window, cx);
+                    let message = if matches!(tab, Tab::Instances | Tab::Profiles) {
+                        "Finish setup to see your games."
+                    } else {
+                        "Finish setup to continue."
+                    };
+                    self.push_toast(message.into(), feedback::ToastKind::Info);
+                    self.status = message.into();
+                    cx.notify();
+                    return;
+                }
+                if (self.tab == Tab::Onboarding || self.shell.guide_preview.is_some())
+                    && matches!(tab, Tab::Settings | Tab::About)
+                {
+                    if self.shell.guide_preview.is_some()
+                        && self.tab == Tab::Settings
+                        && tab != Tab::Settings
+                    {
+                        self.preferences.clone_from(&self.saved_preferences);
+                        self.settings_form = None;
+                    }
                     if tab == Tab::Settings {
                         self.open_settings(cx);
                     }

@@ -542,7 +542,7 @@ impl SettingsDraft {
         if !(1..=16).contains(&concurrent) {
             return Err(SettingsError::at(
                 SettingsField::Concurrent,
-                "download concurrency must be 1..=16",
+                "Choose between 1 and 16 parallel downloads.",
             ));
         }
         if retries > 10 {
@@ -1939,7 +1939,9 @@ mod tests {
             assert!(view.read_with(cx, |view, cx| {
                 view.settings_form.as_ref().is_some_and(|draft| {
                     draft.page == 3 && draft.concurrent.read(cx).value() == "0"
-                }) && view.status.contains("concurrency must be 1..=16")
+                }) && view
+                    .status
+                    .contains("Choose between 1 and 16 parallel downloads.")
             }));
             assert!(cx.debug_bounds("settings-status").is_some());
             assert_eq!(
