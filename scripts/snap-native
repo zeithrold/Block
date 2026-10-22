@@ -29,10 +29,12 @@ let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], 
 for info in windows {
     guard info[kCGWindowOwnerPID as String] as? Int == Int(pid),
           let id = info[kCGWindowNumber as String] as? Int,
+          let windowTitle = info[kCGWindowName as String] as? String,
+          !windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           let raw = info[kCGWindowBounds as String] as? [String: Any],
           let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary),
           bounds.width > 100, bounds.height > 100 else { continue }
-    let title = (info[kCGWindowName as String] as? String ?? "dialog").replacingOccurrences(of: "\t", with: " ")
+    let title = windowTitle.replacingOccurrences(of: "\t", with: " ")
     print("\(id)\t\(Int(bounds.width))\t\(Int(bounds.height))\t\(title)")
 }
 '''
