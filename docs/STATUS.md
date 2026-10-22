@@ -74,7 +74,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Forge modern/legacy installation and build selection | Yes | Pending | Pending | Windows native legacy flow pending. |
 | NeoForge full catalog and installation | Yes | Pending | Pending | Includes 1.20.1 and 26.x. |
 | OptiFine standalone/Forge import and installation | Partial | Pending | Pending | Existing-target re-import UI missing. |
-| Quick Play and saved server settings | Partial | Pending | Pending | Legacy arguments missing. |
+| Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
 | Productized LWJGL 3 ARM64 compatibility and Java 8 | No | Pending | Pending | Manual Linux composition only. |
 | ARM64 LWJGL 2 picker restriction | No | Pending | Pending | Explain unavailable natives. |
 | Deletion, confirmation and linked Profiles | Yes | Pending | Pending | Player files retained. |

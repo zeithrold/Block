@@ -568,12 +568,28 @@ mod instance_defaults_tests {
                 .count(),
             1
         );
+        // Versions that predate Quick Play receive the legacy server arguments.
         let legacy = minecraft_manifest::decode(&std::fs::read(fixtures.join("../1.12.2.json"))?)?;
-        let before = plan.command.game_args.clone();
-        assert!(super::apply_profile_arguments(&mut plan, instance, quick_play, &legacy).is_err());
+        let mut legacy_plan = crate::plan::compile(&recipe, &metadata)?;
+        super::apply_profile_arguments(&mut legacy_plan, instance, quick_play, &legacy)?;
+        assert!(legacy_plan.command.game_args.ends_with(&[
+            "--server".into(),
+            "play.example.com".into(),
+            "--port".into(),
+            "25566".into()
+        ]));
+        // An official pre-release client accepts neither form; a failed
+        // connection decision leaves the compiled plan untouched.
+        let mut beta = legacy.clone();
+        beta.kind = minecraft_manifest::model::VersionType::OldBeta;
+        let mut beta_plan = crate::plan::compile(&recipe, &metadata)?;
+        let before = beta_plan.command.game_args.clone();
+        assert!(
+            super::apply_profile_arguments(&mut beta_plan, instance, quick_play, &beta).is_err()
+        );
         assert_eq!(
-            plan.command.game_args, before,
-            "unsupported Quick Play leaves the compiled plan untouched"
+            beta_plan.command.game_args, before,
+            "unsupported automatic connection leaves the compiled plan untouched"
         );
         Ok(())
     }

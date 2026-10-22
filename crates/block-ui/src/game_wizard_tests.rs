@@ -1005,6 +1005,77 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
     );
 }
 
+#[gpui::test]
+fn automatic_connection_prefers_installed_manifests_and_the_official_catalog_family(
+    cx: &mut TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../minecraft-manifest/tests/fixtures");
+        let root = tempfile::tempdir()?;
+        let legacy_path = root.path().join("1.12.2.json");
+        std::fs::write(&legacy_path, std::fs::read(fixtures.join("1.12.2.json"))?)?;
+        let index: minecraft_manifest::model::VersionIndex = minecraft_manifest::decode(
+            &std::fs::read(fixtures.join("official/version_manifest_v2.json"))?,
+        )?;
+        let modern = index
+            .versions
+            .iter()
+            .find(|entry| entry.id == "1.20.6")
+            .ok_or_else(|| anyhow::anyhow!("official fixture missing"))?;
+        let modern_path = root.path().join("1.20.6.json");
+        std::fs::write(
+            &modern_path,
+            std::fs::read(
+                fixtures
+                    .join("official/versions")
+                    .join(format!("{}.json", modern.sha1)),
+            )?,
+        )?;
+        view.update(cx, |view, _| {
+            view.version_catalog = vec![
+                entry("1.20.6", minecraft_manifest::model::VersionType::Release),
+                entry("1.12.2", minecraft_manifest::model::VersionType::Release),
+                entry("24w14a", minecraft_manifest::model::VersionType::Snapshot),
+                entry("a1.2.6", minecraft_manifest::model::VersionType::OldAlpha),
+            ];
+            use block_launcher::catalog::AutomaticConnection;
+            // Catalog-only versions fall back to the official family.
+            assert_eq!(
+                view.automatic_connection("1.20.6"),
+                Some(AutomaticConnection::QuickPlay)
+            );
+            assert_eq!(
+                view.automatic_connection("1.12.2"),
+                Some(AutomaticConnection::Legacy)
+            );
+            assert_eq!(
+                view.automatic_connection("a1.2.6"),
+                Some(AutomaticConnection::Unsupported)
+            );
+            assert_eq!(view.automatic_connection("unknown-version"), None);
+            // Installed official manifests are authoritative.
+            let mut snapshot = ready_snapshot();
+            snapshot.instances[0].minecraft_version = "1.12.2".into();
+            snapshot.instances[0].targets[0].manifest = Some(legacy_path.clone());
+            view.snapshot = snapshot;
+            assert_eq!(
+                view.automatic_connection("1.12.2"),
+                Some(AutomaticConnection::Legacy)
+            );
+            view.snapshot.instances[0].minecraft_version = "1.20.6".into();
+            view.snapshot.instances[0].targets[0].manifest = Some(modern_path.clone());
+            assert_eq!(
+                view.automatic_connection("1.20.6"),
+                Some(AutomaticConnection::QuickPlay)
+            );
+        });
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
 fn loader_build(version: &str, stable: bool) -> block_launcher::install::fabric::LoaderVersion {
     block_launcher::install::fabric::LoaderVersion {
         version: version.into(),

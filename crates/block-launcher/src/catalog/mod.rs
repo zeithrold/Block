@@ -14,7 +14,10 @@ use crate::recipe::{Compatibility, RuntimeSelection};
 
 pub use appearance::{ProfileAppearance, ProfileColor, ProfileIcon};
 pub use instance_settings::{InstanceConfiguration, InstanceSettings, ProfileInheritance};
-pub use server::{ServerPreferences, supports_quick_play};
+pub use server::{
+    AutomaticConnection, ServerAddress, ServerPreferences, automatic_connection,
+    supports_quick_play,
+};
 pub use storage::{Catalog, GameDirectoryGuard};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

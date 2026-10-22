@@ -2033,7 +2033,12 @@ impl Block {
         )
     }
 
-    fn wizard_quick_play_supported(&self, cx: &gpui::App) -> bool {
+    /// The selected version's automatic connection form, resolved from its real
+    /// official manifest or the official catalog entry.
+    fn wizard_automatic_connection(
+        &self,
+        cx: &gpui::App,
+    ) -> Option<block_launcher::catalog::AutomaticConnection> {
         let version = if self.shell.wizard.kind == CreationKind::ExistingInstance {
             self.snapshot
                 .instances
@@ -2045,7 +2050,14 @@ impl Block {
         } else {
             None
         };
-        version.is_some_and(|version| self.supports_quick_play(&version))
+        version.and_then(|version| self.automatic_connection(&version))
+    }
+
+    fn wizard_automatic_connection_supported(&self, cx: &gpui::App) -> bool {
+        self.wizard_automatic_connection(cx)
+            .is_some_and(|connection| {
+                connection != block_launcher::catalog::AutomaticConnection::Unsupported
+            })
     }
 
     fn wizard_server_preferences(
@@ -2053,7 +2065,8 @@ impl Block {
         profile: &ProfileDraft,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
-        let supported = self.wizard_quick_play_supported(cx);
+        let connection = self.wizard_automatic_connection(cx);
+        let supported = self.wizard_automatic_connection_supported(cx);
         let has_address = !profile.server.read(cx).value().trim().is_empty();
         let mut fields = div()
             .flex()
@@ -2080,7 +2093,12 @@ impl Block {
                 }),
             ));
         if !supported {
-            fields = fields.child(note("The address can be saved. Automatic connection stays unavailable until this version’s multiplayer Quick Play support is known."));
+            fields = fields.child(note(match connection {
+                Some(block_launcher::catalog::AutomaticConnection::Unsupported) => {
+                    "This version’s client does not accept an automatic server connection. The address can still be saved."
+                }
+                _ => "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.",
+            }));
         }
         fields
     }
@@ -2092,9 +2110,20 @@ impl Block {
             .profile
             .as_ref()
             .is_some_and(|profile| profile.connect_on_launch)
-            && !self.wizard_quick_play_supported(cx)
+            && !self.wizard_automatic_connection_supported(cx)
         {
-            self.set_wizard_error("This version’s multiplayer Quick Play support is unknown. Turn off automatic connection to continue.".into(), cx);
+            let reason = match self.wizard_automatic_connection(cx) {
+                Some(block_launcher::catalog::AutomaticConnection::Unsupported) => {
+                    "This version does not accept an automatic server connection."
+                }
+                _ => {
+                    "This version’s official manifest is unavailable, so automatic connection cannot start."
+                }
+            };
+            self.set_wizard_error(
+                format!("{reason} Turn off automatic connection to continue."),
+                cx,
+            );
             self.shell.wizard.error_field = Some(WizardField::Server);
             self.shell.wizard.reveal.set(Some(WizardField::Server));
             false
@@ -3272,6 +3301,7 @@ impl Block {
                 )
             },
         );
+        let automatic_connection = self.automatic_connection(&version);
         div().flex().flex_col().gap_4()
             .child(div().text_xl().child("Ready for your next world?"))
             .child(note(if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." }))
@@ -3287,7 +3317,12 @@ impl Block {
                 ("Launch target", launch_target),
                 ("Maximum memory", format!("{memory} MiB")),
                 ("Server", profile.map_or_else(|| "Choose in game".to_owned(), |profile| { let value = profile.server.read(cx).value(); if value.trim().is_empty() { "Choose in game".into() } else { value } })),
-                ("Automatic connection", if profile.is_some_and(|profile| profile.connect_on_launch) { "On · multiplayer Quick Play" } else { "Off" }.to_owned()),
+                ("Automatic connection", if profile.is_some_and(|profile| profile.connect_on_launch) {
+                    match automatic_connection {
+                        Some(block_launcher::catalog::AutomaticConnection::Legacy) => "On · server arguments",
+                        _ => "On · Quick Play",
+                    }
+                } else { "Off" }.to_owned()),
                 ("JVM arguments", profile.map_or_else(|| "Default arguments".to_owned(), |profile| { let value = profile.jvm.read(cx).value(); if value.trim().is_empty() { "Default arguments".into() } else { value } })),
                 ("Java runtime", java),
                 ("Game window", resolution),

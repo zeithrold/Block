@@ -618,7 +618,10 @@ impl Block {
             .iter()
             .find(|instance| instance.id == form.original.instance_id)
             .map(|instance| instance.minecraft_version.as_str());
-        let supported = version.is_some_and(|version| self.supports_quick_play(version));
+        let connection = version.and_then(|version| self.automatic_connection(version));
+        let supported = connection.is_some_and(|connection| {
+            connection != block_launcher::catalog::AutomaticConnection::Unsupported
+        });
         let address = form.server.read(cx).value();
         let mut choice = div().flex().flex_col().gap_2();
         if !address.trim().is_empty() {
@@ -637,12 +640,23 @@ impl Block {
             ));
         }
         if !supported {
-            choice = choice.child(note("The address can be saved. Automatic connection is available only when this version’s multiplayer Quick Play support is known."));
+            choice = choice.child(note(match connection {
+                Some(block_launcher::catalog::AutomaticConnection::Unsupported) => {
+                    "This version’s client does not accept an automatic server connection. The address can still be saved."
+                }
+                _ => "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.",
+            }));
         }
         choice
     }
 
-    pub(super) fn supports_quick_play(&self, version: &str) -> bool {
+    /// Which automatic connection form this version accepts. Installed official
+    /// manifests are authoritative; otherwise the official catalog entry decides
+    /// the family and the 1.20 Quick Play series boundary.
+    pub(super) fn automatic_connection(
+        &self,
+        version: &str,
+    ) -> Option<block_launcher::catalog::AutomaticConnection> {
         for instance in self
             .snapshot
             .instances
@@ -656,20 +670,36 @@ impl Block {
                         minecraft_manifest::model::VersionManifest,
                     >(&bytes)
                 {
-                    return block_launcher::catalog::supports_quick_play(&manifest);
+                    return Some(block_launcher::catalog::automatic_connection(&manifest));
                 }
             }
         }
-        // Mojang's 1.20 release contract introduced these arguments. Unknown
-        // snapshots and newer naming schemes wait for an installed manifest.
-        let mut parts = version.split('.');
-        let known_series = parts.next() == Some("1")
-            && matches!(parts.next(), Some("20" | "21"))
-            && parts.all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
-        known_series
-            && self.version_catalog.iter().any(|entry| {
-                entry.id == version && entry.kind == minecraft_manifest::model::VersionType::Release
-            })
+        let entry = self
+            .version_catalog
+            .iter()
+            .find(|entry| entry.id == version)?;
+        Some(match entry.kind {
+            minecraft_manifest::model::VersionType::OldAlpha
+            | minecraft_manifest::model::VersionType::OldBeta => {
+                block_launcher::catalog::AutomaticConnection::Unsupported
+            }
+            minecraft_manifest::model::VersionType::Release
+            | minecraft_manifest::model::VersionType::Snapshot => {
+                // Mojang's 1.20 release data introduced Quick Play. Numeric
+                // release ids are `1.<series>.<patch>`; older clients use the
+                // legacy server arguments.
+                if version
+                    .split('.')
+                    .nth(1)
+                    .and_then(|series| series.parse::<u32>().ok())
+                    .is_some_and(|series| series >= 20)
+                {
+                    block_launcher::catalog::AutomaticConnection::QuickPlay
+                } else {
+                    block_launcher::catalog::AutomaticConnection::Legacy
+                }
+            }
+        })
     }
 
     fn profile_page_trigger(&self, button: components::Control) -> components::Control {
