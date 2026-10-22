@@ -655,13 +655,22 @@ impl Block {
         if let Some(form) = &self.shell.providers.form {
             let address = form.address.read(cx).value();
             let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);
+            let header_icon = form
+                .original
+                .as_ref()
+                .and_then(|provider| self.provider_icons.get(&provider.id.to_string()));
             content = content
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap_4()
-                        .child(super::design::Icon::Server.render(28., self.palette.muted))
+                        .child(components::provider_icon(
+                            &form.name.read(cx).value(),
+                            header_icon,
+                            self.palette,
+                            36.,
+                        ))
                         .child(
                             div()
                                 .flex()
