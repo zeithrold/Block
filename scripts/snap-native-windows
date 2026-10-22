@@ -856,9 +856,19 @@ def prepare_host(commit):
 
 
 def list_scenarios():
+    # The launcher is a windows-subsystem binary, so a plain SSH invocation does
+    # not attach its stdout to our pipe. Redirect through a file with
+    # Start-Process, then read it back.
+    remote = REMOTE_TOOLS + r"\scenarios.txt"
     last = None
     for _ in range(3):
-        result = ssh(f"& '{REMOTE_BINARY}' --list-scenarios")
+        result = ssh(
+            f"Remove-Item -LiteralPath '{remote}' -ErrorAction SilentlyContinue; "
+            f"Start-Process -FilePath '{REMOTE_BINARY}' "
+            f"-ArgumentList '--list-scenarios' "
+            f"-RedirectStandardOutput '{remote}' -NoNewWindow -Wait; "
+            f"Get-Content -LiteralPath '{remote}' -Encoding UTF8"
+        )
         scenarios = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         if scenarios:
             return scenarios
