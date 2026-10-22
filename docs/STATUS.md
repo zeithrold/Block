@@ -37,22 +37,22 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector sheets. |
-| Real account avatars in Home and selectors | Yes | Pending | Pending | Microsoft active skin and Authlib declared textures only; bounded validated fetch, data-dir cache with digest/URL/structure revalidation, silent initials fallback (no demo skins). Native display check pending. |
+| Profile/account selection; empty/loading/error states | Yes | Yes (Windows, Linux) | Pending | Persistent catalog and selector sheets exercised in Q6/Q9 runs; empty/error states observed. |
+| Real account avatars in Home and selectors | Yes | Yes (Authlib fixture) | Pending | Microsoft active skin and Authlib declared textures only; bounded validated fetch, data-dir cache with digest/URL/structure revalidation, silent initials fallback (no demo skins). Native fixture display and fallback verified on Linux AMD64; Microsoft live skin display still pending a live account. |
 | Play/Stop, recovery and crash help | Yes | Yes (Windows, Linux) | Pending | Windows Q6 Play/Stop all loaders, crash help with recovery, and Linux ARM64/AMD64 menu→Stop passed. macOS native check pending. |
-| Downloads, retries and file details | Yes | Pending | Pending | Real byte events. |
+| Downloads, retries and file details | Yes | Yes (Windows) | Pending | Q6 interrupted download→Retry→Repair complete; real byte progress and file detail views exercised. |
 
 ### Accounts and sign-in
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| List/detail, selection, deletion, last-account empty state | Yes | Pending | Pending | OS credential storage. |
+| List/detail, selection, deletion, last-account empty state | Yes | Yes (Windows, Linux) | Pending | Accounts list/detail/selection exercised natively; last-account/empty state observed in fixture and Q6 runs. |
 | Microsoft browser PKCE and final confirmation | Yes | Yes (macOS) | Pending | Native authorization and secure save passed. |
 | Microsoft Device Code and final confirmation | Yes | Yes | Pending | macOS, Windows, Linux ARM64 and Linux AMD64 native saves passed; Linux AMD64 was 0f7e26b. |
-| Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
+| Offline account and final confirmation | Yes | Yes (Windows, Linux) | Pending | Linux Q6 and Windows Q6/Q10 created offline identities and persisted them across restart. |
 | Authlib provider add/edit/remove and discovery | Yes | Yes (fixture, Linux AMD64) | Pending | Linked-account protection. Native fixture add/consent/discovery/duplicate and delete paths observed; Windows/macOS native checks pending. |
 | Authlib provider icon retrieval and display | Yes | Yes (fixture, Linux AMD64) | Pending | Bounded validated fetch against the provider API host, data-dir cache (file+sidecar digests verified), monogram fallback. Native fixture checks: good icon shown/cached, corrupt and oversized rejected silently to monogram with no cache, stale cache offline still shown, missing cache offline monogram. ICO-only favicons fall back to the monogram (accepted limitation). |
-| Provider URL/paste import, duplicate selection, HTTP consent | Yes | Pending | Pending | Address-bound consent. |
+| Provider URL/paste import, duplicate selection, HTTP consent | Yes | Yes (Linux fixture) | Pending | Fixture/Q8 runs exercised typed quick-link identify, HTTP consent, discovery, duplicate notice and saved-provider reuse; Windows typed path also observed. |
 | External quick-link text drop | Yes | Yes (Windows, Linux) | Pending | Owned native drop targets in `crates/block-drop`: OLE child HWND on Windows, XDND ARGB overlay on Linux X11, both reusing the existing discovery/consent/duplicate flow; real browser→drop-zone drags prove accept + reject paths. Wayland is not supported by the pinned GPUI (clear error; options recorded); macOS phase pending the user batch. |
 | Authlib password form, characters and final save | Yes | Yes (fixture, Linux AMD64) | Pending | Native fixture sign-in (FixturesAlex/Slim), character choice and save; keyring unlock was user-assisted via VNC. |
 | Yggdrasil session lifecycle and launch injection | Yes | Yes (fixture, Linux AMD64) | Pending | Real 1.20.6 + authlib-injector 1.2.8 reached the main menu through the fixture; refresh/invalid-token path exercised. |
@@ -66,7 +66,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Bundled/Separated browsing, search, details, Home sync | Yes | Yes (Windows) | Pending | Q6 separated mode: one-way conversion, second Profile sharing an Instance and Home sync exercised natively. |
 | Profile/Instance appearance and settings drafts | Yes | Yes (Windows) | Pending | Theme/reduced-motion and separated-profile drafts exercised natively; version/loader immutable. |
 | Icons/colors, memory/JVM, Java/window defaults, folders/account | Yes | Pending | Pending | Compiled into launch recipes. |
-| Bundled two-step / Separated four-step creation | Yes | Pending | Pending | Atomic Instance/Profile pair. |
+| Bundled two-step / Separated four-step creation | Yes | Yes (Windows) | Pending | Q6 separated mode created a second Profile for an existing Instance with the installation preserved. |
 | Version, loader/build and location pickers | Yes | Yes (Windows, Linux) | Pending | Real catalogs; Q6/Q10 loader picks, Q3 ARM64 restriction, Q9 search/scroll. |
 | Vanilla installation, progress, retry and resume | Yes | Yes (Windows, Linux) | Pending | Windows Q6 interrupted download→Retry→Repair complete→launch; Q10 1.8.9/1.12.2; Linux AMD64 Q6 1.20.6. |
 | Fabric installation and build selection | Yes | Yes (Windows, Linux) | Pending | Q6 Windows Fabric 0.19.5→title; Q10 Fabric 1.16.5→title; Linux fixture/AMD64 paths. |
@@ -105,11 +105,11 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
 | Light/dark layout, typography, icons and states | Partial | Pending | Pending | Windows captures complete; visual comparison in review. |
-| Directional 460 ms upstream opacity/offset transitions | Partial | Pending | Pending | Audit timing and directions. |
+| Directional 460 ms upstream opacity/offset transitions | Yes | Yes (Linux AMD64) | Pending | Q9 D6 sampled the sheet slide/fade and page resize/fade at ~460 ms with upstream opacity/offset; Windows/macOS visual timing audit remains. |
 | System/in-app reduced motion | Yes | Yes (Linux AMD64) | Pending | In-app toggle native; Linux system reads GTK `gsettings`, Windows system reads `SPI_GETCLIENTAREAANIMATION` (native Windows check pending), macOS NSWorkspace. |
 | Fit-to-display at creation and recovery | Yes | Yes (Linux AMD64) | Pending | 1280×800 and 1366×768 captured (Home clamps to 432×620, management 960×600 fits). Windows/macOS native checks pending. |
-| CJK IME, clipboard, search and scrolling | Partial | Pending | Pending | Real input checks pending. |
-| Enter/Escape/Tab, draft/error preservation | Partial | Pending | Pending | Full interaction checks pending. |
+| CJK IME, clipboard, search and scrolling | Partial | Partial (Linux AMD64) | Pending | Clipboard copy/paste, search filtering and scrolling native on Linux AMD64; CJK IME is macOS-only and still pending. |
+| Enter/Escape/Tab, draft/error preservation | Yes | Yes (Linux AMD64, Windows) | Pending | Q9 D6 Tab/Enter/Escape, draft restore and error behavior; Q6 Windows dialogs/overlays. |
 | In-window overlays: Sheets for Home drawers, Dialogs elsewhere | Yes | Partial | Pending | Windows AMD64 native check passed on c18e416: one window in every state, stacked Dialog over Sheet, Escape closes only the topmost layer, focus returns to the avatar, Add account is the Accounts page in the same window and saves/restarts correctly. macOS native overlay check deferred while the Mac is in use; scenario captures exist. |
 
 ## Smoke matrix
