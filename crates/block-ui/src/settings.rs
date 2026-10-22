@@ -1760,11 +1760,9 @@ impl Block {
         content
     }
 
-    pub(super) fn render_storage_confirmation(
-        &self,
-        id: uuid::Uuid,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
+    /// The retained-copy review text shared by the in-window confirmation
+    /// dialog and its legacy surface fallback.
+    pub(super) fn storage_cleanup_notes(&self, id: uuid::Uuid) -> Vec<String> {
         let Some(cleanup) = self
             .shell
             .storage
@@ -1772,21 +1770,58 @@ impl Block {
             .as_ref()
             .filter(|state| state.id == id)
         else {
-            return div().child(note("The retained copy changed. Close this window and review the current storage state."));
+            return vec![
+                "The retained copy changed. Close this dialog and review the current storage state."
+                    .to_owned(),
+            ];
         };
-        let mut content = div().flex().flex_col().gap_3()
-            .child(div().text_xl().child("Remove this retained copy?"))
-            .child(note(if cleanup.interrupted { "Only the incomplete destination folders listed below will be removed. The original locations remain in use." }
-                else { "Only the previous managed folders listed below will be removed. The verified new copy remains in use." }));
-        for path in &cleanup.previous_folders {
-            content = content.child(note(path.display().to_string()));
-        }
+        let mut notes = vec![if cleanup.interrupted {
+            "Only the incomplete destination folders listed below will be removed. The original locations remain in use.".to_owned()
+        } else {
+            "Only the previous managed folders listed below will be removed. The verified new copy remains in use.".to_owned()
+        }];
+        notes.extend(
+            cleanup
+                .previous_folders
+                .iter()
+                .map(|path| path.display().to_string()),
+        );
         if cleanup.cleanup_started {
-            content = content.child(note("An earlier cleanup stopped partway through. Confirm again to remove its remaining files."));
+            notes.push(
+                "An earlier cleanup stopped partway through. Confirm again to remove its remaining files."
+                    .to_owned(),
+            );
         }
-        content.child(note("Keep the copy if you want to inspect it first. Edited previous copies are preserved and require manual review."))
-            .child(self.button("storage-confirm-remove", "Remove retained copy", UiAction::StorageCleanup(id, true), cx))
-            .child(self.button("storage-confirm-keep", "Keep copy", UiAction::StorageCleanup(id, false), cx))
+        notes.push(
+            "Keep the copy if you want to inspect it first. Edited previous copies are preserved and require manual review."
+                .to_owned(),
+        );
+        notes
+    }
+
+    pub(super) fn render_storage_confirmation(
+        &self,
+        id: uuid::Uuid,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_xl().child("Remove this retained copy?"))
+            .children(self.storage_cleanup_notes(id).into_iter().map(note))
+            .child(self.button(
+                "storage-confirm-remove",
+                "Remove retained copy",
+                UiAction::StorageCleanup(id, true),
+                cx,
+            ))
+            .child(self.button(
+                "storage-confirm-keep",
+                "Keep copy",
+                UiAction::StorageCleanup(id, false),
+                cx,
+            ))
     }
 
     fn settings_profile_mode(&self, narrow: bool, cx: &Context<'_, Self>) -> gpui::Div {

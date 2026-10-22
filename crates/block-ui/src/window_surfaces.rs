@@ -10,9 +10,11 @@ use super::{
 };
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, FocusHandle, Focusable as _,
-    IntoElement, Render, ScrollHandle, Subscription, TitlebarOptions, WeakEntity, Window,
-    WindowBounds, WindowDecorations, WindowId, WindowKind, WindowOptions, div, point, px, size,
+    IntoElement, ParentElement as _, Render, ScrollHandle, Styled as _, Subscription,
+    TitlebarOptions, WeakEntity, Window, WindowBounds, WindowDecorations, WindowId, WindowKind,
+    WindowOptions, div, point, px, size,
 };
+use gpui_component::WindowExt as _;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -114,6 +116,8 @@ impl SurfaceWindows {
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
         let focus = cx.focus_handle();
+        let overlay = kind.is_overlay();
+        let dialog_kind = kind.clone();
         let entry = SurfaceWindow {
             kind,
             scroll: ScrollHandle::new(),
@@ -127,6 +131,11 @@ impl SurfaceWindows {
         if matches!(entry.kind, Surface::Select(_)) {
             focus.focus(window, cx);
             self.entries.push(entry);
+            return true;
+        }
+        if overlay {
+            self.entries.push(entry);
+            Self::open_surface_dialog(dialog_kind, revision, window, cx);
             return true;
         }
         let title = entry.kind.title().to_owned();
@@ -318,6 +327,82 @@ impl SurfaceWindows {
         });
         true
     }
+    /// Present an overlay surface through the component library's dialog
+    /// layer. The logical entry remains the stack owner; the library owns the
+    /// scrim, Escape, focus trap, focus restore and motion.
+    fn open_surface_dialog(
+        kind: Surface,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Block>,
+    ) {
+        let owner = cx.weak_entity();
+        let observer = owner.clone();
+        let body = cx.new(|cx| {
+            if let Some(owner) = observer.upgrade() {
+                cx.observe(&owner, |_, _, cx| cx.notify()).detach();
+            }
+            SurfaceOverlayBody {
+                owner: observer,
+                revision,
+            }
+        });
+        window.open_dialog(cx, move |dialog, dialog_window, dialog_cx| {
+            let Some(view) = owner.upgrade() else {
+                return dialog;
+            };
+            view.update(dialog_cx, |view, _| {
+                view.shell.surfaces.activate(dialog_window);
+            });
+            let title = view.read(dialog_cx).surface_dialog_title(&kind);
+            let body = body.clone();
+            let gate = owner.clone();
+            let dismiss = owner.clone();
+            dialog
+                .font_family(super::design::FONT_FAMILY)
+                .w(px(520.))
+                .px(px(0.))
+                .pt(px(24.))
+                .pb(px(0.))
+                .title(
+                    div()
+                        .px(px(24.))
+                        .text_xl()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+                .content(move |content, _window, _cx| content.child(body.clone()))
+                .on_cancel(move |_, _, cx| {
+                    gate.upgrade().is_none_or(|view| {
+                        let view = view.read(cx);
+                        !(view.busy && !view.can_stop())
+                    })
+                })
+                .on_close(move |_, _, cx| {
+                    let _ =
+                        dismiss.update(cx, |view, cx| view.dismiss_surface_overlay(revision, cx));
+                })
+        });
+    }
+
+    fn close_surface_dialog(target: AnyWindowHandle, window: &mut Window, cx: &mut App) {
+        if target.window_id() == window.window_handle().window_id() {
+            window.close_dialog(cx);
+        } else {
+            let _ = target.update(cx, |_, target_window, cx| target_window.close_dialog(cx));
+        }
+    }
+
+    fn close_all_surface_dialogs(target: AnyWindowHandle, window: &mut Window, cx: &mut App) {
+        if target.window_id() == window.window_handle().window_id() {
+            window.close_all_dialogs(cx);
+        } else {
+            let _ = target.update(cx, |_, target_window, cx| {
+                target_window.close_all_dialogs(cx)
+            });
+        }
+    }
+
     pub(super) fn close(
         &mut self,
         window: &mut Window,
@@ -327,6 +412,10 @@ impl SurfaceWindows {
         let index = self.current_index()?;
         let entry = self.entries.remove(index);
         self.current_window.set(Some(entry.parent.window_id()));
+        if entry.kind.is_overlay() {
+            Self::close_surface_dialog(entry.parent, window, cx);
+            return Some(entry.kind);
+        }
         if let Some(handle) = entry.window {
             if handle.window_id() == window.window_handle().window_id() {
                 window.remove_window();
@@ -355,7 +444,14 @@ impl SurfaceWindows {
         Some(entry.kind)
     }
     pub(super) fn clear(&mut self, window: &mut Window, fallback: &FocusHandle, cx: &mut App) {
+        let mut dialog_parents: Vec<AnyWindowHandle> = Vec::new();
         for entry in self.entries.drain(..) {
+            if entry.kind.is_overlay() {
+                if !dialog_parents.contains(&entry.parent) {
+                    dialog_parents.push(entry.parent);
+                }
+                continue;
+            }
             if let Some(handle) = entry.window {
                 if handle.window_id() == window.window_handle().window_id() {
                     window.remove_window();
@@ -364,7 +460,29 @@ impl SurfaceWindows {
                 }
             }
         }
+        for parent in dialog_parents {
+            Self::close_all_surface_dialogs(parent, window, cx);
+        }
         fallback.focus(window, cx);
+    }
+}
+
+/// A logical overlay surface rendered inside the component library's dialog
+/// layer. It follows the shared Block entity, so its note and buttons always
+/// describe the current catalog and operation state instead of a stale copy.
+struct SurfaceOverlayBody {
+    owner: WeakEntity<Block>,
+    revision: usize,
+}
+
+impl Render for SurfaceOverlayBody {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let revision = self.revision;
+        self.owner
+            .update(cx, |view, cx| {
+                view.render_surface_dialog_body(revision, window, cx)
+            })
+            .unwrap_or_else(|_| div().into_any_element())
     }
 }
 
@@ -478,6 +596,28 @@ impl Block {
         self.motion_dirty = true;
         cx.notify();
     }
+
+    /// The library dismissed a dialog itself (Escape, backdrop or close
+    /// button). Drop exactly that logical layer; a late dismissal for an older
+    /// revision is a no-op and never closes a newer layer.
+    fn dismiss_surface_overlay(&mut self, revision: usize, cx: &mut Context<'_, Self>) {
+        let Some(index) = self
+            .shell
+            .surfaces
+            .entries
+            .iter()
+            .position(|entry| entry.revision == revision)
+        else {
+            return;
+        };
+        let entry = self.shell.surfaces.entries.remove(index);
+        self.shell
+            .surfaces
+            .current_window
+            .set(Some(entry.parent.window_id()));
+        self.motion_dirty = true;
+        cx.notify();
+    }
 }
 
 impl Surface {
@@ -515,6 +655,18 @@ impl Surface {
             Self::Select(state) => &state.title,
         }
     }
+    /// Surfaces that the component library renders as an in-window dialog
+    /// instead of a separate OS window.
+    pub(super) const fn is_overlay(&self) -> bool {
+        matches!(
+            self,
+            Self::DeleteProfile(_)
+                | Self::RemoveAccount(_)
+                | Self::RemoveProvider(_)
+                | Self::SeparateProfiles
+                | Self::StorageCleanup(_)
+        )
+    }
     fn window_size(&self) -> gpui::Size<gpui::Pixels> {
         let (width, height) = match self {
             Self::GuideInformation(_) => (960., 600.),
@@ -529,3 +681,7 @@ impl Surface {
         size(px(width), px(height))
     }
 }
+
+#[cfg(test)]
+#[path = "overlay_tests.rs"]
+mod overlay_tests;

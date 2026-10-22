@@ -9,8 +9,8 @@ use std::{
 };
 
 use gpui::{
-    Context, Image, ImageFormat, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, Window, div, img, px, rgb,
+    AnyElement, Context, Image, ImageFormat, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div, img, px, rgb,
 };
 
 use super::{Block, Form, Tab, UiAction, account_id, note, scroll_area::ScrollAreaExt as _};
@@ -402,11 +402,7 @@ impl Block {
             }))
     }
 
-    pub(super) fn render_page_body(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         if self.tab == Tab::Onboarding {
             return self.onboarding(window, cx);
         }
@@ -996,7 +992,7 @@ impl Block {
             .children(self.render_popups(window, cx))
     }
 
-    fn render_popups(&self, window: &Window, cx: &Context<'_, Self>) -> Vec<gpui::AnyElement> {
+    fn render_popups(&self, window: &Window, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         self.shell
             .surfaces
             .layers()
@@ -1043,6 +1039,229 @@ impl Block {
             })
             .collect()
     }
+
+    /// One overlay surface's body: notes and its action row. The dialog host
+    /// owns the title and chrome; every value comes from current state so a
+    /// confirmation that started an operation cannot keep stale buttons.
+    pub(super) fn render_surface_dialog_body(
+        &self,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        self.shell.surfaces.activate(window);
+        let kind = self
+            .shell
+            .surfaces
+            .layers()
+            .find(|layer| layer.revision == revision)
+            .map(|layer| layer.kind.clone());
+        let Some(kind) = kind else {
+            return div().into_any_element();
+        };
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .px(px(24.))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .mt_4()
+                    .pt_4()
+                    .px(px(24.))
+                    .border_t_1()
+                    .border_color(rgb(self.palette.border))
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .children(self.surface_dialog_actions(&kind, cx)),
+            )
+            .into_any_element()
+    }
+
+    /// Name the exact record a confirmation removes when the catalog still
+    /// holds it, falling back to the surface's neutral title.
+    pub(super) fn surface_dialog_title(&self, kind: &Surface) -> String {
+        match kind {
+            Surface::DeleteProfile(id) => self
+                .snapshot
+                .profiles
+                .iter()
+                .find(|profile| &profile.id == id)
+                .map_or_else(
+                    || "Delete this profile?".to_owned(),
+                    |profile| format!("Delete {}?", profile.name),
+                ),
+            Surface::RemoveAccount(id) => self
+                .accounts
+                .iter()
+                .find(|account| &account_id(account) == id)
+                .map_or_else(
+                    || "Remove this account?".to_owned(),
+                    |account| format!("Remove {}?", account.player_name),
+                ),
+            Surface::RemoveProvider(_) => "Remove this provider?".to_owned(),
+            Surface::SeparateProfiles => "Enable separated profiles?".to_owned(),
+            Surface::StorageCleanup(_) => "Remove this retained copy?".to_owned(),
+            _ => kind.title().to_owned(),
+        }
+    }
+
+    fn surface_dialog_notes(&self, kind: &Surface) -> Vec<String> {
+        match kind {
+            Surface::DeleteProfile(_) => vec![if self.snapshot.profile_mode
+                == block_launcher::catalog::ProfileMode::Bundled
+            {
+                "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.".to_owned()
+            } else {
+                "Only launch settings are removed. Worlds, game data and installation files stay on disk.".to_owned()
+            }],
+            Surface::RemoveAccount(_) => vec![
+                "This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it.".to_owned(),
+            ],
+            Surface::RemoveProvider(id) => vec![if self.provider_links(id) > 0 {
+                "This provider is used by saved accounts. Remove those accounts first.".to_owned()
+            } else {
+                "The saved provider and cached metadata are removed. Game files stay on disk.".to_owned()
+            }],
+            Surface::SeparateProfiles => vec![
+                "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.".to_owned(),
+            ],
+            Surface::StorageCleanup(id) => self.storage_cleanup_notes(*id),
+            _ => Vec::new(),
+        }
+    }
+
+    fn surface_dialog_actions(
+        &self,
+        kind: &Surface,
+        cx: &Context<'_, Self>,
+    ) -> Vec<super::components::Control> {
+        let (cancel_id, cancel_label, cancel_action, primary) = match kind {
+            Surface::DeleteProfile(_) => (
+                "close-drawer",
+                "Cancel",
+                None,
+                Some((
+                    "confirm-delete",
+                    "Delete profile",
+                    UiAction::ConfirmDelete,
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            Surface::RemoveAccount(id) => (
+                "close-drawer",
+                "Cancel",
+                None,
+                Some((
+                    "confirm-remove-account",
+                    "Remove account",
+                    UiAction::SignOut(id.clone()),
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            Surface::RemoveProvider(id) => {
+                let used = self.provider_links(id) > 0;
+                (
+                    "close-drawer",
+                    if used { "Close" } else { "Cancel" },
+                    None,
+                    (!used).then(|| {
+                        (
+                            "confirm-remove-provider",
+                            "Remove provider",
+                            UiAction::ProviderRemove(id.clone()),
+                            SurfaceDialogTone::Destructive,
+                        )
+                    }),
+                )
+            }
+            Surface::SeparateProfiles => (
+                "cancel-separate",
+                "Keep bundled mode",
+                Some(UiAction::ConfirmSeparate(false)),
+                Some((
+                    "confirm-separate",
+                    "Enable separated profiles",
+                    UiAction::SeparateProfiles,
+                    SurfaceDialogTone::Primary,
+                )),
+            ),
+            Surface::StorageCleanup(id) => (
+                "storage-confirm-keep",
+                "Keep copy",
+                Some(UiAction::StorageCleanup(*id, false)),
+                Some((
+                    "storage-confirm-remove",
+                    "Remove retained copy",
+                    UiAction::StorageCleanup(*id, true),
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            _ => ("close-drawer", "Close", None, None),
+        };
+        let mut actions = vec![self.surface_dialog_button(
+            cancel_id,
+            cancel_label,
+            cancel_action,
+            SurfaceDialogTone::Outline,
+            cx,
+        )];
+        if let Some((id, label, action, tone)) = primary {
+            actions.push(self.surface_dialog_button(id, label, Some(action), tone, cx));
+        }
+        actions
+    }
+
+    fn surface_dialog_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        action: Option<UiAction>,
+        tone: SurfaceDialogTone,
+        cx: &Context<'_, Self>,
+    ) -> super::components::Control {
+        let variant = match tone {
+            SurfaceDialogTone::Primary => super::components::ButtonVariant::Primary,
+            SurfaceDialogTone::Destructive => super::components::ButtonVariant::Destructive,
+            SurfaceDialogTone::Outline => super::components::ButtonVariant::Outline,
+        };
+        let on_activate = cx.listener(move |view, (): &(), window, cx| {
+            if view.busy {
+                return;
+            }
+            match action.clone() {
+                Some(action) => view.handle(action, window, cx),
+                None => view.handle(UiAction::Drawer(None), window, cx),
+            }
+        });
+        super::components::button(
+            id,
+            label,
+            self.palette,
+            variant,
+            super::components::ControlState {
+                disabled: self.busy,
+                ..Default::default()
+            },
+            on_activate,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SurfaceDialogTone {
+    Primary,
+    Destructive,
+    Outline,
 }
 
 #[cfg(test)]
