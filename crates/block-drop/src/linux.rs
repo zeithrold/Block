@@ -345,11 +345,13 @@ fn refresh(state: &mut Ready) {
 fn handle_event(state: &mut Ready, event: x11rb::protocol::Event) {
     let x11rb::protocol::Event::ClientMessage(message) = event else {
         if let x11rb::protocol::Event::SelectionNotify(selection) = event {
+            eprintln!("Q8DBG SelectionNotify property={}", selection.property);
             handle_selection(state, selection);
         }
         return;
     };
     let data = message.data.as_data32();
+    eprintln!("Q8DBG client message type={} data={data:?}", message.type_);
     if message.type_ == state.atoms.enter {
         handle_enter(state, data);
     } else if message.type_ == state.atoms.position {
