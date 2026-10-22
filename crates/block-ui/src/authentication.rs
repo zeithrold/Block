@@ -146,6 +146,7 @@ pub(super) struct AuthWizard {
     error: Option<String>,
     return_tab: Tab,
     return_size: Size<Pixels>,
+    return_window: Option<gpui::AnyWindowHandle>,
     focus: Option<FocusHandle>,
     body_scroll: ScrollHandle,
     rail_scroll: ScrollHandle,
@@ -303,6 +304,7 @@ impl AuthWizard {
             error: self.error.clone(),
             return_tab: self.return_tab,
             return_size: self.return_size,
+            return_window: self.return_window,
             focus: Some(cx.focus_handle()),
             body_scroll,
             rail_scroll,
@@ -589,7 +591,6 @@ impl Block {
             state.provider_draft = None;
             state.transition(Phase::Information);
         }
-        self.shell.surfaces.activate(window);
         self.shell.surfaces.close(window, &self.focus, cx);
         cx.notify();
     }
@@ -639,10 +640,9 @@ impl Block {
         let draft_id = draft.id;
         let handle = self
             .shell
-            .surfaces
-            .layers()
-            .find(|entry| matches!(entry.kind, super::shell::Surface::AuthProviderAdd))
-            .and_then(|entry| entry.window);
+            .auth
+            .as_ref()
+            .and_then(|state| state.return_window);
         if let Some(handle) = handle {
             let owner = cx.entity();
             cx.defer(move |cx| {
@@ -1109,10 +1109,9 @@ impl Block {
             self.cancel_auth_provider(cx);
             let handle = self
                 .shell
-                .surfaces
-                .layers()
-                .find(|entry| matches!(entry.kind, super::shell::Surface::AuthProviderAdd))
-                .and_then(|entry| entry.window);
+                .auth
+                .as_ref()
+                .and_then(|state| state.return_window);
             if let Some(handle) = handle {
                 let owner = cx.entity();
                 cx.defer(move |cx| {
@@ -1126,7 +1125,6 @@ impl Block {
                             {
                                 return;
                             }
-                            view.shell.surfaces.activate(window);
                             view.shell.surfaces.close(window, &view.focus, cx);
                         })
                     });
@@ -1226,9 +1224,6 @@ impl Block {
 
     pub(super) fn open_auth_wizard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.shell.auth.is_some() {
-            self.shell
-                .surfaces
-                .open(super::shell::Surface::Auth, window, cx);
             return;
         }
         if self.busy {
@@ -1260,10 +1255,9 @@ impl Block {
                 }
                 let handle = view
                     .shell
-                    .surfaces
-                    .layers()
-                    .find(|entry| matches!(entry.kind, super::shell::Surface::Auth))
-                    .and_then(|entry| entry.window);
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.return_window);
                 if let Some(handle) = handle {
                     let owner = cx.entity();
                     cx.defer(move |cx| {
@@ -1288,13 +1282,20 @@ impl Block {
                 .map(|p| p.api_url.clone()),
             return_tab: self.tab,
             return_size: window.viewport_size(),
+            return_window: Some(window.window_handle()),
             focus: Some(focus.clone()),
             ..AuthWizard::default()
         };
         self.shell.auth = Some(wizard);
-        self.shell
-            .surfaces
-            .open(super::shell::Surface::Auth, window, cx);
+        // The Add account wizard is the Accounts page's own page, as in the
+        // prototype's /accounts/new; never a separate window or overlay.
+        self.shell.instance_editor = None;
+        self.shell.providers.visible = false;
+        self.shell.accounts.detail_visible = false;
+        self.tab = Tab::Accounts;
+        window.resize(super::window_geometry::management_size(window, cx));
+        self.shell.surfaces.clear(window, &focus, cx);
+        focus.focus(window, cx);
         cx.notify();
     }
 
@@ -1495,12 +1496,16 @@ impl Block {
             .auth
             .as_ref()
             .is_some_and(|state| matches!(state.phase, Phase::Saving | Phase::Saved));
-        // Finish authorizes a durable save. Closing its window does not cancel
-        // that transaction or a different operation started in the parent.
+        // Finish authorizes a durable save. Closing the page does not cancel
+        // that transaction, so only an uncommitted attempt returns to its page.
         if !committing {
             self.abandon_auth_attempt();
         }
-        self.close_auth_context(window, cx);
+        if committing {
+            self.close_auth_context(window, cx);
+        } else {
+            self.abandon_auth_context(window, cx);
+        }
     }
 
     pub(super) fn finish_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1579,10 +1584,9 @@ impl Block {
         state.transition(Phase::Saved);
         let handle = self
             .shell
-            .surfaces
-            .layers()
-            .find(|entry| matches!(entry.kind, super::shell::Surface::Auth))
-            .and_then(|entry| entry.window);
+            .auth
+            .as_ref()
+            .and_then(|state| state.return_window);
         if let Some(handle) = handle {
             let owner = cx.entity();
             cx.defer(move |cx| {
@@ -1617,22 +1621,32 @@ impl Block {
         self.shell.accounts.inspected = Some(id);
         self.shell.accounts.detail_visible = true;
         self.status = format!("{} is saved and ready to use", account.player_name);
-        self.shell.surfaces.activate(window);
         self.close_auth_context(window, cx);
     }
 
+    /// Finish path: first-run preparation returns to its setup page; a normal
+    /// Add account stays on Accounts, which now shows the saved account.
     fn close_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.shell.auth.take().is_none() {
+        let Some(state) = self.shell.auth.take() else {
             return;
+        };
+        if state.return_tab == Tab::Onboarding {
+            self.tab = Tab::Onboarding;
+            window.resize(state.return_size);
+            self.focus.focus(window, cx);
         }
-        if self
-            .shell
-            .surfaces
-            .top()
-            .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Auth))
-        {
-            self.shell.surfaces.close(window, &self.focus, cx);
-        }
+        cx.notify();
+    }
+
+    /// Cancel path: abandon the page and return to the page and size that opened
+    /// it, preserving any draft there.
+    fn abandon_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(state) = self.shell.auth.take() else {
+            return;
+        };
+        self.tab = state.return_tab;
+        window.resize(state.return_size);
+        self.focus.focus(window, cx);
         cx.notify();
     }
 
@@ -3056,9 +3070,7 @@ mod tests {
                             prepared_account: (phase == Phase::Complete).then(|| account.clone()),
                             ..AuthWizard::default()
                         });
-                        view.shell
-                            .surfaces
-                            .open(crate::shell::Surface::Auth, window, cx);
+                        view.tab = Tab::Accounts;
                         view
                     });
                     crate::test_support::control_bounds(cx, "auth-body");

@@ -21,6 +21,7 @@ mod motion;
 #[cfg(test)]
 mod native_regressions;
 mod onboarding;
+mod overlays;
 mod patterns;
 mod platform;
 mod profile_editor;
@@ -41,7 +42,6 @@ mod text_input;
 mod tooltip;
 mod transitions;
 mod window_geometry;
-mod window_surfaces;
 
 pub use about::BuildInfo;
 pub use crash_view::CrashView;
@@ -1073,6 +1073,22 @@ impl Block {
         self.cancel = CancellationToken::new();
     }
 
+    /// Leave the Welcome Settings/About preview and restore the setup page,
+    /// keeping its draft and undoing an unsaved settings preview.
+    fn leave_guide_preview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some((tab, size)) = self.shell.guide_preview.take() else {
+            return;
+        };
+        if tab == Tab::Settings {
+            self.preferences.clone_from(&self.saved_preferences);
+            self.settings_form = None;
+        }
+        self.tab = Tab::Onboarding;
+        window.resize(size);
+        self.shell.surfaces.clear(window, &self.focus, cx);
+        cx.notify();
+    }
+
     fn instance(&self) -> Option<&Instance> {
         self.snapshot
             .instances
@@ -1092,7 +1108,6 @@ impl Block {
         reason = "Concrete UI actions are kept in one dispatcher without a controller framework."
     )]
     fn handle(&mut self, action: UiAction, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.shell.surfaces.activate(window);
         self.motion_dirty = true;
         self.motion.direction = if matches!(
             action,
@@ -1181,9 +1196,10 @@ impl Block {
                     if tab == Tab::Settings {
                         self.open_settings(cx);
                     }
-                    self.shell
-                        .surfaces
-                        .open(shell::Surface::GuideInformation(tab), window, cx);
+                    self.shell.guide_preview = Some((tab, window.viewport_size()));
+                    self.tab = tab;
+                    self.shell.surfaces.clear(window, &self.focus, cx);
+                    window.resize(window_geometry::management_size(window, cx));
                     cx.notify();
                     return;
                 }
@@ -1224,6 +1240,8 @@ impl Block {
                     {
                         self.open_selector(drawer, window, cx);
                     }
+                } else if self.shell.guide_preview.is_some() {
+                    self.leave_guide_preview(window, cx);
                 } else if self
                     .shell
                     .surfaces
@@ -1232,13 +1250,6 @@ impl Block {
                 {
                     self.cancel_auth_provider(cx);
                     self.shell.surfaces.close(window, &self.focus, cx);
-                } else if self
-                    .shell
-                    .surfaces
-                    .top()
-                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::Auth))
-                {
-                    self.cancel_auth(window, cx);
                 } else if self
                     .shell
                     .surfaces
@@ -1255,14 +1266,7 @@ impl Block {
                 {
                     self.finish_onboarding_section(true, window, cx);
                 } else {
-                    let closed = self.shell.surfaces.close(window, &self.focus, cx);
-                    if matches!(
-                        closed,
-                        Some(shell::Surface::GuideInformation(Tab::Settings))
-                    ) {
-                        self.preferences.clone_from(&self.saved_preferences);
-                        self.settings_form = None;
-                    }
+                    self.shell.surfaces.close(window, &self.focus, cx);
                 }
             }
             UiAction::SetAppearance(appearance) => self.preview_appearance(appearance),
@@ -2237,7 +2241,6 @@ impl Render for Block {
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);
-        let previous_window = self.shell.surfaces.enter_window(window);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();
         window.set_window_title(&if self.tab == Tab::Home && self.shell.auth.is_none() {
@@ -2245,9 +2248,7 @@ impl Render for Block {
         } else {
             format!("Block · {title}")
         });
-        let content = self.render_shell(window, cx).into_any_element();
-        self.shell.surfaces.restore_window(previous_window);
-        content
+        self.render_shell(window, cx).into_any_element()
     }
 }
 

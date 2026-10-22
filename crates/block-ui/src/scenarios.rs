@@ -357,21 +357,7 @@ impl Block {
                     );
                 }
                 if name == "auth-authlib-provider-add" {
-                    let owner = cx.entity();
-                    cx.defer(move |cx| {
-                        let handle = owner
-                            .read(cx)
-                            .shell
-                            .surfaces
-                            .layers()
-                            .find(|entry| matches!(entry.kind, Surface::Auth))
-                            .and_then(|entry| entry.window);
-                        if let Some(handle) = handle {
-                            let _ = handle.update(cx, |_, window, cx| {
-                                owner.update(cx, |view, cx| view.open_auth_provider_add(window, cx))
-                            });
-                        }
-                    });
+                    self.open_auth_provider_add(window, cx);
                 }
             }
         }

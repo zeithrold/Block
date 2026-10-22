@@ -210,15 +210,6 @@ impl Block {
         true
     }
 
-    pub(super) fn render_selector(
-        &self,
-        drawer: Drawer,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        self.render_selector_body(drawer, window, cx)
-    }
-
     /// Search, result rows and the management jump, without a surface-local
     /// heading: the owning sheet or dialog supplies its own title.
     pub(super) fn render_selector_body(

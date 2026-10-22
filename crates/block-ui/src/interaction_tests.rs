@@ -1,5 +1,5 @@
 //! Product drafts and late asynchronous results remain independent of window presentation.
-use super::{Block, Tab, UiAction, engine::Message, shell::Surface};
+use super::{Block, Tab, UiAction, engine::Message};
 use gpui::{Focusable as _, px, size};
 
 #[gpui::test]
@@ -132,18 +132,25 @@ fn guide_information_preserves_setup_draft_and_cancels_settings_preview(
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
             view.handle(UiAction::SetAppearance(super::Appearance::Dark), window, cx);
             assert_eq!(view.preferences.appearance, super::Appearance::Dark);
-            assert_eq!(view.tab, Tab::Onboarding);
-            assert!(view.shell.surfaces.top().is_some_and(|layer| matches!(layer.kind, Surface::GuideInformation(Tab::Settings))));
+            assert_eq!(view.tab, Tab::Settings);
+            assert!(view.shell.guide_preview.is_some());
+            assert!(view.shell.surfaces.layers().next().is_none());
             view.handle(UiAction::Drawer(None), window, cx);
+            assert_eq!(view.tab, Tab::Onboarding);
             assert_eq!(view.preferences.appearance, super::Appearance::System);
             assert!(view.settings_form.is_none());
+            assert!(view.shell.guide_preview.is_none());
             assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Retain 世界"));
             view.handle(UiAction::Tab(Tab::About), window, cx);
+            assert_eq!(view.tab, Tab::About);
+            assert!(view.shell.guide_preview.is_some());
         });
     });
     cx.run_until_parked();
     assert!(crate::test_support::control_bounds(cx, "about-body").is_some());
     crate::test_support::press(cx, "escape");
-    assert!(view.read_with(cx, |view, cx| view.tab == Tab::Onboarding && !view.shell.surfaces.is_open()
+    assert!(view.read_with(cx, |view, cx| view.tab == Tab::Onboarding
+        && view.shell.guide_preview.is_none()
+        && !view.shell.surfaces.is_open()
         && matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Retain 世界")));
 }

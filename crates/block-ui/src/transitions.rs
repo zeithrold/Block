@@ -325,6 +325,7 @@ impl ShellState {
             accounts: self.accounts.snapshot(cx),
             providers: self.providers.snapshot(cx),
             selector: self.selector.as_ref().map(|selector| selector.snapshot(cx)),
+            guide_preview: self.guide_preview,
             revision: self.revision,
             backwards: self.backwards,
             settings_page: self.settings_page,

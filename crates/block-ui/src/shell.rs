@@ -40,17 +40,22 @@ pub(super) enum Surface {
     SeparateProfiles,
     StorageCleanup(uuid::Uuid),
     GamesHelp,
-    GuideInformation(Tab),
     OnboardingSection(super::WizardPage),
     WizardSection(super::WizardPage),
-    Auth,
     AuthProviderAdd,
     Select(super::select::SelectState<UiAction>),
 }
 
+/// The library overlay that presents a surface inside the product window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OverlayPresentation {
+    Dialog,
+    Sheet,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct ShellState {
-    pub surfaces: super::window_surfaces::SurfaceWindows,
+    pub surfaces: super::overlays::Overlays,
     pub connection: super::connection_test::State,
     pub storage: super::settings::StorageState,
     pub downloads: super::downloads::State,
@@ -67,6 +72,9 @@ pub(super) struct ShellState {
     pub accounts: super::browser::CollectionState,
     pub providers: super::providers::State,
     pub selector: Option<super::search_selector::SearchSelectorState>,
+    /// Settings/About preview opened from the Welcome menu, with the size to
+    /// restore when the setup draft comes back.
+    pub guide_preview: Option<(Tab, gpui::Size<gpui::Pixels>)>,
     pub revision: usize,
     pub backwards: bool,
     pub settings_page: u8,
@@ -121,10 +129,8 @@ impl ShellState {
             | Surface::SeparateProfiles
             | Surface::StorageCleanup(_)
             | Surface::GamesHelp
-            | Surface::GuideInformation(_)
             | Surface::OnboardingSection(_)
             | Surface::WizardSection(_)
-            | Surface::Auth
             | Surface::AuthProviderAdd
             | Surface::Select(_) => None,
         })
@@ -152,12 +158,6 @@ impl Block {
             .id("block-shell")
             .debug_selector(|| "block-shell".into())
             .key_context("LauncherForm")
-            .capture_any_mouse_down(
-                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
-            )
-            .capture_key_down(
-                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
-            )
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
@@ -165,6 +165,9 @@ impl Block {
                     if !view.shell.surfaces.is_open() {
                         if view.shell.auth.is_some() {
                             view.handle(UiAction::AuthCancel, window, cx);
+                            cx.stop_propagation();
+                        } else if view.shell.guide_preview.is_some() {
+                            view.leave_guide_preview(window, cx);
                             cx.stop_propagation();
                         } else if view.shell.instance_editor.is_some() {
                             view.handle(UiAction::CancelInstanceSettings, window, cx);
@@ -281,6 +284,9 @@ impl Block {
     }
 
     fn contextual_back(&self) -> (&'static str, UiAction) {
+        if self.shell.guide_preview.is_some() {
+            return ("Back to setup", UiAction::Drawer(None));
+        }
         if self.tab == Tab::Accounts && self.shell.providers.visible {
             return ("Accounts", UiAction::ProvidersBack);
         }
@@ -405,6 +411,18 @@ impl Block {
     pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         if self.tab == Tab::Onboarding {
             return self.onboarding(window, cx);
+        }
+        if self.tab == Tab::Accounts && self.shell.auth.is_some() {
+            return self.render_auth_wizard(window, cx).into_any_element();
+        }
+        // Welcome's Settings/About preview keeps the setup draft aside and
+        // shows the real management page, not the wizard form.
+        if let Some((tab, _)) = self.shell.guide_preview {
+            return if tab == Tab::Settings {
+                self.render_settings(window, cx).into_any_element()
+            } else {
+                self.render_about(window, cx).into_any_element()
+            };
         }
         if let Some(Form::Instance(form)) = &self.form {
             return self.render_game_wizard(form, window, cx).into_any_element();
@@ -890,108 +908,6 @@ impl Block {
         self.render_settings(window, cx)
     }
 
-    pub(super) fn render_surface_window(
-        &self,
-        layer: &super::window_surfaces::SurfaceWindow,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        let content = div()
-            .id(("surface-content", layer.revision))
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_5();
-        let mut content = super::scroll_area::viewport(
-            content,
-            &layer.scroll,
-            layer.kind.title(),
-            self.palette,
-            false,
-        );
-        content = match &layer.kind {
-            Surface::Drawer(Drawer::Menu) => content,
-            Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => content
-                .child(self.render_selector(*drawer, window, cx)),
-            Surface::Drawer(Drawer::Downloads) => content.child(self.render_downloads(window, cx)),
-            Surface::DownloadFiles(group) => content.child(self.render_download_files_body(*group, window)),
-            Surface::DeleteProfile(_) => content
-                .child(div().text_xl().child("Delete this profile?"))
-                .child(note(if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled { "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk." } else { "Only launch settings are removed. Worlds, game data and installation files stay on disk." }))
-                .child(self.button("confirm-delete", "Delete profile", UiAction::ConfirmDelete, cx)),
-            Surface::RemoveAccount(id) => content
-                .child(div().text_xl().child("Remove this account?"))
-                .child(note("This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it."))
-                .child(self.button("confirm-remove-account", "Remove account", UiAction::SignOut(id.clone()), cx)),
-            Surface::RemoveProvider(id) => content
-                .child(div().text_xl().child("Remove this provider?"))
-                .child(note(if self.provider_links(id)>0 { "This provider is used by saved accounts. Remove those accounts first." } else { "The saved provider and cached metadata are removed. Game files stay on disk." }))
-                .children((self.provider_links(id)==0).then(||self.button("confirm-remove-provider","Remove provider",UiAction::ProviderRemove(id.clone()),cx))),
-            Surface::SeparateProfiles => content
-                .child(div().text_xl().child("Enable separated profiles?"))
-                .child(note("This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored."))
-                .child(self.button("confirm-separate", "Enable separated profiles", UiAction::SeparateProfiles, cx))
-                .child(self.button("cancel-separate", "Keep bundled mode", UiAction::ConfirmSeparate(false), cx)),
-            Surface::StorageCleanup(id) => content.child(self.render_storage_confirmation(*id, cx)),
-            Surface::GamesHelp => content.child(self.render_games_help(cx)),
-            Surface::GuideInformation(tab) => content.p_0().child(div().h_full().w_full().min_h_0()
-                .child(if *tab == Tab::Settings { self.render_settings(window, cx).into_any_element() } else { self.render_about(window, cx).into_any_element() })),
-            Surface::OnboardingSection(page) => content.p_0().gap_0().overflow_hidden().child(self.render_onboarding_section(*page, window, cx)),
-            Surface::Auth => content.p_0().child(self.render_auth_wizard(window, cx)),
-            Surface::AuthProviderAdd=>content.child(self.render_auth_provider_add(cx)),
-            Surface::WizardSection(_) => content.p_0().gap_0()
-                .child(div().flex_1().min_h_0().child(self.render_game_wizard_transition_body(window, cx)))
-                .child(super::patterns::management_footer(window.viewport_size(), self.palette).justify_end()
-                    .child(self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx).w_auto())
-                    .child(self.button("section-done", "Done", UiAction::WizardPage(None), cx).w_auto())),
-            Surface::Select(state) => content.p_1().gap_0().rounded_lg().child(self.select_options(state, cx)),
-        };
-        if !matches!(
-            layer.kind,
-            Surface::OnboardingSection(_)
-                | Surface::WizardSection(_)
-                | Surface::Auth
-                | Surface::AuthProviderAdd
-                | Surface::Select(_)
-        ) {
-            content =
-                content.child(self.button("close-drawer", "Close", UiAction::Drawer(None), cx));
-        }
-        div()
-            .id(("surface-window", layer.revision))
-            .key_context("LauncherForm")
-            .track_focus(&layer.focus)
-            .capture_any_mouse_down(
-                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
-            )
-            .capture_key_down(
-                cx.listener(|view, _, window, _| view.shell.surfaces.activate(window)),
-            )
-            .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
-                view.move_focus(false, window, cx)
-            }))
-            .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
-                view.move_focus(true, window, cx)
-            }))
-            .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
-                    view.handle(UiAction::Drawer(None), window, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .size_full()
-            .min_h_0()
-            .relative()
-            .bg(rgb(self.palette.background))
-            .text_color(rgb(self.palette.foreground))
-            .text_size(px(14.))
-            .font_family(super::design::FONT_FAMILY)
-            .child(content)
-            .children(self.render_popups(window, cx))
-    }
-
     fn render_popups(&self, window: &Window, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         self.shell
             .surfaces
@@ -1000,9 +916,6 @@ impl Block {
                 let Surface::Select(state) = &layer.kind else {
                     return None;
                 };
-                if layer.parent.window_id() != window.window_handle().window_id() {
-                    return None;
-                }
                 Some(
                     gpui_base::Positioner::corner(gpui::Anchor::TopLeft, state.anchor)
                         .margin(px(8.))

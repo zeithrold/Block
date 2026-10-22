@@ -113,17 +113,6 @@ impl Block {
         })
     }
 
-    pub(super) fn render_downloads(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
-        div()
-            .h((window.viewport_size().height - px(200.)).clamp(px(160.), px(360.)))
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_lg().child("Downloads"))
-            .child(self.render_downloads_body(window, cx))
-    }
-
     /// Download task summary without a surface-local heading: the owning sheet
     /// supplies its own title and description.
     pub(super) fn render_downloads_body(

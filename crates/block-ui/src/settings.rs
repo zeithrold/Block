@@ -1439,7 +1439,7 @@ impl Block {
                 .child(self.button(
                     "cancel-preferences",
                     "Cancel",
-                    if self.tab == Tab::Onboarding {
+                    if self.tab == Tab::Onboarding || self.shell.guide_preview.is_some() {
                         UiAction::Drawer(None)
                     } else {
                         UiAction::Tab(Tab::Home)
@@ -1797,31 +1797,6 @@ impl Block {
                 .to_owned(),
         );
         notes
-    }
-
-    pub(super) fn render_storage_confirmation(
-        &self,
-        id: uuid::Uuid,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("Remove this retained copy?"))
-            .children(self.storage_cleanup_notes(id).into_iter().map(note))
-            .child(self.button(
-                "storage-confirm-remove",
-                "Remove retained copy",
-                UiAction::StorageCleanup(id, true),
-                cx,
-            ))
-            .child(self.button(
-                "storage-confirm-keep",
-                "Keep copy",
-                UiAction::StorageCleanup(id, false),
-                cx,
-            ))
     }
 
     fn settings_profile_mode(&self, narrow: bool, cx: &Context<'_, Self>) -> gpui::Div {

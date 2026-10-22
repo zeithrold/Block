@@ -101,11 +101,13 @@ fn settings_select_anchors_to_trigger_and_keeps_inspection_separate_from_value(
     let trigger_focus = cx.update(|window, cx| window.focused(cx));
     cx.simulate_resize(size(px(360.), px(540.)));
     click(cx, "settings-appearance");
+
     assert_narrow_popup(cx);
     crate::test_support::press(cx, "escape");
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
     click(cx, "settings-appearance");
     crate::test_support::press(cx, "end enter");
+
     assert!(view.read_with(cx, |view, _| view.preferences.appearance
         == crate::Appearance::Dark
         && view.saved_preferences.appearance == crate::Appearance::System
@@ -423,11 +425,10 @@ fn guide_menu_filters_real_actions_and_settings_cancel_preserves_the_guide_draft
             && cx.debug_bounds("menu-about").is_some()
     );
     click(cx, "menu-settings");
-    assert!(view.read_with(cx, |view, _| view.tab == Tab::Onboarding
-        && view.shell.surfaces.top().is_some_and(|layer| matches!(
-            layer.kind,
-            Surface::GuideInformation(Tab::Settings)
-        ))));
+
+    assert!(view.read_with(cx, |view, _| view.tab == Tab::Settings
+        && view.shell.guide_preview.is_some()
+        && view.shell.surfaces.layers().next().is_none()));
     click(cx, "settings-appearance");
     crate::test_support::press(cx, "end enter");
     assert_eq!(
@@ -435,6 +436,7 @@ fn guide_menu_filters_real_actions_and_settings_cancel_preserves_the_guide_draft
         crate::Appearance::Dark
     );
     click(cx, "cancel-preferences");
+
     assert!(view.read_with(cx, |view, cx| view.tab == Tab::Onboarding && !view.shell.surfaces.is_open()
         && view.preferences == view.saved_preferences && view.settings_form.is_none()
         && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Kept guide 世界")));
