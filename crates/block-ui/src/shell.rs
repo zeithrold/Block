@@ -1058,22 +1058,67 @@ impl Block {
         let Some(kind) = kind else {
             return div().into_any_element();
         };
-        let content = match &kind {
-            Surface::DownloadFiles(group) => div()
-                .px(px(24.))
-                .child(self.render_download_files_body(*group, window)),
-            Surface::GamesHelp => div().px(px(24.)).child(self.render_games_help(cx)),
-            _ => div()
-                .px(px(24.))
-                .flex()
-                .flex_col()
-                .gap_2()
-                .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
+        // Wizard and onboarding sections bring their own headings, scrolling
+        // and footer, so the dialog only supplies the surface and the chrome.
+        let height = (window.viewport_size().height - px(180.)).clamp(px(320.), px(540.));
+        let (content, section) = match &kind {
+            Surface::OnboardingSection(page) => (
+                div()
+                    .h(height)
+                    .min_h_0()
+                    .w_full()
+                    .child(self.render_onboarding_section(*page, window, cx)),
+                true,
+            ),
+            Surface::WizardSection(_) => (
+                div()
+                    .h(height)
+                    .min_h_0()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.render_game_wizard_transition_body(window, cx)),
+                    )
+                    .child(
+                        super::patterns::management_footer(window.viewport_size(), self.palette)
+                            .justify_end()
+                            .child(
+                                self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)
+                                    .w_auto(),
+                            )
+                            .child(
+                                self.button("section-done", "Done", UiAction::WizardPage(None), cx)
+                                    .w_auto(),
+                            ),
+                    ),
+                true,
+            ),
+            Surface::DownloadFiles(group) => (
+                div()
+                    .px(px(24.))
+                    .child(self.render_download_files_body(*group, window)),
+                false,
+            ),
+            Surface::GamesHelp => (div().px(px(24.)).child(self.render_games_help(cx)), false),
+            _ => (
+                div()
+                    .px(px(24.))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
+                false,
+            ),
         };
+        let content = content.w_full().flex().flex_col();
+        if section {
+            return content.into_any_element();
+        }
         content
-            .w_full()
-            .flex()
-            .flex_col()
             .child(
                 div()
                     .w_full()

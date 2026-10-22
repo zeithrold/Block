@@ -105,14 +105,20 @@ impl SurfaceWindows {
         cx: &mut Context<'_, Block>,
     ) -> bool {
         let parent = window.window_handle();
-        if let Some(existing) = self
+        if let Some(index) = self
             .entries
             .iter()
-            .find(|entry| entry.kind.purpose() == kind.purpose())
+            .position(|entry| entry.kind.purpose() == kind.purpose())
         {
-            if let Some(handle) = existing.window {
+            if let Some(handle) = self.entries[index].window {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
                 self.current_window.set(Some(handle.window_id()));
+            } else if self.entries[index].kind.overlay().is_some() {
+                // A wizard section can switch pages while its one dialog stays
+                // mounted; keep the logical layer and let the body re-read it.
+                self.entries[index].kind = kind;
+                self.current_window.set(Some(parent.window_id()));
+                cx.notify();
             }
             return false;
         }
@@ -376,23 +382,37 @@ impl SurfaceWindows {
                 view.update(dialog_cx, |view, _| {
                     view.shell.surfaces.activate(dialog_window);
                 });
+                let section = matches!(
+                    kind,
+                    Surface::OnboardingSection(_) | Surface::WizardSection(_)
+                );
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
                 let body = body.clone();
                 let gate = build_owner.clone();
                 let dismiss = build_owner.clone();
+                let dialog = if section {
+                    dialog
+                        .font_family(super::design::FONT_FAMILY)
+                        .w(px(760.))
+                        .px(px(0.))
+                        .pt(px(0.))
+                        .pb(px(0.))
+                } else {
+                    dialog
+                        .font_family(super::design::FONT_FAMILY)
+                        .w(px(520.))
+                        .px(px(0.))
+                        .pt(px(24.))
+                        .pb(px(0.))
+                        .title(
+                            div()
+                                .px(px(24.))
+                                .text_xl()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(title),
+                        )
+                };
                 dialog
-                    .font_family(super::design::FONT_FAMILY)
-                    .w(px(520.))
-                    .px(px(0.))
-                    .pt(px(24.))
-                    .pb(px(0.))
-                    .title(
-                        div()
-                            .px(px(24.))
-                            .text_xl()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(title),
-                    )
                     .content(move |content, _window, _cx| content.child(body.clone()))
                     .on_cancel(move |_, _, cx| {
                         gate.upgrade().is_none_or(|view| {
@@ -406,6 +426,9 @@ impl SurfaceWindows {
                         });
                     })
             });
+            if let Some(focus) = view.read(cx).surface_input_focus(revision, cx) {
+                focus.focus(window, cx);
+            }
         });
     }
 
@@ -773,6 +796,12 @@ impl Block {
             .surfaces
             .current_window
             .set(Some(entry.parent.window_id()));
+        match entry.kind {
+            Surface::OnboardingSection(_) | Surface::WizardSection(_) => {
+                self.cancel_component_draft(cx);
+            }
+            _ => {}
+        }
         SurfaceWindows::restore_surface_focus(entry.return_focus, entry.parent, window, cx);
         self.motion_dirty = true;
         cx.notify();
@@ -821,7 +850,10 @@ impl Surface {
             Self::Drawer(Drawer::Accounts | Drawer::Profiles | Drawer::Downloads) => {
                 Some(OverlayPresentation::Sheet)
             }
-            Self::DownloadFiles(_) | Self::GamesHelp => Some(OverlayPresentation::Dialog),
+            Self::DownloadFiles(_)
+            | Self::GamesHelp
+            | Self::OnboardingSection(_)
+            | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
             Self::DeleteProfile(_)
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)

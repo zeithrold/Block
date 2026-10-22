@@ -4,7 +4,7 @@ use crate::{
     Block, UiAction,
     shell::{Drawer, Surface},
 };
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
+use gpui::{Entity, Focusable as _, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::WindowExt as _;
 
 fn fixture(cx: &mut TestAppContext) -> (Entity<Block>, &mut VisualTestContext) {
@@ -374,4 +374,40 @@ fn download_files_dialog_stacks_above_the_downloads_sheet(cx: &mut TestAppContex
         assert!(window.has_active_sheet(cx));
         assert!(!window.has_active_dialog(cx));
     });
+}
+
+#[gpui::test]
+fn onboarding_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    let trigger_focus = cx.update(|window, cx| window.focused(cx));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.begin_onboarding(cx);
+            view.open_onboarding_section(crate::game_wizard::WizardPage::Version, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), 1, "the section stays inside Welcome");
+    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+    cx.update(|window, cx| {
+        view.read_with(cx, |view, cx| {
+            assert!(matches!(
+                view.shell.surfaces.top().map(|layer| &layer.kind),
+                Some(Surface::OnboardingSection(_))
+            ));
+            assert!(
+                view.shell
+                    .wizard
+                    .version_search
+                    .as_ref()
+                    .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window)),
+                "the section search is focused inside the dialog"
+            );
+        });
+    });
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
 }

@@ -101,7 +101,8 @@ fn resizing_setup_keeps_component_rows_square_and_the_note_next_to_them(cx: &mut
 }
 
 #[gpui::test]
-fn tab_during_configuration_entrance_reaches_the_live_modal_controls(cx: &mut TestAppContext) {
+fn tab_during_configuration_entrance_stays_inside_the_section_dialog(cx: &mut TestAppContext) {
+    use gpui_component::WindowExt as _;
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -109,21 +110,20 @@ fn tab_during_configuration_entrance_reaches_the_live_modal_controls(cx: &mut Te
             view.open_onboarding_section(WizardPage::Version, window, cx);
         });
     });
+    cx.run_until_parked();
+    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+    let page_focus = view.read_with(cx, |view, _| view.focus.clone());
     crate::test_support::press(cx, "tab");
     cx.update(|window, cx| {
         let view = view.read(cx);
-        assert!(
-            view.shell
-                .surfaces
-                .top()
-                .is_some_and(|layer| layer.focus.contains_focused(window, cx))
-        );
-        assert!(
-            view.shell
-                .wizard
-                .version_search
-                .as_ref()
-                .is_some_and(|input| !input.read(cx).focus_handle(cx).is_focused(window))
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::OnboardingSection(_))
+        ));
+        assert_ne!(
+            window.focused(cx),
+            Some(page_focus),
+            "Tab must stay inside the section dialog instead of the page behind it"
         );
     });
 }
