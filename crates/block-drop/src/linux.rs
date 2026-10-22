@@ -419,7 +419,9 @@ fn handle_enter(state: &mut Ready, data: [u32; 5]) {
     state.drag.reset();
     state.drag.source = source;
     state.drag.targets = targets;
-    state.drag.accepted = true;
+    // Unknown type lists are accepted optimistically and validated at drop; a
+    // known list without a text type is refused up front (files, images, ...).
+    state.drag.accepted = types.is_empty() || offered.is_some();
 }
 
 fn read_type_list(state: &Ready, source: Window) -> Vec<Atom> {
@@ -461,6 +463,11 @@ fn handle_position(state: &mut Ready, data: [u32; 5]) {
 fn handle_drop(state: &mut Ready, data: [u32; 5]) {
     let source = data[0];
     if source != state.drag.source {
+        return;
+    }
+    if !state.drag.accepted {
+        finish(state, source, false);
+        state.drag.reset();
         return;
     }
     state.drag.drop_time = data[2];
