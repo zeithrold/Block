@@ -23,8 +23,8 @@ use async_channel::Sender as PayloadSender;
 use x11rb::{
     connection::Connection as _,
     protocol::xproto::{
-        Atom, AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt as _,
-        CreateWindowAux, EventMask, PropMode, Window, WindowClass,
+        Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConfigureWindowAux,
+        ConnectionExt as _, CreateWindowAux, EventMask, PropMode, StackMode, Window, WindowClass,
     },
     rust_connection::RustConnection,
     wrapper::ConnectionExt as _,
@@ -188,7 +188,7 @@ fn run(
         let mut shutdown = false;
         loop {
             match commands.try_recv() {
-                Ok(Command::Zone(zone)) => configure_zone(&state, zone),
+                Ok(Command::Zone(zone)) => configure_zone(&mut state, zone),
                 Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => {
                     shutdown = true;
                     break;
@@ -217,17 +217,29 @@ fn run(
         }
         let _ = state.connection.flush();
     }
-    // SAFETY: no borrow of the connection outlives this call.
     let _ = state.connection.destroy_window(state.window);
     let _ = state.connection.flush();
 }
 
 fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Result<Ready> {
-    let (connection, _screen) =
+    let (connection, screen) =
         x11rb::connect(None).map_err(|error| anyhow!("could not open the X11 display: {error}"))?;
     let atoms = intern_atoms(&connection)?;
+    let root = connection
+        .setup()
+        .roots
+        .get(screen)
+        .map(|root| root.root)
+        .ok_or_else(|| anyhow!("the X11 display has no root window"))?;
+    // XDND sources look up the immediate child of the root under the pointer, so
+    // the target must be a top-level input-only window, not a child of the app.
+    connection
+        .change_window_attributes(
+            parent,
+            &ChangeWindowAttributesAux::new().event_mask(EventMask::STRUCTURE_NOTIFY),
+        )
+        .map_err(|error| anyhow!("could not observe the product window: {error}"))?;
     let window = connection.generate_id()?;
-    let (x, y, width, height) = zone_rect(zone);
     let aux = CreateWindowAux::new()
         .override_redirect(1)
         .event_mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY);
@@ -235,11 +247,11 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         .create_window(
             0,
             window,
-            parent,
-            x as i16,
-            y as i16,
-            width,
-            height,
+            root,
+            0,
+            0,
+            1,
+            1,
             0,
             WindowClass::INPUT_ONLY,
             x11rb::COPY_FROM_PARENT,
@@ -254,14 +266,19 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         &[XDND_VERSION],
     )?;
     connection.map_window(window)?;
-    connection.flush()?;
-    Ok(Ready {
+    let mut state = Ready {
         connection,
+        parent,
+        root,
         window,
         atoms,
         payloads,
         drag: DragState::empty(),
-    })
+        zone,
+        last_refresh: Instant::now(),
+    };
+    refresh(&mut state);
+    Ok(state)
 }
 
 fn intern_atoms(connection: &RustConnection) -> Result<Atoms> {
