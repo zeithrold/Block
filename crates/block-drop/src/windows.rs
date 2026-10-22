@@ -6,7 +6,9 @@
 //! while the window remains a real hit-test target for OLE drag-and-drop.
 
 use std::{
-    fmt, ptr,
+    fmt,
+    mem::size_of,
+    ptr,
     sync::{
         Once,
         atomic::{AtomicBool, AtomicU16, Ordering},
@@ -17,7 +19,7 @@ use anyhow::{Context as _, Result};
 use async_channel::Sender;
 use windows::{
     Win32::{
-        Foundation::{BOOL, COLORREF, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINTL, WPARAM},
+        Foundation::{COLORREF, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINTL, WPARAM},
         System::{
             Com::{FORMATETC, IDataObject},
             LibraryLoader::GetModuleHandleW,
@@ -96,7 +98,7 @@ impl ZoneDropTarget {
             let handle: HGLOBAL = unsafe { medium.u.hGlobal };
             // SAFETY: `handle` belongs to the medium; GlobalSize returns the
             // allocation size in bytes, so the scan below cannot leave the block.
-            let max_units = unsafe { GlobalSize(handle) } / std::mem::size_of::<u16>();
+            let max_units = unsafe { GlobalSize(handle) } / size_of::<u16>();
             // SAFETY: an HGLOBAL-backed text medium holds a lockable block owned
             // by the medium; the pointer stays valid until GlobalUnlock below.
             let wide = unsafe { GlobalLock(handle) } as *const u16;
@@ -357,18 +359,18 @@ impl Drop for NativeTarget {
 /// accessibility setting; the query returns whether animations are enabled, so
 /// reduced motion is its negation. A failed query keeps motion enabled.
 pub(crate) fn system_reduce_motion() -> bool {
-    let mut animations_enabled = BOOL(0);
+    let mut animations_enabled: i32 = 0;
     // SAFETY: SPI_GETCLIENTAREAANIMATION writes exactly one BOOL into the
     // supplied pointer, which is valid for the duration of the call.
     let queried = unsafe {
         SystemParametersInfoW(
             SPI_GETCLIENTAREAANIMATION,
             0,
-            Some((&raw mut animations_enabled).cast()),
+            Some(ptr::from_mut(&mut animations_enabled).cast()),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         )
     };
-    queried.is_ok() && !animations_enabled.as_bool()
+    queried.is_ok() && animations_enabled == 0
 }
 
 #[cfg(test)]
