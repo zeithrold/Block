@@ -1,6 +1,9 @@
 //! Overlay state rules: the component library owns presentation, while the
 //! logical stack stays the single source of truth for open, close and order.
-use crate::{Block, UiAction, shell::Surface};
+use crate::{
+    Block, UiAction,
+    shell::{Drawer, Surface},
+};
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::WindowExt as _;
 
@@ -170,7 +173,11 @@ fn a_late_dismissal_never_closes_a_newer_overlay(cx: &mut TestAppContext) {
         });
     });
     cx.run_until_parked();
-    view.update(cx, |view, cx| view.dismiss_surface_overlay(stale, cx));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.dismiss_surface_overlay(stale, window, cx)
+        });
+    });
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
         assert!(
@@ -212,4 +219,86 @@ fn the_scrim_blocks_pointer_input_to_the_background(cx: &mut TestAppContext) {
         ));
     });
     cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+}
+
+#[gpui::test]
+fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(432.), px(768.)));
+    cx.run_until_parked();
+    let trigger_focus = cx.update(|window, cx| window.focused(cx));
+    assert!(trigger_focus.is_some());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), 1, "the sheet stays inside Home");
+    cx.update(|window, cx| assert!(window.has_active_sheet(cx)));
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::Drawer(Drawer::Profiles))
+        ));
+    });
+    assert!(crate::test_support::control_bounds(cx, "manage-games").is_some());
+    let sheet_focus = cx.update(|window, cx| window.focused(cx));
+    assert!(sheet_focus.is_some());
+    assert_ne!(sheet_focus, trigger_focus, "focus moves into the sheet");
+
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), 1);
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_sheet(cx)));
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        trigger_focus,
+        "focus returns to the invoking control"
+    );
+}
+
+#[gpui::test]
+fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(432.), px(768.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+            view.handle(UiAction::DeleteProfileId("profile-a".into()), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::DeleteProfile(_))
+        ));
+        assert_eq!(view.shell.surfaces.layers().count(), 2);
+    });
+    cx.update(|window, cx| {
+        assert!(window.has_active_sheet(cx));
+        assert!(window.has_active_dialog(cx));
+    });
+
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::Drawer(Drawer::Profiles))
+        ));
+        assert_eq!(view.shell.surfaces.layers().count(), 1);
+    });
+    cx.update(|window, cx| {
+        assert!(window.has_active_sheet(cx));
+        assert!(!window.has_active_dialog(cx));
+    });
+
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_sheet(cx)));
 }

@@ -1046,10 +1046,9 @@ impl Block {
     pub(super) fn render_surface_dialog_body(
         &self,
         revision: usize,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
-        self.shell.surfaces.activate(window);
         let kind = self
             .shell
             .surfaces
@@ -1085,6 +1084,56 @@ impl Block {
                     .children(self.surface_dialog_actions(&kind, cx)),
             )
             .into_any_element()
+    }
+
+    /// The sheet header copy and height fraction for one home drawer.
+    pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
+        match kind {
+            Surface::Drawer(Drawer::Profiles) => {
+                ("Switch Profile", "Choose how you want to play.", 0.62)
+            }
+            Surface::Drawer(Drawer::Accounts) => (
+                "Switch Account",
+                "Choose the account you want to use.",
+                0.62,
+            ),
+            Surface::Drawer(Drawer::Downloads) => ("Downloads", "Track your download tasks.", 0.56),
+            _ => ("", "", 0.5),
+        }
+    }
+
+    /// The sheet body for a home drawer. The sheet host owns the title,
+    /// description, scrim, dismissal and focus; this renders the product list.
+    pub(super) fn render_surface_sheet_body(
+        &self,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        let kind = self
+            .shell
+            .surfaces
+            .layers()
+            .find(|layer| layer.revision == revision)
+            .map(|layer| layer.kind.clone());
+        let Some(kind) = kind else {
+            return div().into_any_element();
+        };
+        match &kind {
+            Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(self.render_selector_body(*drawer, window, cx))
+                .into_any_element(),
+            Surface::Drawer(Drawer::Downloads) => div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(self.render_downloads_body(window, cx))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        }
     }
 
     /// Name the exact record a confirmation removes when the catalog still

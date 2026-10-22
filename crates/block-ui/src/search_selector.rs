@@ -216,6 +216,17 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
+        self.render_selector_body(drawer, window, cx)
+    }
+
+    /// Search, result rows and the management jump, without a surface-local
+    /// heading: the owning sheet or dialog supplies its own title.
+    pub(super) fn render_selector_body(
+        &self,
+        drawer: Drawer,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         let Some(state) = self
             .shell
             .selector
@@ -240,11 +251,6 @@ impl Block {
                 if view.selector_key(event, window, cx) {
                     cx.stop_propagation();
                 }
-            }))
-            .child(div().text_lg().child(if accounts {
-                "Switch account"
-            } else {
-                "Switch game"
             }))
             .child(
                 div()

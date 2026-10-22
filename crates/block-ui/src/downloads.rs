@@ -114,13 +114,30 @@ impl Block {
     }
 
     pub(super) fn render_downloads(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
-        let mut page = div()
+        div()
             .h((window.viewport_size().height - px(200.)).clamp(px(160.), px(360.)))
             .min_w_0()
             .flex()
             .flex_col()
             .gap_3()
             .child(div().text_lg().child("Downloads"))
+            .child(self.render_downloads_body(window, cx))
+    }
+
+    /// Download task summary without a surface-local heading: the owning sheet
+    /// supplies its own title and description.
+    pub(super) fn render_downloads_body(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        let mut page = div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_3()
             .child(note(self.status.clone()));
         let Some(tracker) = self.download_snapshot() else {
             return page.child(patterns::empty_state("No observed transfers", if self.busy { "The operation is preparing resources. Files appear when the downloader reports them." } else { "Start an installation or repair to track real downloads." }, self.palette));
