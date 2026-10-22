@@ -121,30 +121,31 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
 | Windows AMD64 | 1.20.6 UI 1ac4564 | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
 | Linux AMD64 | 1.20.6 API 168a6e1 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
-| Linux ARM64 | 1.20.6 API bb901b7 | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.16.5 API manual composition |
+| Linux ARM64 | 1.16.5/1.18.2 native menus (Azul runtime) 851e23b | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.12.2 picker disabled (native proof) 851e23b |
 
 ## Legacy ARM64
 
 | Combination | Outcome | Concrete limitation |
 | --- | --- | --- |
-| Linux ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1, JNA 5.13, TTS 1.12.4 | Main menu via manual composition | Product integration pending (classifier-era manifests); narration lacks native flite wrapper. |
+| Linux ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1, JNA 5.13, TTS 1.12.4 + slf4j companion | Native wizard → Play → main menu → Stop verified (851e23b) | Narration lacks a native ARM64 flite wrapper; latest.log gets no "Stopping!" line on the managed stop path. |
+| Linux ARM64 1.18.2, plain Zulu 17, LWJGL 3.3.1 | Native wizard → Play → main menu → Stop verified (851e23b) | Narration limitation as above. |
 | Linux ARM64 1.19+ / 1.20.6, LWJGL 3.3.1+ | Official ARM64 natives substituted explicitly in plan and log | Native wizard and Play run pending. |
 | macOS ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1/JNA 5.13 | Failed at window creation | GLFW window-icon error. |
 | macOS ARM64 1.16.5, alternate official GLFW/binding combinations | Failed | Missing 3.4 binding function or incompatible CallbackI interface. |
-| Linux/macOS ARM64 1.12.2 and 1.8.9, official LWJGL 2 natives | Unsupported selected binaries | Verified archives contain x86/x64 only; picker restriction pending. |
+| Linux/macOS/Windows ARM64 1.12.2 and 1.8.9, official LWJGL 2 natives | Unsupported selected binaries | Verified archives contain x86/x64 only. The picker keeps them visible but disabled with the inline reason and rejects typed IDs (3e5a801; native Linux ARM64 proof). |
 
 ## Verification notes
 
 - Windows intermittent lifecycle failure: bounded repeated host test still required. CREATE_NO_WINDOW validated natively on Windows through install and Play on 1ac4564.
 - Known low-frequency test flake (pre-existing): block-launcher `storage::tests::cache_can_return_to_the_managed_root_without_touching_games_or_control_files` failed 2/25 under load, then passed 55/55 stress runs; no code change, tracked until it reappears.
 - Native screenshots cover 71 debug scenarios in light/dark; every overlay now renders inside its parent window (one capture per scenario). Scenario captures are visual fixtures.
-- Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 Windows scenario shots (228 images) captured at c0a9dc5 with names and dimensions identical to the macOS set.
+- Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 single-window Windows scenario shots (71 stems) captured at d1be580 after the overlay refactor and Q2 fixes.
 - Remote picker captures prove navigation and overlays, not native installation/Play.
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
 - macOS storage relocation/cleanup followed by game menu passed through the API.
-- Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through.
-- ARM64 hosts (Linux, Windows, macOS) keep LWJGL 2-era versions visible but disabled in the version picker with "official LWJGL 2 natives are x86/x64 only"; typed exact IDs are refused with the same reason (merged 3e5a801). Linux ARM64 native Play verification is pending.
+- Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through. The 1.16.5 composition also adds the official checksum-verified slf4j-api 1.8.0-beta4 companion required by the reviewed text2speech (native crash found and fixed during Part B).
+- ARM64 hosts (Linux, Windows, macOS) keep LWJGL 2-era versions visible but disabled in the version picker with "official LWJGL 2 natives are x86/x64 only"; typed exact IDs are refused with the same reason (3e5a801, native Linux ARM64 proof). Linux ARM64 native 1.16.5/1.18.2 wizard→Play→menu→Stop passed at 851e23b with the Azul runtime-substitution lines and the title-screen game-log lines; captures in target/parity-shots/linux-arm64/.
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
 - Windows native first-run flow passed on 1ac4564: pending identity discarded on quit, account and game saved together, real 1.20.6 download, Play, main menu and Stop.
 - CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
@@ -159,7 +160,9 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
 | Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
 | Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
-| Prototype/native board and behavior acceptance | Windows captures complete (228 images, c0a9dc5); one grouped review pending. |
+| Prototype/native board and behavior acceptance | Windows single-window matrix and boards recaptured at d1be580 (142 images); one grouped review sent, user verdict pending. macOS recapture/native overlay check deferred while the Mac is in use. |
+| Windows ARM64 Q4 run | Cross-build from Windows AMD64 is blocked on a missing VS VC++ ARM64 CRT/toolset component (check passes, final link lacks msvcrt.lib); the VM has the native MSVC ARM64 toolchain. Needs a Mac-idle window to build natively on the VM (or the VS component installed on the AMD64 host). |
+| Windows ARM64 game launch | No official ARM64 Java 8 exists (Azul/Adoptium/Liberica empty; Mojang windows-arm64 has 17/21/25 only). 1.20.6/1.18.2 best effort remains; 1.16.5 and older are a stated boundary. Running x64 Java under emulation is a product decision to confirm, not implemented. |
 | Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
