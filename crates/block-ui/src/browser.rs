@@ -1766,7 +1766,7 @@ impl Block {
     }
 
     pub(super) fn render_games_help(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        div().flex().flex_col().gap_4().child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child("The game, and how you launch it."))
+        div().flex().flex_col().gap_4()
             .child(note("An Instance fixes the game version and mod loader. A Profile stores your launch preferences."))
             .child(div().id("games-help-body").min_h_0().max_h(px(320.)).overflow_y_scroll().flex().flex_col().gap_3()
                 .child(components::card(self.palette).p_3().child("Instance").child(note("Minecraft version and mod loader are fixed at creation. Its game folder and installation settings belong to this game setup.")))

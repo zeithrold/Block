@@ -302,3 +302,76 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
     cx.update(|window, cx| assert!(!window.has_active_sheet(cx)));
 }
+
+#[gpui::test]
+fn games_help_opens_as_a_dialog_inside_the_product_window(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    let trigger_focus = cx.update(|window, cx| window.focused(cx));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::GamesHelp, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), 1);
+    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::GamesHelp)
+        ));
+    });
+    assert!(crate::test_support::control_bounds(cx, "games-help-settings").is_some());
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
+}
+
+#[gpui::test]
+fn download_files_dialog_stacks_above_the_downloads_sheet(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(432.), px(768.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::Drawer(Some(Drawer::Downloads)), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(
+                UiAction::DownloadFiles(crate::downloads::DownloadGroup::Active),
+                window,
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.windows().len(), 1, "details no longer leave the window");
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::DownloadFiles(_))
+        ));
+        assert_eq!(view.shell.surfaces.layers().count(), 2);
+    });
+    cx.update(|window, cx| {
+        assert!(window.has_active_sheet(cx));
+        assert!(window.has_active_dialog(cx));
+    });
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::Drawer(Drawer::Downloads))
+        ));
+    });
+    cx.update(|window, cx| {
+        assert!(window.has_active_sheet(cx));
+        assert!(!window.has_active_dialog(cx));
+    });
+}

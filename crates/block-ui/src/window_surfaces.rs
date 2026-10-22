@@ -821,6 +821,7 @@ impl Surface {
             Self::Drawer(Drawer::Accounts | Drawer::Profiles | Drawer::Downloads) => {
                 Some(OverlayPresentation::Sheet)
             }
+            Self::DownloadFiles(_) | Self::GamesHelp => Some(OverlayPresentation::Dialog),
             Self::DeleteProfile(_)
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)

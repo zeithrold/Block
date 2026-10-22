@@ -916,7 +916,7 @@ impl Block {
             Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => content
                 .child(self.render_selector(*drawer, window, cx)),
             Surface::Drawer(Drawer::Downloads) => content.child(self.render_downloads(window, cx)),
-            Surface::DownloadFiles(group) => content.child(self.render_download_files(*group, window, cx)),
+            Surface::DownloadFiles(group) => content.child(self.render_download_files_body(*group, window)),
             Surface::DeleteProfile(_) => content
                 .child(div().text_xl().child("Delete this profile?"))
                 .child(note(if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled { "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk." } else { "Only launch settings are removed. Worlds, game data and installation files stay on disk." }))
@@ -1046,7 +1046,7 @@ impl Block {
     pub(super) fn render_surface_dialog_body(
         &self,
         revision: usize,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         let kind = self
@@ -1058,18 +1058,22 @@ impl Block {
         let Some(kind) = kind else {
             return div().into_any_element();
         };
-        div()
+        let content = match &kind {
+            Surface::DownloadFiles(group) => div()
+                .px(px(24.))
+                .child(self.render_download_files_body(*group, window)),
+            Surface::GamesHelp => div().px(px(24.)).child(self.render_games_help(cx)),
+            _ => div()
+                .px(px(24.))
+                .flex()
+                .flex_col()
+                .gap_2()
+                .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
+        };
+        content
             .w_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .px(px(24.))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
-            )
             .child(
                 div()
                     .w_full()
@@ -1194,6 +1198,24 @@ impl Block {
         kind: &Surface,
         cx: &Context<'_, Self>,
     ) -> Vec<super::components::Control> {
+        if matches!(kind, Surface::GamesHelp) {
+            return vec![
+                self.surface_dialog_button(
+                    "games-help-settings",
+                    "Profile mode",
+                    Some(UiAction::ProfileModeSettings),
+                    SurfaceDialogTone::Outline,
+                    cx,
+                ),
+                self.surface_dialog_button(
+                    "close-drawer",
+                    "Close",
+                    None,
+                    SurfaceDialogTone::Outline,
+                    cx,
+                ),
+            ];
+        }
         let (cancel_id, cancel_label, cancel_action, primary) = match kind {
             Surface::DeleteProfile(_) => (
                 "close-drawer",
@@ -1255,6 +1277,7 @@ impl Block {
                     SurfaceDialogTone::Destructive,
                 )),
             ),
+            Surface::DownloadFiles(_) => ("downloads-back", "Back", None, None),
             _ => ("close-drawer", "Close", None, None),
         };
         let mut actions = vec![self.surface_dialog_button(
@@ -1283,8 +1306,15 @@ impl Block {
             SurfaceDialogTone::Destructive => super::components::ButtonVariant::Destructive,
             SurfaceDialogTone::Outline => super::components::ButtonVariant::Outline,
         };
+        // A confirmation keeps its existing busy rules: only actions that stay
+        // available while a run is active may fire, and a plain close always may.
+        let available = action.as_ref().is_none_or(Self::available_while_busy);
         let on_activate = cx.listener(move |view, (): &(), window, cx| {
-            if view.busy {
+            if view.busy
+                && action
+                    .as_ref()
+                    .is_some_and(|action| !Self::available_while_busy(action))
+            {
                 return;
             }
             match action.clone() {
@@ -1298,7 +1328,7 @@ impl Block {
             self.palette,
             variant,
             super::components::ControlState {
-                disabled: self.busy,
+                disabled: self.busy && !available,
                 ..Default::default()
             },
             on_activate,

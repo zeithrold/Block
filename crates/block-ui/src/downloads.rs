@@ -227,11 +227,12 @@ impl Block {
         .child(Icon::ChevronRight.render(14., self.palette.muted))
     }
 
-    pub(super) fn render_download_files(
+    /// File-level detail for one download group, without a surface-local
+    /// heading or back control: the owning dialog supplies those.
+    pub(super) fn render_download_files_body(
         &self,
         group: DownloadGroup,
         window: &Window,
-        cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let files: Vec<_> = self
             .download_snapshot()
@@ -244,32 +245,11 @@ impl Block {
                     .collect::<Vec<_>>()
             })
             .collect();
-        let header = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                self.button(
-                    "downloads-back",
-                    "Back to tasks",
-                    UiAction::Drawer(None),
-                    cx,
-                )
-                .child(Icon::ArrowLeft.render(14., self.palette.muted)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_sm()
-                    .whitespace_normal()
-                    .child(group.label()),
-            );
         let rows = div().flex().flex_col().gap_2()
             .children(files.iter().map(|file| self.download_file_row(file)))
             .children(files.is_empty().then(|| patterns::empty_state("No resources in this group", "Transfer updates can move resources between groups. Back returns to the task list.", self.palette)));
-        div().h((window.viewport_size().height - px(200.)).clamp(px(160.), px(360.)))
-            .min_w_0().flex().flex_col().gap_3().child(header)
+        div().h((window.viewport_size().height - px(360.)).clamp(px(200.), px(360.)))
+            .min_w_0().flex().flex_col().gap_3()
             .child(note(format!("{} observed resources. Resource IDs are SHA-1 hashes; the downloader does not report file names.", files.len())))
             .child(super::scroll_area::viewport(div().id("download-files-scroll").debug_selector(|| "download-files-scroll".into()).min_h_0().flex_1(), &self.shell.downloads.files_scroll[group.index()], "Download files", self.palette, false).child(rows))
     }
