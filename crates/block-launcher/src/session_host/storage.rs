@@ -2,6 +2,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use anyhow::{Context as _, ensure};
@@ -65,8 +66,44 @@ pub(super) fn write_json(path: &Path, document: &impl Serialize) -> anyhow::Resu
     serde_json::to_writer_pretty(file.as_file_mut(), document)?;
     file.write_all(b"\n")?;
     file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
+    persist_with_retry(file, path)
+}
+
+/// Replace the destination file, retrying transient Windows sharing denials.
+///
+/// The launcher polls the session document while the supervisor rewrites it,
+/// and antivirus/indexer handles can briefly deny the atomic replace even
+/// though the destination is owned by this process. Retrying a bounded number
+/// of times keeps that transient denial from losing a record update.
+fn persist_with_retry(mut file: tempfile::NamedTempFile, path: &Path) -> anyhow::Result<()> {
+    let mut delay = Duration::from_millis(20);
+    let mut attempt = 0;
+    loop {
+        match file.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt < 5 && retryable_persist_error(&error.error) => {
+                file = error.file;
+                attempt += 1;
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(200));
+            }
+            Err(error) => return Err(anyhow::Error::new(error)),
+        }
+    }
+}
+
+fn retryable_persist_error(error: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        // ERROR_ACCESS_DENIED and ERROR_SHARING_VIOLATION are transient while
+        // another process has the destination open for inspection.
+        matches!(error.raw_os_error(), Some(5) | Some(32))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = error;
+        false
+    }
 }
 
 pub(super) fn write_record(root: &Path, record: &RunRecord) -> anyhow::Result<()> {
@@ -188,6 +225,28 @@ mod tests {
     use crate::crash::{
         AttachmentKind, CrashContext, CrashReport, DiagnosticAttachment, ExitOutcome,
     };
+
+    #[test]
+    fn transient_windows_persist_errors_are_retried() {
+        #[cfg(windows)]
+        {
+            assert!(super::retryable_persist_error(
+                &std::io::Error::from_raw_os_error(5)
+            ));
+            assert!(super::retryable_persist_error(
+                &std::io::Error::from_raw_os_error(32)
+            ));
+            assert!(!super::retryable_persist_error(
+                &std::io::Error::from_raw_os_error(2)
+            ));
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(!super::retryable_persist_error(
+                &std::io::Error::from_raw_os_error(5)
+            ));
+        }
+    }
 
     #[test]
     fn bounded_control_character_reports_remain_readable_after_json_expansion() -> anyhow::Result<()>
