@@ -788,6 +788,9 @@ impl Block {
                 && self.shell.auth.is_none()
                 && self.shell.instance_editor.is_none()
             {
+                if self.tab == Tab::Home {
+                    self.pending_window_size = Some(gpui::size(px(960.), px(600.)));
+                }
                 self.tab = Tab::Instances;
             }
             self.apply_profile_account();
@@ -2173,11 +2176,11 @@ impl Render for Block {
         if let Some(help) = &self.crash_help {
             return div().size_full().child(help.clone()).into_any_element();
         }
-        if let Some(size) = self.pending_window_size.take() {
+        if self.pending_window_size.take().is_some() {
             window.resize(if self.tab == Tab::Home {
                 window_geometry::home_size(window, cx)
             } else {
-                size
+                window_geometry::management_size(window, cx)
             });
         }
         self.palette = self.preferences.palette(window.appearance());
@@ -2753,6 +2756,7 @@ mod tests {
             sender.try_send(super::Message::Catalog(Ok(catalog.snapshot()?)))?;
             let (view, cx) = crate::test_support::window(cx, test_view);
             view.update(cx, |view, cx| {
+                view.tab = super::Tab::Home;
                 view.pending_profile = Some(profile.id.clone());
                 view.messages = Some(receiver);
                 view.poll(cx);
@@ -2766,6 +2770,10 @@ mod tests {
                 Some(instance.id)
             );
             assert!(view.read_with(cx, |view, _| view.pending_profile.is_none()));
+            assert_eq!(
+                view.read_with(cx, |view, _| view.tab),
+                super::Tab::Instances
+            );
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
