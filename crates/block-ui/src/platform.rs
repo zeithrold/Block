@@ -19,9 +19,15 @@ pub(super) fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
 
-// These platforms retain the application's existing preference. Their system
+/// Windows reads the "Show animations in Windows" accessibility setting.
+#[cfg(target_os = "windows")]
+pub(super) fn system_reduce_motion() -> bool {
+    block_drop::system_reduce_motion()
+}
+
+// This platform retains the application's existing preference. Its system
 // integration needs platform-specific implementation and CI validation.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(super) const fn system_reduce_motion() -> bool {
     false
 }

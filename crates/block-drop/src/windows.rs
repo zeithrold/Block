@@ -9,7 +9,7 @@ use std::{
     fmt, ptr,
     sync::{
         Once,
-        atomic::{AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
 };
 
@@ -17,11 +17,11 @@ use anyhow::{Context as _, Result};
 use async_channel::Sender;
 use windows::{
     Win32::{
-        Foundation::{COLORREF, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINTL, WPARAM},
+        Foundation::{BOOL, COLORREF, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINTL, WPARAM},
         System::{
             Com::{FORMATETC, IDataObject},
             LibraryLoader::GetModuleHandleW,
-            Memory::{GlobalLock, GlobalUnlock},
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
             Ole::{
                 DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE, IDropTarget, IDropTarget_Impl,
                 OleInitialize, OleUninitialize, RegisterDragDrop, ReleaseStgMedium, RevokeDragDrop,
@@ -30,8 +30,9 @@ use windows::{
         },
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, LWA_ALPHA, MoveWindow, RegisterClassW,
-            SetLayeredWindowAttributes, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED,
-            WS_EX_NOACTIVATE, WS_VISIBLE,
+            SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SetLayeredWindowAttributes, SystemParametersInfoW, WNDCLASSW, WS_CHILD,
+            WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_VISIBLE,
         },
     },
     core::{HSTRING, Ref, implement},
@@ -54,12 +55,25 @@ static CLASS_ATOM: AtomicU16 = AtomicU16::new(0);
 #[implement(IDropTarget)]
 struct ZoneDropTarget {
     payloads: Sender<String>,
+    /// Whether the payload of the drag currently over the zone was accepted.
+    accepted: AtomicBool,
 }
 
 impl fmt::Debug for ZoneDropTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("ZoneDropTarget")
     }
+}
+
+/// Length of the UTF-16 payload inside an allocation that may not be terminated.
+///
+/// The caller passes exactly the units the HGLOBAL can hold, so a malformed drag
+/// source without a NUL terminator can never make the scan read past the block.
+fn utf16_units_len(units: &[u16]) -> usize {
+    units
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(units.len())
 }
 
 impl ZoneDropTarget {
@@ -75,35 +89,31 @@ impl ZoneDropTarget {
         // SAFETY: `data` is the live data object supplied by OLE for this drag;
         // `format` is a fully initialised plain struct.
         let mut medium = unsafe { data.GetData(&format) }.ok()?;
-        let text = if medium.tymed == TYMED_HGLOBAL {
+        let mut text = None;
+        if medium.tymed == TYMED_HGLOBAL {
             // SAFETY: the union member is `hGlobal` precisely when
             // `tymed == TYMED_HGLOBAL`, which the guard just established.
             let handle: HGLOBAL = unsafe { medium.u.hGlobal };
+            // SAFETY: `handle` belongs to the medium; GlobalSize returns the
+            // allocation size in bytes, so the scan below cannot leave the block.
+            let max_units = unsafe { GlobalSize(handle) } / std::mem::size_of::<u16>();
             // SAFETY: an HGLOBAL-backed text medium holds a lockable block owned
             // by the medium; the pointer stays valid until GlobalUnlock below.
             let wide = unsafe { GlobalLock(handle) } as *const u16;
-            let mut value = None;
             if !wide.is_null() {
-                let mut length = 0usize;
-                // SAFETY: CF_UNICODETEXT is a null-terminated UTF-16 buffer; the
-                // scan stops at the terminator (never past it).
-                unsafe {
-                    while *wide.add(length) != 0 {
-                        length += 1;
-                    }
-                    value = Some(String::from_utf16_lossy(std::slice::from_raw_parts(
-                        wide, length,
-                    )));
+                if max_units > 0 {
+                    // SAFETY: GlobalLock succeeded and the block is at least
+                    // `max_units` UTF-16 units according to GlobalSize.
+                    let units = unsafe { std::slice::from_raw_parts(wide, max_units) };
+                    let length = utf16_units_len(units);
+                    text = Some(String::from_utf16_lossy(&units[..length]));
                 }
                 // SAFETY: balances the successful GlobalLock above.
                 unsafe {
                     GlobalUnlock(handle).ok();
                 }
             }
-            value
-        } else {
-            None
-        };
+        }
         // SAFETY: `medium` was produced by a successful GetData and is not
         // retained; ReleaseStgMedium is the matching cleanup call.
         unsafe { ReleaseStgMedium(&mut medium) };
@@ -136,6 +146,7 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
             .as_ref()
             .and_then(ZoneDropTarget::read_text)
             .is_some_and(|text| quick_link_payload(&text).is_some());
+        self.accepted.store(accepted, Ordering::Relaxed);
         ZoneDropTarget::accept_effect(effect, accepted);
         Ok(())
     }
@@ -146,11 +157,12 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
         _point: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        ZoneDropTarget::accept_effect(effect, true);
+        ZoneDropTarget::accept_effect(effect, self.accepted.load(Ordering::Relaxed));
         Ok(())
     }
 
     fn DragLeave(&self) -> windows::core::Result<()> {
+        self.accepted.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -161,11 +173,12 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
         _point: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
+        let accepted = self.accepted.swap(false, Ordering::Relaxed);
         let payload = data
             .as_ref()
             .and_then(ZoneDropTarget::read_text)
             .filter(|text| quick_link_payload(text).is_some());
-        if let Some(payload) = payload {
+        if accepted && let Some(payload) = payload {
             ZoneDropTarget::accept_effect(effect, true);
             // A full channel means the UI already has a pending drop to process;
             // dropping the newest payload keeps the OLE callback non-blocking.
@@ -180,7 +193,7 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
 /// Owned child window plus its registered OLE drop target.
 pub(crate) struct NativeTarget {
     hwnd: isize,
-    _drop_target: IDropTarget,
+    drop_target: Option<IDropTarget>,
 }
 
 impl fmt::Debug for NativeTarget {
@@ -235,8 +248,21 @@ impl NativeTarget {
         let parent = hwnd_of(parent).context("drop zone parent window is missing")?;
         ensure_window_class()?;
         // SAFETY: initialises OLE on the calling UI thread; the matching
-        // OleUninitialize happens in Drop.
+        // OleUninitialize happens in Drop, or immediately below when attaching
+        // fails before the target exists.
         unsafe { OleInitialize(None) }.context("could not initialize OLE for the drop target")?;
+        let attached = Self::create_registered(parent, zone, payloads);
+        if attached.is_err() {
+            // SAFETY: balances the OleInitialize above because no target (and
+            // therefore no Drop) owns this initialisation on the error path.
+            unsafe { OleUninitialize() };
+        }
+        attached
+    }
+
+    /// Creates and registers the child window; callers already own the OLE
+    /// initialisation and must release it when this returns an error.
+    fn create_registered(parent: HWND, zone: DropZone, payloads: Sender<String>) -> Result<Self> {
         let (x, y, width, height) = zone.pixel_rect();
         // SAFETY: the class atom is registered, the parent belongs to this
         // thread, and the child style flags are a plain constant combination.
@@ -260,16 +286,35 @@ impl NativeTarget {
         // 1/255 alpha keeps the GPUI drop-zone visuals visible while the window
         // stays hit-testable for OLE drag-and-drop.
         // SAFETY: `hwnd` is the child window created above.
-        unsafe { SetLayeredWindowAttributes(hwnd, COLORREF(0), 1, LWA_ALPHA) }
-            .context("could not make the quick-link drop window transparent")?;
-        let drop_target: IDropTarget = ZoneDropTarget { payloads }.into();
+        let transparent = unsafe { SetLayeredWindowAttributes(hwnd, COLORREF(0), 1, LWA_ALPHA) }
+            .context("could not make the quick-link drop window transparent");
+        if let Err(error) = transparent {
+            // SAFETY: destroys the child created above before returning.
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            return Err(error);
+        }
+        let drop_target: IDropTarget = ZoneDropTarget {
+            payloads,
+            accepted: AtomicBool::new(false),
+        }
+        .into();
         // SAFETY: `hwnd` is live and owned by this target; the interface stays
-        // alive in `drop_target` until RevokeDragDrop in Drop.
-        unsafe { RegisterDragDrop(hwnd, &drop_target) }
-            .context("could not register the OLE drop target")?;
+        // alive in `drop_target` until Drop releases it.
+        let registered = unsafe { RegisterDragDrop(hwnd, &drop_target) }
+            .context("could not register the OLE drop target");
+        if let Err(error) = registered {
+            // SAFETY: destroys the child created above before returning; the
+            // local interface drops naturally.
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            return Err(error);
+        }
         Ok(Self {
             hwnd: hwnd.0 as isize,
-            _drop_target: drop_target,
+            drop_target: Some(drop_target),
         })
     }
 
@@ -289,13 +334,59 @@ impl Drop for NativeTarget {
         let Some(hwnd) = hwnd_of(self.hwnd) else {
             return;
         };
-        // SAFETY: revokes the registration created in attach and then destroys
-        // the owned child window, both exactly once and on the owning thread.
+        // SAFETY: revokes the registration created in create_registered; the
+        // registration is revoked exactly once and on the owning thread.
         unsafe {
             let _ = RevokeDragDrop(hwnd);
-            let _ = DestroyWindow(hwnd);
         }
-        // SAFETY: balances the OleInitialize performed in attach.
-        unsafe { OleUninitialize() };
+        // Release our interface reference while the COM apartment and the child
+        // window are still alive: deterministic OLE teardown ordering.
+        drop(self.drop_target.take());
+        // SAFETY: destroys the owned child window and then balances the
+        // OleInitialize performed in attach, in that order.
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+            OleUninitialize();
+        }
+    }
+}
+
+/// Whether Windows asks applications to reduce motion.
+///
+/// Reads `SPI_GETCLIENTAREAANIMATION`, the "Show animations in Windows"
+/// accessibility setting; the query returns whether animations are enabled, so
+/// reduced motion is its negation. A failed query keeps motion enabled.
+pub(crate) fn system_reduce_motion() -> bool {
+    let mut animations_enabled = BOOL(0);
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes exactly one BOOL into the
+    // supplied pointer, which is valid for the duration of the call.
+    let queried = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut animations_enabled).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    queried.is_ok() && !animations_enabled.as_bool()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf16_units_len;
+
+    #[test]
+    fn utf16_units_stop_at_the_terminator() {
+        assert_eq!(utf16_units_len(&[65, 66, 0, 67]), 2);
+    }
+
+    #[test]
+    fn utf16_units_use_the_whole_bounded_buffer_without_a_terminator() {
+        assert_eq!(utf16_units_len(&[65, 66]), 2);
+    }
+
+    #[test]
+    fn utf16_units_handle_an_empty_buffer() {
+        assert_eq!(utf16_units_len(&[]), 0);
     }
 }

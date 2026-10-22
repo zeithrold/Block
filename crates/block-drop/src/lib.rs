@@ -83,6 +83,23 @@ use windows::NativeTarget;
 #[cfg(not(windows))]
 use stub::NativeTarget;
 
+/// Whether the operating system asks applications to reduce motion.
+///
+/// Windows reports `SPI_GETCLIENTAREAANIMATION` ("Show animations in Windows");
+/// it means animations are enabled, so reduced motion is its negation. Other
+/// platforms keep the caller's stored preference and report `false` here.
+#[must_use]
+pub fn system_reduce_motion() -> bool {
+    #[cfg(windows)]
+    {
+        windows::system_reduce_motion()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// A live provider drop zone; dropping this value revokes the OLE registration
 /// and destroys the owned child window.
 pub struct DropTarget(NativeTarget);
