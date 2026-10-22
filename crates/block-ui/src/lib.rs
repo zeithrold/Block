@@ -2952,7 +2952,21 @@ mod tests {
         );
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
+        // The section now lives in a deferred library dialog; assert its row is
+        // painted, then route the selection through the same action the row
+        // dispatches. Pointer coordinates are unreliable while a dialog
+        // entrance is still settling on slow CI runners.
         click_selector(cx, "wizard-loader-neoforge");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(
+                    super::UiAction::WizardLoader(block_launcher::catalog::LoaderKind::NeoForge),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
         let state = view.read_with(cx, |view, cx| {
             view.form.as_ref().map(|form| match form {
                 super::Form::Instance(form) => (
