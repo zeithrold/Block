@@ -176,13 +176,34 @@ fn lock(root: &Path, exclusive: bool) -> anyhow::Result<File> {
         .create(true)
         .truncate(false)
         .open(path)?;
-    let result = if exclusive {
-        fs2::FileExt::try_lock_exclusive(&file)
-    } else {
-        fs2::FileExt::try_lock_shared(&file)
-    };
-    result.context("Storage is busy. Finish downloads and stop games before relocating files")?;
-    Ok(file)
+    // A concurrently forked child (other tests or a platform query spawning a
+    // process) briefly inherits this descriptor before exec closes it, which can
+    // surface as a transient would-block even when no live saver holds the lock.
+    // Retry for up to 500 ms so real conflicts still report busy.
+    let mut waited = 0;
+    loop {
+        let result = if exclusive {
+            fs2::FileExt::try_lock_exclusive(&file)
+        } else {
+            fs2::FileExt::try_lock_shared(&file)
+        };
+        match result {
+            Ok(()) => return Ok(file),
+            Err(error)
+                if (error.kind() == std::io::ErrorKind::WouldBlock
+                    || matches!(error.raw_os_error(), Some(11 | 35)))
+                    && waited < 50 =>
+            {
+                waited += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(
+                    "Storage is busy. Finish downloads and stop games before relocating files",
+                ));
+            }
+        }
+    }
 }
 fn resolve(path: &Path) -> anyhow::Result<PathBuf> {
     ensure!(
