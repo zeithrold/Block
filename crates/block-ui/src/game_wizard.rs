@@ -1190,22 +1190,6 @@ impl Block {
         legacy_lwjgl_reason(self.host_architecture(), entry, &self.version_catalog)
     }
 
-    /// Catalog-level note explaining the ARM64 LWJGL 2 restriction.
-    fn wizard_version_legacy_note(&self) -> Option<gpui::Div> {
-        let restricted = self
-            .version_catalog
-            .iter()
-            .any(|entry| self.wizard_version_restriction(&entry.id).is_some());
-        restricted.then(|| {
-            div()
-                .debug_selector(|| "wizard-version-legacy-note".into())
-                .child(note(format!(
-                    "1.12.2 and earlier are unavailable on this ARM64 host: {}",
-                    block_launcher::support::LWJGL2_ARM64_REASON
-                )))
-        })
-    }
-
     pub(super) fn set_wizard_version(&mut self, version: String, cx: &mut Context<'_, Self>) {
         let version = if version.trim().len() == version.len() {
             version
@@ -2742,7 +2726,6 @@ impl Block {
                 cx.listener(|view, &(): &(), window, cx| view.handle(UiAction::WizardSnapshots, window, cx))))
             .child(div().id("wizard-version-result-count")
                 .text_xs().text_color(rgb(self.palette.muted)).child(format!("{count} {result}")))
-            .children(self.wizard_version_legacy_note())
             .child(self.wizard_version_list(form, versions, cx))
             .child(components::field_with("Selected version ID", &form.version, self.palette, FieldOptions {
                 required: true,
