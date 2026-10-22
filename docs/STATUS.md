@@ -120,7 +120,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
 | Windows AMD64 | 1.20.6 UI 1ac4564 | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
-| Linux AMD64 | 1.20.6 API 168a6e1 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
+| Linux AMD64 | 1.20.6 native UI 016c695 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
 | Linux ARM64 | 1.16.5/1.18.2 native menus (Azul runtime) 851e23b | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.12.2 picker disabled (native proof) 851e23b |
 
 ## Legacy ARM64
@@ -152,6 +152,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
 - All four test hosts share a WireGuard overlay (Mac hub 10.77.0.1; Windows AMD64 10.77.0.11, Windows ARM64 10.77.0.12, Linux ARM64 10.77.0.21, Linux AMD64 10.77.0.22); the Mac forwards between peers and the fixed Mac LAN address is the endpoint. The Linux AMD64 VM must still be started detached from its Windows host, and its login keyring relocks after a reboot.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
+- Linux AMD64 Q6 native flow passed on 016c695: fresh data dir, Welcome Vanilla 1.20.6, Offline account, real install + managed Mojang runtime, Play → main menu → Stop, restart persistence; evidence in target/parity-shots/linux-amd64/e2e-q6-*.png. Narration only is unavailable on that host because official 1.20.6 metadata ships no Linux `libflite.so`; the game reaches the menu and audio/rendering work. Known upstream limitation, no launcher fix.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
 ## Needs-user
