@@ -110,7 +110,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Fit-to-display at creation and recovery | Yes | Partial | Pending | Linux AMD64 1280×800 captured. |
 | CJK IME, clipboard, search and scrolling | Partial | Pending | Pending | Real input checks pending. |
 | Enter/Escape/Tab, draft/error preservation | Partial | Pending | Pending | Full interaction checks pending. |
-| In-window overlays: Sheets for Home drawers, Dialogs elsewhere | Yes | Pending | Pending | Escape closes the topmost layer, focus is trapped and restored, and background input is blocked by the library. Native open/stack/Escape check pending on Windows and macOS. |
+| In-window overlays: Sheets for Home drawers, Dialogs elsewhere | Yes | Partial | Pending | Windows AMD64 native check passed on c18e416: one window in every state, stacked Dialog over Sheet, Escape closes only the topmost layer, focus returns to the avatar, Add account is the Accounts page in the same window and saves/restarts correctly. macOS native overlay check deferred while the Mac is in use; scenario captures exist. |
 
 ## Smoke matrix
 
@@ -136,6 +136,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 ## Verification notes
 
 - Windows intermittent lifecycle failure: bounded repeated host test still required. CREATE_NO_WINDOW validated natively on Windows through install and Play on 1ac4564.
+- Known low-frequency test flake (pre-existing): block-launcher `storage::tests::cache_can_return_to_the_managed_root_without_touching_games_or_control_files` failed 2/25 under load, then passed 55/55 stress runs; no code change, tracked until it reappears.
 - Native screenshots cover 71 debug scenarios in light/dark; every overlay now renders inside its parent window (one capture per scenario). Scenario captures are visual fixtures.
 - Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 Windows scenario shots (228 images) captured at c0a9dc5 with names and dimensions identical to the macOS set.
 - Remote picker captures prove navigation and overlays, not native installation/Play.
@@ -143,6 +144,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
 - macOS storage relocation/cleanup followed by game menu passed through the API.
 - Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through.
+- ARM64 hosts (Linux, Windows, macOS) keep LWJGL 2-era versions visible but disabled in the version picker with "official LWJGL 2 natives are x86/x64 only"; typed exact IDs are refused with the same reason (merged 3e5a801). Linux ARM64 native Play verification is pending.
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
 - Windows native first-run flow passed on 1ac4564: pending identity discarded on quit, account and game saved together, real 1.20.6 download, Play, main menu and Stop.
 - CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
