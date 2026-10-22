@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use async_channel::Sender as PayloadSender;
 use x11rb::{
     connection::Connection as _,
