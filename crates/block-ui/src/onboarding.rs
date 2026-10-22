@@ -645,10 +645,13 @@ impl Block {
         let step = self.shell.onboarding.step;
         let compact = patterns::is_narrow(window.viewport_size());
         let created = self.onboarding_progress == Progress::Created;
-        let has_account = self
-            .accounts
-            .iter()
-            .any(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        // A verified identity kept in memory counts as the step-2 choice; it is
+        // persisted only by the final setup commit.
+        let has_account = self.onboarding_identity().is_some()
+            || self
+                .accounts
+                .iter()
+                .any(|account| Some(account_id(account)) == self.shell.onboarding.account);
         let blocked = !created && (self.busy || (step == Step::Account && !has_account));
         let creating = self.busy && step == Step::Review && !created;
         let label = if created {

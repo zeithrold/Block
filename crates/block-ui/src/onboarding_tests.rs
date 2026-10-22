@@ -894,3 +894,39 @@ fn cancelling_first_run_account_setup_leaves_no_identity_behind(cx: &mut TestApp
     })();
     assert!(result.is_ok(), "{result:?}");
 }
+
+#[gpui::test]
+fn pending_identity_unblocks_the_setup_footer_without_saving(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, _receiver) = first_run_engine(root.path())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_onboarding(cx);
+                prepare_local_identity(view, window, cx, "Footer_Player");
+                view.change_onboarding_step(Step::Account, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        // The verified in-memory identity is a valid step-2 choice, so the
+        // enabled Continue control exists and the blocked variant does not.
+        required_bounds(cx, "welcome-next");
+        assert!(
+            crate::test_support::control_bounds(cx, "onboarding-next-disabled").is_none(),
+            "a verified pending identity must enable Continue"
+        );
+        click(cx, "welcome-next");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.onboarding.step),
+            Step::Review
+        );
+        // Choosing it still persists nothing before the final commit.
+        assert!(!root.path().join("accounts.json").exists());
+        assert!(!root.path().join("catalog.json").exists());
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
