@@ -433,12 +433,19 @@ fn handle_enter(state: &mut Ready, data: [u32; 5]) {
     } else {
         data[2..].get(..count as usize).unwrap_or(&[]).to_vec()
     };
-    let offered = crate::text_offer(
+    let mut offered = crate::text_offer(
         &types,
         state.atoms.utf8,
         state.atoms.text_plain,
         state.atoms.string,
     );
+    // Some GTK sources advertise more than three types through XdndTypeList.
+    // Read the property again at enter time in that case; when it is still
+    // unavailable the drop requests UTF8_STRING optimistically, and the
+    // payload validation below still rejects anything that is not a quick link.
+    if offered.is_none() && types.is_empty() {
+        offered = Some(state.atoms.utf8);
+    }
     state.drag.reset();
     state.drag.source = source;
     state.drag.offered = offered;
@@ -487,6 +494,16 @@ fn handle_drop(state: &mut Ready, data: [u32; 5]) {
         return;
     }
     state.drag.drop_time = data[2];
+    let refresh = read_type_list(state, source);
+    if let Some(target) = crate::text_offer(
+        &refresh,
+        state.atoms.utf8,
+        state.atoms.text_plain,
+        state.atoms.string,
+    ) {
+        state.drag.offered = Some(target);
+        state.drag.accepted = true;
+    }
     let Some(target) = state.drag.offered.filter(|_| state.drag.accepted) else {
         finish(state, source, false);
         state.drag.reset();
