@@ -633,6 +633,31 @@ fn relative_runtime_path(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     Ok(Some(rest))
 }
 
+/// Accept only relative symlinks whose lexical target stays inside the tree.
+fn contained_symlink_target(relative: &Path, link: &Path) -> anyhow::Result<()> {
+    ensure!(
+        !link.is_absolute(),
+        "managed runtime archive contains an absolute symlink"
+    );
+    let mut resolved = relative
+        .parent()
+        .map_or_else(PathBuf::new, Path::to_path_buf);
+    for component in link.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                ensure!(
+                    resolved.pop(),
+                    "managed runtime archive contains an escaping symlink"
+                );
+            }
+            _ => bail!("managed runtime archive contains an unsupported symlink target"),
+        }
+    }
+    Ok(())
+}
+
 fn unpack_tar_gz(destination: &Path, archive: &Path) -> anyhow::Result<()> {
     let file = fs::File::open(archive)?;
     let decoder = flate2::read::GzDecoder::new(file);
@@ -642,25 +667,37 @@ fn unpack_tar_gz(destination: &Path, archive: &Path) -> anyhow::Result<()> {
         let mut entry = entry?;
         let size = entry.header().size()?;
         let kind = entry.header().entry_type();
-        ensure!(
-            matches!(kind, tar::EntryType::Regular | tar::EntryType::Directory),
-            "managed runtime archive contains a link or special entry"
-        );
         budget.account(size)?;
         let path = entry.path()?.into_owned();
         let Some(relative) = relative_runtime_path(&path)? else {
             continue;
         };
-        let target = destination.join(relative);
-        if kind == tar::EntryType::Directory {
-            fs::create_dir_all(&target)?;
-        } else {
-            fs::create_dir_all(target.parent().context("runtime file has no parent")?)?;
-            let mut file = fs::File::create(&target)?;
-            io::copy(&mut entry, &mut file)?;
-            if let Ok(mode) = entry.header().mode() {
-                set_runtime_mode(&target, mode)?;
+        let target = destination.join(&relative);
+        match kind {
+            tar::EntryType::Directory => fs::create_dir_all(&target)?,
+            tar::EntryType::Regular => {
+                fs::create_dir_all(target.parent().context("runtime file has no parent")?)?;
+                let mut file = fs::File::create(&target)?;
+                io::copy(&mut entry, &mut file)?;
+                if let Ok(mode) = entry.header().mode() {
+                    set_runtime_mode(&target, mode)?;
+                }
             }
+            // Official vendor runtime archives use relative symlinks for files
+            // such as the man-page locale and libjsig.so. Accept them only when
+            // their target stays inside the unpacked runtime tree.
+            tar::EntryType::Symlink => {
+                let link = entry
+                    .link_name()?
+                    .context("runtime symlink has no target")?;
+                contained_symlink_target(&relative, &link)?;
+                fs::create_dir_all(target.parent().context("runtime symlink has no parent")?)?;
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&link, &target)?;
+                #[cfg(not(unix))]
+                bail!("managed runtime archive contains a symlink");
+            }
+            _ => bail!("managed runtime archive contains a link or special entry"),
         }
     }
     Ok(())
