@@ -1464,8 +1464,8 @@ impl Block {
                         || "Not installed".to_owned(),
                         |selected| selected.version.clone(),
                     ),
-                "Fixed at creation".to_owned(),
-                None,
+                "Editable in Instance settings".to_owned(),
+                Some(UiAction::EditInstance),
             ),
             (
                 "component-instance-settings",
