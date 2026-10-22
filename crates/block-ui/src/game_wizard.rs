@@ -3406,7 +3406,7 @@ impl Block {
                 .children(state.separated.then(|| div().border_t_1().border_color(rgb(self.palette.border)).pt_3().flex().items_center().gap_3()
                     .child(components::profile_avatar(appearance, self.palette, 40.))
                     .child(div().min_w_0().child(note("NEW PROFILE")).child(profile_name)))) )
-            .children([
+            .child(div().flex().flex_wrap().gap_3().children([
                 ("Launch target", launch_target),
                 ("Maximum memory", memory.parse::<u32>().map_or_else(|_| memory.clone(), components::memory_label)),
                 ("Server", profile.map_or_else(|| "Choose in game".to_owned(), |profile| { let value = profile.server.read(cx).value(); if value.trim().is_empty() { "Choose in game".into() } else { value } })),
@@ -3421,7 +3421,7 @@ impl Block {
                 ("Game window", resolution),
                 ("Game files", if directory.is_empty() { "A separate folder in Block’s data directory".to_owned() } else { directory }),
                 ("Game data", "Isolated folder for this Profile".to_owned()),
-            ].map(|(label,value)| div().flex().flex_col().gap_1().child(note(label)).child(div().text_sm().whitespace_normal().child(value))))
+            ].map(|(label,value)| div().w(px(260.)).min_w_0().flex().flex_col().gap_1().child(note(label)).child(div().text_sm().whitespace_normal().child(value)))))
             .child(components::badge("Version and loader fixed after creation", self.palette, BadgeVariant::Outline))
             .children(existing.then(|| note("Only the new Profile is saved. Any missing files for its selected target are installed before play.")))
     }
