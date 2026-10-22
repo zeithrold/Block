@@ -256,6 +256,8 @@ impl JavaCommand {
     #[must_use]
     pub fn process(&self) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.program);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW; output goes to session logs.
         command
             .current_dir(&self.cwd)
             .args(self.arguments.iter().map(|arg| &arg.value))

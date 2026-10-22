@@ -574,9 +574,12 @@ fn set_executable(path: &Path, executable: bool) -> anyhow::Result<()> {
 }
 
 async fn probe_java(path: &Path, plan: &ExecutionPlan) -> anyhow::Result<()> {
+    let mut command = tokio::process::Command::new(path);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     let output = tokio::time::timeout(
         Duration::from_secs(15),
-        tokio::process::Command::new(path)
+        command
             .args(["-XshowSettings:properties", "-version"])
             .kill_on_drop(true)
             .output(),

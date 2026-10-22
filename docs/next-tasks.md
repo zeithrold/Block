@@ -11,6 +11,22 @@ The pilot is the **complete product**:
 
 Only **architecture governance** is deferred to v0. That covers structural refactoring, layering, file splitting, lint tidy-up and cleaning up code that already works.
 
+## Where we are (2026-10-22, relay to DeepSeek)
+
+- Codex's v6 run stopped mid-way. HEAD `442b94e` is green in CI. A small set of verified fixes is uncommitted: Windows CREATE_NO_WINDOW and secure-store error copy.
+- Native app evidence so far:
+  - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again.
+  - Windows: Device Code; Welcome → Vanilla → main menu → Stop.
+  - Linux ARM64: Device Code.
+- Open:
+  - Welcome is not atomic (a real defect)
+  - Linux AMD64 native sign-in
+  - Windows scenario captures and the visual review
+  - D1–D5 product gaps and OptiFine re-import
+  - most native E2E flows, D6/D8/D9 and older representatives
+- Windows is now the primary native UI/E2E and visual-review platform (user decision).
+- The relay prompt is the "Pilot Relay Goal" in [codex-goal-prompt.md](codex-goal-prompt.md).
+
 ## Where we are (2026-10-22, v6)
 
 - P0–P3 are done. HEAD `78f1595` is green in CI on Windows AMD64, Linux AMD64 and macOS ARM64.

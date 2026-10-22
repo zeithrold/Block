@@ -1,10 +1,106 @@
-# Codex Goal Prompts (v6)
+# Goal Prompts (v7 relay, v6 specification)
 
 Context and decisions: [next-tasks.md](next-tasks.md). The v5 prompt (P0–P3 and most of the P4 backend) is in Git history.
 
 | Prompt | Runner | When |
 | --- | --- | --- |
-| Pilot Completion Goal | Codex, with subagents for bounded tasks | Now (2026-10-22); stop the v5 run first |
+| Pilot Relay Goal | DeepSeek (dsh), main agent | Now (2026-10-22); Codex's v6 run stopped mid-way |
+| Pilot Completion Goal (v6) | Codex | Superseded as a runner prompt; still the binding detailed specification for the relay |
+
+---
+
+## Pilot Relay Goal
+
+```text
+Goal: Take over the Block pilot from Codex and drive it first to "implementation ready; awaiting user verification", then to completion with the user. You are the main agent for this relay. The v6 "Pilot Completion Goal" later in this file remains the binding specification (definition of complete, working rules 1–10, sections B–F, Stop-and-ask, Completion, Authorized / Not authorized). This prompt records the handoff state, overrides order and platform priority, and adds rules. Where the two conflict, this prompt wins.
+
+Repository: /Users/zeithrold/Documents/Develop/Native/Block
+Prototype (read-only reference): /Users/zeithrold/Documents/Develop/Frontend/Block-UI, snapshot commit fd2713b; its README.md is the design spec.
+Read first, in this order: this prompt; docs/STATUS.md; docs/next-tasks.md (Decisions and Test hosts); the v6 prompt below; `git status`; `git log --oneline 78f1595..`; the justfile.
+
+== Handoff state (2026-10-22, HEAD 442b94e, CI green) ==
+Verified through the native app:
+- macOS ARM64: Microsoft browser PKCE and Device Code, securely saved. Welcome → Vanilla 1.20.6 real download → Home → Play → main menu → Stop. Quit, relaunch, Play again without signing in (v6 B4 and macOS E2 are done).
+- Windows AMD64: Device Code securely saved. Welcome creates a game, real download, 1.20.6 main menu, native Stop; the Java process exited.
+- Linux ARM64: Device Code securely saved.
+- Linux AMD64: the user created and unlocked a persistent keyring; an independent read/write/delete check passed. Native sign-in not done yet.
+- Prototype reference screenshots exist in target/parity-shots/proto/ (86 images); scripts/parity-board pairs them with native captures.
+Uncommitted work left by Codex (its full `just check` passed; not pushed):
+- CREATE_NO_WINDOW for every Java child process on Windows (block-launcher command.rs, the executor Java probe, the NeoForge/Forge and OptiFine installers). Still needs a real Windows check: no console window during loader install or Play.
+- Platform-specific copy for a locked/unavailable secure credential store (block-ui authentication.rs), with a test.
+- scripts/parity-board --platform (Windows board at index.html, macOS board at macos-arm64.html).
+- docs/STATUS.md updates.
+Open defects and gaps:
+- Welcome is not atomic: the new account is saved before the final game creation (STATUS row "Failed (macOS)"). This violates a product decision.
+- Linux AMD64: xdotool mouse clicks do not trigger GPUI controls; keyboard navigation (Tab/Enter/Space) works.
+- The Windows scenario capture run was interrupted; only 2 images exist in target/parity-shots/windows-amd64/scenarios/. scripts/snap-native supports macOS only.
+- Not built: real account avatars (D1), provider icons (D2), quick-link drop (D3), legacy Quick Play (D4), productized legacy ARM64 and the LWJGL 2 picker restriction (D5), OptiFine re-import for an existing target.
+- Native E2E is Pending for most STATUS rows. No page is Accepted.
+
+== Overrides to v6 ==
+O1. Windows AMD64 is the primary platform for native UI E2E and visual review (user decision, 2026-10-22). Run v6 flows B1, B2, B3, B5, B6, B7 and B8 on Windows instead of macOS. Keep on macOS only: CJK IME (D6), the D3 real drag, the bounded D5 attempt, and re-checks of macOS-specific code you change (titlebar, keychain, PKCE).
+O2. Each Linux host still needs one native Welcome → Play → main menu → Stop. Linux ARM64 also runs a D5 legacy version through the wizard.
+O3. Do not repeat anything listed as verified above unless your change touches that path.
+O4. Subagents are optional. If your harness offers them, v6 rule 11 limits apply and every verdict stays with you.
+
+== Relay rules (in addition to v6 working rules 1–10) ==
+R1. Honest status.
+   - Native E2E is "Yes" only after you drove the real block-app (no --scenario) on that host against real services, reached the end state and saved target/parity-shots/<platform>/e2e-<flow>.png.
+   - A game launch must reach the main menu. View the capture if your harness can show images. If it cannot, confirm from the game log (title screen reached, no crash report), check that the capture is not blank, and write "Yes (log)" so the user can spot-check.
+   - A Java PID, a "Running" label, a unit test or an API-driver run never counts as Native E2E.
+   - Never set Accepted yourself. Only the user's review sets it.
+   - Unfinished work stays "Partial" or "No", with the gap in Note.
+R2. Small green steps. One work item at a time: implement → targeted tests → `just check` → commit (English message describing the behavior) → push → watch CI. Never push when `just check` fails. Fix a red CI before starting the next item.
+R3. Touch only what the item needs. Do not reformat, rename or reorganize unrelated code. Never weaken, delete or #[ignore] an existing test to get a change through; if an existing test fails, assume the code is wrong.
+R4. Read before writing. Before changing a subsystem, read its code and tests and follow their patterns: error types, cancellation tokens, revision/stale-result guards, and the local fixture servers in block-auth/block-download.
+R5. Three strikes. If one approach fails three times (a build, a host procedure, an automation step), stop it, record the blocker as one STATUS line or Needs-user row, and move to the next item.
+R6. Secrets. .env holds SSH targets, Microsoft client credentials and an API key. Use the values only inside commands. Never print, log, commit, screenshot or report them.
+R7. Hosts. At the end of each remote session, close owned app instances, remove owned scheduled tasks and soft-stop the Linux AMD64 VM. On Windows, delete stale target/ folders before building (C: is small).
+R8. Talk to the user in Chinese; everything in the repo stays English. Batch requests (v6 rule 10). For Device Code: tell the user first and wait until they say they are ready, then start the request and send the code and URL at once.
+
+== Work queue (in order) ==
+Q0. Handoff commit. Review the uncommitted diff yourself and keep it unless it is wrong. Run `just check`, then commit the code, the script, STATUS.md and these prompt/plan doc edits. Push and confirm CI.
+
+Q1. Atomic Welcome commit (v6 D7).
+   - The identity prepared in step 2 stays in memory; only the final "Ready to go" confirmation persists it, together with the Instance/Profile from step 1.
+   - If the game save fails after the credential save, roll the credential back. Cancel, Back, closing the window or quitting the app at any earlier point leaves no credential in the OS store and no catalog entry.
+   - Skip still creates no identity.
+   - Tests: success, game-save failure with rollback, cancel at each step, a late result after cancel.
+   - Then re-run Welcome natively on Windows with a new Offline account in a fresh data dir, and update the STATUS row. In the same run, confirm that no console window appears during install or Play (CREATE_NO_WINDOW check).
+
+Q2. Windows visual capture and review (v6 C2–C3).
+   - Add Windows support to scenario capture: extend scripts/snap-native with a Windows mode or add one helper script beside it (no new docs). Start block-app with each --scenario in light and dark inside the interactive session (schtasks /it). Capture only the app's own windows by PID (PrintWindow or equivalent). Write target/parity-shots/windows-amd64/scenarios/<scenario>-<theme>.png, using the prototype scenario names and the child-window names parity-board expects.
+   - Capture every scenario, copy the images back, then run `scripts/parity-board` and `scripts/parity-board --platform macos-arm64`.
+   - Review every pair yourself. If you cannot view images, check for missing pairs and size mismatches only, and say so in the message.
+   - Send the user one review message, as in v6 C3. Fix your planned differences without waiting. Apply the user's corrections and re-capture. Set Accepted per page only on the user's verdict.
+
+Q3. Linux AMD64 native Device Code (v6 E3).
+   - Start the VM and launch block-app on its desktop. Use keyboard navigation to reach Add account → Microsoft → Device Code. Follow R8, and after the secure save close the app and soft-stop the VM.
+   - Later Linux flows need the mouse, so try to fix the clicks within R5. For example, send a pointer motion before the click, then mousedown/mouseup with a short delay. If that fails, keep using the keyboard.
+
+Q4. Product gaps. Specs are in v6 section D. Each gap is one or more Q0-style commits:
+   a. D4: legacy Quick Play, including the real local-server join verification.
+   b. D5: productized legacy ARM64, then the LWJGL 2 picker restriction.
+   c. OptiFine re-import for an existing target through native file selection (STATUS gap).
+   d. D1: account avatars. D2: provider icons.
+   e. D3: the quick-link drop target in one dedicated crate (crates/block-drop). This is the highest-risk item.
+      - Before writing any code, study GPUI's raw-window-handle access and the platform drag APIs.
+      - Keep the unsafe surface minimal, with a SAFETY comment on every unsafe block. Never touch GPUI's own classes or drop targets.
+      - Platform order: Windows → macOS → Linux X11 → Wayland attempt. Real drag checks as in v6 D3. Batch user drags when automation cannot perform them.
+
+Q5. Native E2E flows on Windows (O1) and Linux (O2). Fill the Native E2E column row by row, then run the macOS-only checks. Fix every bug you find, with a regression test where the logic is testable.
+
+Q6. v6 D6 (motion, reduced motion, a short display on the Linux AMD64 VM at 1366×768, keyboard/clipboard/scrolling), D8 (bounded Windows lifecycle-flake investigation) and D9 (sweep for remaining disabled or placeholder items).
+
+Q7. v6 F older representatives. The user already put the official OptiFine 1.16.5 G8 and 1.12.2 G5 JARs in ~/Downloads. Validate and install them through native file selection.
+
+Q8. Completion report as in v6 Completion.
+
+Q2 and Q3 wait on the user. While you wait, keep working on Q4. Finish Q1 before any later item.
+
+== Reporting ==
+After each queue item, send a short Chinese message: what changed, the commits, capture/board paths, the STATUS rows that changed, and anything the user needs to do. The final report follows v6 Completion. Say "implementation ready; awaiting user verification" and list what is pending, unless the user has accepted everything.
+```
 
 ---
 

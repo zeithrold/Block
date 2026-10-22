@@ -704,7 +704,10 @@ async fn run_installer(
     let home = crate::command::java_path(home, os)?;
     let log_path = stage.join("installer.log");
     let log = File::create(&log_path)?;
-    let mut child = tokio::process::Command::new(java)
+    let mut command = tokio::process::Command::new(java);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let mut child = command
         .arg("-Djava.awt.headless=true")
         .arg(format!(
             "-javaagent:installer-cache.jar={}",

@@ -4,7 +4,8 @@ Updated: 2026-10-22. Built, native verification and user acceptance are separate
 
 ## Product decisions and intended differences
 
-- The P0 React snapshot and README define product content; the current Goal's explicit decisions take precedence.
+- The P0 React snapshot and README define product content; explicit user decisions take precedence.
+- Windows is the primary native UI/E2E and visual-review platform (user decision, 2026-10-22); retain platform-specific macOS/Linux checks.
 - New catalogs use Bundled mode: one Instance and exactly one associated Profile; names and appearance match Home.
 - Existing catalogs without a mode keep Separated behavior. Confirmed Bundled-to-Separated conversion is one-way; Restore defaults preserves mode.
 - Separated mode permits multiple Profiles per Instance. Deletion removes catalog metadata and preserves player files.
@@ -38,7 +39,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector windows. |
 | Real account avatars in Home and selectors | No | Pending | Pending | Initial fallback only. |
-| Play/Stop, recovery and crash help | Yes | Pending | Pending | Supervisor recovery is wired. |
+| Play/Stop, recovery and crash help | Yes | Partial | Pending | Windows Play/Stop and macOS relaunch passed; crash help pending. |
 | Downloads, retries and file details | Yes | Pending | Pending | Real byte events. |
 
 ### Accounts and sign-in
@@ -47,7 +48,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | List/detail, selection, deletion, last-account empty state | Yes | Pending | Pending | OS credential storage. |
 | Microsoft browser PKCE and final confirmation | Yes | Yes (macOS) | Pending | Native authorization and secure save passed. |
-| Microsoft Device Code and final confirmation | Yes | Pending | Pending | Live user sign-in needed. |
+| Microsoft Device Code and final confirmation | Yes | Partial | Pending | macOS/Windows/Linux ARM64 securely saved; AMD64 Linux blocked. |
 | Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
 | Authlib provider icon retrieval and display | No | Pending | Pending | Only icon URL is cached. |
@@ -67,7 +68,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Icons/colors, memory/JVM, Java/window defaults, folders/account | Yes | Pending | Pending | Compiled into launch recipes. |
 | Bundled two-step / Separated four-step creation | Yes | Pending | Pending | Atomic Instance/Profile pair. |
 | Version, loader/build and location pickers | Yes | Pending | Pending | Real catalogs. |
-| Vanilla installation, progress, retry and resume | Yes | Pending | Pending | Official resources only. |
+| Vanilla installation, progress, retry and resume | Yes | Partial | Pending | macOS/Windows Welcome/install/Play passed; retry pending. |
 | Fabric installation and build selection | Yes | Pending | Pending | Official catalog. |
 | Quilt installation and build selection | Yes | Pending | Pending | Older representative pending. |
 | Forge modern/legacy installation and build selection | Yes | Pending | Pending | Windows native legacy flow pending. |
@@ -97,7 +98,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | About: build/product, brand, links and copy actions | Yes | Pending | Pending | Real information. |
 | Welcome: three steps, drafts, skip, download/retry | Yes | Pending | Pending | No implicit identity on Skip. |
-| Welcome: atomic new-account/game final commit | Partial | Pending | Pending | Combined transaction needs audit. |
+| Welcome: atomic new-account/game final commit | No | Failed (macOS) | Pending | Account saves before final game creation. |
 
 ### Cross-page
 
@@ -117,8 +118,8 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 | Host | Vanilla | Fabric | Quilt | Forge | NeoForge | OptiFine | Authlib | Older |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| macOS ARM64 | 1.20.6 API 8b6a136 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
-| Windows AMD64 | 1.20.6 API bb901b7 | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
+| macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
+| Windows AMD64 | 1.20.6 UI 442b94e | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
 | Linux AMD64 | 1.20.6 API 168a6e1 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
 | Linux ARM64 | 1.20.6 API bb901b7 | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.16.5 API manual composition |
 
@@ -133,11 +134,12 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 ## Verification notes
 
-- Windows intermittent lifecycle failure: bounded repeated host test still required.
+- Windows intermittent lifecycle failure: bounded repeated host test still required; unwanted Java console fix awaits host validation.
 - Native screenshots cover 71 debug scenarios in light/dark; scenario captures are visual fixtures.
-- Comparison board: target/parity-shots/index.html; prototype references are pending.
+- Comparison board: target/parity-shots/index.html (Windows primary); prototype references captured; Windows scenario refresh pending.
 - Remote picker captures prove navigation/windows, not native installation/Play.
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
+- macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
 - macOS storage relocation/cleanup followed by game menu passed through the API.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
@@ -147,8 +149,9 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Item | Status |
 | --- | --- |
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
-| Microsoft macOS PKCE/Device Code and batched remote Device Code | Native login in progress; retain dedicated test accounts/data. |
-| Prototype/native board and behavior acceptance | Await reference captures, then one grouped review. |
+| Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
+| Linux AMD64 secure credential store | Persistent keyring created and unlocked by user; native preflight still fails. |
+| Prototype/native board and behavior acceptance | References captured; Windows scenario refresh, then one grouped review. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
 | Real quick-link drag on hosts automation cannot drive | Batch after native drop target exists. |

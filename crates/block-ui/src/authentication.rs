@@ -2319,6 +2319,16 @@ fn sign_in_error(error: &str) -> String {
         "This player is saved under another Microsoft application registration. Remove that saved account first, then sign in again.".into()
     } else if lower.contains("application registration") || lower.contains("client id") {
         "The Microsoft application rejected this sign-in method. Check its public-client and personal-account settings; browser sign-in also needs its desktop redirect URI.".into()
+    } else if lower.contains("secure credential store is unavailable or locked") {
+        if cfg!(target_os = "linux") {
+            "The desktop Secret Service is unavailable or locked. Start or unlock your system keyring, then try again. Credentials are never saved to a plaintext file.".into()
+        } else if cfg!(target_os = "windows") {
+            "Windows Credential Manager is unavailable. Check access to your Windows user session, then try again. Credentials are never saved to a plaintext file.".into()
+        } else {
+            "The system keychain is unavailable or locked. Unlock your login keychain, then try again. Credentials are never saved to a plaintext file.".into()
+        }
+    } else if lower.contains("no supported secure credential store") {
+        "This system has no supported secure credential store. Account sign-in is unavailable until a system credential store is configured.".into()
     } else if lower.contains("metadata")
         || lower.contains("secure storage")
         || lower.contains("credential")
@@ -2371,6 +2381,29 @@ mod tests {
             cx.run_until_parked();
             crate::test_support::ensure_live_window(cx);
         }
+    }
+
+    #[test]
+    fn secure_store_preflight_errors_explain_system_recovery_without_private_details() {
+        let error = block_auth::AuthError::CredentialStoreUnavailable.to_string();
+        let message = super::sign_in_error(&format!("{error} PRIVATE_DIAGNOSTIC"));
+        assert!(message.contains(if cfg!(target_os = "linux") {
+            "Secret Service"
+        } else if cfg!(target_os = "windows") {
+            "Windows Credential Manager"
+        } else {
+            "login keychain"
+        }));
+        assert!(message.contains("try again"));
+        assert!(!message.contains("PRIVATE_DIAGNOSTIC"));
+        assert!(!message.contains("could not save the account"));
+        let unsupported =
+            super::sign_in_error(&block_auth::AuthError::UnsupportedSecureStore.to_string());
+        assert!(unsupported.contains("sign-in is unavailable"));
+        assert_ne!(
+            message,
+            super::sign_in_error("Account metadata cannot be written")
+        );
     }
 
     fn simulate_started_attempt(view: &mut crate::Block, phase: Phase) {

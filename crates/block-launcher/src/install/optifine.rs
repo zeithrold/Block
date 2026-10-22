@@ -446,6 +446,8 @@ pub async fn patch(
     let log = File::create(stage.join("installer.log"))?;
     let os = crate::platform::Target::host()?.os;
     let mut command = tokio::process::Command::new(crate::command::java_path(java.to_owned(), os)?);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     command
         .arg("-Djava.awt.headless=true")
         .arg("-cp")
