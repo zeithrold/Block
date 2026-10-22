@@ -552,7 +552,10 @@ fn finish(state: &Ready, source: Window, accepted: bool) {
 }
 
 fn send_message(state: &Ready, kind: Atom, destination: Window, data: [u32; 5]) {
-    let event = ClientMessageEvent::new(32, state.window, kind, data);
+    // XDND replies are addressed to the source window: the ClientMessage's own
+    // window field must name that destination, not the target window (the target
+    // window is carried in data[0], as XDND requires and GTK verifies).
+    let event = ClientMessageEvent::new(32, destination, kind, data);
     let _ = state
         .connection
         .send_event(false, destination, EventMask::NO_EVENT, event);
