@@ -16,6 +16,7 @@ import sys
 
 PLATFORMS = {
     "windows-amd64": ("Windows", "x86_64", "x86_64-pc-windows-msvc", "X64"),
+    "windows-arm64": ("Windows", "aarch64", "aarch64-pc-windows-msvc", "ARM64"),
     "linux-amd64": ("Linux", "x86_64", "x86_64-unknown-linux-gnu", "X64"),
     "linux-arm64": ("Linux", "aarch64", "aarch64-unknown-linux-gnu", "ARM64"),
     "macos-arm64": ("Darwin", "aarch64", "aarch64-apple-darwin", "ARM64"),
