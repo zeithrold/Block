@@ -96,6 +96,8 @@ pub(crate) enum Message {
     },
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
+    AccountImages(Vec<(String, block_launcher::avatars::SkinImage)>),
+    ProviderImages(Vec<(String, block_launcher::avatars::ProviderIcon)>),
     AuthlibCharacters(Vec<block_auth::AuthlibProfile>),
     AuthPrepared(Account),
     SignedIn(Account),
@@ -264,6 +266,22 @@ impl Engine {
                     result.map_err(|error| format!("{error:#}")),
                 ))
                 .await;
+        });
+    }
+
+    /// Refresh real account avatars and provider icons without surfacing errors:
+    /// every failure simply keeps the initials or monogram fallback.
+    pub(super) fn load_images(&self) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let cancel = CancellationToken::new();
+            if let Ok(images) = account_images(&root, &cancel).await {
+                let _ = sender.send(Message::AccountImages(images)).await;
+            }
+            if let Ok(icons) = provider_images(&root, &cancel).await {
+                let _ = sender.send(Message::ProviderImages(icons)).await;
+            }
         });
     }
 
@@ -1505,6 +1523,86 @@ fn load_accounts(root: &Path) -> anyhow::Result<Vec<Account>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(error) => Err(error).context("Saved account metadata could not be opened"),
     }
+}
+
+/// Resolve every saved account's real skin through its own provider. Any
+/// failure is skipped: the UI keeps the initials fallback, silently.
+async fn account_images(
+    root: &Path,
+    cancel: &CancellationToken,
+) -> anyhow::Result<Vec<(String, block_launcher::avatars::SkinImage)>> {
+    let accounts = load_accounts(root)?;
+    let providers = load_providers(root).unwrap_or_default();
+    let fetch = block_launcher::avatars::ImageFetch::new()?;
+    let cache = block_launcher::avatars::ImageCache::new(root);
+    let mut images = Vec::new();
+    for account in accounts {
+        let identity = account.identity_key();
+        let Some((url, domains)) = skin_source(&account, &providers, cancel).await else {
+            continue;
+        };
+        if let Some(image) = cache.skin(&identity, &url) {
+            images.push((identity, image));
+            continue;
+        }
+        let Ok(image) = fetch.skin(&url, &domains, cancel).await else {
+            continue;
+        };
+        let _ = cache.store_skin(&identity, &url, &image);
+        images.push((identity, image));
+    }
+    Ok(images)
+}
+
+async fn skin_source(
+    account: &Account,
+    providers: &[block_auth::AuthlibProvider],
+    cancel: &CancellationToken,
+) -> Option<(String, Vec<String>)> {
+    match account.provider {
+        AccountProvider::Offline => None,
+        AccountProvider::Microsoft => {
+            let auth = auth().ok()?;
+            let session = auth.refresh(account, cancel).await.ok()?;
+            let skin = auth.profile_skin(&session, cancel).await.ok()??;
+            Some((skin.url, vec!["textures.minecraft.net".to_owned()]))
+        }
+        AccountProvider::Authlib => {
+            let link = account.authlib.as_ref()?;
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id == link.provider_id)?;
+            let auth = block_auth::AuthlibAuth::new(provider).ok()?;
+            let session = auth.refresh(account, cancel).await.ok()?;
+            let skin = block_auth::skin_texture(&session, provider)?;
+            Some((skin.url, provider.metadata.skin_domains.clone()))
+        }
+    }
+}
+
+/// Resolve provider icons from the discovered icon URL, bounded to its API host.
+async fn provider_images(
+    root: &Path,
+    cancel: &CancellationToken,
+) -> anyhow::Result<Vec<(String, block_launcher::avatars::ProviderIcon)>> {
+    let providers = load_providers(root)?;
+    let fetch = block_launcher::avatars::ImageFetch::new()?;
+    let cache = block_launcher::avatars::ImageCache::new(root);
+    let mut icons = Vec::new();
+    for provider in providers {
+        let id = provider.id.to_string();
+        let source = provider.metadata.icon_url.clone();
+        if let Some(icon) = cache.icon(&id, &source) {
+            icons.push((id, icon));
+            continue;
+        }
+        let Ok(icon) = fetch.icon(&source, &provider.api_url, cancel).await else {
+            continue;
+        };
+        let _ = cache.store_icon(&id, &source, &icon);
+        icons.push((id, icon));
+    }
+    Ok(icons)
 }
 
 fn load_providers(root: &Path) -> anyhow::Result<Vec<block_auth::AuthlibProvider>> {

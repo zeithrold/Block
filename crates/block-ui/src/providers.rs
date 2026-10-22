@@ -495,7 +495,12 @@ impl Block {
                 .justify_start()
                 .h_auto()
                 .py_4()
-                .child(super::design::Icon::Server.render(18., self.palette.muted))
+                .child(components::provider_icon(
+                    &provider.name,
+                    self.provider_icons.get(&provider.id.to_string()),
+                    self.palette,
+                    24.,
+                ))
                 .child(
                     div()
                         .flex_1()

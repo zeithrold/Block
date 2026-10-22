@@ -2234,7 +2234,13 @@ impl Block {
             return components::card(self.palette).child(note("Waiting for a verified identity."));
         };
         components::card(self.palette)
-            .child(components::avatar_fallback(&account.player_name, self.palette, 64., AvatarState::Fallback))
+            .child(components::account_avatar(
+                &account.player_name,
+                self.account_avatars.get(&account.identity_key()),
+                self.palette,
+                64.,
+                AvatarState::Fallback,
+            ))
             .child(div().text_xl().child(account.player_name.clone()))
             .child(components::badge(self.account_authority(account), self.palette, BadgeVariant::Secondary))
             .children(self.account_provider(account).map(|provider|note(provider.api_url.clone())))

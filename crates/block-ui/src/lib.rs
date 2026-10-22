@@ -87,9 +87,9 @@ use block_launcher::{
     session_host::{self, RunRecord, RunState},
 };
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Render, SharedString,
-    Styled as _, Window, div, px, rgb,
+    AppContext as _, Context, Entity, FocusHandle, Focusable as _, Image, ImageFormat,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, PathPromptOptions,
+    Render, SharedString, Styled as _, Window, div, px, rgb,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -348,6 +348,8 @@ pub struct Block {
     palette: Palette,
     snapshot: Snapshot,
     accounts: Vec<Account>,
+    account_avatars: HashMap<String, components::AccountAvatar>,
+    provider_icons: HashMap<String, components::ProviderBadge>,
     versions: Vec<String>,
     /// Test-only architecture override for version-availability policy.
     host_arch_override: Option<Architecture>,
@@ -462,6 +464,7 @@ impl Block {
             Some(Ok((engine, messages))) => {
                 engine.load_catalog();
                 engine.load_versions();
+                engine.load_images();
                 (Some(engine), Some(messages), "Welcome to Block".into())
             }
             Some(Err(error)) => (None, None, format!("Engine unavailable: {error:#}")),
@@ -518,6 +521,8 @@ impl Block {
             preferences,
             snapshot: Snapshot::default(),
             accounts: Vec::new(),
+            account_avatars: HashMap::new(),
+            provider_icons: HashMap::new(),
             versions: Vec::new(),
             host_arch_override: None,
             version_load: if engine.is_some() {
@@ -647,10 +652,18 @@ impl Block {
                     self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone());
                     self.report(error);
                 }
-                Message::Providers(result) => self.receive_providers(result),
+                Message::Providers(result) => {
+                    self.receive_providers(result);
+                    if let Some(engine) = &self.engine {
+                        engine.load_images();
+                    }
+                }
                 Message::ProviderSaved(id) => {
                     if !self.auth_provider_saved(&id, cx) {
                         self.provider_saved(&id, cx);
+                    }
+                    if let Some(engine) = &self.engine {
+                        engine.load_images();
                     }
                 }
                 Message::Accounts(Err(error)) => {
@@ -669,6 +682,43 @@ impl Block {
                     {
                         self.apply_profile_account();
                     }
+                    if let Some(engine) = &self.engine {
+                        engine.load_images();
+                    }
+                }
+                Message::AccountImages(images) => {
+                    self.account_avatars = images
+                        .into_iter()
+                        .map(|(identity, skin)| {
+                            (
+                                identity,
+                                components::AccountAvatar {
+                                    image: std::sync::Arc::new(Image::from_bytes(
+                                        ImageFormat::Png,
+                                        skin.bytes,
+                                    )),
+                                    width: skin.width,
+                                    height: skin.height,
+                                },
+                            )
+                        })
+                        .collect();
+                }
+                Message::ProviderImages(icons) => {
+                    self.provider_icons = icons
+                        .into_iter()
+                        .map(|(provider, icon)| {
+                            (
+                                provider,
+                                components::ProviderBadge {
+                                    image: std::sync::Arc::new(Image::from_bytes(
+                                        components::icon_image_format(icon.kind),
+                                        icon.bytes,
+                                    )),
+                                },
+                            )
+                        })
+                        .collect();
                 }
                 Message::Versions(Ok(versions)) => {
                     self.version_load = browser::CollectionLoad::Ready;
@@ -2443,6 +2493,8 @@ mod tests {
             palette: super::Palette::LIGHT,
             snapshot: block_launcher::catalog::Snapshot::default(),
             accounts: Vec::new(),
+            account_avatars: std::collections::HashMap::new(),
+            provider_icons: std::collections::HashMap::new(),
             versions: vec!["1.20.6".into()],
             host_arch_override: None,
             version_load: super::browser::CollectionLoad::Ready,

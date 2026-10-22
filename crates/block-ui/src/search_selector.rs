@@ -387,7 +387,15 @@ impl Block {
             self.palette.popover
         }))
         .child(choice.appearance.map_or_else(
-            || components::avatar_fallback(&choice.title, self.palette, 36., AvatarState::Fallback),
+            || {
+                components::account_avatar(
+                    &choice.title,
+                    self.account_avatars.get(&choice.id),
+                    self.palette,
+                    36.,
+                    AvatarState::Fallback,
+                )
+            },
             |appearance| components::profile_avatar(appearance, self.palette, 36.),
         ))
         .child(self.selector_row_text(choice))
