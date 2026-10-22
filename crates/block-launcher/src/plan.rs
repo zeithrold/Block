@@ -228,6 +228,22 @@ fn plan_libraries(
             });
         }
     }
+    // Dependencies the reviewed substitutions need but older manifests never
+    // listed (for example slf4j for the reviewed text2speech).
+    for companion in &metadata.companion_libraries {
+        let path = format!(
+            "{library_root}/{}-{}",
+            companion.resource.sha1, companion.filename
+        );
+        add_copy(
+            &mut files.resources,
+            &mut files.actions,
+            companion.resource.clone(),
+            path.clone(),
+            false,
+        );
+        files.classpath.push(path);
+    }
     let client_path = format!(
         "views/clients/{}/client.jar",
         manifest.downloads.client.sha1

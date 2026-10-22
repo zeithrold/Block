@@ -69,6 +69,7 @@ fn zulu_runtime_substitution_is_explicit_and_extracts_into_the_runtime_store() -
             component: "jre-legacy".into(),
         }),
         library_overrides: BTreeMap::new(),
+        companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
     };
@@ -108,5 +109,70 @@ fn zulu_runtime_substitution_is_explicit_and_extracts_into_the_runtime_store() -
     assert!(note.contains(&sha256), "{note}");
     assert!(note.contains("jre-legacy"), "{note}");
     assert!(note.contains("api.azul.com"), "{note}");
+    Ok(())
+}
+
+#[test]
+fn companion_libraries_are_added_to_the_verified_classpath() -> anyhow::Result<()> {
+    // The companion mechanism is architecture-independent; this plans a modern
+    // supported manifest on x64 and checks the dependency still reaches the
+    // classpath and the verified resource list.
+    let manifest = decode(&std::fs::read(fixtures().join("26.3.json"))?)?;
+    let mut metadata = ResolvedMetadata {
+        parsed: ParsedRecipe {
+            manifest,
+            manifest_sha1: "a".repeat(40),
+        },
+        target: Target {
+            os: OperatingSystem::Linux,
+            arch: Architecture::X86_64,
+            os_version: "6.1".into(),
+        },
+        assets: AssetObjects {
+            objects: BTreeMap::new(),
+            virtual_layout: None,
+            map_to_resources: None,
+        },
+        runtime: None,
+        library_overrides: BTreeMap::new(),
+        companion_libraries: Vec::new(),
+        classifier_overrides: BTreeMap::new(),
+        compatibility: None,
+    };
+    // A companion dependency the reviewed replacement needs but the older
+    // manifest never listed, for example slf4j-api for text2speech 1.12.4.
+    metadata.companion_libraries.push(crate::resolver::LibraryOverride {
+        resource: block_download::Resource {
+            sha1: "d".repeat(40),
+            size: 69_908,
+            url: "https://libraries.minecraft.net/org/slf4j/slf4j-api/1.8.0-beta4/slf4j-api-1.8.0-beta4.jar".into(),
+        },
+        filename: "slf4j-api-1.8.0-beta4.jar".into(),
+    });
+    let mut recipe = recipe();
+    recipe.runtime = RuntimeSelection::Local {
+        java: PathBuf::from("/usr/bin/java"),
+    };
+    let mut plan = super::compile(&recipe, &metadata)?;
+    let companion = format!(
+        "views/libraries/{}/d{}-slf4j-api-1.8.0-beta4.jar",
+        "a".repeat(40),
+        "d".repeat(39)
+    );
+    assert!(
+        plan.command
+            .classpath
+            .iter()
+            .any(|entry| entry == &companion),
+        "companion classpath entry missing: {:?}",
+        plan.command.classpath
+    );
+    assert!(
+        plan.resources
+            .iter()
+            .any(|resource| resource.url.contains("slf4j-api-1.8.0-beta4.jar")),
+        "companion resource missing"
+    );
+    plan.resources.clear();
     Ok(())
 }

@@ -151,6 +151,12 @@ pub const REVIEWED_ARM64_JNA: &str = "5.13.0";
 /// The reviewed text2speech release that loads without an ARM64 native wrapper.
 pub const REVIEWED_TEXT2SPEECH: &str = "1.12.4";
 
+/// The official slf4j-api release the reviewed text2speech depends on. Manifests
+/// that predate text2speech 1.12.4 do not list it, so the plan adds it alongside
+/// the replacement. The artifact is the one the official 1.18.2 manifest pairs
+/// with text2speech 1.12.4.
+pub const REVIEWED_TEXT2SPEECH_SLF4J: &str = "1.8.0-beta4";
+
 /// Whether this LWJGL 3 release publishes official Linux ARM64 natives.
 #[must_use]
 pub fn lwjgl_supports_linux_arm64(version: &str) -> bool {

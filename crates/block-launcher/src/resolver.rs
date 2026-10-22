@@ -102,6 +102,9 @@ pub struct ResolvedMetadata {
     pub assets: AssetObjects,
     pub runtime: Option<ManagedRuntime>,
     pub library_overrides: BTreeMap<String, LibraryOverride>,
+    /// Artifacts added beyond the manifest, such as a dependency the reviewed
+    /// replacement needs but the older manifest never listed.
+    pub companion_libraries: Vec<LibraryOverride>,
     /// Replacement native classifiers keyed by the library that selects them.
     /// Classifier-era manifests declare natives through `natives`/`classifiers`
     /// instead of separate artifacts, so they need their own override map.
@@ -178,7 +181,7 @@ async fn resolve_inner(
     } else {
         None
     };
-    let (library_overrides, classifier_overrides, compatibility) =
+    let (library_overrides, classifier_overrides, companion_libraries, compatibility) =
         compatibility_overrides(recipe, &parsed, &target, context).await?;
     Ok(ResolvedMetadata {
         parsed,
@@ -186,6 +189,7 @@ async fn resolve_inner(
         assets,
         runtime,
         library_overrides,
+        companion_libraries,
         classifier_overrides,
         compatibility,
     })
@@ -244,6 +248,7 @@ async fn resolve_managed_runtime(
 type AppliedOverrides = (
     BTreeMap<String, LibraryOverride>,
     BTreeMap<String, LibraryOverride>,
+    Vec<LibraryOverride>,
     Option<String>,
 );
 
@@ -258,7 +263,7 @@ async fn compatibility_overrides(
             if target.os == OperatingSystem::Linux && target.arch == Architecture::Aarch64 {
                 linux_arm64_overrides(recipe, parsed, target, context).await
             } else {
-                Ok((BTreeMap::new(), BTreeMap::new(), None))
+                Ok((BTreeMap::new(), BTreeMap::new(), Vec::new(), None))
             }
         }
         Compatibility::LinuxArm64Lwjgl3 => {
@@ -267,6 +272,7 @@ async fn compatibility_overrides(
         Compatibility::MacosJna513 => Ok((
             macos_jna_overrides(recipe, parsed, target, context).await?,
             BTreeMap::new(),
+            Vec::new(),
             Some(format!(
                 "macOS ARM64: the affected JNA pair is replaced with the official JNA {} release from Maven Central",
                 crate::support::REVIEWED_ARM64_JNA
@@ -300,6 +306,7 @@ async fn linux_arm64_overrides(
     let mut arm64_selected = false;
     let mut jna = Vec::new();
     let mut text2speech = Vec::new();
+    let mut has_slf4j = false;
     for library in &parsed.manifest.libraries {
         if !crate::rules::allowed(library.rules.as_deref(), target, &recipe.features)? {
             continue;
@@ -348,6 +355,8 @@ async fn linux_arm64_overrides(
                     parts[1].to_owned(),
                 ));
             }
+        } else if library.name.starts_with("org.slf4j:slf4j-api:") {
+            has_slf4j = true;
         } else if let Some(rest) = library.name.strip_prefix("com.mojang:text2speech:") {
             let version = rest.split(':').next().unwrap_or_default();
             text2speech.push((library.name.clone(), version.to_owned()));
@@ -412,6 +421,8 @@ async fn linux_arm64_overrides(
         "this version selects no LWJGL 3 Linux artifacts to substitute"
     );
     let mut companions = Vec::new();
+    let mut companion_libraries = Vec::new();
+    let mut replaced_text2speech = false;
     for (name, artifact, manifest_version) in jna {
         if version_at_least(&manifest_version, crate::support::REVIEWED_ARM64_JNA) {
             continue;
@@ -442,6 +453,7 @@ async fn linux_arm64_overrides(
         if version_at_least(&manifest_version, crate::support::REVIEWED_TEXT2SPEECH) {
             continue;
         }
+        replaced_text2speech = true;
         let filename = format!("text2speech-{}.jar", crate::support::REVIEWED_TEXT2SPEECH);
         let url = format!(
             "https://libraries.minecraft.net/com/mojang/text2speech/{}/{filename}",
@@ -458,6 +470,17 @@ async fn linux_arm64_overrides(
             "text2speech {}",
             crate::support::REVIEWED_TEXT2SPEECH
         ));
+    }
+    if replaced_text2speech && !has_slf4j {
+        let version = crate::support::REVIEWED_TEXT2SPEECH_SLF4J;
+        let filename = format!("slf4j-api-{version}.jar");
+        let url =
+            format!("https://libraries.minecraft.net/org/slf4j/slf4j-api/{version}/{filename}");
+        companion_libraries.push(LibraryOverride {
+            resource: context.store.describe_maven(&url).await?,
+            filename,
+        });
+        companions.push(format!("slf4j-api {version} (text2speech dependency)"));
     }
     let lwjgl = reviewed_module.unwrap_or_default();
     let note = if reviewed.is_some() {
@@ -483,6 +506,7 @@ async fn linux_arm64_overrides(
     Ok((
         artifact_overrides,
         classifier_overrides,
+        companion_libraries,
         Some(format!(
             "{note}; narration has no native ARM64 flite wrapper, so it stays unavailable"
         )),

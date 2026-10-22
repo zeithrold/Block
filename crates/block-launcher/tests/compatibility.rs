@@ -319,6 +319,11 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_compo
         "https://libraries.minecraft.net/com/mojang/text2speech/1.12.4/text2speech-1.12.4.jar"
             .into(),
     );
+    // text2speech 1.12.4 needs slf4j-api, which the 1.16.5 manifest never lists.
+    urls.push(
+        "https://libraries.minecraft.net/org/slf4j/slf4j-api/1.8.0-beta4/slf4j-api-1.8.0-beta4.jar"
+            .into(),
+    );
     // Planning only needs published descriptors; digests are synthetic offline fixtures.
     let synthetic: Vec<String> = (1..=urls.len())
         .map(|index| format!("{index:040x}"))
@@ -349,6 +354,7 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_compo
     assert!(note.contains("reviewed 3.3.1 composition"), "{note}");
     assert!(note.contains("JNA 5.13.0"), "{note}");
     assert!(note.contains("text2speech 1.12.4"), "{note}");
+    assert!(note.contains("slf4j-api 1.8.0-beta4"), "{note}");
     assert!(note.contains("narration"), "{note}");
     let plan = compile(&recipe, &resolved)?;
     assert_eq!(plan.compatibility.as_deref(), Some(note.as_str()));
@@ -384,6 +390,19 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_compo
             .classpath
             .iter()
             .any(|path| path.ends_with("text2speech-1.12.4.jar"))
+    );
+    assert!(
+        plan.command
+            .classpath
+            .iter()
+            .any(|path| path.ends_with("slf4j-api-1.8.0-beta4.jar")),
+        "text2speech dependency must join the classpath"
+    );
+    assert!(
+        plan.resources
+            .iter()
+            .any(|resource| resource.url.ends_with("slf4j-api-1.8.0-beta4.jar")),
+        "text2speech dependency must be verified as a resource"
     );
     Ok(())
 }
