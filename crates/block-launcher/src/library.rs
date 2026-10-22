@@ -433,26 +433,11 @@ async fn resolve_for_host(
     recipe: &mut LaunchRecipe,
     context: &ResolveContext,
 ) -> anyhow::Result<crate::resolver::ResolvedMetadata> {
-    let system_fallback = cfg!(all(target_os = "linux", target_arch = "aarch64"))
-        && matches!(recipe.runtime, crate::recipe::RuntimeSelection::Managed);
-    if system_fallback {
-        recipe.runtime = crate::recipe::RuntimeSelection::Local {
-            java: PathBuf::from("/usr/bin/java"),
-        };
-    }
-    let metadata = resolve(recipe, context).await?;
-    if system_fallback {
-        let major = metadata
-            .parsed
-            .manifest
-            .java_version
-            .as_ref()
-            .map_or(8, |java| java.major_version);
-        recipe.runtime = crate::recipe::RuntimeSelection::Local {
-            java: crate::runtime::system_java(major)?,
-        };
-    }
-    Ok(metadata)
+    // Managed recipes stay managed: the resolver provisions the official Mojang
+    // runtime, or the official Azul runtime when the catalog has no native ARM64
+    // build. The old Linux ARM64 "/usr/bin/java" substitution bypassed that
+    // reviewed provisioning and failed on hosts without a local Java 8.
+    resolve(recipe, context).await
 }
 
 #[cfg(test)]
