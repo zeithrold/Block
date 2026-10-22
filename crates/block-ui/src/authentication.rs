@@ -695,26 +695,29 @@ impl Block {
             .child(note(
                 "Enter the server details or paste an Authlib quick link.",
             ))
-            .child(
-                div()
-                    .id("provider-drop-zone")
-                    .debug_selector(|| "provider-drop-zone".into())
-                    .w_full()
-                    .p_4()
-                    .rounded_lg()
-                    .border_1()
-                    .border_dashed()
-                    .border_color(rgb(self.palette.border))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .child(Icon::ExternalLink.render(20., self.palette.muted))
-                    .child(div().text_sm().child("Drop an Authlib quick link here"))
-                    .child(note(
-                        "You can also paste the link into the server address field.",
-                    )),
-            )
+            .child(super::attach_provider_drop_bounds(
+                div().child(
+                    div()
+                        .id("provider-drop-zone")
+                        .debug_selector(|| "provider-drop-zone".into())
+                        .w_full()
+                        .p_4()
+                        .rounded_lg()
+                        .border_1()
+                        .border_dashed()
+                        .border_color(rgb(self.palette.border))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_1()
+                        .child(Icon::ExternalLink.render(20., self.palette.muted))
+                        .child(div().text_sm().child("Drop an Authlib quick link here"))
+                        .child(note(
+                            "You can also paste the link into the server address field.",
+                        )),
+                ),
+                cx.entity().downgrade(),
+            ))
             .child(components::field_with(
                 "Display name",
                 &draft.name,

@@ -87,10 +87,12 @@ use block_launcher::{
     session_host::{self, RunRecord, RunState},
 };
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Render, SharedString,
-    Styled as _, Window, div, px, rgb,
+    AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Pixels, Render, SharedString,
+    Styled as _, WeakEntity, Window, div, px, rgb,
 };
+#[cfg(windows)]
+use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
 use tokio::sync::mpsc::Receiver;
 
 use appearance::{Appearance, Palette, Preferences};
@@ -340,7 +342,7 @@ pub struct Block {
     motion: transitions::MotionState,
     motion_dirty: bool,
     visual_only: bool,
-    pending_window_size: Option<gpui::Size<gpui::Pixels>>,
+    pending_window_size: Option<gpui::Size<Pixels>>,
     onboarding_progress: onboarding::Progress,
     settings_form: Option<settings::SettingsDraft>,
     preferences: Preferences,
@@ -385,6 +387,9 @@ pub struct Block {
     show_command: bool,
     recipe: Option<LaunchRecipe>,
     recipe_load: RecipeLoadState,
+    /// Windows-only OLE drop target over the rendered provider drop zone.
+    #[cfg(windows)]
+    provider_drop: Option<ProviderDrop>,
 }
 
 #[derive(Debug, Default)]
@@ -408,6 +413,13 @@ impl RecipeLoadState {
             .take()
             .is_some_and(|launch| launch && success)
     }
+}
+
+/// Owns the Windows child HWND that receives provider quick-link drops.
+#[cfg(windows)]
+#[derive(Debug)]
+struct ProviderDrop {
+    target: block_drop::DropTarget,
 }
 
 impl Drop for Block {
@@ -558,6 +570,8 @@ impl Block {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
+            #[cfg(windows)]
+            provider_drop: None,
         };
         view.initialize_browsers(cx);
         let load = if view.engine.is_some() {
@@ -2251,6 +2265,7 @@ impl Render for Block {
         self.motion
             .apply_policy(self.motion_preferences().reduced(), cx);
         self.prepare_crash_help(window, cx);
+        self.sync_provider_drop(window, cx);
         if let Some(help) = &self.crash_help {
             return div().size_full().child(help.clone()).into_any_element();
         }
@@ -2273,6 +2288,137 @@ impl Render for Block {
         });
         self.render_shell(window, cx).into_any_element()
     }
+}
+
+impl Block {
+    /// Attach or release the Windows OLE drop target as the provider draft appears
+    /// or disappears. Non-Windows platforms keep this a no-op.
+    #[cfg(windows)]
+    fn sync_provider_drop(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        let drafting = self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.provider_draft.is_some());
+        if !drafting {
+            self.provider_drop = None;
+            return;
+        }
+        if self.provider_drop.is_some() {
+            return;
+        }
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+            return;
+        };
+        let (sender, receiver) = async_channel::bounded::<String>(4);
+        let zone = block_drop::DropZone::new(0.0, 0.0, 0.0, 0.0, window.scale_factor());
+        match block_drop::DropTarget::attach(win32.hwnd.get() as isize, zone, sender) {
+            Ok(target) => {
+                self.provider_drop = Some(ProviderDrop { target });
+                cx.spawn(async move |view, cx| {
+                    while let Ok(payload) = receiver.recv().await {
+                        let _ = view.update(cx, |view, cx| {
+                            view.apply_provider_drop(payload, cx);
+                        });
+                    }
+                })
+                .detach();
+            }
+            Err(error) => {
+                if let Some(draft) = self
+                    .shell
+                    .auth
+                    .as_mut()
+                    .and_then(|state| state.provider_draft.as_mut())
+                    && draft.error.is_none()
+                {
+                    draft.error = Some(format!("Drag and drop is unavailable: {error}"));
+                }
+            }
+        }
+    }
+
+    /// Keep the owned child HWND aligned with the rendered drop zone.
+    #[cfg(windows)]
+    fn position_provider_drop(&mut self, bounds: &[Bounds<Pixels>], scale: f32) {
+        let Some(first) = bounds.first() else {
+            return;
+        };
+        let mut left = first.left();
+        let mut top = first.top();
+        let mut right = first.right();
+        let mut bottom = first.bottom();
+        for bounds in &bounds[1..] {
+            left = left.min(bounds.left());
+            top = top.min(bounds.top());
+            right = right.max(bounds.right());
+            bottom = bottom.max(bounds.bottom());
+        }
+        if let Some(drop) = &self.provider_drop {
+            drop.target.set_zone(block_drop::DropZone::new(
+                f32::from(left),
+                f32::from(top),
+                f32::from(right - left),
+                f32::from(bottom - top),
+                scale,
+            ));
+        }
+    }
+
+    /// Feed an accepted quick link through the same recognise/normalise path as
+    /// pasting it and pressing "Recognize address".
+    #[cfg(windows)]
+    fn apply_provider_drop(&mut self, payload: String, cx: &mut Context<'_, Self>) {
+        if let Some(draft) = self
+            .shell
+            .auth
+            .as_mut()
+            .and_then(|state| state.provider_draft.as_mut())
+        {
+            draft
+                .address
+                .update(cx, |field, cx| field.set_value(&payload, cx));
+            draft.error = None;
+        }
+        self.identify_auth_provider(cx);
+        cx.notify();
+    }
+
+    #[cfg(not(windows))]
+    fn sync_provider_drop(&mut self, _window: &Window, _cx: &mut Context<'_, Self>) {}
+
+    #[cfg(not(windows))]
+    #[expect(
+        dead_code,
+        reason = "the drop zone only drives real bounds and payloads on Windows"
+    )]
+    fn position_provider_drop(&mut self, _bounds: &[Bounds<Pixels>], _scale: f32) {}
+
+    #[cfg(not(windows))]
+    #[expect(dead_code, reason = "quick-link drops are a Windows OLE capability")]
+    fn apply_provider_drop(&mut self, _payload: String, _cx: &mut Context<'_, Self>) {}
+}
+
+/// Subscribe the rendered drop zone to its real window bounds (Windows only).
+#[cfg(windows)]
+fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui::Div {
+    zone.on_children_prepainted(move |bounds, window, cx| {
+        if let Some(view) = view.upgrade() {
+            let scale = window.scale_factor();
+            let _ = view.update(cx, |view, cx| {
+                view.position_provider_drop(&bounds, scale);
+                cx.notify();
+            });
+        }
+    })
+}
+
+#[cfg(not(windows))]
+fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpui::Div {
+    zone
 }
 
 fn panel() -> gpui::Div {
@@ -2479,6 +2625,8 @@ mod tests {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
+            #[cfg(windows)]
+            provider_drop: None,
         }
     }
 
