@@ -64,6 +64,8 @@ Only **architecture governance** is deferred to v0. That covers structural refac
 12. OptiFine uses an external download from optifine.net followed by automatic validation and installation of the user-selected JAR. No bundling, redistribution or manual file-placement requirement.
 13. Finish P0/P1/P2 foundations before expanding page/backend work. Prepare native light/dark screenshots and the comparison board for user visual acceptance on 2026-10-22; immediate per-page taste approval is not a prerequisite for continuing independent work.
 
+19. Retract the separate-native-window scheme for dialogs and drawers. Rebuild them as in-window overlay components (prototype-aligned dimmed scrim, blocked background interaction, Escape close, focus contained and restored on close) on the gpui-kit/gpui-component Dialog and Sheet primitives; keep the project's own content components and palette. Windows remain fixed-size. Use the component library's animation/overlay machinery instead of hand-rolled equivalents.
+
 ## Decisions (user, 2026-10-22)
 
 14. Quick Play falls back to the legacy `--server`/`--port` arguments for versions without `--quickPlayMultiplayer`. Disable it with a reason only where neither form is supported.

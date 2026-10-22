@@ -14,8 +14,8 @@ Updated: 2026-10-22. Built, native verification and user acceptance are separate
 - Late results update actual catalog/session state, but cannot complete or clear a newer draft, wizard or authentication attempt.
 - Home is 432×768; full management pages are 960×600; dialogs use content-appropriate fixed sizes. Fit to short displays at creation.
 - macOS uses the upstream transparent titlebar and native traffic lights; Windows/Linux use system decorations.
-- Dialogs/drawers become separate GPUI windows with interactive parents. Anchored menus/selects/tooltips use upstream Base components.
-- Accessibility semantics, inert/backdrop machinery and paint scaling are removed; retain system and in-app reduced motion.
+- Dialogs, drawers, wizard sections and the account flow are in-window overlay components built on the gpui-kit/gpui-component Dialog and Sheet primitives: prototype-aligned scrim, background interaction blocked, Escape closes, focus stays inside the overlay and is restored afterwards. Anchored menus/selects/tooltips use upstream Base components.
+- Accessibility semantics remain deferred; stacked overlays, system and in-app reduced motion are retained.
 - First run keeps Your game → Your account → Ready to go. Skipping creates no identity and never bypasses launch authorization.
 - Authentication approval prepares an identity; final confirmation saves it. Cancellation, expiry and method changes invalidate pending results.
 - First-run creation installs a real game and returns Home while downloads continue. Download/Retry requires no signed-in account or duplicate game.
