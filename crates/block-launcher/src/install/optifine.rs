@@ -79,6 +79,17 @@ fn identifier(value: &str) -> bool {
         && value != ".."
 }
 
+/// Whether a changelog token can be a Forge version rather than an issue reference.
+fn forge_version_like(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_digit())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || b".-_+".contains(&byte))
+}
+
 fn entry(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
@@ -227,11 +238,16 @@ fn inspect_bytes(bytes: &[u8]) -> anyhow::Result<OptiFineJar> {
         release.next().map(str::trim) == Some(format!("OptiFine {version}").as_str()),
         "OptiFine changelog does not match its identity"
     );
+    // Some changelogs reference a Forge issue ("compatible with Forge #2847")
+    // instead of declaring a version. Only a version-looking token is a
+    // compatibility declaration; an issue reference must not fail the import.
     let forge = release
         .take_while(|line| !line.trim().is_empty())
         .find_map(|line| {
             line.trim()
                 .strip_prefix("- compatible with Forge ")
+                .map(str::trim)
+                .filter(|value| forge_version_like(value))
                 .map(str::to_owned)
         });
     ensure!(
@@ -605,6 +621,28 @@ mod tests {
             output.write_all(bytes)?;
         }
         Ok(output.finish()?.into_inner())
+    }
+
+    #[test]
+    fn forge_issue_reference_is_not_a_compatibility_version() -> anyhow::Result<()> {
+        let bytes = archive(
+            "1.12.2_HD_U_G5",
+            "OptiFine 1.12.2_HD_U_G5\r\n - compatible with Forge #2847\r\n\r\nOptiFine 1.12.2_HD_U_G4\r\n",
+            false,
+        )?;
+        let identity = inspect_bytes(&bytes)?;
+        assert_eq!(identity.minecraft, "1.12.2");
+        assert!(identity.forge.is_none());
+        match identity.validate_for("1.12.2", &LoaderKind::Forge, Some("1.12.2-14.23.5.2864")) {
+            Ok(()) => anyhow::bail!("an undeclared Forge version must stay unsupported"),
+            Err(error) => assert!(
+                error
+                    .to_string()
+                    .contains("does not declare Forge compatibility"),
+                "{error}"
+            ),
+        }
+        Ok(())
     }
 
     #[test]
