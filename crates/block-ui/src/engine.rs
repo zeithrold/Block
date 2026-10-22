@@ -373,6 +373,23 @@ impl Engine {
         });
     }
 
+    pub(super) async fn import_optifine(
+        &self,
+        path: PathBuf,
+    ) -> anyhow::Result<block_launcher::install::optifine::OptiFineJar> {
+        let root = self.root.clone();
+        self.runtime
+            .spawn_blocking(move || {
+                let storage = block_launcher::storage::acquire(&root)?;
+                let context = ResolveContext {
+                    store: Store::new(storage.cache.clone(), false, Arc::new(|_| {}))?,
+                    cancel: CancellationToken::new(),
+                };
+                block_launcher::install::optifine::import(&path, &context)
+            })
+            .await?
+    }
+
     pub(super) fn loader_versions(
         &self,
         request: uuid::Uuid,
@@ -419,6 +436,7 @@ impl Engine {
         version: String,
         directory: Option<PathBuf>,
         loader: Option<(LoaderKind, String)>,
+        optifine: Option<block_launcher::install::optifine::OptiFineJar>,
         defaults: GameDefaults,
         profile: Option<ProfileDraftValues>,
         cancel: CancellationToken,
@@ -443,11 +461,12 @@ impl Engine {
                 let catalog_root = root.clone();
                 let (instance, profile) = tokio::task::spawn_blocking(move || {
                     let catalog = Catalog::open(catalog_root)?;
-                    catalog.create_instance_with_loader(
+                    catalog.create_instance_with_components(
                         name,
                         version,
                         directory,
                         loader,
+                        optifine,
                         configuration,
                     )
                 })
@@ -2048,6 +2067,7 @@ mod tests {
             "26.3".into(),
             None,
             None,
+            None,
             defaults,
             None,
             cancel,
@@ -2115,6 +2135,7 @@ mod tests {
                 minecraft.into(),
                 None,
                 Some((kind.clone(), version.into())),
+                None,
                 super::GameDefaults::default(),
                 None,
                 cancel,

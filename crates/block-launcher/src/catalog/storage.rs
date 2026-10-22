@@ -368,6 +368,26 @@ impl Catalog {
         loader: Option<(LoaderKind, String)>,
         configuration: ProfileConfiguration,
     ) -> anyhow::Result<(Instance, Profile)> {
+        self.create_instance_with_components(
+            name,
+            minecraft_version,
+            directory,
+            loader,
+            None,
+            configuration,
+        )
+    }
+
+    /// Create a game with an optional user-imported OptiFine component fixed to its launch target.
+    pub fn create_instance_with_components(
+        &self,
+        name: String,
+        minecraft_version: String,
+        directory: Option<PathBuf>,
+        loader: Option<(LoaderKind, String)>,
+        optifine: Option<crate::install::optifine::OptiFineJar>,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<(Instance, Profile)> {
         let storage = crate::storage::acquire(&self.root)?;
         validate_name(&name)?;
         ensure!(
@@ -390,6 +410,15 @@ impl Catalog {
                 LoaderKind::Vanilla => anyhow::bail!("Vanilla does not have a loader version"),
             }
         }
+        if let Some(selected) = &optifine {
+            selected.validate_for(
+                &minecraft_version,
+                loader
+                    .as_ref()
+                    .map_or(&LoaderKind::Vanilla, |(kind, _)| kind),
+                loader.as_ref().map(|(_, version)| version.as_str()),
+            )?;
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let directory = directory.unwrap_or_else(|| storage.library.join(&id));
         validate_directory(&directory)?;
@@ -404,6 +433,8 @@ impl Catalog {
                 loader_version: None,
                 manifest: None,
                 status: InstallStatus::Pending,
+                optifine: loader.is_none().then(|| optifine.clone()).flatten(),
+                optifine_mod: None,
             }],
             settings: None,
         };
@@ -420,6 +451,8 @@ impl Catalog {
                 loader_version: Some(version),
                 manifest: None,
                 status: InstallStatus::Pending,
+                optifine,
+                optifine_mod: None,
             });
         }
         let mut profile = configured_profile(&instance, configuration)?;
@@ -606,7 +639,9 @@ impl Catalog {
                 .find(|t| t.id == target.id)
                 .context("launch target no longer exists")?;
             ensure!(
-                old.kind == target.kind && old.loader_version == target.loader_version,
+                old.kind == target.kind
+                    && old.loader_version == target.loader_version
+                    && old.optifine == target.optifine,
                 "cannot change installed target identity"
             );
             *old = target.clone();
@@ -789,6 +824,18 @@ fn validate_snapshot(state: &Snapshot) -> anyhow::Result<()> {
         ensure!(ids.insert(&instance.id), "duplicate installation ID");
         let mut targets = std::collections::BTreeSet::new();
         for target in &instance.targets {
+            if let Some(selected) = &target.optifine {
+                selected.validate_for(
+                    &instance.minecraft_version,
+                    &target.kind,
+                    target.loader_version.as_deref(),
+                )?;
+            }
+            ensure!(
+                target.optifine_mod.is_none()
+                    || target.optifine.is_some() && target.kind == LoaderKind::Forge,
+                "Unexpected OptiFine mod output"
+            );
             ensure!(
                 !target.id.is_empty()
                     && target.id.len() <= 80

@@ -93,8 +93,9 @@ impl Library {
         self.catalog.set_target(instance_id, &target)?;
         let result = self.install_target(instance, &target, cancel).await;
         match result {
-            Ok(path) => {
+            Ok((path, optifine_mod)) => {
                 target.manifest = Some(path);
+                target.optifine_mod = optifine_mod;
                 target.status = InstallStatus::Ready;
                 self.catalog.set_target(instance_id, &target)
             }
@@ -113,7 +114,7 @@ impl Library {
         instance: &Instance,
         target: &LaunchTarget,
         cancel: &CancellationToken,
-    ) -> anyhow::Result<PathBuf> {
+    ) -> anyhow::Result<(PathBuf, Option<block_download::Resource>)> {
         let state = self.catalog.snapshot()?;
         let profile = state
             .profiles
@@ -136,6 +137,7 @@ impl Library {
             .executor
             .prepare_repair(compile(&recipe, &metadata)?, cancel)
             .await?;
+        let mut optifine_mod = None;
         if target.kind != LoaderKind::Vanilla {
             (self.events)(crate::executor::ExecutionEvent::Stage {
                 name: format!(
@@ -145,7 +147,7 @@ impl Library {
                 ),
             });
         }
-        let manifest = if matches!(target.kind, LoaderKind::NeoForge | LoaderKind::Forge) {
+        let mut manifest = if matches!(target.kind, LoaderKind::NeoForge | LoaderKind::Forge) {
             let java = match &prepared.plan.command.java {
                 JavaExecutable::Managed { path } => {
                     crate::executor::confined_path(&prepared.root, path)?
@@ -182,6 +184,41 @@ impl Library {
             write_metadata(&path, &bytes)?;
             path
         };
+        if let Some(selected) = &target.optifine {
+            selected.validate_for(
+                &instance.minecraft_version,
+                &target.kind,
+                target.loader_version.as_deref(),
+            )?;
+            let java = match &prepared.plan.command.java {
+                JavaExecutable::Managed { path } => {
+                    crate::executor::confined_path(&prepared.root, path)?
+                }
+                JavaExecutable::Local { path } => path.clone(),
+            };
+            (self.events)(crate::executor::ExecutionEvent::Stage {
+                name: format!("Installing OptiFine {}", selected.version),
+            });
+            if target.kind == LoaderKind::Forge {
+                optifine_mod = Some(
+                    crate::install::optifine::forge_mod(
+                        selected,
+                        &instance.minecraft_version,
+                        target.loader_version.as_deref(),
+                        &context,
+                    )
+                    .await?,
+                );
+            } else {
+                manifest = crate::install::optifine::install(
+                    &metadata.parsed.manifest,
+                    selected,
+                    &java,
+                    &context,
+                )
+                .await?;
+            }
+        }
         drop(prepared);
         // Verify/materialize the complete loader closure before marking the target ready.
         recipe.source = RecipeSource::LocalManifest {
@@ -191,7 +228,7 @@ impl Library {
         let mut plan = compile(&recipe, &metadata)?;
         adapt(&mut plan, &metadata.parsed.manifest, target, &manifest)?;
         self.executor.prepare_repair(plan, cancel).await?;
-        Ok(manifest)
+        Ok((manifest, optifine_mod))
     }
 
     /// Session acquisition/refresh belongs to the caller. Launch never silently repairs or logs credentials.
@@ -269,6 +306,21 @@ impl Library {
             None => executor.prepare(plan, cancel).await,
         }
         .context("installation integrity check failed; choose Repair")?;
+        if target.kind == LoaderKind::Forge
+            && let Some(selected) = &target.optifine
+        {
+            let resource = target
+                .optifine_mod
+                .as_ref()
+                .context("OptiFine mod is not installed; choose Repair")?;
+            let object = context.store.fetch(resource, cancel).await?;
+            crate::install::optifine::place_mod(
+                directory.directory(),
+                selected,
+                resource,
+                &object,
+            )?;
+        }
         let mut launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
         launch.storage = Some(self.storage.lease.clone());
         Ok(launch)

@@ -34,6 +34,8 @@ pub const SCENARIOS: &[&str] = &[
     "games-instance-settings",
     "wizard-setup",
     "wizard-review",
+    "wizard-optifine",
+    "wizard-optifine-selected",
     "accounts-list",
     "accounts-detail",
     "accounts-offline-detail",
@@ -237,7 +239,11 @@ impl Block {
             if name == "wizard-review" {
                 self.shell.wizard.step = WizardStep::Review;
             }
+            if name.starts_with("wizard-optifine") {
+                self.set_wizard_version("1.21.1".into(), cx);
+            }
             let page = match name {
+                "wizard-optifine" | "wizard-optifine-selected" => Some(WizardPage::OptiFine),
                 "wizard-version-picker" => Some(WizardPage::Version),
                 "wizard-loader-picker"
                 | "wizard-fabric-picker"
@@ -252,6 +258,21 @@ impl Block {
             };
             if let Some(page) = page {
                 self.handle(UiAction::WizardPage(Some(page)), window, cx);
+            }
+            if name == "wizard-optifine-selected"
+                && let Some(super::Form::Instance(form)) = &mut self.form
+            {
+                form.optifine = Some(Box::new(block_launcher::install::optifine::OptiFineJar {
+                    minecraft: form.version.read(cx).value(),
+                    version: format!("{}_HD_U_J1", form.version.read(cx).value()),
+                    launchwrapper: "2.3".into(),
+                    forge: Some("52.0.16".into()),
+                    resource: block_launcher::Resource {
+                        sha1: "a".repeat(40),
+                        size: 1,
+                        url: "block-import:scenario-only".into(),
+                    },
+                }));
             }
             if matches!(
                 name,
@@ -499,6 +520,8 @@ fn library() -> Snapshot {
                 kind,
                 manifest: None,
                 status: InstallStatus::Ready,
+                optifine: None,
+                optifine_mod: None,
             }],
             settings: None,
         });

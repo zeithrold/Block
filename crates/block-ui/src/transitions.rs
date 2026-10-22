@@ -229,6 +229,7 @@ impl Block {
                 directory: frozen_input(&form.directory, cx),
                 loader: form.loader.clone(),
                 loader_version: form.loader_version.clone(),
+                optifine: form.optifine.clone(),
             }),
             Form::Profile(form) => Form::Profile(Box::new(ProfileForm {
                 original: form.original.clone(),

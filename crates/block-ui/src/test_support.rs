@@ -79,6 +79,8 @@ pub(super) fn ready_snapshot() -> Snapshot {
                 loader_version: None,
                 manifest: None,
                 status: InstallStatus::Ready,
+                optifine: None,
+                optifine_mod: None,
             }],
             settings: None,
         }],

@@ -147,6 +147,8 @@ enum UiAction {
     WizardNext,
     WizardBack,
     WizardSnapshots,
+    WizardOptiFineFile,
+    WizardOptiFineRemove,
     WizardKind(bool),
     WizardInstance(String),
     WizardProfileIcon(block_launcher::catalog::ProfileIcon),
@@ -266,6 +268,7 @@ struct InstanceForm {
     directory: Entity<TextInput>,
     loader: block_launcher::catalog::LoaderKind,
     loader_version: Option<String>,
+    optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
 }
 
 impl InstanceForm {
@@ -275,10 +278,17 @@ impl InstanceForm {
     }
 
     fn loader_label(&self) -> String {
-        self.loader_version.as_ref().map_or_else(
+        let loader = self.loader_version.as_ref().map_or_else(
             || self.loader.name().to_owned(),
             |version| format!("{} {version}", self.loader.name()),
-        )
+        );
+        self.optifine.as_ref().map_or(loader.clone(), |selected| {
+            if self.loader == block_launcher::catalog::LoaderKind::Vanilla {
+                format!("OptiFine {}", selected.version)
+            } else {
+                format!("{loader} + OptiFine {}", selected.version)
+            }
+        })
     }
 
     fn selected_loader(&self) -> Option<(block_launcher::catalog::LoaderKind, String)> {
@@ -1106,6 +1116,13 @@ impl Block {
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
         let previous_page = (self.tab, self.form.is_some());
         match action {
+            UiAction::WizardOptiFineFile => self.browse_optifine(cx),
+            UiAction::WizardOptiFineRemove => {
+                if let Some(Form::Instance(form)) = &mut self.form {
+                    form.optifine = None;
+                }
+                self.shell.wizard.cancel_optifine_import();
+            }
             UiAction::OnboardingSection(page) => self.open_onboarding_section(page, window, cx),
             UiAction::OnboardingSectionDone => self.finish_onboarding_section(false, window, cx),
             UiAction::OnboardingSectionCancel => self.finish_onboarding_section(true, window, cx),
@@ -1763,7 +1780,7 @@ impl Block {
                         .into_iter()
                         .collect()
                 }
-                Some(WizardPage::Loader) | None => Vec::new(),
+                Some(WizardPage::Loader | WizardPage::OptiFine) | None => Vec::new(),
             },
             Some(Form::Profile(form)) => {
                 let mut fields = vec![&form.name, &form.memory];
@@ -1818,8 +1835,9 @@ impl Block {
             Some("Choose a Minecraft version")
         } else if version.len() > 80 || version.chars().any(char::is_control) {
             Some("Use a Minecraft version of at most 80 UTF-8 bytes without control characters")
-        } else if self.wizard_loader_issue(cx).is_some() {
-            Some("Choose a compatible loader build in Mod loader before continuing")
+        } else if let Some(issue) = self.wizard_loader_issue(cx) {
+            self.report(issue);
+            return false;
         } else if !directory.trim().is_empty() && !PathBuf::from(directory.trim()).is_absolute() {
             Some("Choose an absolute installation directory")
         } else {
@@ -2882,7 +2900,7 @@ mod tests {
         for selector in [
             "wizard-component-version",
             "wizard-component-loader",
-            "wizard-unavailable-optifine",
+            "wizard-component-optifine",
             "wizard-component-location",
         ] {
             let bounds = crate::test_support::control_bounds(cx, selector);
@@ -3078,6 +3096,8 @@ mod tests {
                     loader_version: None,
                     manifest: None,
                     status: InstallStatus::Pending,
+                    optifine: None,
+                    optifine_mod: None,
                 }],
             });
             view.snapshot.profiles.push(Profile {

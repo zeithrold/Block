@@ -68,6 +68,7 @@ pub(super) enum CreationKind {
 pub(super) enum WizardPage {
     Version,
     Loader,
+    OptiFine,
     Location,
 }
 
@@ -81,6 +82,7 @@ pub(super) struct WizardState {
     pub loader_search: Option<Entity<TextInput>>,
     pub loader_catalog: Option<LoaderCatalog>,
     loader_request: Option<LoaderRequest>,
+    optifine_request: Option<uuid::Uuid>,
     loader_scroll: ScrollHandle,
     version_focus: Rc<RefCell<HashMap<String, gpui::FocusHandle>>>,
     advanced: RefCell<super::motion::Disclosure>,
@@ -369,11 +371,16 @@ struct ComponentDraft {
     loader: LoaderKind,
     loader_version: Option<String>,
     loader_catalog: Option<LoaderCatalog>,
+    optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
     version_notice: Option<String>,
     profile: Option<ProfileCheckpoint>,
 }
 
 impl WizardState {
+    pub(super) fn cancel_optifine_import(&mut self) {
+        self.optifine_request = None;
+        self.clear_error();
+    }
     pub(super) fn cancel_loader_request(&mut self) {
         self.loader_request = None;
         self.loader_catalog = None;
@@ -404,6 +411,7 @@ impl WizardState {
                 .map(|input| cx.new(|cx| input.read(cx).frozen(cx))),
             loader_catalog: self.loader_catalog.clone(),
             loader_request: None,
+            optifine_request: self.optifine_request,
             loader_scroll,
             version_focus: Rc::default(),
             advanced: RefCell::new(self.advanced.borrow().clone()),
@@ -480,6 +488,148 @@ impl WizardState {
 }
 
 impl Block {
+    fn optifine_issue(&self, cx: &gpui::App) -> Option<String> {
+        let Some(Form::Instance(form)) = &self.form else {
+            return None;
+        };
+        form.optifine
+            .as_ref()
+            .and_then(|selected| {
+                selected
+                    .validate_for(
+                        &form.version.read(cx).value(),
+                        &form.loader,
+                        form.loader_version.as_deref(),
+                    )
+                    .err()
+            })
+            .map(|error| error.to_string())
+    }
+
+    pub(super) fn browse_optifine(&self, cx: &Context<'_, Self>) {
+        if self.busy
+            || self.shell.wizard.optifine_request.is_some()
+            || self.shell.wizard.page != Some(WizardPage::OptiFine)
+        {
+            return;
+        }
+        let Some(Form::Instance(form)) = &self.form else {
+            return;
+        };
+        if !matches!(form.loader, LoaderKind::Vanilla | LoaderKind::Forge) {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        let field = form.version.entity_id();
+        let prompt = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Select the official OptiFine installer JAR".into()),
+        });
+        cx.spawn(async move |view, cx| {
+            let Ok(Ok(Some(paths))) = prompt.await else { return; };
+            let Some(path) = paths.into_iter().next() else { return; };
+            let request = uuid::Uuid::new_v4();
+            let started = view.update(cx, |view, cx| {
+                if view.busy || view.shell.wizard.page != Some(WizardPage::OptiFine) || !matches!(&view.form, Some(Form::Instance(form)) if form.version.entity_id() == field) { return false; }
+                view.shell.wizard.optifine_request = Some(request);
+                view.shell.wizard.clear_error();
+                cx.notify();
+                true
+            }).unwrap_or(false);
+            if !started { return; }
+            let result = engine.import_optifine(path).await;
+            let _ = view.update(cx, |view, cx| view.finish_optifine_import(request, field, result, cx));
+        }).detach();
+    }
+
+    fn finish_optifine_import(
+        &mut self,
+        request: uuid::Uuid,
+        field: gpui::EntityId,
+        result: anyhow::Result<block_launcher::install::optifine::OptiFineJar>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.shell.wizard.optifine_request != Some(request)
+            || self.shell.wizard.page != Some(WizardPage::OptiFine)
+        {
+            return;
+        }
+        self.shell.wizard.optifine_request = None;
+        let Some(Form::Instance(form)) = &mut self.form else {
+            return;
+        };
+        if form.version.entity_id() != field {
+            return;
+        }
+        match result {
+            Ok(selected) => match selected.validate_for(
+                &form.version.read(cx).value(),
+                &form.loader,
+                form.loader_version.as_deref(),
+            ) {
+                Ok(()) => form.optifine = Some(Box::new(selected)),
+                Err(error) => self.shell.wizard.error = Some(error.to_string()),
+            },
+            Err(error) => {
+                self.shell.wizard.error = Some(format!("Could not import OptiFine: {error:#}"))
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn wizard_optifine_component(
+        &self,
+        form: &InstanceForm,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        if !matches!(form.loader, LoaderKind::Vanilla | LoaderKind::Forge) {
+            return self
+                .wizard_unavailable(
+                    "optifine",
+                    "OptiFine",
+                    &format!("Cannot combine directly with {}", form.loader.name()),
+                    true,
+                )
+                .into_any_element();
+        }
+        self.wizard_component(
+            "optifine",
+            "OptiFine",
+            (
+                form.optifine
+                    .as_ref()
+                    .map_or("Not selected", |jar| jar.version.as_str()),
+                if form.optifine.is_some() {
+                    "JAR identity checked"
+                } else {
+                    "Download, then select JAR"
+                },
+            ),
+            WizardPage::OptiFine,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    pub(super) fn wizard_optifine(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::Div {
+        let pending = self.shell.wizard.optifine_request.is_some();
+        div().flex().flex_col().gap_4()
+            .child(div().text_xl().child("Install OptiFine"))
+            .child(note("Download the installer JAR for your Minecraft version from optifine.net, then select it here. Block validates it and performs the remaining installation automatically."))
+            .child(components::button("optifine-official-download", "Open official downloads", self.palette, ButtonVariant::Outline, ControlState::default(), |&(), _, cx| cx.open_url("https://optifine.net/downloads")))
+            .child(self.button("optifine-select-jar", if pending { "Validating selected JAR…" } else { "Select downloaded JAR" }, UiAction::WizardOptiFineFile, cx))
+            .children(form.optifine.as_ref().map(|selected| div().flex().flex_col().gap_2()
+                .child(div().text_sm().child(format!("Selected: {}", selected.version)))
+                .child(note(selected.forge.as_ref().map_or_else(|| "Standalone installation; this release does not declare Forge compatibility.".into(), |version| format!("Standalone or Forge {version}. Other loaders cannot be combined directly."))))
+                .child(self.button("optifine-remove", "Use without OptiFine", UiAction::WizardOptiFineRemove, cx))))
+            .children(self.optifine_issue(cx).map(|reason| note(reason)))
+            .children(self.shell.wizard.error.as_ref().map(|reason| note(reason.clone())))
+            .child(note("No extraction or manual file placement is required. The selected JAR is kept only in your private launcher cache."))
+    }
     pub(super) fn set_wizard_error(&mut self, message: String, cx: &gpui::App) {
         let mut field = self
             .shell
@@ -638,6 +788,7 @@ impl Block {
             directory: input("", "Automatic installation location", cx),
             loader: LoaderKind::Vanilla,
             loader_version: None,
+            optifine: None,
         }));
     }
 
@@ -762,6 +913,9 @@ impl Block {
         page: Option<WizardPage>,
         cx: &Context<'_, Self>,
     ) {
+        if page != Some(WizardPage::OptiFine) {
+            self.shell.wizard.optifine_request = None;
+        }
         if page.is_some()
             && self.shell.wizard.page.is_none()
             && let Some(Form::Instance(form)) = &self.form
@@ -772,6 +926,7 @@ impl Block {
                 loader: form.loader.clone(),
                 loader_version: form.loader_version.clone(),
                 loader_catalog: self.shell.wizard.loader_catalog.clone(),
+                optifine: form.optifine.clone(),
                 version_notice: self.shell.wizard.version_notice.clone(),
                 profile: self
                     .shell
@@ -783,6 +938,7 @@ impl Block {
         }
         if page.is_none() {
             self.shell.wizard.section_snapshot = None;
+            self.shell.wizard.optifine_request = None;
         }
         self.shell.wizard.clear_error();
         self.shell.wizard.open_page(page);
@@ -808,6 +964,14 @@ impl Block {
         self.shell.wizard.loader_catalog = None;
         self.shell.wizard.loader_request = None;
         self.shell.wizard.version_notice = None;
+        if !matches!(kind, LoaderKind::Vanilla | LoaderKind::Forge)
+            && form.optifine.take().is_some()
+        {
+            self.shell.wizard.version_notice = Some(format!(
+                "OptiFine was removed because it cannot be combined directly with {}.",
+                kind.name()
+            ));
+        }
         self.shell
             .wizard
             .loader_scroll
@@ -962,6 +1126,12 @@ impl Block {
     }
 
     pub(super) fn wizard_loader_issue(&self, cx: &gpui::App) -> Option<String> {
+        if let Some(issue) = self.optifine_issue(cx) {
+            return Some(issue);
+        }
+        if self.shell.wizard.optifine_request.is_some() {
+            return Some("Wait for OptiFine JAR validation to finish.".into());
+        }
         let Some(Form::Instance(form)) = &self.form else {
             return None;
         };
@@ -1062,6 +1232,18 @@ impl Block {
             && let Some(issue) = self.wizard_loader_issue(cx)
         {
             return Some((WizardField::Loader, issue));
+        }
+        if let Some(selected) = &form.optifine
+            && let Err(error) =
+                selected.validate_for(&version, &form.loader, form.loader_version.as_deref())
+        {
+            return Some((WizardField::Loader, error.to_string()));
+        }
+        if self.shell.wizard.optifine_request.is_some() {
+            return Some((
+                WizardField::Loader,
+                "Wait for the selected OptiFine JAR to finish validation.".into(),
+            ));
         }
         if page != WizardPage::Location {
             return None;
@@ -1209,6 +1391,7 @@ impl Block {
         let version = form.version.read(cx).value();
         let directory = form.directory.read(cx).value();
         let loader = form.selected_loader();
+        let optifine = form.optifine.as_deref().cloned();
         let kind = self.shell.wizard.kind;
         if kind == CreationKind::NewInstance && !self.validate_instance_draft(cx) {
             return;
@@ -1266,6 +1449,7 @@ impl Block {
                     version,
                     directory,
                     loader,
+                    optifine,
                     defaults,
                     Some(values),
                     self.cancel.clone(),
@@ -1293,6 +1477,7 @@ impl Block {
                 .update(cx, |field, cx| field.set_value(&snapshot.directory, cx));
             form.loader = snapshot.loader;
             form.loader_version = snapshot.loader_version;
+            form.optifine = snapshot.optifine;
             self.shell.wizard.loader_catalog = snapshot.loader_catalog.map(|mut catalog| {
                 catalog.request = uuid::Uuid::new_v4();
                 if matches!(catalog.load, CollectionLoad::Loading) {
@@ -1311,6 +1496,7 @@ impl Block {
         }
         self.shell.wizard.open_page(None);
         self.shell.wizard.loader_request = None;
+        self.shell.wizard.optifine_request = None;
     }
 
     pub(super) fn render_game_wizard(
@@ -1487,6 +1673,7 @@ impl Block {
         match page {
             Some(WizardPage::Version) => self.wizard_version(form, cx).into_any_element(),
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
+            Some(WizardPage::OptiFine) => self.wizard_optifine(form, cx).into_any_element(),
             Some(WizardPage::Location) => self.wizard_location(form, cx).into_any_element(),
             None if review => self.wizard_review(form, cx).into_any_element(),
             None if state.step == WizardStep::GetStarted => {
@@ -1981,10 +2168,7 @@ impl Block {
                     .gap_2()
                     .children(targets.into_iter().map(|target| {
                         let id = target.id.clone();
-                        let name = target.loader_version.as_ref().map_or_else(
-                            || "Vanilla".to_owned(),
-                            |version| format!("{} {version}", target.kind.name()),
-                        );
+                        let name = target.display_name();
                         group.item(
                             &target.id,
                             components::radio(
@@ -2165,12 +2349,7 @@ impl Block {
                         WizardPage::Loader,
                         cx,
                     ))
-                    .child(self.wizard_unavailable(
-                        "optifine",
-                        "OptiFine",
-                        "Installer not implemented",
-                        true,
-                    ))
+                    .child(self.wizard_optifine_component(form, cx))
                     .child(self.wizard_component(
                         "location",
                         "Configuration",
@@ -2225,6 +2404,7 @@ impl Block {
         let icon = match page {
             WizardPage::Version => Icon::Games,
             WizardPage::Loader => Icon::Download,
+            WizardPage::OptiFine => Icon::Experiment,
             WizardPage::Location => Icon::Settings,
         };
         let mut card = components::button(
@@ -3052,12 +3232,7 @@ impl Block {
                 })
                 .map_or_else(
                     || "Choose a launch target".to_owned(),
-                    |target| {
-                        target.loader_version.as_ref().map_or_else(
-                            || "Vanilla".to_owned(),
-                            |version| format!("{} {version}", target.kind.name()),
-                        )
-                    },
+                    |target| target.display_name(),
                 )
         } else {
             form.loader_label()

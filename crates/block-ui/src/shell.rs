@@ -735,24 +735,7 @@ impl Block {
             Some(minecraft_manifest::model::VersionType::OldAlpha) => "Old alpha",
             None => "Type unverified",
         };
-        let loader = match target.kind {
-            block_launcher::catalog::LoaderKind::Vanilla => "Vanilla".to_owned(),
-            block_launcher::catalog::LoaderKind::NeoForge => {
-                target.loader_version.as_ref().map_or_else(
-                    || "NeoForge".into(),
-                    |version| format!("NeoForge {version}"),
-                )
-            }
-            block_launcher::catalog::LoaderKind::Forge => {
-                format!("Forge {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-            block_launcher::catalog::LoaderKind::Fabric => {
-                format!("Fabric {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-            block_launcher::catalog::LoaderKind::Quilt => {
-                format!("Quilt {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-        };
+        let loader = target.display_name();
         let description = format!(
             "Minecraft {} · {release} · {loader}{}",
             instance.minecraft_version,

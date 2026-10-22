@@ -6,6 +6,63 @@ use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, p
 use super::{CreationKind, WizardPage, WizardState, WizardStep};
 use crate::{Form, test_support::ready_snapshot};
 
+#[gpui::test]
+fn optifine_import_is_draft_bound_revalidates_late_results_and_cancels_without_saving(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    view.update(cx, |view, cx| {
+        let selected = block_launcher::install::optifine::OptiFineJar {
+            minecraft: "1.21.1".into(),
+            version: "1.21.1_HD_U_J1".into(),
+            launchwrapper: "2.3".into(),
+            forge: Some("52.0.16".into()),
+            resource: block_launcher::Resource {
+                sha1: "a".repeat(40),
+                size: 123,
+                url: "block-import:synthetic".into(),
+            },
+        };
+        let count = view.snapshot.instances.len();
+        view.begin_game_wizard(cx);
+        view.set_wizard_version("1.21.1".into(), cx);
+        view.open_game_wizard_page(Some(WizardPage::OptiFine), cx);
+        let field = match &view.form {
+            Some(Form::Instance(form)) => form.version.entity_id(),
+            _ => return,
+        };
+        let old = uuid::Uuid::new_v4();
+        view.shell.wizard.optifine_request = Some(old);
+        view.cancel_component_draft(cx);
+        view.finish_optifine_import(old, field, Ok(selected.clone()), cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none()));
+        view.open_game_wizard_page(Some(WizardPage::OptiFine), cx);
+        let current = uuid::Uuid::new_v4();
+        view.shell.wizard.optifine_request = Some(current);
+        view.finish_optifine_import(old, field, Ok(selected.clone()), cx);
+        assert_eq!(view.shell.wizard.optifine_request, Some(current));
+        view.finish_optifine_import(current, field, Ok(selected.clone()), cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_some()));
+        assert_eq!(view.snapshot.instances.len(), count);
+        view.cancel_component_draft(cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none()));
+        view.open_game_wizard_page(Some(WizardPage::OptiFine), cx);
+        let changed = uuid::Uuid::new_v4();
+        view.shell.wizard.optifine_request = Some(changed);
+        view.set_wizard_version("1.20.6".into(), cx);
+        view.finish_optifine_import(changed, field, Ok(selected), cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none()));
+        assert!(
+            view.shell
+                .wizard
+                .error
+                .as_ref()
+                .is_some_and(|error| error.contains("1.21.1"))
+        );
+        assert_eq!(view.snapshot.instances.len(), count);
+    });
+}
+
 fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
     let bounds = crate::test_support::control_bounds(cx, selector);
@@ -568,7 +625,7 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
 #[gpui::test]
 fn narrow_wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext) {
     for width in [960., 640., 360.] {
-        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let (_view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
             view.begin_game_wizard(cx);
@@ -594,15 +651,6 @@ fn narrow_wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppC
         if width < 640. {
             assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(48.)));
         }
-        // A disabled capability tile consumes the click and preserves the draft.
-        if let Some(bounds) = crate::test_support::control_bounds(cx, "wizard-unavailable-optifine")
-        {
-            cx.simulate_click(
-                point(bounds.left() + px(4.), bounds.top() + px(4.)),
-                Modifiers::none(),
-            );
-        }
-        assert!(view.read_with(cx, |view, _| view.shell.wizard.page.is_none()));
     }
 }
 

@@ -558,6 +558,10 @@ impl Store {
             return Ok(path);
         }
         ensure!(
+            !resource.url.starts_with("block-import:"),
+            "A user-supplied installation file is missing or corrupt. Select the official JAR again."
+        );
+        ensure!(
             !self.offline,
             "missing or corrupt offline resource: {} ({})",
             resource.sha1,

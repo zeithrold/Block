@@ -1429,8 +1429,16 @@ impl Block {
                 "component-optifine",
                 Icon::Experiment,
                 "OptiFine",
-                "Unavailable".to_owned(),
-                "A native OptiFine installer is not available.".to_owned(),
+                instance
+                    .targets
+                    .iter()
+                    .find(|target| profile.is_some_and(|profile| profile.target_id == target.id))
+                    .and_then(|target| target.optifine.as_ref())
+                    .map_or_else(
+                        || "Not installed".to_owned(),
+                        |selected| selected.version.clone(),
+                    ),
+                "Fixed at creation".to_owned(),
                 None,
             ),
             (
@@ -1786,21 +1794,6 @@ fn loader_value(instance: &Instance, profile: Option<&Profile>) -> String {
         .or_else(|| instance.targets.first());
     target.map_or_else(
         || "No launch target".into(),
-        |target| match target.kind {
-            LoaderKind::Vanilla => "Vanilla".into(),
-            LoaderKind::NeoForge => format!(
-                "NeoForge {}",
-                target.loader_version.as_deref().unwrap_or("")
-            ),
-            LoaderKind::Forge => {
-                format!("Forge {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-            LoaderKind::Fabric => {
-                format!("Fabric {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-            LoaderKind::Quilt => {
-                format!("Quilt {}", target.loader_version.as_deref().unwrap_or(""))
-            }
-        },
+        block_launcher::catalog::LaunchTarget::display_name,
     )
 }

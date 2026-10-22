@@ -507,6 +507,7 @@ impl Surface {
             Self::OnboardingSection(page) | Self::WizardSection(page) => match page {
                 super::WizardPage::Version => "Minecraft version",
                 super::WizardPage::Loader => "Mod loader",
+                super::WizardPage::OptiFine => "OptiFine",
                 super::WizardPage::Location => "Game configuration",
             },
             Self::Auth => "Add account",

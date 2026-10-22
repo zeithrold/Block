@@ -96,6 +96,7 @@ impl Block {
             directory: input("", "Automatic installation location", cx),
             loader: block_launcher::catalog::LoaderKind::Vanilla,
             loader_version: None,
+            optifine: None,
         }));
     }
 
@@ -360,7 +361,7 @@ impl Block {
             .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(if compact { 2 } else { 4 }).gap_3()
                 .child(self.wizard_component("version", "Minecraft", (&version, version_kind), WizardPage::Version, cx))
                 .child(self.wizard_component("loader", "Mod loader", (form.loader.name(), form.loader_version.as_deref().unwrap_or("Original game")), WizardPage::Loader, cx))
-                .child(self.wizard_unavailable("optifine", "OptiFine", "Installation is not supported yet.", true))
+                .child(self.wizard_optifine_component(form, cx))
                 .child(self.wizard_component("location", "Configuration", (&configuration.0, &configuration.1), WizardPage::Location, cx)))
             .child(self.setup_caption("Your choices remain a draft until you create the game. Java and required files are downloaded from verified sources.").id("onboarding-draft-note").debug_selector(|| "onboarding-draft-note".into()))
             .into_any_element()
@@ -515,7 +516,7 @@ impl Block {
         &self,
         form: &InstanceForm,
         cx: &Context<'_, Self>,
-    ) -> [(&'static str, String, UiAction); 9] {
+    ) -> [(&'static str, String, UiAction); 10] {
         let account = self
             .accounts
             .iter()
@@ -571,6 +572,14 @@ impl Block {
                 "Mod loader",
                 form.loader_label(),
                 UiAction::OnboardingSection(WizardPage::Loader),
+            ),
+            (
+                "OptiFine",
+                form.optifine.as_ref().map_or_else(
+                    || "Not selected".into(),
+                    |selected| selected.version.clone(),
+                ),
+                UiAction::OnboardingSection(WizardPage::OptiFine),
             ),
             (
                 "Game folder",
@@ -911,7 +920,7 @@ impl Block {
                 Some(Form::Instance(form)) => Some(&form.directory),
                 _ => None,
             },
-            WizardPage::Loader => None,
+            WizardPage::Loader | WizardPage::OptiFine => None,
         };
         if let Some(input) = input {
             input.read(cx).focus_handle(cx).focus(window, cx);
@@ -972,6 +981,7 @@ impl Block {
         let content = match page {
             WizardPage::Version => self.wizard_version(form, cx).into_any_element(),
             WizardPage::Loader => self.wizard_loader(form, cx).into_any_element(),
+            WizardPage::OptiFine => self.wizard_optifine(form, cx).into_any_element(),
             WizardPage::Location => self.wizard_configuration(form, cx).into_any_element(),
         };
         div()
@@ -1091,6 +1101,7 @@ impl Block {
         let version = form.version.read(cx).value();
         let directory = form.directory.read(cx).value();
         let loader = form.selected_loader();
+        let optifine = form.optifine.as_deref().cloned();
         let Some(profile) = &self.shell.wizard.profile else {
             return;
         };
@@ -1115,6 +1126,7 @@ impl Block {
                 version,
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim())),
                 loader,
+                optifine,
                 defaults,
                 Some(values),
                 self.cancel.clone(),

@@ -95,6 +95,28 @@ pub struct LaunchTarget {
     /// Durable installed metadata, not a resolved launch plan.
     pub manifest: Option<PathBuf>,
     pub status: InstallStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optifine: Option<crate::install::optifine::OptiFineJar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optifine_mod: Option<block_download::Resource>,
+}
+
+impl LaunchTarget {
+    /// Describe both the loader and the selected optimization component.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        let loader = self.loader_version.as_ref().map_or_else(
+            || self.kind.name().to_owned(),
+            |version| format!("{} {version}", self.kind.name()),
+        );
+        self.optifine.as_ref().map_or(loader.clone(), |selected| {
+            if self.kind == LoaderKind::Vanilla {
+                format!("OptiFine {}", selected.version)
+            } else {
+                format!("{loader} + OptiFine {}", selected.version)
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -531,10 +531,7 @@ impl Block {
                                     .iter()
                                     .find(|target| target.id == profile.target_id)
                                 {
-                                    badges.push(target.loader_version.as_ref().map_or_else(
-                                        || target.kind.name().into(),
-                                        |version| format!("{} {version}", target.kind.name()),
-                                    ));
+                                    badges.push(target.display_name());
                                 }
                                 badges
                             }),

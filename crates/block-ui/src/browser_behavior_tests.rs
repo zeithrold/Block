@@ -29,6 +29,8 @@ fn fixture(
         loader_version: Some("21.1.90".into()),
         manifest: None,
         status: InstallStatus::Ready,
+        optifine: None,
+        optifine_mod: None,
     });
     let mut profile = view.snapshot.profiles[0].clone();
     profile.id = "profile-b".into();
