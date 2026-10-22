@@ -301,6 +301,8 @@ impl Block {
             show_command: self.show_command,
             recipe: self.recipe.clone(),
             recipe_load: super::RecipeLoadState::default(),
+            #[cfg(windows)]
+            provider_drop: None,
         }
     }
 }

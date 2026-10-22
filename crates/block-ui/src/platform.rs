@@ -19,6 +19,12 @@ pub(super) fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
 
+/// Windows reads the "Show animations in Windows" accessibility setting.
+#[cfg(target_os = "windows")]
+pub(super) fn system_reduce_motion() -> bool {
+    block_drop::system_reduce_motion()
+}
+
 /// GTK/GNOME exposes the system animation preference through gsettings.
 #[cfg(target_os = "linux")]
 pub(super) fn system_reduce_motion() -> bool {
@@ -35,10 +41,7 @@ pub(super) fn system_reduce_motion() -> bool {
 fn animations_disabled(value: &str) -> bool {
     value.trim().eq_ignore_ascii_case("false")
 }
-
-/// Windows system motion preference still needs a platform query; the in-app
-/// preference remains authoritative until that lands.
-#[cfg(target_os = "windows")]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(super) const fn system_reduce_motion() -> bool {
     false
 }

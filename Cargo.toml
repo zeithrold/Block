@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth"]
+members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth", "crates/block-drop"]
 default-members = ["crates/block-app"]
 resolver = "3"
 
@@ -13,6 +13,9 @@ publish = false
 block-auth = { path = "crates/block-auth" }
 unicode-segmentation = "1"
 block-ui = { path = "crates/block-ui" }
+block-drop = { path = "crates/block-drop" }
+raw-window-handle = "0.6"
+async-channel = "2"
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
 gpui-base = "=0.8.0"

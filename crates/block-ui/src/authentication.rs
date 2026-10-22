@@ -112,15 +112,35 @@ struct DeviceCode {
 }
 
 #[derive(Debug)]
-struct AuthProviderDraft {
+pub(crate) struct AuthProviderDraft {
     id: uuid::Uuid,
-    name: gpui::Entity<super::TextInput>,
-    address: gpui::Entity<super::TextInput>,
-    observed_address: String,
-    accepted_http: Option<String>,
-    error: Option<String>,
+    pub(crate) name: gpui::Entity<super::TextInput>,
+    pub(crate) address: gpui::Entity<super::TextInput>,
+    pub(crate) observed_address: String,
+    pub(crate) accepted_http: Option<String>,
+    pub(crate) error: Option<String>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     saved: Option<uuid::Uuid>,
+}
+
+impl AuthWizard {
+    /// Whether the Add-provider page currently owns a draft (drop-zone lifetime).
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "the drop zone is Windows-only")
+    )]
+    pub(super) fn is_provider_drafting(&self) -> bool {
+        self.provider_draft.is_some()
+    }
+
+    /// Mutable access to the draft for drop-payload handoff.
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "the drop zone is Windows-only")
+    )]
+    pub(super) fn provider_draft_mut(&mut self) -> Option<&mut AuthProviderDraft> {
+        self.provider_draft.as_mut()
+    }
 }
 
 #[derive(Default)]
@@ -695,26 +715,29 @@ impl Block {
             .child(note(
                 "Enter the server details or paste an Authlib quick link.",
             ))
-            .child(
-                div()
-                    .id("provider-drop-zone")
-                    .debug_selector(|| "provider-drop-zone".into())
-                    .w_full()
-                    .p_4()
-                    .rounded_lg()
-                    .border_1()
-                    .border_dashed()
-                    .border_color(rgb(self.palette.border))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .child(Icon::ExternalLink.render(20., self.palette.muted))
-                    .child(div().text_sm().child("Drop an Authlib quick link here"))
-                    .child(note(
-                        "You can also paste the link into the server address field.",
-                    )),
-            )
+            .child(super::attach_provider_drop_bounds(
+                div().child(
+                    div()
+                        .id("provider-drop-zone")
+                        .debug_selector(|| "provider-drop-zone".into())
+                        .w_full()
+                        .p_4()
+                        .rounded_lg()
+                        .border_1()
+                        .border_dashed()
+                        .border_color(rgb(self.palette.border))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_1()
+                        .child(Icon::ExternalLink.render(20., self.palette.muted))
+                        .child(div().text_sm().child("Drop an Authlib quick link here"))
+                        .child(note(
+                            "You can also paste the link into the server address field.",
+                        )),
+                ),
+                cx.entity().downgrade(),
+            ))
             .child(components::field_with(
                 "Display name",
                 &draft.name,

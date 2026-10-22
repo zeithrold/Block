@@ -760,6 +760,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-drop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "block-launcher"
 version = "0.1.0"
 dependencies = [
@@ -805,7 +815,9 @@ name = "block-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "block-auth",
+ "block-drop",
  "block-launcher",
  "directories",
  "gpui-base",
@@ -816,6 +828,7 @@ dependencies = [
  "gpui-pre-platform",
  "minecraft-manifest",
  "objc2-app-kit 0.3.2",
+ "raw-window-handle",
  "semver",
  "serde",
  "serde_json",
