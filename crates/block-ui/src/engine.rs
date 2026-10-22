@@ -642,6 +642,54 @@ impl Engine {
         );
     }
 
+    /// Save the Instance draft together with a Replace/Remove OptiFine choice,
+    /// then reinstall that target so the saved JAR is actually applied.
+    pub(super) fn save_instance_with_optifine(
+        &self,
+        id: String,
+        configuration: block_launcher::catalog::InstanceConfiguration,
+        target_id: String,
+        optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let catalog_root = root.clone();
+            let write = {
+                let id = id.clone();
+                let target_id = target_id.clone();
+                let selected = optifine.map(|selected| *selected);
+                tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                    Catalog::open(catalog_root)?.save_instance_with_optifine(
+                        &id,
+                        configuration,
+                        &target_id,
+                        selected,
+                    )?;
+                    Ok(())
+                })
+                .await
+            };
+            let result = match write {
+                Ok(Ok(())) => {
+                    async {
+                        library(root.clone(), &sender)
+                            .await?
+                            .install(&id, &target_id, &cancel)
+                            .await?;
+                        Ok("Instance settings saved · OptiFine applied".to_owned())
+                    }
+                    .await
+                }
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(error.into()),
+            };
+            send_catalog(&root, &sender).await;
+            finish(&sender, result).await;
+        });
+    }
+
     fn catalog_change(
         &self,
         operation: impl FnOnce(Catalog) -> anyhow::Result<()> + Send + 'static,
