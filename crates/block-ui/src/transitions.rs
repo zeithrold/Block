@@ -264,6 +264,8 @@ impl Block {
             snapshot: self.snapshot.clone(),
             host_arch_override: self.host_arch_override,
             accounts: self.accounts.clone(),
+            account_avatars: self.account_avatars.clone(),
+            provider_icons: self.provider_icons.clone(),
             versions: self.versions.clone(),
             version_load: self.version_load.clone(),
             version_catalog: self.version_catalog.clone(),

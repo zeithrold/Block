@@ -510,6 +510,60 @@ impl MicrosoftAuth {
         Ok(session)
     }
 
+    /// Resolve the account's active Minecraft skin from the official profile API.
+    /// The bearer token is only sent to the official endpoint; failures are silent
+    /// so callers can fall back to initials instead of a demo image.
+    ///
+    /// # Errors
+    /// Returns identity/cancellation/network errors; a profile without an active,
+    /// trusted skin URL yields `Ok(None)`, not an error.
+    pub async fn profile_skin(
+        &self,
+        session: &AuthenticatedSession,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<crate::SkinTexture>> {
+        self.validate_account(&session.account)?;
+        let profile: MinecraftProfileSkins = self
+            .request(
+                self.client
+                    .get(self.endpoint(PROFILE))
+                    .bearer_auth(session.expose_access_token()),
+                "Minecraft profile",
+                cancellation,
+            )
+            .await?;
+        let Some(skin) = profile
+            .skins
+            .into_iter()
+            .find(|skin| skin.state.eq_ignore_ascii_case("ACTIVE"))
+        else {
+            return Ok(None);
+        };
+        let Ok(url) = url::Url::parse(&skin.url) else {
+            return Ok(None);
+        };
+        if (url.scheme() != "https" && url.scheme() != "http")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.host_str() != Some("textures.minecraft.net")
+        {
+            return Ok(None);
+        }
+        let variant = if skin
+            .variant
+            .as_deref()
+            .is_some_and(|variant| variant.eq_ignore_ascii_case("slim"))
+        {
+            crate::SkinVariant::Slim
+        } else {
+            crate::SkinVariant::Classic
+        };
+        Ok(Some(crate::SkinTexture {
+            url: url.to_string(),
+            variant,
+        }))
+    }
+
     /// Delete this app's refresh credential. Remove metadata only after success.
     /// Already missing credentials count as signed out. Existing Java processes keep
     /// their in-memory session until exit; sign-out is not a remote token-revocation API.
@@ -813,6 +867,19 @@ impl Entitlements {
 }
 
 #[derive(Deserialize)]
+struct MinecraftProfileSkins {
+    #[serde(default)]
+    skins: Vec<MinecraftSkin>,
+}
+
+#[derive(Deserialize)]
+struct MinecraftSkin {
+    url: String,
+    state: String,
+    variant: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct MinecraftProfile {
     id: String,
     name: String,
@@ -950,6 +1017,80 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[tokio::test]
+    async fn profile_skin_reads_the_active_official_skin()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (base, task) = scripted_server(vec![
+            (
+                200,
+                r#"{"skins":[{"id":"s1","state":"INACTIVE","url":"https://textures.minecraft.net/texture/inactive","variant":"CLASSIC"},{"id":"s2","state":"ACTIVE","url":"https://textures.minecraft.net/texture/active","variant":"SLIM"}]}"#,
+            ),
+        ])
+        .await?;
+        let mut auth = MicrosoftAuth::new("00000000-0000-4000-8000-000000000001")?;
+        auth.test_base_url = Some(base);
+        let account = Account {
+            reference: AccountRef {
+                player_id: Uuid::from_u128(9),
+            },
+            provider: AccountProvider::Microsoft,
+            player_name: "Player".into(),
+            client_id: auth.client_id.clone(),
+            credential_ref: credential_ref(&auth.client_id, Uuid::from_u128(9)),
+            authlib: None,
+        };
+        let session = AuthenticatedSession::for_test(account, "synthetic-minecraft", "{}");
+        let skin = auth
+            .profile_skin(&session, &CancellationToken::new())
+            .await?
+            .ok_or(AuthError::InvalidResponse {
+                stage: "Minecraft profile",
+            })?;
+        assert_eq!(skin.url, "https://textures.minecraft.net/texture/active");
+        assert_eq!(skin.variant, crate::SkinVariant::Slim);
+        task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn profile_skin_ignores_inactive_and_untrusted_hosts()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let (base, task) = scripted_server(vec![
+            (200, r#"{"skins":[]}"#),
+            (
+                200,
+                r#"{"skins":[{"id":"s3","state":"ACTIVE","url":"https://evil.example.net/skin.png","variant":"CLASSIC"}]}"#,
+            ),
+            (
+                200,
+                r#"{"skins":[{"id":"s4","state":"ACTIVE","url":"https://user:pass@textures.minecraft.net/texture/credentialed","variant":"CLASSIC"}]}"#,
+            ),
+        ])
+        .await?;
+        let mut auth = MicrosoftAuth::new("00000000-0000-4000-8000-000000000001")?;
+        auth.test_base_url = Some(base);
+        let account = Account {
+            reference: AccountRef {
+                player_id: Uuid::from_u128(9),
+            },
+            provider: AccountProvider::Microsoft,
+            player_name: "Player".into(),
+            client_id: auth.client_id.clone(),
+            credential_ref: credential_ref(&auth.client_id, Uuid::from_u128(9)),
+            authlib: None,
+        };
+        let session = AuthenticatedSession::for_test(account, "synthetic-minecraft", "{}");
+        for _ in 0..3 {
+            assert!(
+                auth.profile_skin(&session, &CancellationToken::new())
+                    .await?
+                    .is_none()
+            );
+        }
+        task.await??;
+        Ok(())
     }
 
     async fn scripted_server(

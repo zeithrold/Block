@@ -6,12 +6,13 @@
     reason = "Shared controls remain scoped to the private UI module."
 )]
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui::{
-    App, CursorStyle, Div, Entity, Focusable as _, FontWeight, InteractiveElement as _,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    Window, div, px, relative, rgb,
+    App, CursorStyle, Div, Entity, Focusable as _, FontWeight, Image, ImageFormat,
+    InteractiveElement as _, ObjectFit, ParentElement as _, SharedString, Stateful,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, img, px, relative,
+    rgb,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -823,7 +824,6 @@ pub(super) enum AvatarState {
     Loading,
     #[default]
     Fallback,
-    Unavailable,
 }
 
 pub(super) fn avatar_fallback(name: &str, palette: Palette, size: f32, state: AvatarState) -> Div {
@@ -842,7 +842,129 @@ pub(super) fn avatar_fallback(name: &str, palette: Palette, size: f32, state: Av
         .text_size(px(if size <= 24. { 10. } else { 14. }));
     match state {
         AvatarState::Loading => avatar.child(Icon::Loading.render(16., palette.muted)),
-        AvatarState::Fallback | AvatarState::Unavailable => avatar.child(initials(name)),
+        AvatarState::Fallback => avatar.child(initials(name)),
+    }
+}
+
+/// A real account skin, cached in memory as the source PNG the renderer draws.
+#[derive(Clone)]
+pub(super) struct AccountAvatar {
+    pub image: Arc<Image>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl std::fmt::Debug for AccountAvatar {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AccountAvatar")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A validated provider icon from the provider's own declared URL.
+#[derive(Clone)]
+pub(super) struct ProviderBadge {
+    pub image: Arc<Image>,
+}
+
+impl std::fmt::Debug for ProviderBadge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderBadge")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Skin pixel scale for the 64-unit skin grid: source pixels per UI pixel.
+fn skin_scale(width: u32, size: f32) -> (f32, f32, f32) {
+    let factor = width as f32 / 64.0;
+    let scale = size / (8.0 * factor);
+    (
+        scale,
+        factor,
+        f32::from(u16::try_from(width).unwrap_or(u16::MAX)),
+    )
+}
+
+/// Draw the face plus hat layer from the real skin, or the initials fallback.
+pub(super) fn account_avatar(
+    name: &str,
+    avatar: Option<&AccountAvatar>,
+    palette: Palette,
+    size: f32,
+    state: AvatarState,
+) -> Div {
+    let Some(avatar) = avatar.filter(|_| state != AvatarState::Loading) else {
+        return avatar_fallback(name, palette, size, state);
+    };
+    let (scale, factor, _) = skin_scale(avatar.width, size);
+    let layer = |source_x: f32, source_y: f32| {
+        let offset_x = -(source_x * factor * scale);
+        let offset_y = -(source_y * factor * scale);
+        div().absolute().left(px(offset_x)).top(px(offset_y)).child(
+            img(avatar.image.clone())
+                .w(px(avatar.width as f32 * scale))
+                .h(px(avatar.height as f32 * scale)),
+        )
+    };
+    div()
+        .size(px(size))
+        .flex_shrink_0()
+        .relative()
+        .overflow_hidden()
+        .rounded_full()
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.secondary))
+        .child(layer(8., 8.))
+        .child(layer(40., 8.))
+}
+
+/// Map a validated provider-icon kind to the renderer's image format.
+pub(super) fn icon_image_format(kind: block_launcher::avatars::ImageKind) -> ImageFormat {
+    use block_launcher::avatars::ImageKind;
+    match kind {
+        ImageKind::Png => ImageFormat::Png,
+        ImageKind::Jpeg => ImageFormat::Jpeg,
+        ImageKind::Gif => ImageFormat::Gif,
+        ImageKind::Webp => ImageFormat::Webp,
+        ImageKind::Bmp => ImageFormat::Bmp,
+        ImageKind::Svg => ImageFormat::Svg,
+    }
+}
+
+/// Draw the provider's real icon, or a monogram with its initials.
+pub(super) fn provider_icon(
+    name: &str,
+    icon: Option<&ProviderBadge>,
+    palette: Palette,
+    size: f32,
+) -> Div {
+    let base = div()
+        .size(px(size))
+        .flex_shrink_0()
+        .overflow_hidden()
+        .rounded(px(if size > 24. { 6. } else { 4. }))
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.secondary))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(palette.muted))
+        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(if size <= 24. { 10. } else { 13. }));
+    match icon {
+        Some(icon) => base.child(
+            img(icon.image.clone())
+                .w(px(size))
+                .h(px(size))
+                .object_fit(ObjectFit::Cover),
+        ),
+        None => base.child(initials(name)),
     }
 }
 
@@ -1049,6 +1171,18 @@ mod tests {
             ProgressState::from_counts(100, Some(80)).fraction(),
             Some(1.)
         );
+    }
+
+    #[test]
+    fn skin_crop_geometry_covers_classic_and_hd_skins() {
+        let (scale, factor, pixels) = super::skin_scale(64, 48.);
+        assert!((scale - 6.).abs() < f32::EPSILON);
+        assert!((factor - 1.).abs() < f32::EPSILON);
+        assert!((pixels - 64.).abs() < f32::EPSILON);
+        let (scale, factor, pixels) = super::skin_scale(128, 48.);
+        assert!((scale - 3.).abs() < f32::EPSILON);
+        assert!((factor - 2.).abs() < f32::EPSILON);
+        assert!((pixels - 128.).abs() < f32::EPSILON);
     }
 
     #[test]

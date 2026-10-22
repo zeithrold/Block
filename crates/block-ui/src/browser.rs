@@ -894,7 +894,12 @@ impl Block {
         } else {
             self.palette.sidebar
         }))
-        .child(self.record_avatar(record.icon, &record.title, 40.))
+        .child(self.record_avatar(
+            record.icon,
+            &record.title,
+            self.account_avatars.get(&record.id),
+            40.,
+        ))
         .child(
             div()
                 .flex_1()
@@ -933,7 +938,13 @@ impl Block {
         row
     }
 
-    fn record_avatar(&self, icon: RowIcon, name: &str, size: f32) -> gpui::Div {
+    fn record_avatar(
+        &self,
+        icon: RowIcon,
+        name: &str,
+        avatar: Option<&components::AccountAvatar>,
+        size: f32,
+    ) -> gpui::Div {
         match icon {
             RowIcon::Profile(appearance) => {
                 components::profile_avatar(appearance, self.palette, size)
@@ -948,7 +959,7 @@ impl Block {
                 .justify_center()
                 .child(Icon::Blocks.render(size * 0.5, self.palette.muted)),
             RowIcon::Account => {
-                components::avatar_fallback(name, self.palette, size, AvatarState::Fallback)
+                components::account_avatar(name, avatar, self.palette, size, AvatarState::Fallback)
                     .rounded(px(if size > 40. { 16. } else { 8. }))
                     .relative()
                     .child(
@@ -1051,7 +1062,13 @@ impl Block {
                 let current = self.selected_account.as_ref() == Some(&id);
                 let offline = account.provider == block_auth::AccountProvider::Offline;
                 let external = account.provider == block_auth::AccountProvider::Authlib;
-                body = body.child(self.detail_identity(RowIcon::Account, &account.player_name, vec![(self.account_authority(account), BadgeVariant::Secondary)], current))
+                body = body.child(self.detail_identity(
+                    RowIcon::Account,
+                    &account.player_name,
+                    self.account_avatars.get(&id),
+                    vec![(self.account_authority(account), BadgeVariant::Secondary)],
+                    current,
+                ))
                     .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", account.provider.label().into()), ("Authentication", if offline { "Local identity; no online authorization" } else if external { "External authentication provider" } else { "Ownership rechecked at launch" }.into()), ("Environment", "Minecraft: Java Edition".into())], narrow))
                     .child(div().border_t_1().border_color(rgb(self.palette.border)).pt_5().flex().flex_col().gap_2()
                         .child(note(if offline { "A local player identity for offline play." } else if external { "An identity issued by an external authentication provider." } else { "A Microsoft identity for Minecraft: Java Edition." }))
@@ -1111,6 +1128,7 @@ impl Block {
                     .child(self.detail_identity(
                         RowIcon::Instance,
                         &instance.name,
+                        None,
                         self.instance_badges(instance, None),
                         false,
                     ))
@@ -1141,6 +1159,7 @@ impl Block {
                             self.detail_identity(
                                 RowIcon::Profile(profile.appearance),
                                 &profile.name,
+                                None,
                                 self.instance_badges(instance, Some(profile)),
                                 current,
                             )
@@ -1298,7 +1317,12 @@ impl Block {
         .p_0()
         .rounded_none()
         .border_0()
-        .child(self.record_avatar(record.icon, &record.title, 32.));
+        .child(self.record_avatar(
+            record.icon,
+            &record.title,
+            self.account_avatars.get(&record.id),
+            32.,
+        ));
         super::tooltip::trigger(control, record.title.clone(), cx)
     }
 
@@ -1319,6 +1343,7 @@ impl Block {
         &self,
         icon: RowIcon,
         name: &str,
+        avatar: Option<&components::AccountAvatar>,
         badges: Vec<(String, BadgeVariant)>,
         current: bool,
     ) -> gpui::Div {
@@ -1329,6 +1354,7 @@ impl Block {
             .child(self.record_avatar(
                 icon,
                 name,
+                avatar,
                 if matches!(icon, RowIcon::Account) {
                     80.
                 } else {
@@ -1617,7 +1643,7 @@ impl Block {
                 .flex()
                 .items_center()
                 .gap_3()
-                .child(self.record_avatar(RowIcon::Instance, &instance.name, 40.))
+                .child(self.record_avatar(RowIcon::Instance, &instance.name, None, 40.))
                 .child(
                     div()
                         .min_w_0()

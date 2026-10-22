@@ -594,6 +594,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
         let name = account.map_or("Welcome to Block", |account| account.player_name.as_str());
+        let avatar = account.and_then(|account| self.account_avatars.get(&account_id(account)));
         let has_account = account.is_some();
         let mut identity = div()
             .id(if account.is_some() {
@@ -666,7 +667,7 @@ impl Block {
                                 ),
                         ),
                 )
-                .child(self.home_avatar(name, window, cx));
+                .child(self.home_avatar(name, avatar, window, cx));
         } else {
             identity = identity
                 .child(super::design::Icon::Account.render(40., self.palette.muted))
@@ -684,6 +685,7 @@ impl Block {
     fn home_avatar(
         &self,
         name: &str,
+        avatar: Option<&super::components::AccountAvatar>,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
@@ -711,8 +713,9 @@ impl Block {
             .border_0()
             .bg(gpui::hsla(0., 0., 0., 0.))
             .child(
-                super::components::avatar_fallback(
+                super::components::account_avatar(
                     name,
+                    avatar,
                     palette,
                     avatar_size,
                     super::components::AvatarState::Fallback,
