@@ -8,6 +8,25 @@ publish.workspace = true
 anyhow.workspace = true
 async-channel = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# AppKit/Foundation objects are reached through objc2 so the crate can own a
+# real `NSView` dragging destination without adding an Objective-C toolchain.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSDragging",
+    "NSPasteboard",
+    "NSResponder",
+    "NSView",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSGeometry",
+    "NSObject",
+    "NSString",
+] }
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 # The X11 stack is already in the workspace through GPUI; this crate only adds
 # the safe XCB bindings it directly uses for XDND.

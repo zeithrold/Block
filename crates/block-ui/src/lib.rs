@@ -91,7 +91,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, PathPromptOptions,
     Pixels, Render, SharedString, Styled as _, WeakEntity, Window, div, px, rgb,
 };
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 
@@ -391,9 +391,9 @@ pub struct Block {
     show_command: bool,
     recipe: Option<LaunchRecipe>,
     recipe_load: RecipeLoadState,
-    /// Owned native drop target (OLE on Windows, XDND on Linux) over the
-    /// rendered provider drop zone.
-    #[cfg(any(windows, target_os = "linux"))]
+    /// Owned native drop target (OLE on Windows, AppKit on macOS, XDND on
+    /// Linux X11) over the rendered provider drop zone.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     provider_drop: Option<ProviderDrop>,
     /// A Play requested while another operation was running, started on completion.
     pending_play: bool,
@@ -423,7 +423,7 @@ impl RecipeLoadState {
 }
 
 /// Owns the native child window that receives provider quick-link drops.
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 #[derive(Debug)]
 struct ProviderDrop {
     target: block_drop::DropTarget,
@@ -580,7 +580,7 @@ impl Block {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(any(windows, target_os = "linux"))]
+            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             provider_drop: None,
             pending_play: false,
         };
@@ -2419,9 +2419,9 @@ impl Render for Block {
 }
 
 impl Block {
-    /// Attach or release the Windows OLE drop target as the provider draft appears
-    /// or disappears. Non-Windows platforms keep this a no-op.
-    #[cfg(any(windows, target_os = "linux"))]
+    /// Attach or release the owned native drop target as the provider draft
+    /// appears or disappears. Platforms without a drop backend keep this a no-op.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn sync_provider_drop(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         let drafting = self
             .shell
@@ -2447,6 +2447,8 @@ impl Block {
             RawWindowHandle::Xlib(xlib) => isize::try_from(xlib.window).ok(),
             #[cfg(target_os = "linux")]
             RawWindowHandle::Wayland(_) => None,
+            #[cfg(target_os = "macos")]
+            RawWindowHandle::AppKit(appkit) => Some(appkit.ns_view.as_ptr() as isize),
             _ => None,
         };
         let Some(parent) = parent else {
@@ -2493,8 +2495,8 @@ impl Block {
         }
     }
 
-    /// Keep the owned native child window aligned with the rendered drop zone.
-    #[cfg(any(windows, target_os = "linux"))]
+    /// Keep the owned native drop surface aligned with the rendered zone.
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn position_provider_drop(&mut self, bounds: &[Bounds<Pixels>], scale: f32) {
         let Some(first) = bounds.first() else {
             return;
@@ -2522,7 +2524,7 @@ impl Block {
 
     /// Feed an accepted quick link through the same recognise/normalise path as
     /// pasting it and pressing "Recognize address".
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     fn apply_provider_drop(&mut self, payload: String, cx: &mut Context<'_, Self>) {
         if let Some(draft) = self
             .shell
@@ -2539,26 +2541,27 @@ impl Block {
         cx.notify();
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     fn sync_provider_drop(&mut self, _window: &Window, _cx: &mut Context<'_, Self>) {}
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[expect(
         dead_code,
         reason = "the drop zone only drives real bounds and payloads where a native target exists"
     )]
     fn position_provider_drop(&mut self, _bounds: &[Bounds<Pixels>], _scale: f32) {}
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[expect(
         dead_code,
-        reason = "quick-link drops are a Windows OLE and Linux XDND capability"
+        reason = "quick-link drops need an owned native target; the stub platforms have none"
     )]
     fn apply_provider_drop(&mut self, _payload: String, _cx: &mut Context<'_, Self>) {}
 }
 
-/// Subscribe the rendered drop zone to its real window bounds (Windows and X11).
-#[cfg(any(windows, target_os = "linux"))]
+/// Subscribe the rendered drop zone to its real window bounds (Windows, macOS
+/// and X11).
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui::Div {
     zone.on_children_prepainted(move |bounds, window, cx| {
         if let Some(view) = view.upgrade() {
@@ -2570,7 +2573,7 @@ fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui
     })
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpui::Div {
     zone
 }
@@ -2862,7 +2865,7 @@ mod tests {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(any(windows, target_os = "linux"))]
+            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             provider_drop: None,
             pending_play: false,
         }

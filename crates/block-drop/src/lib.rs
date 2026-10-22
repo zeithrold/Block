@@ -1,12 +1,13 @@
-//! Owned child-window OLE drop target for the Authlib quick-link drop zone.
+//! Owned native drop target for the Authlib quick-link drop zone.
 //!
 //! This crate is the only place in the workspace where `unsafe_code` is lowered:
 //! the rest of the launcher forbids it. GPUI windows are never subclassed,
-//! patched or swizzled. The launcher instead creates its own transparent child
-//! HWND over the rendered drop zone, registers an OLE `IDropTarget` on that
-//! child, and forwards accepted `CF_UNICODETEXT` payloads over an async channel
-//! to the UI thread. Every `unsafe` block carries a SAFETY comment explaining
-//! the invariant it relies on.
+//! patched or swizzled. The launcher instead creates its own transparent native
+//! drop surface over the rendered drop zone — an OLE-registered child HWND on
+//! Windows, an owned `NSView` dragging destination on macOS and an XDND child
+//! window on Linux X11 — and forwards accepted text payloads over an async
+//! channel to the UI thread. Every `unsafe` block carries a SAFETY comment
+//! explaining the invariant it relies on.
 
 #![allow(unsafe_code)]
 
@@ -90,19 +91,25 @@ impl DropZone {
 #[cfg(windows)]
 mod windows;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 #[cfg(all(unix, not(target_os = "macos")))]
 mod linux;
 
-#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+#[cfg(not(any(windows, unix)))]
 mod stub;
 
 #[cfg(windows)]
 use windows::NativeTarget;
 
+#[cfg(target_os = "macos")]
+use macos::NativeTarget;
+
 #[cfg(all(unix, not(target_os = "macos")))]
 use linux::NativeTarget;
 
-#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+#[cfg(not(any(windows, unix)))]
 use stub::NativeTarget;
 
 /// Whether the operating system asks applications to reduce motion.
@@ -122,8 +129,8 @@ pub fn system_reduce_motion() -> bool {
     }
 }
 
-/// A live provider drop zone; dropping this value revokes the OLE registration
-/// and destroys the owned child window.
+/// A live provider drop zone; dropping this value revokes the native drag
+/// registration and removes the owned surface.
 pub struct DropTarget(NativeTarget);
 
 impl fmt::Debug for DropTarget {
@@ -133,16 +140,17 @@ impl fmt::Debug for DropTarget {
 }
 
 impl DropTarget {
-    /// Creates the owned child window and registers an OLE drop target on it.
+    /// Creates the owned native drop surface over the product window.
     ///
-    /// `parent_window` is the raw Win32 `HWND` of the product window, obtained
-    /// through `raw-window-handle`; it must stay alive while this value exists.
-    /// On non-Windows platforms the target is inert so the launcher keeps a
-    /// single code path.
+    /// `parent_window` is the platform window handle obtained through
+    /// `raw-window-handle`: the Win32 `HWND`, the X11 window id, or the
+    /// `NSView` pointer. It must stay alive while this value exists, which the
+    /// platform targets enforce by retaining it. On platforms without a
+    /// backend the target is inert so the launcher keeps a single code path.
     ///
     /// # Errors
     /// Fails when the parent handle is missing or the platform refuses the
-    /// child window / OLE registration.
+    /// owned drop window or its drag registration.
     pub fn attach(
         parent_window: isize,
         zone: DropZone,
