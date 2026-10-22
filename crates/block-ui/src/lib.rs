@@ -82,6 +82,7 @@ use block_launcher::{
     CancellationToken,
     catalog::{DataPolicy, Instance, Profile, Snapshot},
     crash::CrashReport,
+    platform::Architecture,
     recipe::{LaunchRecipe, RuntimeSelection},
     session_host::{self, RunRecord, RunState},
 };
@@ -348,6 +349,8 @@ pub struct Block {
     snapshot: Snapshot,
     accounts: Vec<Account>,
     versions: Vec<String>,
+    /// Test-only architecture override for version-availability policy.
+    host_arch_override: Option<Architecture>,
     version_load: browser::CollectionLoad,
     version_catalog: Vec<minecraft_manifest::model::VersionEntry>,
     selected_instance: Option<String>,
@@ -516,6 +519,7 @@ impl Block {
             snapshot: Snapshot::default(),
             accounts: Vec::new(),
             versions: Vec::new(),
+            host_arch_override: None,
             version_load: if engine.is_some() {
                 browser::CollectionLoad::Loading
             } else {
@@ -1854,6 +1858,12 @@ impl Block {
         let directory = form.directory.read(cx).value();
         let name = form.name.read(cx).value();
         let version = form.version.read(cx).value();
+        if self.wizard_version_restriction(version.trim()).is_some() {
+            self.report(block_launcher::support::legacy_lwjgl_message(
+                version.trim(),
+            ));
+            return false;
+        }
         let message = if name.trim().is_empty() {
             Some("Enter a game name")
         } else if name.len() > 160 || name.chars().any(char::is_control) {
@@ -2434,6 +2444,7 @@ mod tests {
             snapshot: block_launcher::catalog::Snapshot::default(),
             accounts: Vec::new(),
             versions: vec!["1.20.6".into()],
+            host_arch_override: None,
             version_load: super::browser::CollectionLoad::Ready,
             version_catalog: Vec::new(),
             selected_instance: None,

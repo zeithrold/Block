@@ -262,6 +262,7 @@ impl Block {
             saved_preferences: self.saved_preferences.clone(),
             palette: self.palette,
             snapshot: self.snapshot.clone(),
+            host_arch_override: self.host_arch_override,
             accounts: self.accounts.clone(),
             versions: self.versions.clone(),
             version_load: self.version_load.clone(),
