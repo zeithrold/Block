@@ -192,7 +192,7 @@ impl fmt::Debug for NativeTarget {
 }
 
 fn hwnd_of(raw: isize) -> Option<HWND> {
-    std::ptr::NonNull::new(raw as *mut core::ffi::c_void).map(HWND::from)
+    (raw != 0).then(|| HWND(raw as *mut core::ffi::c_void))
 }
 
 /// Minimal window procedure: the layered child paints nothing of its own.
@@ -211,10 +211,8 @@ fn ensure_window_class() -> Result<()> {
     REGISTER_CLASS.call_once(|| {
         // SAFETY: a null module name resolves to this process module; the handle
         // is only stored in the registered window class.
-        let instance = unsafe { GetModuleHandleW(None) }.map_or(HINSTANCE::default(), |module| {
-            // SAFETY: HMODULE and HINSTANCE share the same handle value here.
-            unsafe { std::mem::transmute_copy(&module) }
-        });
+        let instance = unsafe { GetModuleHandleW(None) }
+            .map_or_else(|_| HINSTANCE::default(), |module| HINSTANCE(module.0));
         let class = WNDCLASSW {
             lpfnWndProc: Some(drop_window_proc),
             hInstance: instance,
