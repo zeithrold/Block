@@ -38,7 +38,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
 | Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector sheets. |
-| Real account avatars in Home and selectors | No | Pending | Pending | Initial fallback only. |
+| Real account avatars in Home and selectors | Yes | Pending | Pending | Microsoft active skin and Authlib declared textures only; bounded validated fetch, data-dir cache with digest/URL/structure revalidation, silent initials fallback (no demo skins). Native display check pending. |
 | Play/Stop, recovery and crash help | Yes | Partial | Pending | Windows Play/Stop and macOS relaunch passed; crash help pending. |
 | Downloads, retries and file details | Yes | Pending | Pending | Real byte events. |
 
@@ -51,7 +51,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Microsoft Device Code and final confirmation | Yes | Yes | Pending | macOS, Windows, Linux ARM64 and Linux AMD64 native saves passed; Linux AMD64 was 0f7e26b. |
 | Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
-| Authlib provider icon retrieval and display | No | Pending | Pending | Only icon URL is cached. |
+| Authlib provider icon retrieval and display | Yes | Pending | Pending | Bounded validated fetch against the provider API host, data-dir cache, monogram fallback. ICO-only favicons fall back to the monogram (accepted limitation). Native display check pending. |
 | Provider URL/paste import, duplicate selection, HTTP consent | Yes | Pending | Pending | Address-bound consent. |
 | External quick-link text drop | No | Pending | Pending | Owned native target required. |
 | Authlib password form, characters and final save | Yes | Pending | Pending | Local fixture allowed. |
