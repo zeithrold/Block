@@ -76,7 +76,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | OptiFine standalone/Forge import and installation | Partial | Pending | Pending | Existing-target re-import UI missing. |
 | Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
 | Productized LWJGL 3 ARM64 compatibility and Java 8 | Partial | Pending | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives for 3.3.1+ manifests; pre-3.3.1 composition and ARM64 Java 8 pending. |
-| ARM64 LWJGL 2 picker restriction | No | Pending | Pending | Explain unavailable natives. |
+| ARM64 LWJGL 2 picker restriction | Yes | Yes (Linux ARM64) | Pending | Rows stay visible but disabled with the inline reason; typed exact IDs are refused in-dialog. Native proof on Linux ARM64 (851e23b); macOS/Windows ARM64 picker checks pending. |
 | Deletion, confirmation and linked Profiles | Yes | Pending | Pending | Player files retained. |
 
 ### Settings
