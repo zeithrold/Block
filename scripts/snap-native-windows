@@ -1,0 +1,1117 @@
+#!/usr/bin/env python3
+"""Capture disposable, network-free debug scenarios on the Windows AMD64 host.
+
+The host is driven over SSH using its PowerShell default shell. GUI scenarios
+must run inside the interactive Windows desktop session, so a scheduled task
+(schtasks /create /it) runs a PowerShell session loop that launches block-app
+per scenario/theme and captures only that process's own top-level windows with
+PrintWindow (plus a screen-crop fallback for hardware-composited frames). The
+PNG files are copied back into the shared workspace and scripts/parity-board is
+rebuilt.
+
+Host layout lives on D: because the Windows system drive C: is small:
+  D:\\block-src      git checkout moved to the pushed origin/main commit
+  D:\\block-target   Cargo target directory for the debug block-app build
+  D:\\block-tools    compiled capture helper, runner scripts and logs
+
+Usage: source .env first (WINDOWS_SSH must be exported), then
+  python3 scripts/snap-native-windows [--scenario NAME] [--theme light|dark]
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+LOCAL_SCENARIOS = ROOT / "target/parity-shots/windows-amd64/scenarios"
+REMOTE_CHECKOUT = r"D:\block-src"
+REMOTE_TARGET = r"D:\block-target"
+REMOTE_TOOLS = r"D:\block-tools"
+REMOTE_BINARY = REMOTE_TARGET + r"\debug\block.exe"
+REMOTE_HELPER = REMOTE_TOOLS + r"\capture.exe"
+REMOTE_SCENARIOS = REMOTE_CHECKOUT + r"\target\parity-shots\windows-amd64\scenarios"
+REMOTE_SETTINGS = REMOTE_TOOLS + r"\capture-settings.json"
+REMOTE_LOG = REMOTE_TOOLS + r"\capture-session.log"
+REMOTE_DONE = REMOTE_TOOLS + r"\capture-done.txt"
+# Git for Windows ships with Visual Studio but is not on the SSH PATH.
+GIT = (
+    r"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE"
+    r"\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe"
+)
+DEFAULT_TIMEOUT = 2700
+
+# The dialog scenarios open a second window, so wait for both before capturing.
+# Keep this list identical to scripts/snap-native.
+DIALOGS = {
+    "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
+    "download-files", "wizard-version-picker", "wizard-loader-picker",
+    "wizard-fabric-picker", "wizard-quilt-picker", "wizard-loader-loading",
+    "wizard-neoforge-picker",
+    "wizard-loader-error", "wizard-loader-empty",
+    "wizard-configuration", "welcome-version-picker", "remove-confirmation",
+    "remove-account-confirmation", "remove-provider-confirmation",
+    "separate-confirmation", "games-help",
+    "storage-cleanup-confirmation",
+    "welcome-settings", "welcome-about",
+}
+
+CAPTURE_CS = r'''using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+// Window-targeted PNG capture helper for the Windows Block scenario matrix.
+// It only looks at top-level windows owned by the requested process id.
+internal static class SnapWindows
+{
+    private const uint WM_CLOSE = 0x0010;
+    private const uint PW_CLIENTONLY = 0x00000001;
+    private const uint PW_RENDERFULLCONTENT = 0x00000002;
+
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+
+        public int Width { get { return Right - Left; } }
+        public int Height { get { return Bottom - Top; } }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointStruct
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW")]
+    private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int count);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr hwnd, ref PointStruct point);
+    [DllImport("user32.dll")]
+    private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool SetProcessDPIAware();
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private sealed class WindowInfo
+    {
+        public IntPtr Handle;
+        public string Title;
+        public string ClassName;
+        public Rect WindowRect;
+        public Rect ClientRect;
+
+        public string Key()
+        {
+            return Handle.ToInt64().ToString(CultureInfo.InvariantCulture) + "|" + Title + "|" +
+                WindowRect.Left + "," + WindowRect.Top + "," + WindowRect.Width + "," + WindowRect.Height;
+        }
+    }
+
+    private static string ReadTitle(IntPtr hwnd)
+    {
+        StringBuilder buffer = new StringBuilder(1024);
+        GetWindowText(hwnd, buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
+
+    private static string ReadClass(IntPtr hwnd)
+    {
+        StringBuilder buffer = new StringBuilder(256);
+        GetClassName(hwnd, buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
+
+    private static List<WindowInfo> Describe(uint pid)
+    {
+        List<WindowInfo> windows = new List<WindowInfo>();
+        EnumWindows(delegate(IntPtr hwnd, IntPtr unused)
+        {
+            uint owner;
+            GetWindowThreadProcessId(hwnd, out owner);
+            if (owner != pid)
+            {
+                return true;
+            }
+            Rect windowRect;
+            if (!GetWindowRect(hwnd, out windowRect))
+            {
+                return true;
+            }
+            Rect clientRect;
+            if (!GetClientRect(hwnd, out clientRect))
+            {
+                clientRect = windowRect;
+            }
+            WindowInfo info = new WindowInfo();
+            info.Handle = hwnd;
+            info.Title = ReadTitle(hwnd);
+            info.ClassName = ReadClass(hwnd);
+            info.WindowRect = windowRect;
+            info.ClientRect = clientRect;
+            windows.Add(info);
+            return true;
+        }, IntPtr.Zero);
+        return windows;
+    }
+
+    // Mirrors scripts/snap-native: visible, titled windows larger than 100x100.
+    private static List<WindowInfo> Capturable(List<WindowInfo> windows)
+    {
+        List<WindowInfo> result = new List<WindowInfo>();
+        foreach (WindowInfo window in windows)
+        {
+            if (!IsWindowVisible(window.Handle))
+            {
+                continue;
+            }
+            if (window.Title == null || window.Title.Trim().Length == 0)
+            {
+                continue;
+            }
+            if (window.WindowRect.Width <= 100 || window.WindowRect.Height <= 100)
+            {
+                continue;
+            }
+            result.Add(window);
+        }
+        return OrderWindows(result);
+    }
+
+    // The launcher window ("Block" or "Block <page>") is the scenario root and
+    // always comes first. Independent surface windows are focus-raised when they
+    // open, so EnumWindows (topmost first) reversed is their creation order.
+    private static List<WindowInfo> OrderWindows(List<WindowInfo> windows)
+    {
+        WindowInfo root = null;
+        List<WindowInfo> ordered = new List<WindowInfo>();
+        for (int index = windows.Count - 1; index >= 0; index--)
+        {
+            WindowInfo window = windows[index];
+            if (root == null && IsRoot(window.Title))
+            {
+                root = window;
+            }
+            else
+            {
+                ordered.Add(window);
+            }
+        }
+        if (root != null)
+        {
+            ordered.Insert(0, root);
+        }
+        return ordered;
+    }
+
+    private static bool IsRoot(string title)
+    {
+        return title == "Block" || title.StartsWith("Block ", StringComparison.Ordinal);
+    }
+
+    private static List<string> Keys(List<WindowInfo> windows)
+    {
+        List<string> keys = new List<string>();
+        foreach (WindowInfo window in windows)
+        {
+            keys.Add(window.Key());
+        }
+        return keys;
+    }
+
+    private static string Slug(string title)
+    {
+        StringBuilder slug = new StringBuilder();
+        bool pendingDash = false;
+        foreach (char character in title.ToLowerInvariant())
+        {
+            bool alphanumeric = (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
+            if (alphanumeric)
+            {
+                if (pendingDash && slug.Length > 0)
+                {
+                    slug.Append('-');
+                }
+                slug.Append(character);
+                pendingDash = false;
+            }
+            else
+            {
+                pendingDash = true;
+            }
+        }
+        return slug.Length == 0 ? "dialog" : slug.ToString();
+    }
+
+    private static Bitmap Grab(IntPtr hwnd, Rect client, uint flags)
+    {
+        Bitmap bitmap = new Bitmap(client.Width, client.Height, PixelFormat.Format32bppArgb);
+        using (Graphics graphics = Graphics.FromImage(bitmap))
+        {
+            IntPtr device = graphics.GetHdc();
+            bool painted;
+            try
+            {
+                painted = PrintWindow(hwnd, device, flags);
+            }
+            finally
+            {
+                graphics.ReleaseHdc(device);
+            }
+            if (!painted)
+            {
+                bitmap.Dispose();
+                return null;
+            }
+        }
+        return bitmap;
+    }
+
+    private sealed class Sample
+    {
+        public int Colors;
+        public double Dominant;
+        public int MaxChannel;
+    }
+
+    private static Sample Inspect(Bitmap bitmap)
+    {
+        BitmapData data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            int stride = data.Stride;
+            int step = Math.Max(1, Math.Min(bitmap.Width, bitmap.Height) / 160);
+            byte[] row = new byte[Math.Abs(stride)];
+            Dictionary<int, int> counts = new Dictionary<int, int>();
+            int total = 0;
+            int maxChannel = 0;
+            int y = 0;
+            while (y < bitmap.Height)
+            {
+                Marshal.Copy(IntPtr.Add(data.Scan0, y * stride), row, 0, row.Length);
+                int x = 0;
+                while (x < bitmap.Width)
+                {
+                    int offset = x * 4;
+                    byte blue = row[offset];
+                    byte green = row[offset + 1];
+                    byte red = row[offset + 2];
+                    int color = (red << 16) | (green << 8) | blue;
+                    int count;
+                    counts.TryGetValue(color, out count);
+                    counts[color] = count + 1;
+                    total++;
+                    int brightest = Math.Max(red, Math.Max(green, blue));
+                    if (brightest > maxChannel)
+                    {
+                        maxChannel = brightest;
+                    }
+                    x += step;
+                }
+                y += step;
+            }
+            int dominant = 0;
+            foreach (KeyValuePair<int, int> entry in counts)
+            {
+                if (entry.Value > dominant)
+                {
+                    dominant = entry.Value;
+                }
+            }
+            Sample sample = new Sample();
+            sample.Colors = counts.Count;
+            sample.Dominant = total == 0 ? 1.0 : ((double)dominant) / total;
+            sample.MaxChannel = maxChannel;
+            return sample;
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
+    private static bool Blank(Sample sample)
+    {
+        return sample.Colors < 8 || sample.Dominant > 0.995 || sample.MaxChannel < 12;
+    }
+
+    private static Bitmap ScreenCapture(Rect client, IntPtr hwnd)
+    {
+        PointStruct origin = new PointStruct();
+        origin.X = 0;
+        origin.Y = 0;
+        if (!ClientToScreen(hwnd, ref origin))
+        {
+            return null;
+        }
+        Bitmap bitmap = new Bitmap(client.Width, client.Height, PixelFormat.Format32bppArgb);
+        using (Graphics graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, new Size(client.Width, client.Height),
+                CopyPixelOperation.SourceCopy);
+        }
+        return bitmap;
+    }
+
+    private static int WaitForWindows(uint pid, int required, int timeoutMs, out List<WindowInfo> captured)
+    {
+        captured = new List<WindowInfo>();
+        List<string> last = null;
+        Stopwatch stable = Stopwatch.StartNew();
+        Stopwatch deadline = Stopwatch.StartNew();
+        while (deadline.ElapsedMilliseconds < timeoutMs)
+        {
+            Process process;
+            try
+            {
+                process = Process.GetProcessById((int)pid);
+            }
+            catch (ArgumentException)
+            {
+                Console.Error.WriteLine("process " + pid + " exited before capture");
+                return 2;
+            }
+            if (process.HasExited)
+            {
+                Console.Error.WriteLine("process " + pid + " exited before capture");
+                return 2;
+            }
+            List<WindowInfo> windows = Capturable(Describe(pid));
+            List<string> keys = Keys(windows);
+            if (last == null || !Same(last, keys))
+            {
+                last = keys;
+                stable.Restart();
+            }
+            if (windows.Count >= required && stable.ElapsedMilliseconds >= 1000)
+            {
+                captured = windows;
+                return 0;
+            }
+            Thread.Sleep(150);
+        }
+        captured = Capturable(Describe(pid));
+        Console.Error.WriteLine("did not open its " + required + " expected windows (saw " + captured.Count + ")");
+        return 2;
+    }
+
+    private static bool Same(List<string> left, List<string> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+        for (int index = 0; index < left.Count; index++)
+        {
+            if (!string.Equals(left[index], right[index], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int Shot(uint pid, string output, string scenario, string theme, int required, int timeoutMs)
+    {
+        // Park the pointer away from the window so hover tooltips do not appear in captures.
+        SetCursorPos(0, 0);
+        List<WindowInfo> windows;
+        int status = WaitForWindows(pid, required, timeoutMs, out windows);
+        if (status != 0)
+        {
+            return status;
+        }
+        SetCursorPos(0, 0);
+        if (windows.Count > 0)
+        {
+            SetForegroundWindow(windows[0].Handle);
+        }
+        Thread.Sleep(350);
+        Directory.CreateDirectory(output);
+        for (int index = 0; index < windows.Count; index++)
+        {
+            WindowInfo window = windows[index];
+            string suffix = index == 0 ? string.Empty : "-" + Slug(window.Title) + "-" + index.ToString(CultureInfo.InvariantCulture);
+            string path = Path.Combine(output, scenario + suffix + "-" + theme + ".png");
+            Rect client = window.ClientRect;
+            if (client.Width <= 0 || client.Height <= 0)
+            {
+                Console.Error.WriteLine("window " + index + " has an empty client area");
+                return 3;
+            }
+            string method;
+            Bitmap bitmap = Grab(window.Handle, client, PW_CLIENTONLY | PW_RENDERFULLCONTENT);
+            Sample sample = bitmap == null ? null : Inspect(bitmap);
+            if (bitmap != null && !Blank(sample))
+            {
+                method = "print-client";
+            }
+            else
+            {
+                if (bitmap != null)
+                {
+                    bitmap.Dispose();
+                }
+                Rect whole = window.WindowRect;
+                bitmap = Grab(window.Handle, new Rect { Left = 0, Top = 0, Right = whole.Width, Bottom = whole.Height }, PW_RENDERFULLCONTENT);
+                sample = bitmap == null ? null : Inspect(bitmap);
+                if (bitmap != null && !Blank(sample))
+                {
+                    PointStruct origin = new PointStruct();
+                    origin.X = 0;
+                    origin.Y = 0;
+                    ClientToScreen(window.Handle, ref origin);
+                    int offsetX = origin.X - whole.Left;
+                    int offsetY = origin.Y - whole.Top;
+                    Bitmap cropped = new Bitmap(client.Width, client.Height, PixelFormat.Format32bppArgb);
+                    using (Graphics graphics = Graphics.FromImage(cropped))
+                    {
+                        graphics.DrawImage(bitmap, new Rectangle(0, 0, client.Width, client.Height),
+                            new Rectangle(offsetX, offsetY, client.Width, client.Height), GraphicsUnit.Pixel);
+                    }
+                    bitmap.Dispose();
+                    bitmap = cropped;
+                    sample = Inspect(bitmap);
+                    method = "print-window-crop";
+                }
+                else
+                {
+                    if (bitmap != null)
+                    {
+                        bitmap.Dispose();
+                    }
+                    bitmap = ScreenCapture(client, window.Handle);
+                    sample = bitmap == null ? null : Inspect(bitmap);
+                    if (bitmap == null || Blank(sample))
+                    {
+                        Console.Error.WriteLine("all capture methods produced a blank window " + index + " (" + window.Title + ")");
+                        if (bitmap != null)
+                        {
+                            bitmap.Dispose();
+                        }
+                        return 4;
+                    }
+                    method = "screen-client";
+                }
+            }
+            bitmap.Save(path, ImageFormat.Png);
+            bitmap.Dispose();
+            FileInfo file = new FileInfo(path);
+            Console.WriteLine("SHOT index=" + index + " title=\"" + window.Title.Replace("\"", "'") + "\" class=" +
+                window.ClassName + " client=" + client.Width + "x" + client.Height + " window=" +
+                window.WindowRect.Width + "x" + window.WindowRect.Height + " method=" + method +
+                " colors=" + sample.Colors + " dominant=" + sample.Dominant.ToString("0.000", CultureInfo.InvariantCulture) +
+                " bytes=" + file.Length + " file=" + path);
+        }
+        return 0;
+    }
+
+    private static int List(uint pid)
+    {
+        List<WindowInfo> windows = Describe(pid);
+        List<WindowInfo> ordered = Capturable(windows);
+        foreach (WindowInfo window in ordered)
+        {
+            Console.WriteLine("WINDOW hwnd=" + window.Handle.ToInt64() + " root=" + IsRoot(window.Title) + " visible=" + IsWindowVisible(window.Handle) +
+                " class=" + window.ClassName + " title=\"" + window.Title.Replace("\"", "'") + "\" window=" +
+                window.WindowRect.Width + "x" + window.WindowRect.Height + " client=" +
+                window.ClientRect.Width + "x" + window.ClientRect.Height);
+        }
+        return 0;
+    }
+
+    private static int Close(uint pid)
+    {
+        List<WindowInfo> windows = Capturable(Describe(pid));
+        foreach (WindowInfo window in windows)
+        {
+            PostMessage(window.Handle, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        }
+        Process process = null;
+        try
+        {
+            process = Process.GetProcessById((int)pid);
+        }
+        catch (ArgumentException)
+        {
+            Console.WriteLine("closed=exited");
+            return 0;
+        }
+        if (process.WaitForExit(4000))
+        {
+            Console.WriteLine("closed=graceful");
+            return 0;
+        }
+        Console.WriteLine("closed=terminated");
+        return 1;
+    }
+
+    private static int Main(string[] arguments)
+    {
+        SetProcessDPIAware();
+        if (arguments.Length < 2)
+        {
+            Console.Error.WriteLine("usage: capture <list|shot|close> <pid> ...");
+            return 64;
+        }
+        string mode = arguments[0];
+        uint pid;
+        if (!uint.TryParse(arguments[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out pid))
+        {
+            Console.Error.WriteLine("invalid pid " + arguments[1]);
+            return 64;
+        }
+        try
+        {
+            if (mode == "list")
+            {
+                return List(pid);
+            }
+            if (mode == "close")
+            {
+                return Close(pid);
+            }
+            if (mode == "shot")
+            {
+                if (arguments.Length < 6)
+                {
+                    Console.Error.WriteLine("usage: capture shot <pid> <outDir> <scenario> <theme> <required> [timeoutMs]");
+                    return 64;
+                }
+                int required = int.Parse(arguments[5], CultureInfo.InvariantCulture);
+                int timeout = arguments.Length > 6 ? int.Parse(arguments[6], CultureInfo.InvariantCulture) : 20000;
+                return Shot(pid, arguments[2], arguments[3], arguments[4], required, timeout);
+            }
+            Console.Error.WriteLine("unknown mode " + mode);
+            return 64;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error.ToString());
+            return 70;
+        }
+    }
+}
+'''
+
+SETUP_PS = r'''param([string]$Commit)
+$ErrorActionPreference = 'Continue'
+$log = 'D:\block-tools\setup.log'
+function Log($message) { $message | Out-File -FilePath $log -Append -Encoding utf8; Write-Output $message }
+$git = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe'
+if (-not (Test-Path $git)) { $git = (Get-Command git -ErrorAction SilentlyContinue).Source }
+if (-not $git) { Log 'git unavailable'; exit 2 }
+Log ("start=" + (Get-Date).ToString('o'))
+New-Item -ItemType Directory -Force -Path 'D:\block-tools' | Out-Null
+if (-not (Test-Path 'D:\block-src\.git')) {
+  Log 'cloning'
+  & $git clone 'https://github.com/zeithrold/Block.git' 'D:\block-src' 2>&1 | ForEach-Object { Log ("clone: " + $_) }
+  if ($LASTEXITCODE -ne 0) { Log ("clone failed " + $LASTEXITCODE); exit 2 }
+}
+Set-Location 'D:\block-src'
+& $git fetch origin --prune 2>&1 | ForEach-Object { Log ("fetch: " + $_) }
+if ($LASTEXITCODE -ne 0) { Log ("fetch failed " + $LASTEXITCODE); exit 2 }
+& $git checkout --detach $Commit 2>&1 | ForEach-Object { Log ("checkout: " + $_) }
+$head = (& $git rev-parse HEAD).Trim()
+Log ("head=" + $head)
+if ($head -ne $Commit) { Log ("checkout mismatch, head " + $head); exit 2 }
+$env:Path = 'C:\Users\Zeithrold\.cargo\bin;' + $env:Path
+$env:CARGO_TARGET_DIR = 'D:\block-target'
+$env:CARGO_BUILD_JOBS = '2'
+$env:CARGO_PROFILE_DEV_DEBUG = '0'
+$env:RUST_MIN_STACK = '67108864'
+$binary = 'D:\block-target\debug\block.exe'
+$marker = 'D:\block-target\block-snap-build-commit.txt'
+$needsBuild = (-not (Test-Path $binary)) -or (-not (Test-Path $marker)) -or ((Get-Content -LiteralPath $marker -Raw).Trim() -ne $Commit)
+if ($needsBuild) {
+  Log 'building'
+  cargo build --locked -p block-app --bin block 2>&1 | Tee-Object -FilePath 'D:\block-tools\build.log' | Select-Object -Last 3 | ForEach-Object { Log ("cargo: " + $_) }
+  if ($LASTEXITCODE -ne 0) { Log ("build failed " + $LASTEXITCODE); exit 2 }
+  Set-Content -LiteralPath $marker -Value $Commit
+}
+if (-not (Test-Path $binary)) { Log 'binary missing after build'; exit 2 }
+Log ("binary=" + $binary)
+Log ("done=" + (Get-Date).ToString('o'))
+'''
+
+SESSION_PS = r'''param([string]$SettingsPath)
+$task = 'block-snap-capture'
+$settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+$helper = $settings.helper
+$binary = $settings.binary
+$outDir = $settings.outDir
+$logPath = $settings.logPath
+$donePath = $settings.donePath
+function Log($message) { $message | Out-File -FilePath $logPath -Append -Encoding utf8 }
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+Get-ChildItem -LiteralPath $outDir -Filter '*.png' -ErrorAction SilentlyContinue | Remove-Item -Force
+if (Test-Path $logPath) { Remove-Item -LiteralPath $logPath -Force }
+if (Test-Path $donePath) { Remove-Item -LiteralPath $donePath -Force }
+$failures = 0
+$started = @()
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class PowerRequest { [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags); }'
+# ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED keeps DWM composing while capturing.
+[PowerRequest]::SetThreadExecutionState(0x80000003) | Out-Null
+Log ("session-start=" + (Get-Date).ToString('o'))
+try {
+  foreach ($shot in $settings.shots) {
+    $scenario = [string]$shot.scenario
+    $theme = [string]$shot.theme
+    $required = [int]$shot.required
+    $processId = 0
+    Log ("BEGIN " + $scenario + "|" + $theme)
+    try {
+      $process = Start-Process -FilePath $binary -ArgumentList '--scenario',$scenario,'--theme',$theme -PassThru
+      $processId = $process.Id
+      $started += $processId
+      $errorPath = Join-Path $env:TEMP ("block-snap-error-" + $scenario + "-" + $theme + ".txt")
+      $output = & $helper shot $processId $outDir $scenario $theme $required 20000 2> $errorPath
+      $code = $LASTEXITCODE
+      foreach ($line in $output) { Log ("SHOT " + $scenario + "|" + $theme + "|" + ("" + $line)) }
+      if (Test-Path $errorPath) {
+        foreach ($line in (Get-Content $errorPath)) { Log ("ERROR " + $scenario + "|" + $theme + "|" + ("" + $line)) }
+        Remove-Item -LiteralPath $errorPath -Force -ErrorAction SilentlyContinue
+      }
+    } catch {
+      $code = 90
+      Log ("ERROR " + $scenario + "|" + $theme + "|exception: " + ($_ | Out-String).Trim())
+    }
+    try {
+      if ($processId -ne 0) {
+        $close = & $helper close $processId 2>&1
+        foreach ($line in $close) { Log ("CLOSE " + $scenario + "|" + $theme + "|" + ("" + $line)) }
+        Start-Sleep -Milliseconds 250
+        if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+          & taskkill.exe /F /PID $processId 2>&1 | Out-Null
+        }
+      }
+    } catch {
+      Log ("ERROR " + $scenario + "|" + $theme + "|close failed: " + ($_ | Out-String).Trim())
+    }
+    Log ("RESULT " + $scenario + "|" + $theme + "|" + $code)
+    if ($code -ne 0) { $failures += 1 }
+  }
+} finally {
+  foreach ($processId in $started) {
+    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+      & $helper close $processId 2>&1 | Out-Null
+      & taskkill.exe /F /PID $processId 2>&1 | Out-Null
+    }
+  }
+  Get-ChildItem -Path $env:TEMP -Filter 'block-ui-scenario-*' -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+  Get-ChildItem -Path $env:TEMP -Filter 'block-snap-error-*.txt' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+  [PowerRequest]::SetThreadExecutionState(0x80000000) | Out-Null
+  $status = 'OK'
+  if ($failures -ne 0) { $status = 'FAIL ' + $failures }
+  Log ("session-done=" + (Get-Date).ToString('o') + " " + $status)
+  Set-Content -LiteralPath $donePath -Value $status
+  & schtasks.exe /delete /tn $task /f 2>&1 | Out-Null
+}
+'''
+
+START_PS = r'''param([string]$SettingsPath)
+$task = 'block-snap-capture'
+& schtasks.exe /delete /tn $task /f 2>&1 | Out-Null
+$action = 'powershell -NoProfile -ExecutionPolicy Bypass -File D:\block-tools\session.ps1 -SettingsPath ' + $SettingsPath
+& schtasks.exe /create /tn $task /tr $action /sc ONCE /st 00:00 /it /f | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Output 'task-create-failed'; exit 2 }
+& schtasks.exe /run /tn $task | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Output 'task-run-failed'; exit 2 }
+Write-Output 'started'
+'''
+
+
+def ssh_target():
+    target = os.environ.get("WINDOWS_SSH", "").strip()
+    if not target:
+        sys.exit("WINDOWS_SSH is not set; source the repository .env before running this script")
+    return target
+
+
+def ssh(command, timeout=120, check=True):
+    """Run one PowerShell command on the Windows host and return its output."""
+    preamble = (
+        "$ErrorActionPreference='Continue'; "
+        "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); "
+        "$OutputEncoding=[System.Text.Encoding]::UTF8; "
+    )
+    result = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", ssh_target(), preamble + command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    if check and result.returncode != 0:
+        stderr = result.stderr.strip().replace(ssh_target(), "WINDOWS_SSH")
+        raise RuntimeError(f"host command failed ({result.returncode}): {command}\n{stderr}")
+    return result
+
+
+def upload(local_path, remote_path):
+    """Copy a local text file to the host without scp uploads."""
+    payload = base64.b64encode(Path(local_path).read_bytes())
+    staging = REMOTE_TOOLS + r"\upload.b64"
+    command = (
+        f"[IO.File]::WriteAllText('{staging}',[Console]::In.ReadToEnd()); "
+        f"[IO.File]::WriteAllBytes('{remote_path}',"
+        f"[Convert]::FromBase64String([IO.File]::ReadAllText('{staging}')))"
+    )
+    result = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", ssh_target(), command],
+        input=payload,
+        capture_output=True,
+        timeout=180,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", "replace").strip().replace(ssh_target(), "WINDOWS_SSH")
+        raise RuntimeError(f"could not upload {remote_path}: {stderr}")
+
+
+def run_script(name, arguments=(), timeout=3600, check=True):
+    """Run an uploaded PowerShell script inside the host."""
+    quoted = [f"-File {REMOTE_TOOLS}\\{name}"] + [f"'{value}'" for value in arguments]
+    return ssh("powershell -NoProfile -ExecutionPolicy Bypass " + " ".join(quoted), timeout=timeout, check=check)
+
+
+def latest_main_commit():
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-remote", "origin", "refs/heads/main"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.split()[0].strip()
+
+
+def upload_tools():
+    ssh(f"New-Item -ItemType Directory -Force -Path '{REMOTE_TOOLS}' | Out-Null")
+    with tempfile.TemporaryDirectory(prefix="block-snap-windows-") as directory:
+        temporary = Path(directory)
+        (temporary / "capture.cs").write_text(CAPTURE_CS)
+        (temporary / "setup.ps1").write_text(SETUP_PS)
+        (temporary / "session.ps1").write_text(SESSION_PS)
+        (temporary / "start.ps1").write_text(START_PS)
+        for local, name in [
+            (temporary / "capture.cs", "capture.cs"),
+            (temporary / "setup.ps1", "setup.ps1"),
+            (temporary / "session.ps1", "session.ps1"),
+            (temporary / "start.ps1", "start.ps1"),
+        ]:
+            remote = REMOTE_TOOLS + "\\" + name
+            upload(local, remote)
+
+
+def compile_helper():
+    compile_command = (
+        f"& 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe' /nologo "
+        f"/target:exe /platform:x64 /optimize+ /r:System.Drawing.dll "
+        f"/out:{REMOTE_HELPER} {REMOTE_TOOLS}\\capture.cs; "
+        f"if (Test-Path '{REMOTE_HELPER}') {{ Write-Output 'helper-compiled' }} "
+        f"else {{ Write-Output 'helper-compile-failed'; exit 2 }}"
+    )
+    result = ssh(compile_command, timeout=180)
+    if "helper-compiled" not in result.stdout:
+        raise RuntimeError("capture helper compilation failed")
+
+
+def prepare_host(commit):
+    print(f"preparing host checkout at {commit} (host D:\\block-src, target D:\\block-target)", flush=True)
+    result = run_script("setup.ps1", [commit], timeout=3600)
+    for line in result.stdout.splitlines():
+        print("  " + line, flush=True)
+    if "binary=" in result.stdout:
+        return
+    raise RuntimeError("host setup did not report a built binary")
+
+
+def list_scenarios():
+    last = None
+    for _ in range(3):
+        result = ssh(f"& '{REMOTE_BINARY}' --list-scenarios")
+        scenarios = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if scenarios:
+            return scenarios
+        last = result
+        time.sleep(2)
+    raise RuntimeError(
+        f"block --list-scenarios returned nothing (exit {last.returncode}): {last.stderr.strip()}"
+    )
+
+
+def required_windows(name):
+    return 2 if (name in DIALOGS or name.startswith("auth-")) else 1
+
+
+def shot_table(scenarios, themes):
+    table = []
+    for name in scenarios:
+        for theme in themes:
+            table.append({"scenario": name, "theme": theme, "required": required_windows(name)})
+    return table
+
+
+def start_capture(table):
+    settings = {
+        "helper": REMOTE_HELPER,
+        "binary": REMOTE_BINARY,
+        "outDir": REMOTE_SCENARIOS,
+        "logPath": REMOTE_LOG,
+        "donePath": REMOTE_DONE,
+        "shots": table,
+    }
+    with tempfile.TemporaryDirectory(prefix="block-snap-settings-") as directory:
+        local = Path(directory) / "capture-settings.json"
+        local.write_text(json.dumps(settings))
+        upload(local, REMOTE_SETTINGS)
+    result = run_script("start.ps1", [REMOTE_SETTINGS], timeout=120)
+    if "started" not in result.stdout:
+        raise RuntimeError(f"could not start the interactive capture task: {result.stdout.strip()}")
+    print("interactive capture task started", flush=True)
+
+
+def wait_for_capture(timeout):
+    deadline = time.monotonic() + timeout
+    last_report = 0.0
+    while time.monotonic() < deadline:
+        result = ssh(
+            f"if (Test-Path '{REMOTE_DONE}') {{ Write-Output ('DONE ' + (Get-Content -LiteralPath '{REMOTE_DONE}' -Raw).Trim()) }} "
+            f"elseif (Test-Path '{REMOTE_LOG}') {{ $lines = Get-Content -LiteralPath '{REMOTE_LOG}' -ErrorAction SilentlyContinue; "
+            f"if ($lines) {{ Write-Output ('PROGRESS ' + ($lines[-1])) }} else {{ Write-Output 'PROGRESS waiting' }} }} "
+            f"else {{ Write-Output 'PROGRESS starting' }}",
+            timeout=60,
+        )
+        line = result.stdout.strip()
+        if line.startswith("DONE "):
+            status = line[5:].strip()
+            if status != "OK":
+                print(f"capture task finished with {status}", flush=True)
+            return status
+        if time.monotonic() - last_report > 15:
+            print("  " + line, flush=True)
+            last_report = time.monotonic()
+        time.sleep(4)
+    raise RuntimeError(f"capture did not finish within {timeout} seconds")
+
+
+def read_remote_log():
+    result = ssh(f"Get-Content -LiteralPath '{REMOTE_LOG}' -Raw", timeout=120)
+    return result.stdout
+
+
+def download_images():
+    LOCAL_SCENARIOS.mkdir(parents=True, exist_ok=True)
+    for stale in LOCAL_SCENARIOS.glob("*.png"):
+        stale.unlink()
+    remote = REMOTE_SCENARIOS.replace("\\", "/")
+    result = subprocess.run(
+        ["scp", "-q", "-o", "BatchMode=yes", f"{ssh_target()}:{remote}/*.png", str(LOCAL_SCENARIOS)],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip().replace(ssh_target(), "WINDOWS_SSH")
+        raise RuntimeError(f"could not download captures: {stderr}")
+
+
+def png_size(path):
+    header = path.read_bytes()[:24]
+    width, height = struct.unpack(">II", header[16:24])
+    return width, height
+
+
+def parse_shot(payload):
+    """Parse one helper SHOT line (key=value tokens; window titles may have spaces)."""
+    fields = {}
+    for token in payload.split(" "):
+        if "=" in token and '"' not in token:
+            key, value = token.split("=", 1)
+            fields[key] = value
+    return fields
+
+
+def verify(shots, log):
+    """Validate the downloaded matrix; return (failures, anomalies, methods)."""
+    failures = []
+    anomalies = []
+    methods = set()
+    by_shot = {}
+    referenced = set()
+    for line in log.splitlines():
+        if not line.startswith("SHOT "):
+            continue
+        scenario, theme, payload = line[5:].split("|", 2)
+        by_shot.setdefault(f"{scenario}|{theme}", []).append(payload)
+        fields = parse_shot(payload)
+        if "method" in fields:
+            methods.add(fields["method"])
+        if "file" in fields:
+            referenced.add(Path(fields["file"].replace("\\", "/")).name)
+    local = {path.name for path in LOCAL_SCENARIOS.glob("*.png")}
+    for name in sorted(referenced - local):
+        failures.append(f"missing image {name}")
+    for name in sorted(local - referenced):
+        failures.append(f"unexpected image {name}")
+    for shot in shots:
+        name, theme = shot["scenario"], shot["theme"]
+        key = f"{name}|{theme}"
+        payloads = by_shot.get(key, [])
+        if len(payloads) < shot["required"]:
+            failures.append(f"{key}: captured {len(payloads)} window(s), expected at least {shot['required']}")
+        home = name.startswith("home-") or name == "download-files"
+        expected = (432, 768) if home else (960, 600)
+        hashes = {}
+        for payload in payloads:
+            fields = parse_shot(payload)
+            if fields.get("index") == "0" and "client" in fields:
+                width, height = (int(value) for value in fields["client"].split("x"))
+                if (width, height) != expected:
+                    anomalies.append(f"{key}: main client {width}x{height}, expected {expected}")
+            if "file" not in fields:
+                continue
+            path = LOCAL_SCENARIOS / Path(fields["file"].replace("\\", "/")).name
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            width, height = png_size(path)
+            if size < 2000:
+                failures.append(f"{path.name}: {size} bytes looks blank")
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest in hashes:
+                failures.append(f"{path.name} duplicates {hashes[digest]}")
+            hashes[digest] = path.name
+            if size < 6000:
+                anomalies.append(f"{path.name}: small image {size} bytes ({width}x{height})")
+    return failures, anomalies, sorted(methods)
+
+
+def run_board():
+    for extra in ([], ["--platform", "macos-arm64"]):
+        subprocess.run([sys.executable, str(ROOT / "scripts/parity-board")] + extra, check=True)
+    print(f"board: {(ROOT / 'target/parity-shots/index.html')}")
+    print(f"board: {(ROOT / 'target/parity-shots/macos-arm64.html')}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scenario", action="append", help="Capture selected scenarios only")
+    parser.add_argument("--theme", choices=["light", "dark"], action="append")
+    parser.add_argument("--no-build", action="store_true", help="Use the binary already built on the host")
+    parser.add_argument("--prepare-only", action="store_true", help="Update the host checkout/build and stop")
+    parser.add_argument("--no-board", action="store_true", help="Do not rebuild the comparison board")
+    parser.add_argument("--verify-only", action="store_true", help="Re-check the last local captures without a host run")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Capture timeout in seconds")
+    args = parser.parse_args()
+    if not os.environ.get("WINDOWS_SSH", "").strip():
+        parser.error("WINDOWS_SSH is not set; source the repository .env first")
+
+    if args.verify_only:
+        log_path = LOCAL_SCENARIOS.parent / "capture-session.log"
+        if not log_path.is_file():
+            parser.error("--verify-only needs a previous capture-session.log")
+        shots = []
+        for line in log_path.read_text().splitlines():
+            if line.startswith("BEGIN "):
+                scenario, theme = line[6:].split("|", 1)
+                shots.append({"scenario": scenario, "theme": theme, "required": required_windows(scenario)})
+        if not shots:
+            parser.error("--verify-only found no BEGIN lines in the session log")
+        failures, anomalies, methods = verify(shots, log_path.read_text())
+        print(f"verified {len(shots)} shots, methods: {', '.join(methods) or 'unknown'}", flush=True)
+        for anomaly in anomalies:
+            print(f"anomaly: {anomaly}", flush=True)
+        for failure in failures:
+            print(f"failure: {failure}", flush=True)
+        if not args.no_board:
+            run_board()
+        if failures:
+            sys.exit(f"verify failed with {len(failures)} image problems")
+        print("verify complete", flush=True)
+        return
+    commit = latest_main_commit()
+    print(f"host capture commit: {commit}", flush=True)
+    upload_tools()
+    compile_helper()
+    if not args.no_build:
+        prepare_host(commit)
+    available = list_scenarios()
+    scenarios = args.scenario or available
+    if any(name not in available for name in scenarios):
+        parser.error("Unknown scenario; use block --list-scenarios")
+    themes = args.theme or ["light", "dark"]
+    table = shot_table(scenarios, themes)
+    if args.prepare_only:
+        print(f"host prepared for {len(scenarios)} scenarios x {len(themes)} themes", flush=True)
+        return
+    start_capture(table)
+    status = wait_for_capture(args.timeout)
+    log = read_remote_log()
+    LOCAL_SCENARIOS.parent.mkdir(parents=True, exist_ok=True)
+    (LOCAL_SCENARIOS.parent / "capture-session.log").write_text(log)
+    download_images()
+    failures, anomalies, methods = verify(table, log)
+    counts = {}
+    for theme in themes:
+        counts[theme] = len(list(LOCAL_SCENARIOS.glob(f"*-{theme}.png")))
+    print(f"captured {len(scenarios)} scenarios, {len(table)} shots, images: "
+          + ", ".join(f"{theme}={count}" for theme, count in counts.items()), flush=True)
+    print(f"capture methods: {', '.join(methods) or 'unknown'}", flush=True)
+    for anomaly in anomalies:
+        print(f"anomaly: {anomaly}", flush=True)
+    if failures:
+        print("failed captures:", flush=True)
+        for failure in failures:
+            print(f"  {failure}", flush=True)
+    if not args.no_board:
+        run_board()
+    if status != "OK" or failures:
+        sys.exit(f"capture run failed: {status} with {len(failures)} image failures")
+    print("capture run complete", flush=True)
+
+
+if __name__ == "__main__":
+    main()
