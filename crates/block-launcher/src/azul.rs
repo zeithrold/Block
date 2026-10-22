@@ -19,6 +19,9 @@ pub(crate) const AZUL_PACKAGES: &str = "https://api.azul.com/metadata/v1/zulu/pa
 
 /// Size bound for a managed runtime archive; a Java runtime is far smaller.
 const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+/// Tolerance for the official advisory `size` field. Azul archives observed on
+/// the CDN differ from it by a few dozen bytes; the SHA-256 stays authoritative.
+const ARCHIVE_SIZE_TOLERANCE: u64 = 4 * 1024;
 /// A listing is normally one package; stop early instead of trusting a huge list.
 const MAX_LISTED_PACKAGES: usize = 16;
 
@@ -111,6 +114,8 @@ struct PackageDetail {
     archive_type: String,
     java_package_type: String,
     javafx_bundled: bool,
+    #[serde(default)]
+    crac_supported: bool,
     lib_c_type: String,
     os: String,
     arch: String,
@@ -138,9 +143,13 @@ pub async fn resolve(
 
 /// Download and sha256-verify the selected archive into the store.
 ///
+/// The official `sha256_hash` is authoritative. Azul's declared `size` is
+/// advisory: observed archives differ from it by a few dozen bytes on the CDN,
+/// so the fetched length only has to stay within [`ARCHIVE_SIZE_TOLERANCE`].
+///
 /// # Errors
-/// Fails on transport errors, a mismatched or missing checksum, a size that
-/// differs from the official metadata, or cancellation.
+/// Fails on transport errors, a mismatched or missing checksum, a length
+/// outside the documented tolerance of the official metadata, or cancellation.
 pub async fn download(
     store: &Store,
     runtime: &ZuluRuntime,
@@ -151,12 +160,17 @@ pub async fn download(
         "Azul runtime archive size is outside the supported bound"
     );
     let path = store
-        .fetch_sha256_bounded(&runtime.download_url, &runtime.sha256, runtime.size, cancel)
+        .fetch_sha256_bounded(
+            &runtime.download_url,
+            &runtime.sha256,
+            MAX_ARCHIVE_BYTES,
+            cancel,
+        )
         .await?;
     let actual = std::fs::metadata(&path)?.len();
     ensure!(
-        actual == runtime.size,
-        "Azul runtime archive size mismatch: expected {} bytes from the official metadata, downloaded {}",
+        actual.abs_diff(runtime.size) <= ARCHIVE_SIZE_TOLERANCE,
+        "Azul runtime archive size differs from the official metadata: declared {} bytes, downloaded {}",
         runtime.size,
         actual
     );
@@ -247,7 +261,7 @@ async fn resolve_listing(
         });
     }
     bail!(
-        "no usable official Azul Zulu Java {java_major} runtime for {platform} ({})",
+        "no plain official Azul Zulu JRE for Java {java_major} on {platform} (rejected: {})",
         rejected.join("; ")
     )
 }
@@ -272,6 +286,7 @@ fn validate_detail(
         detail.java_package_type
     );
     ensure!(!detail.javafx_bundled, "package bundles JavaFX");
+    ensure!(!detail.crac_supported, "package is a CRaC build");
     ensure!(
         detail.lib_c_type == "glibc",
         "libc is {}",
@@ -481,10 +496,22 @@ mod tests {
         .to_string()
     }
 
+    fn single_plain_list() -> String {
+        json!([{
+            "name": ARCHIVE_NAME,
+            "package_uuid": PACKAGE_UUID,
+            "java_version": [8, 0, 504],
+            "distro_version": [8, 96, 0, 205],
+            "latest": true
+        }])
+        .to_string()
+    }
+
     fn detail_body(
         name: &str,
         sha256: &str,
         javafx: bool,
+        crac: bool,
         size: u64,
         download_url: &str,
     ) -> String {
@@ -496,6 +523,7 @@ mod tests {
             "archive_type": "tar.gz",
             "java_package_type": "jre",
             "javafx_bundled": javafx,
+            "crac_supported": crac,
             "lib_c_type": "glibc",
             "os": "linux",
             "arch": "arm",
@@ -521,6 +549,7 @@ mod tests {
                         "zulu8.96.0.205-ca-fx-jre8.0.504-linux_aarch64.tar.gz",
                         &digest,
                         true,
+                        false,
                         archive.len() as u64,
                         &archive_url,
                     ),
@@ -530,6 +559,7 @@ mod tests {
                     detail_body(
                         ARCHIVE_NAME,
                         &digest,
+                        false,
                         false,
                         archive.len() as u64,
                         &archive_url,
@@ -567,13 +597,14 @@ mod tests {
                 route(LIST_PATH, list_body()),
                 route(
                     &format!("/packages/{FX_UUID}/"),
-                    detail_body("fx", &wrong, true, 1, &archive_url),
+                    detail_body("fx", &wrong, true, false, 1, &archive_url),
                 ),
                 route(
                     &format!("/packages/{PACKAGE_UUID}/"),
                     detail_body(
                         ARCHIVE_NAME,
                         &wrong,
+                        false,
                         false,
                         archive.len() as u64,
                         &archive_url,
@@ -591,6 +622,143 @@ mod tests {
             .err()
             .ok_or_else(|| anyhow::anyhow!("mismatched checksum must fail"))?;
         assert!(format!("{error:#}").contains("SHA-256"), "{error:#}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn declared_size_tolerance_accepts_cdn_delta() -> anyhow::Result<()> {
+        let archive = runtime_archive()?;
+        let digest = sha256(&archive);
+        // Azul's advisory size was observed 24 bytes below the actual CDN length.
+        let declared = u64::try_from(archive.len())?.saturating_sub(24);
+        let (base, _fixture) = fixture(|base| {
+            let archive_url = format!("{base}{ARCHIVE_PATH}");
+            vec![
+                route(LIST_PATH, single_plain_list()),
+                route(
+                    &format!("/packages/{PACKAGE_UUID}/"),
+                    detail_body(ARCHIVE_NAME, &digest, false, false, declared, &archive_url),
+                ),
+                archive_route(archive.clone()),
+            ]
+        })?;
+        let (_directory, store) = store()?;
+        let cancel = CancellationToken::new();
+        let runtime =
+            resolve_with_base(&store, &target(), 8, &format!("{base}{LIST_PATH}"), &cancel).await?;
+        let path = download(&store, &runtime, &cancel).await?;
+        assert_eq!(
+            std::fs::metadata(&path)?.len(),
+            u64::try_from(archive.len())?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn large_declared_size_mismatch_is_rejected() -> anyhow::Result<()> {
+        let archive = runtime_archive()?;
+        let digest = sha256(&archive);
+        let declared = u64::try_from(archive.len())? + 100_000;
+        let (base, _fixture) = fixture(|base| {
+            let archive_url = format!("{base}{ARCHIVE_PATH}");
+            vec![
+                route(LIST_PATH, single_plain_list()),
+                route(
+                    &format!("/packages/{PACKAGE_UUID}/"),
+                    detail_body(ARCHIVE_NAME, &digest, false, false, declared, &archive_url),
+                ),
+                archive_route(archive.clone()),
+            ]
+        })?;
+        let (_directory, store) = store()?;
+        let cancel = CancellationToken::new();
+        let runtime =
+            resolve_with_base(&store, &target(), 8, &format!("{base}{LIST_PATH}"), &cancel).await?;
+        let error = download(&store, &runtime, &cancel)
+            .await
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("large declared-size mismatch must fail"))?;
+        assert!(format!("{error:#}").contains("declared"), "{error:#}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn plain_jre_is_preferred_over_crac() -> anyhow::Result<()> {
+        const CRAC_UUID: &str = "22222222-2222-4222-8222-222222222222";
+        const CRAC_NAME: &str = "zulu8.96.0.205-ca-crac-jre8.0.504-linux_aarch64.tar.gz";
+        let digest = "b".repeat(64);
+        let list = json!([
+            {
+                "name": CRAC_NAME,
+                "package_uuid": CRAC_UUID,
+                "java_version": [8, 0, 504],
+                "distro_version": [8, 96, 0, 205],
+                "latest": true
+            },
+            {
+                "name": ARCHIVE_NAME,
+                "package_uuid": PACKAGE_UUID,
+                "java_version": [8, 0, 504],
+                "distro_version": [8, 96, 0, 205],
+                "latest": true
+            }
+        ])
+        .to_string();
+        let (base, _fixture) = fixture(|base| {
+            let archive_url = format!("{base}{ARCHIVE_PATH}");
+            vec![
+                route(LIST_PATH, list),
+                route(
+                    &format!("/packages/{CRAC_UUID}/"),
+                    detail_body(CRAC_NAME, &digest, false, true, 123, &archive_url),
+                ),
+                route(
+                    &format!("/packages/{PACKAGE_UUID}/"),
+                    detail_body(ARCHIVE_NAME, &digest, false, false, 123, &archive_url),
+                ),
+            ]
+        })?;
+        let (_directory, store) = store()?;
+        let cancel = CancellationToken::new();
+        let runtime =
+            resolve_with_base(&store, &target(), 8, &format!("{base}{LIST_PATH}"), &cancel).await?;
+        assert_eq!(runtime.package, ARCHIVE_NAME);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crac_only_catalog_is_rejected() -> anyhow::Result<()> {
+        const CRAC_UUID: &str = "33333333-3333-4333-8333-333333333333";
+        const CRAC_NAME: &str = "zulu8.96.0.205-ca-crac-jre8.0.504-linux_aarch64.tar.gz";
+        let digest = "b".repeat(64);
+        let list = json!([{
+            "name": CRAC_NAME,
+            "package_uuid": CRAC_UUID,
+            "java_version": [8, 0, 504],
+            "distro_version": [8, 96, 0, 205],
+            "latest": true
+        }])
+        .to_string();
+        let (base, _fixture) = fixture(|base| {
+            let archive_url = format!("{base}{ARCHIVE_PATH}");
+            vec![
+                route(LIST_PATH, list),
+                route(
+                    &format!("/packages/{CRAC_UUID}/"),
+                    detail_body(CRAC_NAME, &digest, false, true, 123, &archive_url),
+                ),
+            ]
+        })?;
+        let (_directory, store) = store()?;
+        let cancel = CancellationToken::new();
+        let error = resolve_with_base(&store, &target(), 8, &format!("{base}{LIST_PATH}"), &cancel)
+            .await
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("a CRaC-only catalog must fail"))?;
+        assert!(
+            format!("{error:#}").contains("no plain official Azul Zulu JRE"),
+            "{error:#}"
+        );
         Ok(())
     }
 
