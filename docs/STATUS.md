@@ -53,11 +53,11 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
 | Authlib provider icon retrieval and display | Yes | Pending | Pending | Bounded validated fetch against the provider API host, data-dir cache, monogram fallback. ICO-only favicons fall back to the monogram (accepted limitation). Native display check pending. |
 | Provider URL/paste import, duplicate selection, HTTP consent | Yes | Pending | Pending | Address-bound consent. |
-| External quick-link text drop | No | Pending | Pending | Owned native target required. |
+| External quick-link text drop | Yes | Yes (Windows) | Pending | Owned native drop target (`crates/block-drop`); real browser→drop-zone drag on Windows AMD64 with a real Authlib provider and the duplicate path. macOS/Linux native targets pending. |
 | Authlib password form, characters and final save | Yes | Pending | Pending | Local fixture allowed. |
 | Yggdrasil session lifecycle and launch injection | Yes | Pending | Pending | Local fixture allowed. |
 | Wizard back/cancel/finish, provider selection, stale results | Yes | Pending | Pending | Prepared identities stay transient. |
-| Real player faces and hat layers | No | Pending | Pending | Provider domain validation required. |
+| Real player faces and hat layers | Yes | Pending | Pending | Microsoft active skin / Authlib declared textures with domain validation, bounded fetch, validated cache, silent initials fallback; native display check pending. |
 
 ### Games and Game Wizard
 
@@ -169,10 +169,11 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
-| Real quick-link drag on hosts automation cannot drive | Batch after native drop target exists. |
+| Real quick-link drag on hosts automation cannot drive | Windows AMD64 done with a real SendInput browser drag. macOS drag still needs the user batch (Mac in use); Linux X11/Wayland phases pending. |
 
 ## v0 notes
 
+- Scoped unsafe exception: `crates/block-drop` is the only crate that lowers `unsafe_code` (workspace still forbids it); every unsafe block carries a SAFETY comment, and the crate owns its child HWND/IDropTarget without patching, subclassing or swizzling GPUI.
 - Architecture governance, file splitting, layering and lint tidy-up remain deferred.
 - Preserve clippy::all, existing deny list and unsafe_code=forbid outside the authorized dedicated drop-target crate.
 - Accessibility, release packaging/signing and mirror sources remain deferred.
