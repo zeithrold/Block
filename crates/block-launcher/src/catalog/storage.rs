@@ -578,6 +578,55 @@ impl Catalog {
         })
     }
 
+    /// Save the Instance draft and replace/clear its OptiFine selection in one
+    /// catalog commit. `optifine_mod` is cleared because the resolved artifact
+    /// no longer matches; the caller runs installation immediately afterwards.
+    ///
+    /// # Errors
+    /// Fails for a missing instance/target, invalid name/settings, or a JAR that
+    /// does not declare compatibility with this game and loader.
+    pub fn save_instance_with_optifine(
+        &self,
+        id: &str,
+        configuration: InstanceConfiguration,
+        target_id: &str,
+        optifine: Option<crate::install::optifine::OptiFineJar>,
+    ) -> anyhow::Result<()> {
+        validate_name(&configuration.name)?;
+        configuration.settings.validate()?;
+        self.transaction(true, |state| {
+            let instance = state
+                .instances
+                .iter_mut()
+                .find(|instance| instance.id == id)
+                .context("installation no longer exists")?;
+            let target = instance
+                .targets
+                .iter_mut()
+                .find(|target| target.id == target_id)
+                .context("launch target no longer exists")?;
+            if let Some(selected) = &optifine {
+                selected.validate_for(
+                    &instance.minecraft_version,
+                    &target.kind,
+                    target.loader_version.as_deref(),
+                )?;
+            }
+            instance.name = configuration.name;
+            instance.settings = Some(configuration.settings);
+            target.optifine = optifine;
+            target.optifine_mod = None;
+            if state.profile_mode == ProfileMode::Bundled {
+                for profile in &mut state.profiles {
+                    if profile.instance_id == id {
+                        profile.name.clone_from(&instance.name);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Copy settings, giving isolated data a new empty directory; never copy live worlds.
     /// # Errors
     /// Fails for a missing profile or invalid name.

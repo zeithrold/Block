@@ -413,4 +413,26 @@ fn profile_actions_keep_the_captured_profile_when_inspection_refreshes(cx: &mut 
         view.read_with(cx, |view, _| view.snapshot.profiles.len()),
         2
     );
+
+    #[gpui::test]
+    fn optifine_component_card_opens_the_instance_editor(cx: &mut TestAppContext) {
+        let (view, cx) =
+            crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::Inspect("profile-a".into()), window, cx);
+            });
+        });
+        click(cx, "component-optifine");
+        cx.update(|_window, cx| {
+            view.read_with(cx, |view, _| {
+                let editor = view.shell.instance_editor.as_ref();
+                assert!(editor.is_some(), "OptiFine card must open the editor");
+                assert_eq!(
+                    editor.map(crate::instance_editor::InstanceEditor::identity),
+                    Some("instance-a")
+                );
+            });
+        });
+    }
 }

@@ -12,7 +12,8 @@ use super::{
     input, note, patterns,
 };
 use block_launcher::{
-    catalog::{Instance, InstanceConfiguration, InstanceSettings},
+    catalog::{Instance, InstanceConfiguration, InstanceSettings, LaunchTarget},
+    install::optifine::OptiFineJar,
     recipe::RuntimeSelection,
 };
 use gpui::{
@@ -36,6 +37,8 @@ enum Field {
 )]
 pub(super) struct InstanceEditor {
     original: Instance,
+    /// Launch target whose OptiFine selection this draft edits.
+    target: LaunchTarget,
     name: Entity<TextInput>,
     java: Entity<TextInput>,
     width: Entity<TextInput>,
@@ -43,6 +46,11 @@ pub(super) struct InstanceEditor {
     managed: bool,
     window_custom: bool,
     fullscreen: bool,
+    /// Draft OptiFine selection; `None` means not installed.
+    optifine: Option<Box<OptiFineJar>>,
+    /// Import that is currently being validated, so late results can be dropped.
+    optifine_request: Option<uuid::Uuid>,
+    optifine_error: Option<String>,
     saving: bool,
     error: Option<(Field, String)>,
     save_error: Option<String>,
@@ -70,6 +78,7 @@ impl InstanceEditor {
         scroll.set_offset(self.scroll.offset());
         Self {
             original: self.original.clone(),
+            target: self.target.clone(),
             name: super::frozen_input(&self.name, cx),
             java: super::frozen_input(&self.java, cx),
             width: super::frozen_input(&self.width, cx),
@@ -77,6 +86,9 @@ impl InstanceEditor {
             managed: self.managed,
             window_custom: self.window_custom,
             fullscreen: self.fullscreen,
+            optifine: self.optifine.clone(),
+            optifine_request: self.optifine_request,
+            optifine_error: self.optifine_error.clone(),
             saving: self.saving,
             error: self.error.clone(),
             save_error: self.save_error.clone(),
@@ -178,6 +190,19 @@ impl InstanceEditor {
             || self.fullscreen != settings.fullscreen
             || self.managed != matches!(settings.runtime, RuntimeSelection::Managed)
             || (!self.managed && self.java.read(cx).value().trim() != java)
+            || self.optifine_changed()
+    }
+
+    const fn optifine_supported(&self) -> bool {
+        matches!(
+            self.target.kind,
+            block_launcher::catalog::LoaderKind::Vanilla
+                | block_launcher::catalog::LoaderKind::Forge
+        )
+    }
+
+    fn optifine_changed(&self) -> bool {
+        self.optifine.as_deref() != self.target.optifine.as_ref()
     }
 }
 
@@ -189,6 +214,21 @@ impl Block {
         let Some(original) = self.inspected_instance().cloned() else {
             return;
         };
+        let target = self
+            .inspected_profile()
+            .filter(|profile| profile.instance_id == original.id)
+            .and_then(|profile| {
+                original
+                    .targets
+                    .iter()
+                    .find(|target| target.id == profile.target_id)
+            })
+            .or_else(|| original.targets.first())
+            .cloned();
+        let Some(target) = target else {
+            return;
+        };
+        let optifine = target.optifine.clone().map(Box::new);
         let settings = original.settings.clone().unwrap_or_default();
         let java = match &settings.runtime {
             RuntimeSelection::Managed => String::new(),
@@ -199,6 +239,7 @@ impl Block {
         name.read(cx).focus_handle(cx).focus(window, cx);
         self.shell.instance_editor = Some(InstanceEditor {
             original,
+            target,
             name,
             java: input(&java, "Absolute path to Java executable", cx),
             width: input(&settings.width.to_string(), "1280", cx),
@@ -207,6 +248,9 @@ impl Block {
             window_custom: !super::settings::WINDOW_PRESETS
                 .contains(&(settings.width, settings.height)),
             fullscreen: settings.fullscreen,
+            optifine,
+            optifine_request: None,
+            optifine_error: None,
             saving: false,
             error: None,
             save_error: None,
@@ -312,6 +356,116 @@ impl Block {
         }
     }
 
+    pub(super) fn browse_instance_optifine(&self, cx: &Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        let Some(editor) = &self.shell.instance_editor else {
+            return;
+        };
+        if editor.optifine_request.is_some() || !editor.optifine_supported() {
+            return;
+        }
+        let identity = editor.identity().to_owned();
+        let target_id = editor.target.id.clone();
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        let prompt = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Select the official OptiFine installer JAR".into()),
+        });
+        cx.spawn(async move |view, cx| {
+            let Ok(Ok(Some(paths))) = prompt.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let request = uuid::Uuid::new_v4();
+            let started = view
+                .update(cx, |view, cx| {
+                    let Some(editor) = &mut view.shell.instance_editor else {
+                        return false;
+                    };
+                    if view.busy
+                        || editor.identity() != identity
+                        || editor.target.id != target_id
+                        || editor.optifine_request.is_some()
+                        || !editor.optifine_supported()
+                    {
+                        return false;
+                    }
+                    editor.optifine_request = Some(request);
+                    editor.optifine_error = None;
+                    cx.notify();
+                    true
+                })
+                .unwrap_or(false);
+            if !started {
+                return;
+            }
+            let result = engine.import_optifine(path).await;
+            let _ = view.update(cx, |view, cx| {
+                view.finish_instance_optifine_import(request, &identity, &target_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_instance_optifine_import(
+        &mut self,
+        request: uuid::Uuid,
+        identity: &str,
+        target_id: &str,
+        result: anyhow::Result<OptiFineJar>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(editor) = &mut self.shell.instance_editor else {
+            return;
+        };
+        if editor.optifine_request != Some(request)
+            || editor.identity() != identity
+            || editor.target.id != target_id
+        {
+            return;
+        }
+        editor.optifine_request = None;
+        match result {
+            Ok(selected) => match selected.validate_for(
+                &editor.original.minecraft_version,
+                &editor.target.kind,
+                editor.target.loader_version.as_deref(),
+            ) {
+                Ok(()) => {
+                    editor.optifine = Some(Box::new(selected));
+                    editor.optifine_error = None;
+                }
+                Err(error) => editor.optifine_error = Some(error.to_string()),
+            },
+            Err(error) => {
+                editor.optifine_error = Some(format!("Could not import OptiFine: {error:#}"));
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn remove_instance_optifine(&mut self, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        if let Some(editor) = &mut self.shell.instance_editor {
+            if editor.optifine_request.is_some() {
+                return;
+            }
+            editor.optifine = None;
+            editor.optifine_error = None;
+            cx.notify();
+        }
+    }
+
     pub(super) fn cancel_instance_editor(
         &mut self,
         window: &mut Window,
@@ -338,9 +492,16 @@ impl Block {
             return;
         };
         let id = editor.original.id.clone();
+        let target_id = editor.target.id.clone();
+        let optifine_changed = editor.optifine_changed();
+        let optifine = editor.optifine.clone();
         match editor.configuration(cx) {
             Ok(configuration) => {
-                self.begin("Saving instance settings");
+                if optifine_changed {
+                    self.begin_cancellable("Saving instance settings · applying OptiFine");
+                } else {
+                    self.begin("Saving instance settings");
+                }
                 if let Some(editor) = &mut self.shell.instance_editor {
                     editor.error = None;
                     editor.save_error = (!self.busy).then(|| "Instance settings could not be saved. Check Block’s data directory and restart.".into());
@@ -350,7 +511,17 @@ impl Block {
                 if self.busy
                     && let Some(engine) = &self.engine
                 {
-                    engine.save_instance(id, configuration);
+                    if optifine_changed {
+                        engine.save_instance_with_optifine(
+                            id,
+                            configuration,
+                            target_id,
+                            optifine,
+                            self.cancel.clone(),
+                        );
+                    } else {
+                        engine.save_instance(id, configuration);
+                    }
                 }
             }
             Err((field, message)) => {
@@ -460,8 +631,9 @@ impl Block {
             .child(components::checkbox("instance-fullscreen", "Start in fullscreen", editor.fullscreen, self.palette,
                 ControlState { disabled: self.busy, ..ControlState::default() },
                 cx.listener(|view, (), window, cx| view.handle(UiAction::InstanceFullscreen, window, cx))))
+            .child(self.instance_optifine_section(editor, cx))
             .child(div().flex().flex_col().gap_2().child("Installation directory").child(note(editor.original.directory.display().to_string()).min_w_0().w_full().truncate())
-                .child(note("This location is read-only. Moving an installation requires data migration and is not available here.")))
+                .child(note("This location is read-only. Move the installation from Settings → Storage.")))
             .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
             .children(editor.save_error.clone().map(note));
         let footer = patterns::management_footer(window.viewport_size(), self.palette)
@@ -480,7 +652,7 @@ impl Block {
                 self.palette,
                 ButtonVariant::Primary,
                 ControlState {
-                    disabled: self.busy || !editor.dirty(cx),
+                    disabled: self.busy || editor.optifine_request.is_some() || !editor.dirty(cx),
                     busy: editor.saving,
                     ..ControlState::default()
                 },
@@ -497,6 +669,99 @@ impl Block {
             .child(body)
             .child(footer)
             .into_any_element()
+    }
+
+    fn instance_optifine_section(
+        &self,
+        editor: &InstanceEditor,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let mut section = div()
+            .id("instance-optifine")
+            .debug_selector(|| "instance-optifine".into())
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_sm().child("OptiFine"))
+            .child(note(
+                "Choose the official OptiFine installer JAR downloaded from optifine.net. Block validates it and applies it to this game when you save.",
+            ));
+        if !editor.optifine_supported() {
+            return section.child(note(format!(
+                "OptiFine cannot be combined directly with {}.",
+                editor.target.kind.name()
+            )));
+        }
+        section = section.child(note(format!(
+            "Applies to {}.",
+            editor.target.display_name()
+        )));
+        let pending = editor.optifine_request.is_some();
+        match &editor.optifine {
+            Some(selected) => {
+                section = section.child(note(format!("Selected: OptiFine {}", selected.version)));
+                if let Some(forge) = &selected.forge {
+                    section = section.child(note(format!(
+                        "This release declares compatibility with Forge {forge}."
+                    )));
+                }
+            }
+            None => {
+                section = section.child(note("Not installed."));
+            }
+        }
+        let select_label = if pending {
+            "Validating selected JAR…"
+        } else if editor.optifine.is_some() {
+            "Replace selected JAR"
+        } else {
+            "Select downloaded JAR"
+        };
+        let mut actions =
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(components::button(
+                    "instance-optifine-select",
+                    select_label,
+                    self.palette,
+                    ButtonVariant::Outline,
+                    ControlState {
+                        disabled: self.busy || pending,
+                        busy: pending,
+                        ..ControlState::default()
+                    },
+                    cx.listener(|view, (), window, cx| {
+                        view.handle(UiAction::InstanceOptiFineFile, window, cx);
+                    }),
+                ));
+        if editor.optifine.is_some() {
+            actions = actions.child(components::button(
+                "instance-optifine-remove",
+                "Remove OptiFine",
+                self.palette,
+                ButtonVariant::Ghost,
+                ControlState {
+                    disabled: self.busy || pending,
+                    ..ControlState::default()
+                },
+                cx.listener(|view, (), window, cx| {
+                    view.handle(UiAction::InstanceOptiFineRemove, window, cx);
+                }),
+            ));
+        }
+        section = section.child(actions);
+        if pending {
+            section = section.child(note(
+                "Checking the JAR and its declared game compatibility…",
+            ));
+        }
+        if let Some(error) = &editor.optifine_error {
+            section = section.child(note(error.clone()));
+        }
+        section
     }
 
     fn instance_field(
@@ -711,5 +976,131 @@ mod tests {
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    fn optifine_jar(minecraft: &str) -> block_launcher::install::optifine::OptiFineJar {
+        block_launcher::install::optifine::OptiFineJar {
+            minecraft: minecraft.into(),
+            version: format!("{minecraft}_HD_U_I6"),
+            launchwrapper: "2.3".into(),
+            forge: None,
+            resource: block_launcher::Resource {
+                sha1: "a".repeat(40),
+                size: 123,
+                url: "block-import:synthetic".into(),
+            },
+        }
+    }
+
+    #[gpui::test]
+    fn instance_optifine_draft_validates_removes_and_cancel_restores_the_catalog(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.tab = Tab::Instances;
+                view.snapshot = ready_snapshot();
+                view.handle(UiAction::EditInstance, window, cx);
+            });
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let Some(editor) = view.shell.instance_editor.as_mut() else {
+                    return;
+                };
+                assert_eq!(editor.target.id, "vanilla");
+                let request = uuid::Uuid::new_v4();
+                editor.optifine_request = Some(request);
+                view.finish_instance_optifine_import(
+                    request,
+                    "instance-a",
+                    "vanilla",
+                    Ok(optifine_jar("1.20.6")),
+                    cx,
+                );
+                let Some(editor) = view.shell.instance_editor.as_ref() else {
+                    return;
+                };
+                assert!(
+                    editor
+                        .optifine
+                        .as_ref()
+                        .is_some_and(|selected| selected.version == "1.20.6_HD_U_I6")
+                );
+                assert!(editor.optifine_error.is_none());
+                assert!(editor.optifine_changed());
+                assert!(editor.dirty(cx));
+
+                let request = uuid::Uuid::new_v4();
+                let Some(editor) = view.shell.instance_editor.as_mut() else {
+                    return;
+                };
+                editor.optifine_request = Some(request);
+                view.finish_instance_optifine_import(
+                    request,
+                    "instance-a",
+                    "vanilla",
+                    Ok(optifine_jar("1.21.1")),
+                    cx,
+                );
+                let Some(editor) = view.shell.instance_editor.as_ref() else {
+                    return;
+                };
+                assert!(
+                    editor
+                        .optifine_error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("1.21.1")),
+                    "{:?}",
+                    editor.optifine_error
+                );
+                assert_eq!(
+                    editor
+                        .optifine
+                        .as_ref()
+                        .map(|selected| selected.version.as_str()),
+                    Some("1.20.6_HD_U_I6"),
+                    "a rejected replacement keeps the previous draft"
+                );
+
+                view.handle(UiAction::InstanceOptiFineRemove, window, cx);
+                let Some(editor) = view.shell.instance_editor.as_ref() else {
+                    return;
+                };
+                assert!(editor.optifine.is_none());
+                assert!(editor.optifine_error.is_none());
+                assert!(
+                    !editor.optifine_changed(),
+                    "remove restores the original draft value"
+                );
+
+                let request = uuid::Uuid::new_v4();
+                let Some(editor) = view.shell.instance_editor.as_mut() else {
+                    return;
+                };
+                editor.optifine_request = Some(request);
+                view.finish_instance_optifine_import(
+                    request,
+                    "instance-a",
+                    "vanilla",
+                    Ok(optifine_jar("1.20.6")),
+                    cx,
+                );
+            });
+        });
+        click(cx, "cancel-instance-settings");
+        cx.update(|window, cx| {
+            view.read_with(cx, |view, _| {
+                assert!(view.shell.instance_editor.is_none() && view.focus.is_focused(window));
+                let target = &view.snapshot.instances[0].targets[0];
+                assert!(
+                    target.optifine.is_none(),
+                    "Cancel never writes OptiFine to the catalog"
+                );
+                assert!(target.optifine_mod.is_none());
+            });
+        });
     }
 }

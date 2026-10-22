@@ -206,6 +206,8 @@ enum UiAction {
     SaveInstanceSettings,
     CancelInstanceSettings,
     InstanceFullscreen,
+    InstanceOptiFineFile,
+    InstanceOptiFineRemove,
     ProfileInheritRuntime,
     ProfileInheritWindow,
     BrowserBack,
@@ -1448,6 +1450,8 @@ impl Block {
             UiAction::SaveInstanceSettings => self.save_instance_draft(window, cx),
             UiAction::CancelInstanceSettings => self.cancel_instance_editor(window, cx),
             UiAction::InstanceFullscreen => self.toggle_instance_fullscreen(),
+            UiAction::InstanceOptiFineFile => self.browse_instance_optifine(cx),
+            UiAction::InstanceOptiFineRemove => self.remove_instance_optifine(cx),
             UiAction::ProfileInheritRuntime => {
                 if let Some(Form::Profile(form)) = &mut self.form {
                     form.original.inheritance.runtime = !form.original.inheritance.runtime;
