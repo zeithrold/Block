@@ -112,7 +112,7 @@ struct DeviceCode {
 }
 
 #[derive(Debug)]
-struct AuthProviderDraft {
+pub(crate) struct AuthProviderDraft {
     id: uuid::Uuid,
     name: gpui::Entity<super::TextInput>,
     address: gpui::Entity<super::TextInput>,
@@ -121,6 +121,26 @@ struct AuthProviderDraft {
     error: Option<String>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     saved: Option<uuid::Uuid>,
+}
+
+impl AuthWizard {
+    /// Whether the Add-provider page currently owns a draft (drop-zone lifetime).
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "the drop zone is Windows-only")
+    )]
+    pub(super) fn is_provider_drafting(&self) -> bool {
+        self.provider_draft.is_some()
+    }
+
+    /// Mutable access to the draft for drop-payload handoff.
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "the drop zone is Windows-only")
+    )]
+    pub(super) fn provider_draft_mut(&mut self) -> Option<&mut AuthProviderDraft> {
+        self.provider_draft.as_mut()
+    }
 }
 
 #[derive(Default)]

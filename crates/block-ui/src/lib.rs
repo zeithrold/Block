@@ -92,7 +92,7 @@ use gpui::{
     Styled as _, WeakEntity, Window, div, px, rgb,
 };
 #[cfg(windows)]
-use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 
 use appearance::{Appearance, Palette, Preferences};
@@ -2299,7 +2299,7 @@ impl Block {
             .shell
             .auth
             .as_ref()
-            .is_some_and(|state| state.provider_draft.is_some());
+            .is_some_and(|state| state.is_provider_drafting());
         if !drafting {
             self.provider_drop = None;
             return;
@@ -2307,7 +2307,7 @@ impl Block {
         if self.provider_drop.is_some() {
             return;
         }
-        let Ok(handle) = window.window_handle() else {
+        let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
             return;
         };
         let RawWindowHandle::Win32(win32) = handle.as_raw() else {
@@ -2332,7 +2332,7 @@ impl Block {
                     .shell
                     .auth
                     .as_mut()
-                    .and_then(|state| state.provider_draft.as_mut())
+                    .and_then(|state| state.provider_draft_mut())
                     && draft.error.is_none()
                 {
                     draft.error = Some(format!("Drag and drop is unavailable: {error}"));
@@ -2376,7 +2376,7 @@ impl Block {
             .shell
             .auth
             .as_mut()
-            .and_then(|state| state.provider_draft.as_mut())
+            .and_then(|state| state.provider_draft_mut())
         {
             draft
                 .address
