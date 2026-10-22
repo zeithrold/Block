@@ -132,16 +132,40 @@ async fn versions_from(
     context: &ResolveContext,
 ) -> anyhow::Result<Vec<LoaderVersion>> {
     let bytes = metadata(&url(origin, minecraft, None)?, context).await?;
-    let entries: Vec<VersionEntry> =
-        serde_json::from_slice(&bytes).context("Invalid official loader version list")?;
+    builds_from_list(&bytes, loader_label(origin), minecraft)
+}
+
+/// Human-readable loader name for the official metadata origin (only used in
+/// user-facing no-builds messages).
+fn loader_label(origin: &str) -> &'static str {
+    if origin.contains("quilt") {
+        "Quilt"
+    } else {
+        "Fabric"
+    }
+}
+
+/// Turn an official loader version list into the builds the picker can offer.
+///
+/// A version without published builds may answer with a different document
+/// shape (or an empty array); both must read as "no builds for this version"
+/// instead of leaking a serde parse error to the UI.
+fn builds_from_list(
+    bytes: &[u8],
+    loader: &str,
+    minecraft: &str,
+) -> anyhow::Result<Vec<LoaderVersion>> {
+    let entries = match serde_json::from_slice::<Vec<VersionEntry>>(bytes) {
+        Ok(entries) => entries,
+        Err(_) => return no_builds(loader, minecraft),
+    };
     ensure!(entries.len() <= 4096, "Loader version list is too large");
     let mut builds = Vec::new();
     for entry in entries {
         validate_version(&entry.loader.version)?;
-        ensure!(
-            entry.intermediary.version == minecraft,
-            "Loader list contains mappings for a different Minecraft version"
-        );
+        if entry.intermediary.version != minecraft {
+            continue;
+        }
         let stable = entry
             .loader
             .stable
@@ -156,7 +180,16 @@ async fn versions_from(
             });
         }
     }
+    if builds.is_empty() {
+        return no_builds(loader, minecraft);
+    }
     Ok(builds)
+}
+
+fn no_builds<T>(loader: &str, minecraft: &str) -> anyhow::Result<T> {
+    anyhow::bail!(
+        "No {loader} builds were found for Minecraft {minecraft}; retry or choose another version"
+    )
 }
 
 /// Merge the official launch profile with Mojang metadata and verify all loader
@@ -481,6 +514,71 @@ mod tests {
         }
         serde_json::json!({"id":format!("{prefix}-loader-0.16.14-1.20.6"), "inheritsFrom":"1.20.6", "mainClass":main,
             "arguments":{"jvm":["-Dloader.fixture=true"], "game":[]},"libraries":libraries})
+    }
+
+    fn no_builds_error(bytes: &[u8], loader: &str, minecraft: &str) -> String {
+        match builds_from_list(bytes, loader, minecraft) {
+            Err(error) => error.to_string(),
+            Ok(_) => "expected a no-builds error".into(),
+        }
+    }
+
+    #[test]
+    fn loader_list_without_intermediary_reads_as_no_builds() {
+        // Quilt's metadata for a game version it has no builds for can answer
+        // with entries that do not carry an `intermediary` mapping.
+        let bytes = br#"[{"loader":{"version":"0.30.1"},"build":{}}]"#;
+        let error = no_builds_error(bytes, "Quilt", "26.3");
+        assert!(
+            error.contains("No Quilt builds were found for Minecraft 26.3"),
+            "{error}"
+        );
+        assert!(error.contains("retry or choose another version"), "{error}");
+        assert!(!error.contains("serde"), "{error}");
+        assert!(!error.contains("missing field"), "{error}");
+    }
+
+    #[test]
+    fn empty_loader_list_reads_as_no_builds() {
+        let error = no_builds_error(b"[]", "Fabric", "1.16.5");
+        assert!(
+            error.contains("No Fabric builds were found for Minecraft 1.16.5"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn loader_list_for_another_game_version_reads_as_no_builds() {
+        let bytes = br#"[{"loader":{"version":"0.15.11","stable":true},"intermediary":{"version":"1.20.1"}}]"#;
+        let error = no_builds_error(bytes, "Quilt", "1.18.2");
+        assert!(
+            error.contains("No Quilt builds were found for Minecraft 1.18.2"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn matching_loader_list_keeps_stable_and_prerelease_builds() {
+        let bytes = br#"[{"loader":{"version":"0.30.1","stable":true},"intermediary":{"version":"1.18.2"}},{"loader":{"version":"0.31.0-beta.4"},"intermediary":{"version":"1.18.2"}}]"#;
+        match builds_from_list(bytes, "Quilt", "1.18.2") {
+            Ok(builds) => {
+                assert_eq!(builds.len(), 2);
+                assert!(
+                    builds
+                        .iter()
+                        .any(|build| build.version == "0.30.1" && build.stable)
+                );
+                assert!(
+                    builds
+                        .iter()
+                        .any(|build| build.version == "0.31.0-beta.4" && !build.stable)
+                );
+            }
+            Err(error) => assert!(
+                error.to_string().is_empty(),
+                "valid loader list must parse: {error}"
+            ),
+        }
     }
 
     #[tokio::test]
