@@ -98,7 +98,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | About: build/product, brand, links and copy actions | Yes | Pending | Pending | Real information. |
 | Welcome: three steps, drafts, skip, download/retry | Yes | Pending | Pending | No implicit identity on Skip. |
-| Welcome: atomic new-account/game final commit | No | Failed (macOS) | Pending | Account saves before final game creation. |
+| Welcome: atomic new-account/game final commit | Yes | Pending | Pending | Identity stays in memory until the final commit; a failed game save rolls it back. |
 
 ### Cross-page
 

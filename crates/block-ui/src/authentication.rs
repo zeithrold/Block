@@ -127,7 +127,7 @@ struct AuthProviderDraft {
 pub(super) struct AuthWizard {
     phase: Phase,
     provider: AccountProvider,
-    username: Option<gpui::Entity<super::TextInput>>,
+    pub(super) username: Option<gpui::Entity<super::TextInput>>,
     login: Option<gpui::Entity<super::TextInput>>,
     password: Option<gpui::Entity<gpui_base::input::InputState>>,
     external_provider: Option<uuid::Uuid>,
@@ -1503,7 +1503,7 @@ impl Block {
         self.close_auth_context(window, cx);
     }
 
-    pub(super) fn finish_auth(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn finish_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;
         }
@@ -1516,6 +1516,28 @@ impl Block {
         let Some(account) = account else {
             return;
         };
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.return_tab == Tab::Onboarding)
+        {
+            // First run keeps the verified identity in memory. The final setup
+            // commit saves it together with the game, or leaves nothing behind.
+            if account.provider == AccountProvider::Offline
+                && let Some(engine) = &self.engine
+            {
+                // A previous Microsoft/Authlib preparation can no longer be
+                // committed once a local identity replaces it.
+                engine.discard_prepared_sign_in();
+            }
+            self.shell.onboarding.pending_identity = Some(account.clone());
+            self.shell.onboarding.account = Some(account_id(&account));
+            self.shell.onboarding.account_decided = true;
+            self.status = "Account verified · saved when you finish setup".into();
+            self.close_auth_context(window, cx);
+            return;
+        }
         if self.engine.is_none() {
             if let Some(state) = &mut self.shell.auth {
                 state.failed("Secure account saving is unavailable: engine unavailable");
@@ -2165,8 +2187,8 @@ impl Block {
             .child(div().text_xl().child(account.player_name.clone()))
             .child(components::badge(self.account_authority(account), self.palette, BadgeVariant::Secondary))
             .children(self.account_provider(account).map(|provider|note(provider.api_url.clone())))
-            .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
-            .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else { "Finish saves this account and selects it. Closing now discards the preparation and keeps previously saved accounts unchanged." }))
+            .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else if state.return_tab == Tab::Onboarding { "Ready for setup" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
+            .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else if state.return_tab == Tab::Onboarding { "Finish keeps this account in memory; setup saves it together with your game. Closing now discards the preparation and saves nothing." } else { "Finish saves this account and selects it. Closing now discards the preparation and keeps previously saved accounts unchanged." }))
     }
 
     fn auth_footer(

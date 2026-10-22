@@ -194,12 +194,14 @@ pub(crate) struct Engine {
     runtime: Arc<tokio::runtime::Runtime>,
     sender: EventSender,
     pub root: PathBuf,
-    prepared_sign_in: Arc<Mutex<Option<(CancellationToken, PreparedMicrosoftSignIn)>>>,
+    prepared_sign_in: MicrosoftSignInSlot,
     pending_authlib: Arc<Mutex<Option<PendingAuthlib>>>,
-    prepared_authlib: Arc<Mutex<Option<(CancellationToken, block_auth::PreparedAuthlibSignIn)>>>,
+    prepared_authlib: AuthlibSignInSlot,
 }
 
 type PendingAuthlib = (CancellationToken, Arc<block_auth::PendingAuthlibSignIn>);
+type MicrosoftSignInSlot = Arc<Mutex<Option<(CancellationToken, PreparedMicrosoftSignIn)>>>;
+type AuthlibSignInSlot = Arc<Mutex<Option<(CancellationToken, block_auth::PreparedAuthlibSignIn)>>>;
 
 impl Engine {
     pub(super) fn new() -> anyhow::Result<(Self, Receiver<Message>)> {
@@ -432,6 +434,7 @@ impl Engine {
     )]
     pub(super) fn create_instance_with_profile(
         &self,
+        pending_account: Option<Account>,
         name: String,
         version: String,
         directory: Option<PathBuf>,
@@ -443,46 +446,110 @@ impl Engine {
     ) {
         let root = self.root.clone();
         let sender = self.sender.clone();
+        let prepared_sign_in = self.prepared_sign_in.clone();
+        let prepared_authlib = self.prepared_authlib.clone();
         self.runtime.spawn(async move {
             let result = async {
-                let configuration = profile
-                    .unwrap_or_else(|| ProfileDraftValues {
-                        name: name.clone(),
-                        defaults,
-                        appearance: ProfileAppearance::default(),
-                        target_id: None,
-                        server: block_launcher::catalog::ServerPreferences::default(),
+                // First-run saves the verified identity and the game as one
+                // commit: the identity is only written here, together with the
+                // catalog entry, and is rolled back if the game cannot be saved.
+                let committed = match pending_account {
+                    None => None,
+                    Some(account) => {
+                        ensure!(
+                            !cancel.is_cancelled(),
+                            "Cancelled before the account was saved."
+                        );
+                        let (accounts, existed) = persist_prepared_identity(
+                            &root,
+                            &account,
+                            &prepared_sign_in,
+                            &prepared_authlib,
+                        )
+                        .await?;
+                        let _ = sender
+                            .unscoped()
+                            .send(Message::Accounts(Ok(accounts)))
+                            .await;
+                        Some((account, existed))
+                    }
+                };
+                let created = async {
+                    // General catalog creation is unaffected by an already
+                    // cancelled install token; only the first-run identity
+                    // commit treats cancellation as a failure to roll back.
+                    if committed.is_some() {
+                        ensure!(
+                            !cancel.is_cancelled(),
+                            "Cancelled before the game was created."
+                        );
+                    }
+                    let configuration = profile
+                        .unwrap_or_else(|| ProfileDraftValues {
+                            name: name.clone(),
+                            defaults,
+                            appearance: ProfileAppearance::default(),
+                            target_id: None,
+                            server: block_launcher::catalog::ServerPreferences::default(),
+                        })
+                        .configuration()?;
+                    let mut configuration = configuration;
+                    if let Some((kind, version)) = &loader {
+                        configuration.target_id =
+                            format!("{}-{version}", kind.name().to_lowercase());
+                    }
+                    let catalog_root = root.clone();
+                    let (instance, profile) = tokio::task::spawn_blocking(move || {
+                        let catalog = Catalog::open(catalog_root)?;
+                        catalog.create_instance_with_components(
+                            name,
+                            version,
+                            directory,
+                            loader,
+                            optifine,
+                            configuration,
+                        )
                     })
-                    .configuration()?;
-                let mut configuration = configuration;
-                if let Some((kind, version)) = &loader {
-                    configuration.target_id = format!("{}-{version}", kind.name().to_lowercase());
+                    .await??;
+                    let _ = sender
+                        .send(Message::Created {
+                            instance: instance.id.clone(),
+                            profile: profile.id.clone(),
+                        })
+                        .await;
+                    send_catalog(&root, &sender).await;
+                    let library = library(root.clone(), &sender).await?;
+                    library
+                        .install(&instance.id, &profile.target_id, &cancel)
+                        .await?;
+                    Ok::<_, anyhow::Error>("Installation complete · ready to play".to_owned())
                 }
-                let catalog_root = root.clone();
-                let (instance, profile) = tokio::task::spawn_blocking(move || {
-                    let catalog = Catalog::open(catalog_root)?;
-                    catalog.create_instance_with_components(
-                        name,
-                        version,
-                        directory,
-                        loader,
-                        optifine,
-                        configuration,
-                    )
-                })
-                .await??;
-                let _ = sender
-                    .send(Message::Created {
-                        instance: instance.id.clone(),
-                        profile: profile.id.clone(),
-                    })
-                    .await;
-                send_catalog(&root, &sender).await;
-                let library = library(root.clone(), &sender).await?;
-                library
-                    .install(&instance.id, &profile.target_id, &cancel)
-                    .await?;
-                Ok::<_, anyhow::Error>("Installation complete · ready to play".to_owned())
+                .await;
+                match (created, committed) {
+                    (Ok(status), _) => Ok(status),
+                    (Err(error), Some((account, false))) => {
+                        // The identity was saved for this commit only; remove its
+                        // credential and metadata so a failed game save leaves
+                        // neither half behind.
+                        if let Err(rollback) = remove_persisted_account(&root, &account).await {
+                            let _ = sender
+                                .unscoped()
+                                .send(Message::Accounts(Ok(
+                                    load_accounts(&root).unwrap_or_default()
+                                )))
+                                .await;
+                            return Err(error.context(format!(
+                                "the new account could not be rolled back: {rollback:#}"
+                            )));
+                        }
+                        let _ = sender
+                            .unscoped()
+                            .send(Message::Accounts(Ok(load_accounts(&root)?)))
+                            .await;
+                        Err(error)
+                    }
+                    (Err(error), _) => Err(error),
+                }
             }
             .await;
             send_catalog(&root, &sender).await;
@@ -946,29 +1013,10 @@ impl Engine {
         self.runtime.spawn(async move {
             let result = async {
                 // Use the account's public registration ID, including after a build configuration change.
-                let mut accounts = load_accounts(&root)?;
-                let mut revocation_warning = false;
-                if account.provider == AccountProvider::Authlib {
-                    if let Some(link) = &account.authlib {
-                        let remote = async {
-                            let provider = provider_by_id(&root, link.provider_id)?;
-                            block_auth::AuthlibAuth::new(&provider)?
-                                .invalidate(&account, &CancellationToken::new())
-                                .await?;
-                            Ok::<_, anyhow::Error>(())
-                        }
-                        .await;
-                        revocation_warning = remote.is_err();
-                    }
-                    block_auth::AuthlibAuth::forget(&account).await?;
-                } else if account.provider == AccountProvider::Microsoft {
-                    MicrosoftAuth::new(&account.client_id)?
-                        .sign_out(&account)
-                        .await?;
-                }
-                accounts.retain(|saved| saved.identity_key() != account.identity_key());
-                save_accounts(&root, &accounts)?;
-                let _ = sender.send(Message::Accounts(Ok(accounts))).await;
+                let revocation_warning = remove_persisted_account(&root, &account).await?;
+                let _ = sender
+                    .send(Message::Accounts(Ok(load_accounts(&root)?)))
+                    .await;
                 Ok(if account.provider == AccountProvider::Offline {
                     "Offline identity removed · game files kept"
                 } else if revocation_warning {
@@ -1611,6 +1659,125 @@ fn save_accounts(root: &Path, accounts: &[Account]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Durably saves one verified identity and returns the updated account list.
+/// Preparation alone never reaches secure storage; only this call does.
+async fn persist_prepared_identity(
+    root: &Path,
+    account: &Account,
+    prepared_sign_in: &MicrosoftSignInSlot,
+    prepared_authlib: &AuthlibSignInSlot,
+) -> anyhow::Result<(Vec<Account>, bool)> {
+    match account.provider {
+        AccountProvider::Offline => {
+            ensure!(
+                account == &offline_account(&account.player_name)?,
+                "The offline identity is invalid."
+            );
+            let (accounts, existed) = merge_signed_in_account(load_accounts(root)?, account)?;
+            save_accounts(root, &accounts)?;
+            Ok((accounts, existed))
+        }
+        AccountProvider::Microsoft => {
+            let (cancel, prepared) = {
+                let mut pending = prepared_sign_in
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                ensure!(
+                    pending.as_ref().is_some_and(|(_, prepared)| {
+                        prepared.account().reference == account.reference
+                    }),
+                    "The prepared identity is no longer available. Sign in again."
+                );
+                pending.take().context("Prepared sign-in is unavailable")?
+            };
+            ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+            let signed_in = prepared.account().clone();
+            let (accounts, existed) = merge_signed_in_account(load_accounts(root)?, &signed_in)?;
+            let auth = auth()?;
+            auth.save_sign_in(prepared).await?;
+            if let Err(error) = save_accounts(root, &accounts) {
+                if !existed {
+                    auth.sign_out(&signed_in).await.context("Account metadata could not be saved, and the new credential could not be removed from secure storage")?;
+                }
+                return Err(error);
+            }
+            Ok((accounts, existed))
+        }
+        AccountProvider::Authlib => {
+            let link = account
+                .authlib
+                .as_ref()
+                .context("Missing account provider")?;
+            let (cancel, prepared) = {
+                let mut slot = prepared_authlib
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                ensure!(
+                    slot.as_ref().is_some_and(|(_, prepared)| {
+                        prepared.account().identity_key() == account.identity_key()
+                    }),
+                    "This prepared character is no longer available. Sign in again."
+                );
+                slot.take()
+                    .context("Prepared external sign-in is unavailable")?
+            };
+            ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
+            let signed_in = prepared.account().clone();
+            let provider = provider_by_id(root, link.provider_id)?;
+            let (_, existed) = merge_signed_in_account(load_accounts(root)?, &signed_in)?;
+            let auth = block_auth::AuthlibAuth::new(&provider)?;
+            auth.save_sign_in(prepared, &CancellationToken::new())
+                .await?;
+            let saved = (|| {
+                ensure!(
+                    provider_by_id(root, link.provider_id)?.api_url == provider.api_url,
+                    "The provider API changed during sign-in. Sign in again."
+                );
+                let (accounts, _) = merge_signed_in_account(load_accounts(root)?, &signed_in)?;
+                save_accounts(root, &accounts)?;
+                Ok::<_, anyhow::Error>(accounts)
+            })();
+            match saved {
+                Ok(accounts) => Ok((accounts, existed)),
+                Err(error) => {
+                    if !existed {
+                        block_auth::AuthlibAuth::forget(&signed_in).await.context("Account metadata could not be saved and its new credential could not be removed")?;
+                    }
+                    Err(error)
+                }
+            }
+        }
+    }
+}
+
+/// Removes an account's durable credentials and metadata. Returns whether a
+/// provider-side revocation could not be confirmed.
+async fn remove_persisted_account(root: &Path, account: &Account) -> anyhow::Result<bool> {
+    let mut accounts = load_accounts(root)?;
+    let mut revocation_warning = false;
+    if account.provider == AccountProvider::Authlib {
+        if let Some(link) = &account.authlib {
+            let remote = async {
+                let provider = provider_by_id(root, link.provider_id)?;
+                block_auth::AuthlibAuth::new(&provider)?
+                    .invalidate(account, &CancellationToken::new())
+                    .await?;
+                Ok::<_, anyhow::Error>(())
+            }
+            .await;
+            revocation_warning = remote.is_err();
+        }
+        block_auth::AuthlibAuth::forget(account).await?;
+    } else if account.provider == AccountProvider::Microsoft {
+        MicrosoftAuth::new(&account.client_id)?
+            .sign_out(account)
+            .await?;
+    }
+    accounts.retain(|saved| saved.identity_key() != account.identity_key());
+    save_accounts(root, &accounts)?;
+    Ok(revocation_warning)
+}
+
 async fn run_recipe(
     recipe: LaunchRecipe,
     root: PathBuf,
@@ -2063,6 +2230,7 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel(); // Test profile creation, with installation prevented from networking.
         engine.create_instance_with_profile(
+            None,
             "Configured".into(),
             "26.3".into(),
             None,
@@ -2131,6 +2299,7 @@ mod tests {
             let cancel = super::CancellationToken::new();
             cancel.cancel();
             engine.create_instance_with_profile(
+                None,
                 kind.name().into(),
                 minecraft.into(),
                 None,

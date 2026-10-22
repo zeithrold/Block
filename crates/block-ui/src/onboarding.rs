@@ -43,7 +43,10 @@ pub(super) struct State {
     pub step: Step,
     pub error: Option<String>,
     pub account: Option<String>,
-    account_decided: bool,
+    /// A verified identity kept in memory until the final setup commit saves it
+    /// together with the game. Nothing reaches secure storage before that.
+    pub pending_identity: Option<block_auth::Account>,
+    pub account_decided: bool,
     scroll: ScrollHandle,
     heading_focus: Option<FocusHandle>,
     error_field: Option<WizardField>,
@@ -58,6 +61,7 @@ impl State {
             step: self.step,
             error: self.error.clone(),
             account: self.account.clone(),
+            pending_identity: self.pending_identity.clone(),
             account_decided: self.account_decided,
             scroll,
             heading_focus: Some(cx.focus_handle()),
@@ -368,10 +372,8 @@ impl Block {
     }
 
     fn onboarding_account(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let selected = self
-            .accounts
-            .iter()
-            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        let selected = self.onboarding_identity();
+        let pending = self.shell.onboarding.pending_identity.is_some();
         let mut body = div().flex().flex_col().gap_6().child(self.setup_heading(
             "02 / YOUR ACCOUNT",
             "Who’s playing?",
@@ -384,8 +386,13 @@ impl Block {
                         .child(components::avatar_fallback(&account.player_name, self.palette, 40., AvatarState::Unavailable))
                         .child(div().flex_1().min_w_0().child(div().text_lg().child(account.player_name.clone()))
                             .child(self.setup_caption(self.account_authority(account)))))
-                    .child(components::badge("Account saved", self.palette, BadgeVariant::Success))
-                    .child(self.setup_caption("This account is saved on your device. Leaving setup keeps the saved account.")),
+                    .children((!pending).then(|| components::badge("Account saved", self.palette, BadgeVariant::Success)))
+                    .children(pending.then(|| components::badge("Ready to save", self.palette, BadgeVariant::Primary)))
+                    .child(self.setup_caption(if pending {
+                        "Verified and kept in memory. Finishing setup saves this account together with your game; leaving before then saves nothing."
+                    } else {
+                        "This account is saved on your device. Leaving setup keeps the saved account."
+                    })),
             );
         } else {
             body = body.child(
@@ -404,7 +411,7 @@ impl Block {
                             }),
                     )
                     .child(self.setup_caption(if self.busy {
-                        "Complete account setup in its window. Only Finish saves the account."
+                        "Complete account setup in its window. Setup saves the account when you create your game."
                     } else {
                         "Sign in with Microsoft or add a local offline identity."
                     }))
@@ -483,10 +490,8 @@ impl Block {
 
     fn onboarding_review(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let created = self.onboarding_progress == Progress::Created;
-        let account = self
-            .accounts
-            .iter()
-            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        let pending = self.shell.onboarding.pending_identity.is_some();
+        let account = self.onboarding_identity();
         let rows = self.onboarding_review_rows(form, cx);
         div().flex().flex_col().gap_6()
             .child(self.setup_heading("03 / READY TO GO", "A world of possibilities.", if created { "Your game has been saved. Finish to return to Home." } else { "Review your choices. Each Change button returns to its draft." }))
@@ -505,8 +510,10 @@ impl Block {
             .children(created.then(|| components::badge("Game saved", self.palette, BadgeVariant::Primary)))
             .children((self.busy && created).then(|| components::progress(ProgressState::Indeterminate, self.palette)))
             .children(self.busy.then(|| self.setup_caption(self.status.clone())))
-            .child(self.setup_caption(if account.is_some() {
-                "The account, game catalog and setup preference are saved in separate steps. Downloads can be retried from Home if they fail."
+            .child(self.setup_caption(if pending {
+                "Creating saves this new account and the game together. If the game cannot be saved, the account is removed again. Downloads can be retried from Home."
+            } else if account.is_some() {
+                "Your game catalog and setup preference are saved in separate steps. Downloads can be retried from Home if they fail."
             } else {
                 "Your game can download without an account. Sign in before you play; download errors can be retried from Home."
             })).into_any_element()
@@ -517,10 +524,7 @@ impl Block {
         form: &InstanceForm,
         cx: &Context<'_, Self>,
     ) -> [(&'static str, String, UiAction); 10] {
-        let account = self
-            .accounts
-            .iter()
-            .find(|account| Some(account_id(account)) == self.shell.onboarding.account);
+        let account = self.onboarding_identity();
         let profile = self.shell.wizard.profile.as_ref();
         let directory = form.directory.read(cx).value();
         let runtime = profile.map_or_else(
@@ -876,15 +880,39 @@ impl Block {
     }
 
     pub(super) fn choose_onboarding_account(&mut self, id: String) {
-        if self
-            .accounts
-            .iter()
-            .any(|account| account_id(account) == id)
+        let pending = self
+            .shell
+            .onboarding
+            .pending_identity
+            .as_ref()
+            .is_some_and(|account| account_id(account) == id);
+        if pending
+            || self
+                .accounts
+                .iter()
+                .any(|account| account_id(account) == id)
         {
+            if !pending && self.shell.onboarding.pending_identity.take().is_some() {
+                // Choosing an already saved identity abandons the in-memory
+                // preparation; its credentials were never persisted.
+                if let Some(engine) = &self.engine {
+                    engine.discard_prepared_sign_in();
+                }
+            }
             self.shell.onboarding.account = Some(id);
             self.shell.onboarding.account_decided = true;
             self.shell.onboarding.error = None;
         }
+    }
+
+    /// The identity this setup would use: a verified in-memory preparation
+    /// first, otherwise an already saved account.
+    pub(super) fn onboarding_identity(&self) -> Option<&block_auth::Account> {
+        self.shell.onboarding.pending_identity.as_ref().or_else(|| {
+            self.accounts
+                .iter()
+                .find(|account| Some(account_id(account)) == self.shell.onboarding.account)
+        })
     }
 
     pub(super) fn open_onboarding_section(
@@ -1118,10 +1146,14 @@ impl Block {
         values.name.clone_from(&name);
         values.target_id = None;
         let defaults = values.defaults.clone();
+        // A verified but unsaved identity is committed here, in the same task
+        // as the catalog entry, so a failure leaves neither half behind.
+        let pending_account = self.shell.onboarding.pending_identity.clone();
         self.begin_cancellable("Creating your game and preparing verified downloads");
         self.mark_creation();
         if let Some(engine) = &self.engine {
             engine.create_instance_with_profile(
+                pending_account,
                 name,
                 version,
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim())),
@@ -1146,6 +1178,12 @@ impl Block {
         if let Err(error) = preferences.save(&engine.root) {
             self.report(format!("Could not finish setup: {error}"));
             return false;
+        }
+        // Setup is complete: no in-memory identity remains, and any prepared
+        // sign-in that was not committed is discarded.
+        self.shell.onboarding.pending_identity = None;
+        if let Some(engine) = &self.engine {
+            engine.discard_prepared_sign_in();
         }
         self.selected_account = self.shell.onboarding.account.clone().filter(|id| {
             self.accounts

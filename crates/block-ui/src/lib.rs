@@ -742,9 +742,13 @@ impl Block {
                             }
                         }
                         Err(_) if self.cancel.is_cancelled() => {
+                            self.discard_uncommitted_onboarding_identity();
                             self.status = "Cancelled · retry when ready".into();
                         }
-                        Err(error) => self.report(format!("Failed · {error}")),
+                        Err(error) => {
+                            self.discard_uncommitted_onboarding_identity();
+                            self.report(format!("Failed · {error}"));
+                        }
                     }
                 }
                 Message::Recipe(result) => {
@@ -911,6 +915,18 @@ impl Block {
                 tab: self.tab,
                 draft: form.name.entity_id().as_u64(),
             });
+        }
+    }
+
+    /// A failed or cancelled first-run commit rolls its new identity back, so
+    /// the draft no longer holds a prepared account and must add one again.
+    fn discard_uncommitted_onboarding_identity(&mut self) {
+        if self.tab == Tab::Onboarding
+            && self.operation_kind == OperationKind::Install
+            && self.shell.onboarding.pending_identity.take().is_some()
+        {
+            self.shell.onboarding.account = None;
+            self.shell.onboarding.account_decided = false;
         }
     }
 

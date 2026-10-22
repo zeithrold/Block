@@ -608,3 +608,289 @@ fn late_session_then_catalog_keeps_guide_game_and_auth_drafts_while_restoring_su
         });
     }
 }
+
+/// Drives the real offline-account preparation window from first-run setup and
+/// stops on its final confirmation screen, which keeps the identity in memory.
+fn prepare_local_identity(
+    view: &mut crate::Block,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<'_, crate::Block>,
+    name: &str,
+) {
+    view.open_auth_wizard(window, cx);
+    view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
+    view.auth_next(cx);
+    let username = view
+        .shell
+        .auth
+        .as_ref()
+        .and_then(|state| state.username.clone());
+    if let Some(username) = &username {
+        username.update(cx, |field, cx| field.set_value(name, cx));
+    }
+    view.start_auth(window, cx);
+    view.finish_auth(window, cx);
+}
+
+fn first_run_engine(
+    root: &std::path::Path,
+) -> anyhow::Result<(
+    crate::engine::Engine,
+    tokio::sync::mpsc::Receiver<crate::Message>,
+)> {
+    crate::engine::Engine::with_root(root.to_owned())
+}
+
+#[track_caller]
+fn submit_first_run(view: &gpui::Entity<crate::Block>, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.change_onboarding_step(Step::Review, window, cx);
+            view.handle(UiAction::OnboardingNext, window, cx);
+            assert!(view.busy);
+        });
+    });
+}
+
+/// Reads the real engine channel until the requested message; the returned flag
+/// distinguishes the catalog commit from the final result.
+fn drain_until(
+    runtime: &tokio::runtime::Runtime,
+    receiver: &mut tokio::sync::mpsc::Receiver<crate::Message>,
+    want_created: bool,
+) -> anyhow::Result<Vec<crate::Message>> {
+    runtime.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut seen = Vec::new();
+            loop {
+                let message = receiver.recv().await.ok_or_else(|| {
+                    anyhow::anyhow!("setup engine closed before the expected result")
+                })?;
+                let inner = match &message {
+                    crate::Message::ForOperation { message, .. } => message.as_ref(),
+                    message => message,
+                };
+                let created = matches!(inner, crate::Message::Created { .. });
+                let finished = matches!(inner, crate::Message::Finished(_));
+                seen.push(message);
+                if (want_created && created) || (!want_created && finished) {
+                    return Ok::<_, anyhow::Error>(seen);
+                }
+            }
+        })
+        .await?
+    })
+}
+
+#[gpui::test]
+fn first_run_saves_the_verified_identity_and_the_game_together(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, mut receiver) = first_run_engine(root.path())?;
+        let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_onboarding(cx);
+                if let Some(Form::Instance(form)) = &view.form {
+                    form.name
+                        .update(cx, |field, cx| field.set_value("First world", cx));
+                }
+                prepare_local_identity(view, window, cx, "Local_Player");
+                assert_eq!(
+                    view.onboarding_identity()
+                        .map(|account| account.player_name.clone()),
+                    Some("Local_Player".to_owned())
+                );
+                // Verification alone persists nothing.
+                assert!(view.accounts.is_empty());
+                assert_eq!(view.tab, Tab::Onboarding);
+                let _ = window;
+            });
+        });
+        assert!(!root.path().join("accounts.json").exists());
+        assert!(!root.path().join("catalog.json").exists());
+
+        submit_first_run(&view, cx);
+        let runtime = tokio::runtime::Runtime::new()?;
+        let messages = drain_until(&runtime, &mut receiver, true)?;
+        // The catalog commit and the identity are durable in the same step.
+        let snapshot = catalog.snapshot()?;
+        assert_eq!(snapshot.instances.len(), 1);
+        assert_eq!(snapshot.profiles.len(), 1);
+        let accounts: Vec<block_auth::Account> =
+            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].player_name, "Local_Player");
+        // Release the installation so it never reaches the network.
+        drop(receiver);
+        drop(messages);
+
+        let (sender, receiver) = tokio::sync::mpsc::channel(4);
+        sender.try_send(crate::Message::Accounts(Ok(accounts.clone())))?;
+        sender.try_send(crate::Message::Created {
+            instance: snapshot.instances[0].id.clone(),
+            profile: snapshot.profiles[0].id.clone(),
+        })?;
+        view.update(cx, |view, cx| {
+            view.messages = Some(receiver);
+            view.poll(cx);
+            assert_eq!(view.tab, Tab::Home);
+            assert!(view.shell.onboarding.pending_identity.is_none());
+            assert_eq!(
+                view.selected_account,
+                accounts.first().map(crate::account_id)
+            );
+        });
+        assert!(crate::Preferences::load(root.path())?.onboarding_complete);
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn first_run_rolls_the_new_identity_back_when_the_game_cannot_be_saved(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, mut receiver) = first_run_engine(root.path())?;
+        // A directory at the catalog path rejects the game commit after the
+        // identity was already saved, which must roll the identity back.
+        std::fs::create_dir(root.path().join("catalog.json"))?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_onboarding(cx);
+                prepare_local_identity(view, window, cx, "Rollback_Player");
+                assert!(view.shell.onboarding.pending_identity.is_some());
+                let _ = window;
+            });
+        });
+        submit_first_run(&view, cx);
+        let runtime = tokio::runtime::Runtime::new()?;
+        let messages = drain_until(&runtime, &mut receiver, false)?;
+        let Some(finished) = messages.last() else {
+            anyhow::bail!("creation reported no result");
+        };
+        let inner = match finished {
+            crate::Message::ForOperation { message, .. } => message.as_ref(),
+            message => message,
+        };
+        assert!(matches!(inner, crate::Message::Finished(Err(_))));
+        // Neither half of the commit remains: the rolled-back metadata keeps
+        // no account, and the catalog directory holds no saved game.
+        let accounts: Vec<block_auth::Account> =
+            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        assert!(accounts.is_empty(), "the new identity must be rolled back");
+        assert!(catalog_free(&root));
+        view.update(cx, |view, cx| {
+            let (sender, receiver) = tokio::sync::mpsc::channel(2);
+            assert!(
+                sender
+                    .try_send(crate::Message::Accounts(Ok(Vec::new())))
+                    .is_ok()
+            );
+            assert!(
+                sender
+                    .try_send(crate::Message::Finished(Err(
+                        "The game could not be saved.".into()
+                    )))
+                    .is_ok()
+            );
+            view.messages = Some(receiver);
+            view.poll(cx);
+            assert_eq!(view.tab, Tab::Onboarding);
+            assert!(view.shell.onboarding.pending_identity.is_none());
+            assert!(view.shell.onboarding.account.is_none());
+        });
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+/// The catalog file is a directory in the rollback fixture, so its absence is
+/// checked through a reading attempt instead of `exists`.
+fn catalog_free(root: &tempfile::TempDir) -> bool {
+    std::fs::read(root.path().join("catalog.json")).is_err()
+}
+
+#[gpui::test]
+fn leaving_first_run_before_creation_saves_no_identity_or_game(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, _receiver) = first_run_engine(root.path())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_onboarding(cx);
+                if let Some(Form::Instance(form)) = &view.form {
+                    form.name
+                        .update(cx, |field, cx| field.set_value("Discarded world", cx));
+                }
+                prepare_local_identity(view, window, cx, "Local_Player");
+                // Going back keeps the verified identity in memory only.
+                view.change_onboarding_step(Step::Game, window, cx);
+                view.change_onboarding_step(Step::Account, window, cx);
+                assert!(view.shell.onboarding.pending_identity.is_some());
+                assert!(view.accounts.is_empty());
+                view.handle(UiAction::OnboardingSkip, window, cx);
+                assert_eq!(view.tab, Tab::Home);
+                assert!(view.shell.onboarding.pending_identity.is_none());
+                assert!(view.accounts.is_empty());
+            });
+        });
+        assert!(!root.path().join("accounts.json").exists());
+        assert!(!root.path().join("catalog.json").exists());
+        assert!(crate::Preferences::load(root.path())?.onboarding_complete);
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn cancelling_first_run_account_setup_leaves_no_identity_behind(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, _receiver) = first_run_engine(root.path())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_onboarding(cx);
+                view.open_auth_wizard(window, cx);
+                view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
+                view.auth_next(cx);
+                let username = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.username.clone());
+                if let Some(username) = &username {
+                    username.update(cx, |field, cx| field.set_value("Cancelled_Player", cx));
+                }
+                view.start_auth(window, cx);
+                // Cancel on the confirmation step: the identity was never saved.
+                view.cancel_auth(window, cx);
+                assert!(view.shell.auth.is_none());
+                assert!(view.shell.onboarding.pending_identity.is_none());
+                // A late result cannot adopt the cancelled attempt.
+                if let Ok(account) = crate::engine::offline_account("Cancelled_Player") {
+                    view.auth_prepared(account);
+                }
+                assert!(view.shell.auth.is_none());
+                assert!(view.shell.onboarding.pending_identity.is_none());
+                assert!(view.accounts.is_empty());
+            });
+        });
+        assert!(!root.path().join("accounts.json").exists());
+        assert!(!root.path().join("catalog.json").exists());
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
