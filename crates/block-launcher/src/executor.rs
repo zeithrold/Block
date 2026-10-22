@@ -376,6 +376,20 @@ fn materialize(
                 let directory = confined_path(root, &directory.replace(RUN_ID_TOKEN, run_id))?;
                 extract(root, &store.object_path(sha1)?, &directory, excludes)?;
             }
+            PrepareAction::ExtractArchive {
+                sha256,
+                directory,
+                archive,
+            } => {
+                let directory = confined_path(root, &directory.replace(RUN_ID_TOKEN, run_id))?;
+                ensure_write_path(root, &directory)?;
+                install_archive(
+                    root,
+                    &store.sha256_object_path(sha256)?,
+                    &directory,
+                    *archive,
+                )?;
+            }
             PrepareAction::Link {
                 path,
                 target,
@@ -501,6 +515,198 @@ fn extract(
             io::copy(&mut entry, &mut fs::File::create(destination)?)?;
         }
     }
+    Ok(())
+}
+
+/// Maximum number of entries unpacked from one vendor runtime archive.
+const MAX_ARCHIVE_ENTRIES: usize = 100_000;
+/// Maximum total unpacked bytes accepted from one vendor runtime archive.
+const MAX_UNPACKED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Install a verified vendor runtime archive atomically.
+///
+/// The archive is unpacked into a staging directory next to the destination and
+/// only renamed into place once `bin/java` exists and is executable, so an
+/// interrupted extraction never looks installed.
+fn install_archive(
+    root: &Path,
+    archive: &Path,
+    directory: &Path,
+    kind: crate::azul::ArchiveKind,
+) -> anyhow::Result<()> {
+    let parent = directory
+        .parent()
+        .context("managed runtime directory has no parent")?;
+    fs::create_dir_all(parent)?;
+    ensure_write_path(root, parent)?;
+    if directory.exists() {
+        if directory.join("bin/java").is_file() || directory.join("bin/java.exe").is_file() {
+            return Ok(());
+        }
+        // A partial extraction can never be produced by the atomic rename below;
+        // remove a legacy/aborted directory so Repair reproduces the archive.
+        ensure_write_path(root, directory)?;
+        fs::remove_dir_all(directory)?;
+    }
+    let staging = parent.join(format!(".staging-{}", uuid::Uuid::new_v4()));
+    let result = materialize_archive(root, archive, &staging, directory, kind);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+fn materialize_archive(
+    root: &Path,
+    archive: &Path,
+    staging: &Path,
+    directory: &Path,
+    kind: crate::azul::ArchiveKind,
+) -> anyhow::Result<()> {
+    ensure_write_path(root, staging)?;
+    fs::create_dir_all(staging)?;
+    match kind {
+        crate::azul::ArchiveKind::TarGz => unpack_tar_gz(staging, archive)?,
+        crate::azul::ArchiveKind::Zip => unpack_zip(staging, archive)?,
+    }
+    let java = staging.join("bin/java");
+    let java_exe = staging.join("bin/java.exe");
+    ensure!(
+        java.is_file() || java_exe.is_file(),
+        "managed runtime archive contains no Java executable"
+    );
+    if java.is_file() {
+        ensure_write_path(root, &java)?;
+        set_executable(&java, true)?;
+    }
+    ensure_write_path(root, staging)?;
+    fs::rename(staging, directory)?;
+    Ok(())
+}
+
+/// Count and size budget shared by both archive formats.
+#[derive(Default)]
+struct UnpackBudget {
+    entries: usize,
+    bytes: u64,
+}
+
+impl UnpackBudget {
+    fn account(&mut self, size: u64) -> anyhow::Result<()> {
+        self.entries = self.entries.saturating_add(1);
+        ensure!(
+            self.entries <= MAX_ARCHIVE_ENTRIES,
+            "managed runtime archive has too many entries"
+        );
+        self.bytes = self
+            .bytes
+            .checked_add(size)
+            .context("managed runtime archive size overflow")?;
+        ensure!(
+            self.bytes <= MAX_UNPACKED_BYTES,
+            "managed runtime archive unpacks beyond the size bound"
+        );
+        Ok(())
+    }
+}
+
+/// Drop the archive's single top-level directory and reject unsafe members.
+///
+/// Absolute paths, parent traversal and OS prefixes are refused instead of
+/// being silently rewritten, so a hostile archive can never escape staging.
+fn relative_runtime_path(path: &Path) -> anyhow::Result<Option<PathBuf>> {
+    let mut components = path.components();
+    match components.next() {
+        Some(Component::Normal(_)) => {}
+        _ => bail!("managed runtime archive contains an absolute or parent path"),
+    }
+    let rest: PathBuf = components.collect();
+    if rest.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    for component in rest.components() {
+        ensure!(
+            matches!(component, Component::Normal(_)),
+            "managed runtime archive contains a parent or OS path component"
+        );
+    }
+    Ok(Some(rest))
+}
+
+fn unpack_tar_gz(destination: &Path, archive: &Path) -> anyhow::Result<()> {
+    let file = fs::File::open(archive)?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let mut budget = UnpackBudget::default();
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let size = entry.header().size()?;
+        let kind = entry.header().entry_type();
+        ensure!(
+            matches!(kind, tar::EntryType::Regular | tar::EntryType::Directory),
+            "managed runtime archive contains a link or special entry"
+        );
+        budget.account(size)?;
+        let path = entry.path()?.into_owned();
+        let Some(relative) = relative_runtime_path(&path)? else {
+            continue;
+        };
+        let target = destination.join(relative);
+        if kind == tar::EntryType::Directory {
+            fs::create_dir_all(&target)?;
+        } else {
+            fs::create_dir_all(target.parent().context("runtime file has no parent")?)?;
+            let mut file = fs::File::create(&target)?;
+            io::copy(&mut entry, &mut file)?;
+            if let Ok(mode) = entry.header().mode() {
+                set_runtime_mode(&target, mode)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unpack_zip(destination: &Path, archive: &Path) -> anyhow::Result<()> {
+    let file = fs::File::open(archive)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let mut budget = UnpackBudget::default();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        budget.account(entry.size())?;
+        ensure!(
+            entry
+                .unix_mode()
+                .is_none_or(|mode| mode & 0o170_000 != 0o120_000),
+            "managed runtime archive contains a symlink"
+        );
+        let name = entry
+            .enclosed_name()
+            .context("managed runtime archive contains an escape path")?;
+        let Some(relative) = relative_runtime_path(&name)? else {
+            continue;
+        };
+        let target = destination.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&target)?;
+        } else {
+            fs::create_dir_all(target.parent().context("runtime file has no parent")?)?;
+            io::copy(&mut entry, &mut fs::File::create(&target)?)?;
+            if let Some(mode) = entry.unix_mode() {
+                set_runtime_mode(&target, mode)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_runtime_mode(path: &Path, mode: u32) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
     Ok(())
 }
 

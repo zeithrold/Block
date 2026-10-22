@@ -11,8 +11,12 @@ use block_download::Store;
 use tokio_util::sync::CancellationToken;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
-use super::{copy_immutable, extract, materialize, runtime_link};
+use super::{
+    MAX_ARCHIVE_ENTRIES, MAX_UNPACKED_BYTES, UnpackBudget, copy_immutable, extract,
+    install_archive, materialize, relative_runtime_path, runtime_link,
+};
 use crate::{
+    azul::ArchiveKind,
     plan::{CommandTemplate, ExecutionPlan, JavaExecutable, PrepareAction},
     platform::{Architecture, OperatingSystem, Target},
 };
@@ -31,6 +35,7 @@ fn plan(actions: Vec<PrepareAction>) -> ExecutionPlan {
         resources: Vec::new(),
         actions,
         compatibility: None,
+        runtime_substitution: None,
         command: CommandTemplate {
             java: JavaExecutable::Managed {
                 path: "runtime/java".into(),
@@ -652,5 +657,155 @@ async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_lo
     assert!(log.contains("software-test"));
     assert!(log.contains("<redacted>"));
     assert!(!log.contains("synthetic-sensitive-access-token"));
+    Ok(())
+}
+
+fn tar_gz(
+    build: impl FnOnce(&mut tar::Builder<flate2::write::GzEncoder<Vec<u8>>>) -> anyhow::Result<()>,
+) -> anyhow::Result<Vec<u8>> {
+    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+    build(&mut builder)?;
+    let encoder = builder.into_inner()?;
+    Ok(encoder.finish()?)
+}
+
+fn append_file(
+    builder: &mut tar::Builder<flate2::write::GzEncoder<Vec<u8>>>,
+    path: &str,
+    body: &[u8],
+    mode: u32,
+) -> anyhow::Result<()> {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(body.len() as u64);
+    header.set_mode(mode);
+    header.set_cksum();
+    builder.append_data(&mut header, path, body)?;
+    Ok(())
+}
+
+#[test]
+fn vendor_tar_gz_runtime_is_extracted_with_an_executable_java() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let archive_bytes = tar_gz(|builder| {
+        append_file(builder, "zulu-test/bin/java", b"#!/bin/sh\nexit 0\n", 0o755)?;
+        append_file(
+            builder,
+            "zulu-test/release",
+            b"JAVA_VERSION=\"1.8.0_504\"\n",
+            0o644,
+        )?;
+        let mut header = tar::Header::new_gnu();
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_cksum();
+        builder.append_data(&mut header, "zulu-test/lib", &[][..])?;
+        Ok(())
+    })?;
+    let archive = root.path().join("runtime.tar.gz");
+    fs::write(&archive, &archive_bytes)?;
+    let directory = root.path().join("runtimes/linux-arm64/checksum");
+    install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)?;
+    let java = directory.join("bin/java");
+    assert!(java.is_file());
+    assert_eq!(fs::read(&java)?, b"#!/bin/sh\nexit 0\n");
+    assert!(directory.join("release").is_file());
+    assert!(directory.join("lib").is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_ne!(fs::metadata(&java)?.permissions().mode() & 0o111, 0);
+    }
+    // A completed runtime is reused instead of being unpacked a second time.
+    install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)?;
+    assert!(java.is_file());
+    let parent = directory.parent().context("runtime parent")?;
+    assert_eq!(fs::read_dir(parent)?.count(), 1, "staging must not remain");
+    Ok(())
+}
+
+#[test]
+fn vendor_zip_runtime_is_extracted_for_windows_targets() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let mut archive_bytes = Vec::new();
+    {
+        let mut writer = ZipWriter::new(std::io::Cursor::new(&mut archive_bytes));
+        writer.start_file(
+            "zulu-test/bin/java.exe",
+            SimpleFileOptions::default().unix_permissions(0o755),
+        )?;
+        writer.write_all(b"java")?;
+        writer.finish()?;
+    }
+    let archive = root.path().join("runtime.zip");
+    fs::write(&archive, &archive_bytes)?;
+    let directory = root.path().join("runtimes/windows-arm64/checksum");
+    install_archive(root.path(), &archive, &directory, ArchiveKind::Zip)?;
+    assert!(directory.join("bin/java.exe").is_file());
+    Ok(())
+}
+
+#[test]
+fn unsafe_archive_paths_are_rejected() -> anyhow::Result<()> {
+    assert!(relative_runtime_path(Path::new("/etc/passwd")).is_err());
+    assert!(relative_runtime_path(Path::new("../escape")).is_err());
+    assert!(relative_runtime_path(Path::new("top/../escape")).is_err());
+    assert_eq!(
+        relative_runtime_path(Path::new("top/bin/java"))?.as_deref(),
+        Some(Path::new("bin/java"))
+    );
+    assert_eq!(relative_runtime_path(Path::new("top"))?, None);
+    Ok(())
+}
+
+#[test]
+fn symbolic_links_in_runtime_archives_are_rejected() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let archive_bytes = tar_gz(|builder| {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_cksum();
+        builder.append_link(&mut header, "zulu-test/bin/java", "/usr/bin/false")?;
+        Ok(())
+    })?;
+    let archive = root.path().join("runtime.tar.gz");
+    fs::write(&archive, &archive_bytes)?;
+    let directory = root.path().join("runtimes/linux-arm64/checksum");
+    let error = install_archive(root.path(), &archive, &directory, ArchiveKind::TarGz)
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("a symlinked runtime archive must fail"))?;
+    assert!(
+        format!("{error:#}").contains("link or special"),
+        "{error:#}"
+    );
+    assert!(!directory.exists(), "no partial runtime may look installed");
+    Ok(())
+}
+
+#[test]
+fn unpack_budget_is_bounded() -> anyhow::Result<()> {
+    let mut budget = UnpackBudget::default();
+    budget.account(1)?;
+    let error = budget
+        .account(MAX_UNPACKED_BYTES)
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("oversized archive must fail"))?;
+    assert!(format!("{error:#}").contains("size bound"), "{error:#}");
+
+    let mut entries = UnpackBudget::default();
+    for _ in 0..MAX_ARCHIVE_ENTRIES {
+        entries.account(0)?;
+    }
+    let error = entries
+        .account(0)
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("too many entries must fail"))?;
+    assert!(
+        format!("{error:#}").contains("too many entries"),
+        "{error:#}"
+    );
     Ok(())
 }

@@ -9,9 +9,10 @@ use minecraft_manifest::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    azul::ArchiveKind,
     platform::{Architecture, OperatingSystem, Target},
     recipe::{LaunchRecipe, RuntimeSelection},
-    resolver::{ResolvedMetadata, download_resource},
+    resolver::{ManagedRuntime, ResolvedMetadata, download_resource},
     rules,
 };
 
@@ -35,6 +36,12 @@ pub enum PrepareAction {
         sha1: String,
         directory: String,
         excludes: Vec<String>,
+    },
+    /// Unpack a verified vendor runtime archive into a managed runtime directory.
+    ExtractArchive {
+        sha256: String,
+        directory: String,
+        archive: ArchiveKind,
     },
 }
 
@@ -75,6 +82,10 @@ pub struct ExecutionPlan {
     /// Saved plans keep it so review and logs never present a silent change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compatibility: Option<String>,
+    /// Explicit managed-runtime substitution applied during resolution, if any.
+    /// Saved plans keep it so review and logs never present a silent change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_substitution: Option<String>,
 }
 
 #[derive(Default)]
@@ -116,6 +127,10 @@ pub fn compile(
         actions: files.actions,
         command,
         compatibility: metadata.compatibility.clone(),
+        runtime_substitution: metadata
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.substitution_note(&metadata.target)),
     })
 }
 
@@ -421,10 +436,39 @@ fn plan_runtime(
     if let RuntimeSelection::Local { java } = &recipe.runtime {
         return Ok(JavaExecutable::Local { path: java.clone() });
     }
-    let (digest, manifest) = metadata
+    match metadata
         .runtime
         .as_ref()
-        .context("managed runtime metadata is missing")?;
+        .context("managed runtime metadata is missing")?
+    {
+        ManagedRuntime::Mojang { digest, manifest } => {
+            plan_mojang_runtime(metadata, digest, manifest, resources, actions)
+        }
+        ManagedRuntime::Zulu { runtime, .. } => {
+            let root = format!(
+                "runtimes/{}/{}",
+                metadata.target.runtime_platform(),
+                runtime.sha256
+            );
+            actions.push(PrepareAction::ExtractArchive {
+                sha256: runtime.sha256.clone(),
+                directory: root.clone(),
+                archive: runtime.archive,
+            });
+            Ok(JavaExecutable::Managed {
+                path: format!("{root}/bin/java"),
+            })
+        }
+    }
+}
+
+fn plan_mojang_runtime(
+    metadata: &ResolvedMetadata,
+    digest: &str,
+    manifest: &minecraft_manifest::resources::RuntimeManifest,
+    resources: &mut Vec<Resource>,
+    actions: &mut Vec<PrepareAction>,
+) -> anyhow::Result<JavaExecutable> {
     let root = format!("runtimes/{}/{digest}", metadata.target.runtime_platform());
     let mut java_path = None;
     for (name, file) in &manifest.files {
@@ -497,3 +541,6 @@ pub fn expand_arguments(
     }
     Ok(expanded)
 }
+
+#[cfg(test)]
+mod tests;

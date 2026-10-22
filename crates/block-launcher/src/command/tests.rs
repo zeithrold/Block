@@ -35,6 +35,7 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         resources: Vec::new(),
         actions: Vec::new(),
         compatibility: None,
+        runtime_substitution: None,
         command: CommandTemplate {
             java: JavaExecutable::Managed {
                 path: "runtime/bin/java".into(),
@@ -171,6 +172,7 @@ fn binding_normalizes_every_java_path_but_preserves_canonical_storage() -> anyho
         resources: Vec::new(),
         actions: Vec::new(),
         compatibility: None,
+        runtime_substitution: None,
         command: CommandTemplate {
             java: JavaExecutable::Managed {
                 path: "runtime/bin/java.exe".into(),

@@ -5,7 +5,7 @@ use block_download::{Resource, Store};
 use futures_util::future::BoxFuture;
 use minecraft_manifest::{
     decode,
-    model::{Download, VersionIndex},
+    model::{Download, VersionIndex, VersionManifest},
     resources::{AssetObjects, RuntimeCatalog, RuntimeManifest},
 };
 use sha1::{Digest as _, Sha1};
@@ -100,7 +100,7 @@ pub struct ResolvedMetadata {
     pub parsed: ParsedRecipe,
     pub target: Target,
     pub assets: AssetObjects,
-    pub runtime: Option<(String, RuntimeManifest)>,
+    pub runtime: Option<ManagedRuntime>,
     pub library_overrides: BTreeMap<String, LibraryOverride>,
     /// Replacement native classifiers keyed by the library that selects them.
     /// Classifier-era manifests declare natives through `natives`/`classifiers`
@@ -109,6 +109,32 @@ pub struct ResolvedMetadata {
     /// Explicit description of an applied compatibility substitution, carried
     /// into the saved plan and the launch log so it is never silent.
     pub compatibility: Option<String>,
+}
+
+/// Managed runtime selected during resolution.
+#[derive(Debug, Clone)]
+pub enum ManagedRuntime {
+    /// Official Mojang runtime files described by the launcher catalog.
+    Mojang {
+        digest: String,
+        manifest: RuntimeManifest,
+    },
+    /// Official vendor runtime substituted where Mojang's catalog has no entry.
+    Zulu {
+        runtime: crate::azul::ZuluRuntime,
+        component: String,
+    },
+}
+
+impl ManagedRuntime {
+    /// Explicit substitution text for the saved plan and the launch log.
+    #[must_use]
+    pub fn substitution_note(&self, target: &Target) -> Option<String> {
+        match self {
+            Self::Mojang { .. } => None,
+            Self::Zulu { runtime, component } => Some(runtime.note(target, component)),
+        }
+    }
 }
 
 /// Resolve typed metadata before compiling a deterministic resource/command plan.
@@ -148,27 +174,7 @@ async fn resolve_inner(
     let bytes = context.store.fetch(&resource, &context.cancel).await?;
     let assets = decode(&tokio::fs::read(bytes).await?)?;
     let runtime = if matches!(recipe.runtime, RuntimeSelection::Managed) {
-        let component = parsed
-            .manifest
-            .java_version
-            .as_ref()
-            .map_or("jre-legacy", |java| java.component.as_str());
-        let bytes = context
-            .store
-            .metadata("java-runtimes.json", JAVA_INDEX)
-            .await?;
-        let catalog: RuntimeCatalog = decode(&bytes)?;
-        let release = catalog.get(target.runtime_platform()).and_then(|components| components.get(component))
-            .and_then(|releases| releases.iter().find(|release| release.availability.progress > 0))
-            .with_context(|| format!("no official {component} runtime for {}; select an explicit local Java matching this target", target.runtime_platform()))?;
-        let path = context
-            .store
-            .fetch(&download_resource(&release.manifest), &context.cancel)
-            .await?;
-        Some((
-            release.manifest.sha1.clone(),
-            decode(&tokio::fs::read(path).await?)?,
-        ))
+        Some(resolve_managed_runtime(&parsed.manifest, &target, context).await?)
     } else {
         None
     };
@@ -183,6 +189,56 @@ async fn resolve_inner(
         classifier_overrides,
         compatibility,
     })
+}
+
+async fn resolve_managed_runtime(
+    manifest: &VersionManifest,
+    target: &Target,
+    context: &ResolveContext,
+) -> anyhow::Result<ManagedRuntime> {
+    let component = manifest
+        .java_version
+        .as_ref()
+        .map_or("jre-legacy", |java| java.component.as_str());
+    let bytes = context
+        .store
+        .metadata("java-runtimes.json", JAVA_INDEX)
+        .await?;
+    let catalog: RuntimeCatalog = decode(&bytes)?;
+    let release = catalog
+        .get(target.runtime_platform())
+        .and_then(|components| components.get(component))
+        .and_then(|releases| {
+            releases
+                .iter()
+                .find(|release| release.availability.progress > 0)
+        });
+    if let Some(release) = release {
+        let path = context
+            .store
+            .fetch(&download_resource(&release.manifest), &context.cancel)
+            .await?;
+        return Ok(ManagedRuntime::Mojang {
+            digest: release.manifest.sha1.clone(),
+            manifest: decode(&tokio::fs::read(path).await?)?,
+        });
+    }
+    if let Some(java) = &manifest.java_version
+        && crate::azul::supports(target)
+    {
+        let runtime =
+            crate::azul::resolve(&context.store, target, java.major_version, &context.cancel)
+                .await?;
+        crate::azul::download(&context.store, &runtime, &context.cancel).await?;
+        return Ok(ManagedRuntime::Zulu {
+            runtime,
+            component: component.to_owned(),
+        });
+    }
+    anyhow::bail!(
+        "no official {component} runtime for {}; select an explicit local Java matching this target",
+        target.runtime_platform()
+    )
 }
 
 type AppliedOverrides = (
