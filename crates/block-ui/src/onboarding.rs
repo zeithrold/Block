@@ -499,7 +499,7 @@ impl Block {
                 div().flex().flex_wrap().gap_3().children(rows.into_iter().enumerate().map(|(index, (title, value, action))| {
                     // Ten review rows do not fit the fixed footer in one column;
                     // a wrapped grid keeps every value visible without scrolling.
-                    div().w(px(266.)).min_w_0().py_2().flex().flex_col().gap_1()
+                    div().w(px(248.)).min_w_0().py_2().flex().flex_col().gap_1()
                         .child(div().flex().items_center().justify_between().gap_2()
                             .child(self.setup_caption(title).min_w_0())
                             .children((!created).then(|| components::button_sized(
