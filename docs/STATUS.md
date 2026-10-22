@@ -56,7 +56,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | External quick-link text drop | Yes | Yes (Windows, Linux) | Pending | Owned native drop targets in `crates/block-drop`: OLE child HWND on Windows, XDND ARGB overlay on Linux X11, both reusing the existing discovery/consent/duplicate flow; real browser→drop-zone drags prove accept + reject paths. Wayland is not supported by the pinned GPUI: on a real KDE Wayland session (Linux ARM64) the dialog shows the documented "Wayland windows are not supported by this build; use an X11 session" while staying usable, and the same app on Xwayland attaches XDND and pastes/saves normally. macOS phase pending the user batch. |
 | Authlib password form, characters and final save | Yes | Yes (fixture, Linux AMD64) | Pending | Native fixture sign-in (FixturesAlex/Slim), character choice and save; keyring unlock was user-assisted via VNC. |
 | Yggdrasil session lifecycle and launch injection | Yes | Yes (fixture, Linux AMD64) | Pending | Real 1.20.6 + authlib-injector 1.2.8 reached the main menu through the fixture; refresh/invalid-token path exercised. |
-| Wizard back/cancel/finish, provider selection, stale results | Yes | Pending | Pending | Prepared identities stay transient. |
+| Wizard back/cancel/finish, provider selection, stale results | Yes | Yes (Linux AMD64) | Pending | Native forward/review/back/cancel; provider Back/Close saved no account; a cancelled slow discovery left providers.json unchanged. Prepared identities stay transient. |
 | Real player faces and hat layers | Yes | Yes (Authlib fixture) | Pending | Authlib fixture skin rendered face+hat on Home/Accounts/selector; cache sidecar digest equals the served PNG; fixture stop falls back to initials silently. Microsoft live skin display still pending a live account. |
 
 ### Games and Game Wizard
@@ -65,7 +65,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | Bundled/Separated browsing, search, details, Home sync | Yes | Yes (Windows) | Pending | Q6 separated mode: one-way conversion, second Profile sharing an Instance and Home sync exercised natively. |
 | Profile/Instance appearance and settings drafts | Yes | Yes (Windows) | Pending | Theme/reduced-motion and separated-profile drafts exercised natively; version/loader immutable. |
-| Icons/colors, memory/JVM, Java/window defaults, folders/account | Yes | Pending | Pending | Compiled into launch recipes. |
+| Icons/colors, memory/JVM, Java/window defaults, folders/account | Yes | Yes (Linux AMD64) | Pending | Native draft Cancel/Save for instance name/window/fullscreen, profile icon/color, memory 8192 + JVM arg, isolated folders and default account; catalog persisted. |
 | Bundled two-step / Separated four-step creation | Yes | Yes (Windows) | Pending | Q6 separated mode created a second Profile for an existing Instance with the installation preserved. |
 | Version, loader/build and location pickers | Yes | Yes (Windows, Linux) | Pending | Real catalogs; Q6/Q10 loader picks, Q3 ARM64 restriction, Q9 search/scroll. |
 | Vanilla installation, progress, retry and resume | Yes | Yes (Windows, Linux) | Pending | Windows Q6 interrupted download→Retry→Repair complete→launch; Q10 1.8.9/1.12.2; Linux AMD64 Q6 1.20.6. |
@@ -84,11 +84,11 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
 | General: theme preview/save/cancel, reduced motion | Yes | Yes (Windows, Linux) | Pending | Windows Q6 Dark preview/Cancel/Save; Linux in-app + GTK system reduced motion; Windows SPI query wired. |
-| Game: Java, memory/JVM, window/fullscreen, snapshots | Yes | Pending | Pending | New-game defaults only. |
-| Memory 1–32 GB, Java choice, window presets/custom, JVM | Yes | Pending | Pending | Validated defaults. |
+| Game: Java, memory/JVM, window/fullscreen, snapshots | Yes | Yes (Linux AMD64) | Pending | Native save defaults (32 GB, 1600×900, fullscreen, snapshots); applied to a fresh wizard; Cancel did not persist; invalid memory/window rejected. |
+| Memory 256 MiB–64 GB shown in GB, Java choice, window presets/custom, JVM | Yes | Yes (Linux AMD64) | Pending | Native bounds: 256–65536 MiB accepted range (32 GB max observed accepted, 999999 rejected), presets/custom, fullscreen, JVM validation. The old inventory said 1–32 GB; product bounds vs inventory alignment is pending the prototype/spec decision. |
 | Profiles: confirmed one-way conversion, Restore defaults | Yes | Yes (Windows) | Pending | Q6 one-way conversion confirmed natively. Restore defaults still pending. |
 | Downloads: System/Direct/HTTP(S)/SOCKS5 and connection test | Yes | Yes (Windows) | Pending | Q6 local SOCKS5 forwarder: test HTTP 200 + 22 CONNECT lines during a real install; reset to Direct. |
-| Parallel 1–16, retries 0–10, nonnegative MB/s limit | Yes | Pending | Pending | Real transport policies. |
+| Parallel 1–16, retries 0–10, nonnegative MB/s limit | Yes | Yes (Linux AMD64) | Pending | Native parallel 16/retries 10/speed 50 saved; 0 rejected, 11 clamped to 10, negative speed rejected. Copy for the parallel error is being polished. |
 | Storage: paths, verified relocation, interruption recovery | Yes | Yes (Windows) | Pending | Q6 native relocation, retained-copy cleanup dialog, relocated game launched. |
 | Relocation leases and confirmed retained-copy cleanup | Yes | Yes (Windows) | Pending | Q6 cleanup dialog confirmed the retained copy removal; lock retry hardened for parallel tests. |
 
@@ -96,7 +96,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| About: build/product, brand, links and copy actions | Yes | Pending | Pending | Real information. |
+| About: build/product, brand, links and copy actions | Yes | Yes (Linux AMD64) | Pending | Version/platform/source fingerprint, links and one build-info Copy action verified with a real clipboard read; external link opening skipped. |
 | Welcome: three steps, drafts, skip, download/retry | Yes | Yes (Windows, Linux) | Pending | Q6 Skip created no identity; download/retry and Welcome flows on Windows/Linux. |
 | Welcome: atomic new-account/game final commit | Yes | Yes (Windows) | Pending | Identity is memory-only until the final commit; failed save rolls back. Native run 1ac4564. |
 
