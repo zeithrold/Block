@@ -104,10 +104,10 @@ Pending required user acceptance, live sign-in or smoke runs must remain pending
 
 - [x] Grant macOS Screen Recording permission to the terminal running Codex.
 - [x] Provide the official OptiFine 1.21.1 JAR.
-- [ ] Enable "Allow public client flows" on the Azure app registration. Device Code sign-in requires it.
+- [x] Enable "Allow public client flows" on the Azure app registration. Device Code sign-in requires it.
 - [ ] Sign in with the genuine Microsoft account on 2026-10-22 when ready; Codex batches host requests and does not start expiring codes ahead of time.
 - [ ] Review the native screenshots and side-by-side board once the prototype reference shots exist.
-- [ ] Download an official OptiFine JAR for one older Minecraft version for the older-representative smoke.
+- [x] Download an official OptiFine JAR for one older Minecraft version for the older-representative smoke.
 - [ ] Optional: provide an Authlib provider account for live-provider verification.
 - [ ] Possibly: perform a quick-link drag on hosts where automation cannot.
 

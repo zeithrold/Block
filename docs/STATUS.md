@@ -46,7 +46,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
 | List/detail, selection, deletion, last-account empty state | Yes | Pending | Pending | OS credential storage. |
-| Microsoft browser PKCE and final confirmation | Yes | Pending | Pending | Live user sign-in needed. |
+| Microsoft browser PKCE and final confirmation | Yes | Yes (macOS) | Pending | Native authorization and secure save passed. |
 | Microsoft Device Code and final confirmation | Yes | Pending | Pending | Live user sign-in needed. |
 | Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
@@ -146,10 +146,10 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 | Item | Status |
 | --- | --- |
-| Azure public client flows and readiness for live sign-in | Requested; do not start Device Code before readiness. |
-| Microsoft macOS PKCE/Device Code and batched remote Device Code | Await readiness; retain dedicated test accounts/data. |
+| Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
+| Microsoft macOS PKCE/Device Code and batched remote Device Code | Native login in progress; retain dedicated test accounts/data. |
 | Prototype/native board and behavior acceptance | Await reference captures, then one grouped review. |
-| Older official OptiFine JAR | Requested local path; 1.21.1 J1 already supplied. |
+| Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
 | Real quick-link drag on hosts automation cannot drive | Batch after native drop target exists. |
 
