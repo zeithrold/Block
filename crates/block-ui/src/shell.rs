@@ -260,6 +260,9 @@ impl Block {
     }
 
     pub(super) fn navigation_title(&self) -> &'static str {
+        if self.shell.auth.is_some() {
+            return "Accounts";
+        }
         if self.shell.guide_preview.is_some() {
             return match self.tab {
                 Tab::Settings => "Settings",
@@ -292,6 +295,9 @@ impl Block {
     }
 
     fn contextual_back(&self) -> (&'static str, UiAction) {
+        if self.shell.auth.is_some() {
+            return ("Back", UiAction::AuthCancel);
+        }
         if self.shell.guide_preview.is_some() {
             return ("Back to setup", UiAction::Drawer(None));
         }
