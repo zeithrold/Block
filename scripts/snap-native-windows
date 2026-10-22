@@ -884,6 +884,13 @@ def shot_table(scenarios, themes):
 
 
 def start_capture(table):
+    # A previous session may have left its completion marker behind; remove it
+    # (and the old log) before the new session starts so polling cannot read a
+    # stale DONE token.
+    ssh(
+        f"Remove-Item -LiteralPath '{REMOTE_DONE}' -ErrorAction SilentlyContinue; "
+        f"Remove-Item -LiteralPath '{REMOTE_LOG}' -ErrorAction SilentlyContinue"
+    )
     settings = {
         "helper": REMOTE_HELPER,
         "binary": REMOTE_BINARY,
@@ -1043,13 +1050,13 @@ def main():
         if not log_path.is_file():
             parser.error("--verify-only needs a previous capture-session.log")
         shots = []
-        for line in log_path.read_text().splitlines():
+        for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
             if line.startswith("BEGIN "):
                 scenario, theme = line[6:].split("|", 1)
                 shots.append({"scenario": scenario, "theme": theme, "required": required_windows(scenario)})
         if not shots:
             parser.error("--verify-only found no BEGIN lines in the session log")
-        failures, anomalies, methods = verify(shots, log_path.read_text())
+        failures, anomalies, methods = verify(shots, log_path.read_text(encoding="utf-8", errors="replace"))
         print(f"verified {len(shots)} shots, methods: {', '.join(methods) or 'unknown'}", flush=True)
         for anomaly in anomalies:
             print(f"anomaly: {anomaly}", flush=True)

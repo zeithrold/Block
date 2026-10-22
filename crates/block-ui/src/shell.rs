@@ -986,12 +986,13 @@ impl Block {
             return div().into_any_element();
         };
         // Wizard and onboarding sections bring their own headings, scrolling
-        // and footer, so the dialog only supplies the surface and the chrome.
-        let height = (window.viewport_size().height - px(180.)).clamp(px(320.), px(540.));
+        // and actions; size the surface area like the old section window and
+        // keep the dialog footer outside that fixed content height.
+        let section_height = (window.viewport_size().height - px(150.)).clamp(px(320.), px(520.));
         let (content, section) = match &kind {
             Surface::OnboardingSection(page) => (
                 div()
-                    .h(height)
+                    .h(section_height)
                     .min_h_0()
                     .w_full()
                     .child(self.render_onboarding_section(*page, window, cx)),
@@ -999,15 +1000,15 @@ impl Block {
             ),
             Surface::WizardSection(_) => (
                 div()
-                    .h(height)
                     .min_h_0()
                     .w_full()
                     .flex()
                     .flex_col()
                     .child(
                         div()
-                            .flex_1()
+                            .h(section_height)
                             .min_h_0()
+                            .w_full()
                             .child(self.render_game_wizard_transition_body(window, cx)),
                     )
                     .child(

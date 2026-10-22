@@ -1784,7 +1784,7 @@ impl Block {
             .child(
                 div()
                     .id("games-help-body")
-                    .h(px(300.))
+                    .h(px(360.))
                     .min_h_0()
                     .w_full()
                     .child(

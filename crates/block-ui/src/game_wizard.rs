@@ -2892,6 +2892,8 @@ impl Block {
         group
             .container()
             .debug_selector(|| "wizard-version-list".into())
+            .flex_shrink_0()
+            .min_h(px(180.))
             .max_h(px(280.))
             .flex()
             .flex_col()
