@@ -2936,7 +2936,28 @@ mod tests {
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
         click_selector(cx, "wizard-loader-neoforge");
-        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(super::Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.1" && form.loader_version.is_none())));
+        let state = view.read_with(cx, |view, cx| {
+            view.form.as_ref().map(|form| match form {
+                super::Form::Instance(form) => (
+                    form.is_neoforge(),
+                    form.version.read(cx).value(),
+                    form.loader.clone(),
+                    form.loader_version.clone(),
+                ),
+                super::Form::Profile(_) => (
+                    false,
+                    String::new(),
+                    block_launcher::catalog::LoaderKind::Vanilla,
+                    None,
+                ),
+            })
+        });
+        assert!(
+            state.as_ref().is_some_and(|(neoforge, version, _, build)| {
+                *neoforge && version == "1.20.1" && build.is_none()
+            }),
+            "form after loader selection: {state:?}"
+        );
         assert!(!view.read_with(cx, |view, _| view.busy));
     }
 
