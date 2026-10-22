@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context as _, ensure};
 use block_download::{Resource, Store};
@@ -102,6 +102,9 @@ pub struct ResolvedMetadata {
     pub assets: AssetObjects,
     pub runtime: Option<(String, RuntimeManifest)>,
     pub library_overrides: BTreeMap<String, LibraryOverride>,
+    /// Explicit description of an applied compatibility substitution, carried
+    /// into the saved plan and the launch log so it is never silent.
+    pub compatibility: Option<String>,
 }
 
 /// Resolve typed metadata before compiling a deterministic resource/command plan.
@@ -165,67 +168,204 @@ async fn resolve_inner(
     } else {
         None
     };
-    let library_overrides = compatibility_overrides(recipe, &parsed, &target, context).await?;
+    let (library_overrides, compatibility) =
+        compatibility_overrides(recipe, &parsed, &target, context).await?;
     Ok(ResolvedMetadata {
         parsed,
         target,
         assets,
         runtime,
         library_overrides,
+        compatibility,
     })
 }
+
+type AppliedOverrides = (BTreeMap<String, LibraryOverride>, Option<String>);
 
 async fn compatibility_overrides(
     recipe: &LaunchRecipe,
     parsed: &ParsedRecipe,
     target: &Target,
     context: &ResolveContext,
-) -> anyhow::Result<BTreeMap<String, LibraryOverride>> {
+) -> anyhow::Result<AppliedOverrides> {
     match recipe.compatibility {
-        Compatibility::Official => Ok(BTreeMap::new()),
-        Compatibility::LinuxArm64Lwjgl3 => {
-            linux_native_overrides(recipe, parsed, target, context).await
+        Compatibility::Official => {
+            if target.os == OperatingSystem::Linux && target.arch == Architecture::Aarch64 {
+                linux_arm64_overrides(recipe, parsed, target, context).await
+            } else {
+                Ok((BTreeMap::new(), None))
+            }
         }
-        Compatibility::MacosJna513 => macos_jna_overrides(recipe, parsed, target, context).await,
+        Compatibility::LinuxArm64Lwjgl3 => {
+            linux_arm64_overrides(recipe, parsed, target, context).await
+        }
+        Compatibility::MacosJna513 => Ok((
+            macos_jna_overrides(recipe, parsed, target, context).await?,
+            Some(format!(
+                "macOS ARM64: the affected JNA pair is replaced with the official JNA {} release from Maven Central",
+                crate::support::REVIEWED_ARM64_JNA
+            )),
+        )),
     }
 }
 
-async fn linux_native_overrides(
+/// Replace the LWJGL and JNA artifacts a Linux ARM64 host cannot load.
+///
+/// The decision is keyed on the manifest's own LWJGL version, not on Minecraft
+/// versions: manifests whose modules are all 3.2.1/3.2.2 (the composition proven
+/// on 1.16.5) move to the reviewed 3.3.1 release, while 3.3.1 and newer keep
+/// their version and only swap the Linux classifiers for the published ARM64
+/// ones. JNA below the reviewed release is replaced as a companion because the
+/// bundled natives predate ARM64. Every artifact URL is checked through the
+/// official Maven Central checksum before it can be planned.
+async fn linux_arm64_overrides(
     recipe: &LaunchRecipe,
     parsed: &ParsedRecipe,
     target: &Target,
     context: &ResolveContext,
-) -> anyhow::Result<BTreeMap<String, LibraryOverride>> {
-    let mut replacements = BTreeMap::new();
+) -> anyhow::Result<AppliedOverrides> {
     ensure!(
         target.os == OperatingSystem::Linux && target.arch == Architecture::Aarch64,
         "linux_arm64_lwjgl3 requires a Linux ARM64 target"
     );
+    let mut modules = Vec::new();
+    let mut versions = BTreeSet::new();
+    let mut jna = Vec::new();
     for library in &parsed.manifest.libraries {
         if !crate::rules::allowed(library.rules.as_deref(), target, &recipe.features)? {
             continue;
         }
-        let parts: Vec<_> = library.name.split(':').collect();
-        if parts.len() == 4 && parts[0] == "org.lwjgl" && parts[3] == "natives-linux" {
-            let filename = format!("{}-{}-natives-linux-arm64.jar", parts[1], parts[2]);
+        if library.name.starts_with("org.lwjgl.lwjgl:") {
+            anyhow::bail!(
+                "this version uses LWJGL 2, whose official natives are x86/x64 only; Linux ARM64 support covers LWJGL 3-era versions"
+            );
+        }
+        if let Some(rest) = library.name.strip_prefix("org.lwjgl:") {
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            versions.insert(parts[1].to_owned());
+            modules.push((library.name.clone(), parts));
+        } else if let Some(rest) = library.name.strip_prefix("net.java.dev.jna:") {
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() == 2 {
+                jna.push((
+                    library.name.clone(),
+                    parts[0].to_owned(),
+                    parts[1].to_owned(),
+                ));
+            }
+        }
+    }
+    let plan = crate::support::linux_arm64_lwjgl_plan(&versions)
+        .map_err(|reason| anyhow::anyhow!(reason))?;
+    let reviewed = match plan {
+        crate::support::LinuxArm64LwjglPlan::SameVersion => None,
+        crate::support::LinuxArm64LwjglPlan::ReplaceWith(version) => Some(version),
+    };
+    let mut replacements = BTreeMap::new();
+    let mut reviewed_modules = None;
+    for (name, parts) in modules {
+        let module = parts[0];
+        let manifest_version = parts[1];
+        let classifier = parts.get(2).copied();
+        let version = reviewed.unwrap_or(manifest_version);
+        if let Some(classifier) = classifier {
+            if classifier == "natives-linux-arm64" {
+                continue;
+            }
+            if classifier != "natives-linux" {
+                continue;
+            }
+        } else if reviewed.is_none() {
+            // Core artifacts stay at their own version unless the composition
+            // replaces the whole reviewed release.
+            continue;
+        }
+        let mut filename = format!("{module}-{version}");
+        if classifier.is_some() {
+            filename.push_str("-natives-linux-arm64");
+        }
+        filename.push_str(".jar");
+        let url =
+            format!("https://repo.maven.apache.org/maven2/org/lwjgl/{module}/{version}/{filename}");
+        reviewed_modules.get_or_insert(version);
+        replacements.insert(
+            name,
+            LibraryOverride {
+                resource: context.store.describe_maven(&url).await?,
+                filename,
+            },
+        );
+    }
+    ensure!(
+        !replacements.is_empty(),
+        "this version selects no LWJGL 3 Linux artifacts to substitute"
+    );
+    let mut jna_replaced = false;
+    for (name, artifact, manifest_version) in jna {
+        if !version_at_least(&manifest_version, crate::support::REVIEWED_ARM64_JNA) {
+            let target_artifact = if artifact == "platform" {
+                "jna-platform"
+            } else {
+                artifact.as_str()
+            };
+            let filename = format!(
+                "{target_artifact}-{}.jar",
+                crate::support::REVIEWED_ARM64_JNA
+            );
             let url = format!(
-                "https://repo.maven.apache.org/maven2/org/lwjgl/{}/{}/{filename}",
-                parts[1], parts[2]
+                "https://repo.maven.apache.org/maven2/net/java/dev/jna/{target_artifact}/{}/{filename}",
+                crate::support::REVIEWED_ARM64_JNA
             );
             replacements.insert(
-                library.name.clone(),
+                name,
                 LibraryOverride {
                     resource: context.store.describe_maven(&url).await?,
                     filename,
                 },
             );
+            jna_replaced = true;
         }
     }
-    ensure!(
-        !replacements.is_empty(),
-        "this version has no replaceable LWJGL 3 Linux classifiers"
-    );
-    Ok(replacements)
+    let lwjgl = reviewed_modules.unwrap_or_default();
+    let note = if reviewed.is_some() {
+        format!(
+            "Linux ARM64: the manifest's LWJGL {} is replaced with the reviewed {lwjgl} composition and its official natives-linux-arm64 classifiers from Maven Central",
+            versions.iter().cloned().collect::<Vec<_>>().join("/")
+        )
+    } else {
+        format!(
+            "Linux ARM64: LWJGL {lwjgl} keeps its version and uses the official natives-linux-arm64 classifiers from Maven Central"
+        )
+    };
+    let note = if jna_replaced {
+        format!(
+            "{note}; JNA is replaced with the official {} release",
+            crate::support::REVIEWED_ARM64_JNA
+        )
+    } else {
+        note
+    };
+    Ok((replacements, Some(note)))
+}
+
+fn version_at_least(version: &str, floor: &str) -> bool {
+    fn parts(version: &str) -> [u32; 3] {
+        let mut parts = version.split('.').map(|part| {
+            part.split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|digits| digits.parse().ok())
+                .unwrap_or(0)
+        });
+        [
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0),
+        ]
+    }
+    parts(version) >= parts(floor)
 }
 
 async fn macos_jna_overrides(

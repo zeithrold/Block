@@ -30,6 +30,7 @@ fn plan(actions: Vec<PrepareAction>) -> ExecutionPlan {
         },
         resources: Vec::new(),
         actions,
+        compatibility: None,
         command: CommandTemplate {
             java: JavaExecutable::Managed {
                 path: "runtime/java".into(),

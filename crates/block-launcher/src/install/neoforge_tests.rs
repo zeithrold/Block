@@ -193,6 +193,7 @@ fn canonical_paths_and_generated_outputs_survive_plan_binding() -> anyhow::Resul
         },
         runtime: None,
         library_overrides: BTreeMap::new(),
+        compatibility: None,
     };
     let recipe = LaunchRecipe {
         schema_version: 1,

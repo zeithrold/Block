@@ -188,6 +188,103 @@ async fn macos_jna_profile_rejects_other_platforms_and_never_downgrades_new_jna(
     Ok(())
 }
 
+/// Seed published Maven descriptors so substitution tests stay offline.
+fn seed_maven(root: &Path, artifacts: &[(&str, &str)]) -> anyhow::Result<()> {
+    let metadata = root.join("metadata");
+    fs::create_dir_all(&metadata)?;
+    for (url, sha1) in artifacts {
+        let key = format!("{:x}", Sha1::digest(url.as_bytes()));
+        fs::write(
+            metadata.join(format!("maven-{key}.json")),
+            serde_json::to_vec(&Resource {
+                sha1: (*sha1).into(),
+                size: 1,
+                url: (*url).into(),
+            })?,
+        )?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn linux_arm64_substitutes_published_arm64_natives_and_records_the_composition()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (path, original) = manifest("1.20.6")?;
+    let context = offline_context(directory.path(), &original)?;
+    let published: [(&str, &str); 8] = [
+        ("lwjgl", "f35d8b6ffe1ac1e3a5eb1d4e33de80f044ad5fd8"),
+        ("lwjgl-freetype", "498965aac06c4a0d42df1fbef6bacd05bde7f974"),
+        ("lwjgl-glfw", "492a0f11f85b85899a6568f07511160c1b87cd38"),
+        ("lwjgl-jemalloc", "eff8b86798191192fe2cba2dc2776109f30c239d"),
+        ("lwjgl-openal", "ad8f302118a65bb8d615f8a2a680db58fb8f835e"),
+        ("lwjgl-opengl", "2096f6b94b2d68745d858fbfe53aacf5f0c8074c"),
+        ("lwjgl-stb", "ddc177afc2be1ee8d93684b11363b80589a13fe1"),
+        ("lwjgl-tinyfd", "2823a8c955c758d0954d282888075019ef99cec7"),
+    ];
+    let urls: Vec<(String, &str)> = published
+        .iter()
+        .map(|(module, sha1)| {
+            (
+                format!(
+                    "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.3/{module}-3.3.3-natives-linux-arm64.jar"
+                ),
+                *sha1,
+            )
+        })
+        .collect();
+    let artifacts: Vec<(&str, &str)> = urls
+        .iter()
+        .map(|(url, sha1)| (url.as_str(), *sha1))
+        .collect();
+    seed_maven(directory.path(), &artifacts)?;
+
+    let mut recipe = recipe(path)?;
+    recipe.compatibility = Compatibility::Official;
+    recipe.target = Some(Target {
+        os: OperatingSystem::Linux,
+        arch: Architecture::Aarch64,
+        os_version: "6.1".into(),
+    });
+    let resolved = resolve(&recipe, &context).await?;
+    assert_eq!(resolved.library_overrides.len(), 8);
+    let note = resolved
+        .compatibility
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("substitution was not recorded"))?;
+    assert!(note.contains("natives-linux-arm64"), "{note}");
+    let plan = compile(&recipe, &resolved)?;
+    assert_eq!(plan.compatibility.as_deref(), Some(note.as_str()));
+    for (module, _) in published {
+        assert!(
+            plan.command
+                .classpath
+                .iter()
+                .any(|path| path.ends_with(&format!("{module}-3.3.3-natives-linux-arm64.jar"))),
+            "{module} ARM64 native missing from the plan"
+        );
+    }
+    assert!(
+        !plan
+            .command
+            .classpath
+            .iter()
+            .any(|path| path.ends_with("-natives-linux.jar")),
+        "the x64 Linux natives must not survive a reviewed ARM64 plan"
+    );
+
+    // The same manifest stays official on x64 Linux: no substitution, no note.
+    recipe.target = Some(Target {
+        os: OperatingSystem::Linux,
+        arch: Architecture::X86_64,
+        os_version: "6.1".into(),
+    });
+    let official = resolve(&recipe, &context).await?;
+    assert!(official.library_overrides.is_empty());
+    assert!(official.compatibility.is_none());
+    Ok(())
+}
+
 #[tokio::test]
 async fn cancellation_interrupts_a_stalled_metadata_response() -> anyhow::Result<()> {
     use std::time::Duration;

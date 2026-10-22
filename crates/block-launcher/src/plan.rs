@@ -71,6 +71,10 @@ pub struct ExecutionPlan {
     pub resources: Vec<Resource>,
     pub actions: Vec<PrepareAction>,
     pub command: CommandTemplate,
+    /// Explicit compatibility substitution applied during resolution, if any.
+    /// Saved plans keep it so review and logs never present a silent change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<String>,
 }
 
 #[derive(Default)]
@@ -111,6 +115,7 @@ pub fn compile(
         resources: files.resources,
         actions: files.actions,
         command,
+        compatibility: metadata.compatibility.clone(),
     })
 }
 

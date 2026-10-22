@@ -86,6 +86,7 @@ fn compiled(manifest: VersionManifest, target: Target) -> anyhow::Result<Executi
             },
             runtime: None,
             library_overrides: BTreeMap::new(),
+            compatibility: None,
         },
     )
 }

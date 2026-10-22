@@ -226,6 +226,7 @@ impl Library {
         };
         let metadata = resolve_for_host(&mut recipe, &context).await?;
         let mut plan = compile(&recipe, &metadata)?;
+        self.announce_compatibility(&plan);
         adapt(&mut plan, &metadata.parsed.manifest, target, &manifest)?;
         self.executor.prepare_repair(plan, cancel).await?;
         Ok((manifest, optifine_mod))
@@ -298,6 +299,7 @@ impl Library {
             .await
             .context("installation metadata unavailable; choose Repair")?;
         let mut plan = compile(&recipe, &metadata)?;
+        self.announce_compatibility(&plan);
         apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;
         adapt(&mut plan, &metadata.parsed.manifest, target, manifest)?;
         let executor = Executor::new(offline, self.events.clone());
@@ -324,6 +326,16 @@ impl Library {
         let mut launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
         launch.storage = Some(self.storage.lease.clone());
         Ok(launch)
+    }
+
+    /// Announce an applied compatibility substitution so launches never hide it.
+    fn announce_compatibility(&self, plan: &ExecutionPlan) {
+        if let Some(note) = &plan.compatibility {
+            (self.events)(crate::executor::ExecutionEvent::Log {
+                line: format!("Compatibility: {note}"),
+                stderr: false,
+            });
+        }
     }
 }
 
@@ -513,6 +525,7 @@ mod instance_defaults_tests {
             },
             runtime: None,
             library_overrides: BTreeMap::new(),
+            compatibility: None,
         };
         let mut plan = crate::plan::compile(&recipe, &metadata)?;
         super::apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;

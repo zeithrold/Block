@@ -48,7 +48,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | List/detail, selection, deletion, last-account empty state | Yes | Pending | Pending | OS credential storage. |
 | Microsoft browser PKCE and final confirmation | Yes | Yes (macOS) | Pending | Native authorization and secure save passed. |
-| Microsoft Device Code and final confirmation | Yes | Partial | Pending | macOS/Windows/Linux ARM64 securely saved; AMD64 Linux blocked. |
+| Microsoft Device Code and final confirmation | Yes | Yes | Pending | macOS, Windows, Linux ARM64 and Linux AMD64 native saves passed; Linux AMD64 was 0f7e26b. |
 | Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
 | Authlib provider icon retrieval and display | No | Pending | Pending | Only icon URL is cached. |
@@ -75,7 +75,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | NeoForge full catalog and installation | Yes | Pending | Pending | Includes 1.20.1 and 26.x. |
 | OptiFine standalone/Forge import and installation | Partial | Pending | Pending | Existing-target re-import UI missing. |
 | Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
-| Productized LWJGL 3 ARM64 compatibility and Java 8 | No | Pending | Pending | Manual Linux composition only. |
+| Productized LWJGL 3 ARM64 compatibility and Java 8 | Partial | Pending | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives for 3.3.1+ manifests; pre-3.3.1 composition and ARM64 Java 8 pending. |
 | ARM64 LWJGL 2 picker restriction | No | Pending | Pending | Explain unavailable natives. |
 | Deletion, confirmation and linked Profiles | Yes | Pending | Pending | Player files retained. |
 
@@ -127,7 +127,8 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 | Combination | Outcome | Concrete limitation |
 | --- | --- | --- |
-| Linux ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1, JNA 5.13, TTS 1.12.4 | Main menu via manual composition | Product integration pending; narration lacks native flite wrapper. |
+| Linux ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1, JNA 5.13, TTS 1.12.4 | Main menu via manual composition | Product integration pending (classifier-era manifests); narration lacks native flite wrapper. |
+| Linux ARM64 1.19+ / 1.20.6, LWJGL 3.3.1+ | Official ARM64 natives substituted explicitly in plan and log | Native wizard and Play run pending. |
 | macOS ARM64 1.16.5, Zulu 8u504, LWJGL 3.3.1/JNA 5.13 | Failed at window creation | GLFW window-icon error. |
 | macOS ARM64 1.16.5, alternate official GLFW/binding combinations | Failed | Missing 3.4 binding function or incompatible CallbackI interface. |
 | Linux/macOS ARM64 1.12.2 and 1.8.9, official LWJGL 2 natives | Unsupported selected binaries | Verified archives contain x86/x64 only; picker restriction pending. |
@@ -141,6 +142,8 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
 - macOS storage relocation/cleanup followed by game menu passed through the API.
+- Linux ARM64 substitutions are explicit in the saved plan and the launch log; the AI/CLI pass the same note through.
+- Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
@@ -150,8 +153,9 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | --- | --- |
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
 | Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
-| Linux AMD64 secure credential store | Persistent keyring created and unlocked by user; native preflight still fails. |
+| Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
 | Prototype/native board and behavior acceptance | References captured; Windows scenario refresh, then one grouped review. |
+| Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
 | Real quick-link drag on hosts automation cannot drive | Batch after native drop target exists. |
