@@ -2584,6 +2584,18 @@ mod queued_play_ui_tests {
             assert!(view.read_with(cx, |view, _| view.status.contains("Launch queued")));
             assert!(view.read_with(cx, |view, _| view.busy));
 
+            // Stop clears a queued launch.
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.handle(UiAction::Stop, window, cx));
+            });
+            assert!(!view.read_with(cx, |view, _| view.pending_play));
+
+            // Pressing Play again after Stop still queues while installing.
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.handle(UiAction::Play, window, cx));
+            });
+            assert!(view.read_with(cx, |view, _| view.pending_play));
+
             // Completion drains the queue through the normal Play path (no
             // account in this fixture, so it lands on the Accounts tab).
             view.update(cx, |view, cx| {
