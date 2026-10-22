@@ -301,7 +301,7 @@ impl Block {
             show_command: self.show_command,
             recipe: self.recipe.clone(),
             recipe_load: super::RecipeLoadState::default(),
-            #[cfg(any(windows, target_os = "linux"))]
+            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             provider_drop: None,
             pending_play: false,
         }
