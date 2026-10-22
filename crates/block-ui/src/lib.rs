@@ -2365,7 +2365,7 @@ impl Block {
         };
         let (sender, receiver) = async_channel::bounded::<String>(4);
         let zone = block_drop::DropZone::new(0.0, 0.0, 0.0, 0.0, window.scale_factor());
-        match block_drop::DropTarget::attach(win32.hwnd.get() as isize, zone, sender) {
+        match block_drop::DropTarget::attach(win32.hwnd.get(), zone, sender) {
             Ok(target) => {
                 self.provider_drop = Some(ProviderDrop { target });
                 cx.spawn(async move |view, cx| {
@@ -2458,7 +2458,7 @@ fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui
     zone.on_children_prepainted(move |bounds, window, cx| {
         if let Some(view) = view.upgrade() {
             let scale = window.scale_factor();
-            let _ = view.update(cx, |view, cx| {
+            view.update(cx, |view, cx| {
                 view.position_provider_drop(&bounds, scale);
                 cx.notify();
             });
