@@ -65,12 +65,39 @@ impl Fixture {
         let store = Store::new(root.clone(), true, Arc::new(|_| {}))?;
         let assets = object(&store, br#"{"objects":{}}"#)?;
         let client = object(&store, b"fixture client bytes, not a real jar")?;
-        let libraries = ["lwjgl-3.3.3-natives-macos-arm64.jar", "lwjgl-glfw-3.3.3-natives-macos-arm64.jar"]
-            .into_iter().map(|filename| {
-                let mut artifact = client.clone();
-                artifact["path"] = json!(filename);
-                json!({"name":format!("org.lwjgl:{filename}:fixture"),"downloads":{"artifact":artifact}})
-            }).collect::<Vec<_>>();
+        // The synthetic fixture is launched on every CI host, so it carries
+        // well-formed LWJGL coordinates and per-OS rules rather than being
+        // exempt from the real native support policy. The child loads no
+        // native code; these entries only satisfy metadata checks.
+        let mut libraries = [
+            "lwjgl-3.3.3-natives-macos-arm64.jar",
+            "lwjgl-glfw-3.3.3-natives-macos-arm64.jar",
+        ]
+        .into_iter()
+        .map(|filename| {
+            let mut artifact = client.clone();
+            artifact["path"] = json!(filename);
+            json!({
+                "name": format!("org.lwjgl:{filename}:fixture"),
+                "rules": [{"action": "allow", "os": {"name": "osx"}}],
+                "downloads": {"artifact": artifact}
+            })
+        })
+        .collect::<Vec<_>>();
+        for (name, path) in [
+            ("org.lwjgl:lwjgl:3.3.3", "lwjgl-3.3.3.jar"),
+            (
+                "org.lwjgl:lwjgl:3.3.3:natives-linux-arm64",
+                "lwjgl-3.3.3-natives-linux-arm64.jar",
+            ),
+        ] {
+            let mut artifact = client.clone();
+            artifact["path"] = json!(path);
+            libraries.push(json!({
+                "name": name,
+                "downloads": {"artifact": artifact}
+            }));
+        }
         let mut asset_index = assets;
         asset_index["id"] = json!("fixture");
         asset_index["totalSize"] = json!(0);
