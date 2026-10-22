@@ -2213,7 +2213,8 @@ impl Block {
 /// Keep the component library's theme mode in step with the product palette so
 /// overlay chrome, scrims and inputs render in the same appearance.
 fn sync_component_theme(palette: Palette, cx: &mut gpui::App) {
-    let mode = if palette.background == Palette::DARK.background {
+    let dark = palette.background == Palette::DARK.background;
+    let mode = if dark {
         gpui_component::ThemeMode::Dark
     } else {
         gpui_component::ThemeMode::Light
@@ -2221,6 +2222,15 @@ fn sync_component_theme(palette: Palette, cx: &mut gpui::App) {
     if gpui_component::Theme::global(cx).mode != mode {
         gpui_component::Theme::change(mode, None, cx);
     }
+    let theme = gpui_component::Theme::global_mut(cx);
+    theme.font_family = design::FONT_FAMILY.into();
+    // The library's default scrim is too faint for the prototype's modal
+    // treatment; the product palette decides the intended dimming.
+    theme.colors.overlay = if dark {
+        gpui::hsla(0., 0., 0., 0.6)
+    } else {
+        gpui::hsla(0., 0., 0., 0.3)
+    };
 }
 
 impl Render for Block {
