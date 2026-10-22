@@ -4,6 +4,38 @@ use crate::{
     library::Library,
 };
 
+/// macOS `flock` is inherited across a concurrent fork/exec in another test
+/// thread until that child execs; retry the transient busy result briefly so a
+/// parallel process spawn cannot make these lock assertions flaky.
+fn retry_busy<T>(mut action: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    for _ in 0..200 {
+        match action() {
+            Ok(value) => return Ok(value),
+            Err(error) if format!("{error:#}").contains("Storage is busy") => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    anyhow::bail!("storage stayed busy after 2s")
+}
+
+fn apply_retry(
+    root: &Path,
+    locations: Locations,
+    move_games: bool,
+) -> anyhow::Result<Option<Cleanup>> {
+    retry_busy(|| {
+        apply(
+            root,
+            locations.clone(),
+            move_games,
+            &CancellationToken::new(),
+            &|_| {},
+        )
+    })
+}
+
 fn put(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     fs::create_dir_all(path.parent().context("Fixture parent")?)?;
     fs::write(path, bytes)?;
@@ -237,18 +269,12 @@ fn live_library_leases_block_relocation_and_old_copy_edits_block_deletion() -> a
         .is_err()
     );
     drop(library);
-    apply(
-        &root,
-        requested(None, Some(destination.clone())),
-        false,
-        &CancellationToken::new(),
-        &|_| {},
-    )?;
+    apply_retry(&root, requested(None, Some(destination.clone())), false)?;
     put(&root.join("objects/data"), b"later edit")?;
     assert!(finish_retained(&root, true).is_err());
     assert_eq!(fs::read(root.join("objects/data"))?, b"later edit");
     assert_eq!(fs::read(destination.join("objects/data"))?, b"original");
-    finish_retained(&root, false)?;
+    retry_busy(|| finish_retained(&root, false))?;
     assert!(root.join("objects/data").exists());
     assert!(cleanup_status(&root)?.is_none());
     Ok(())
@@ -405,22 +431,10 @@ fn cache_can_return_to_the_managed_root_without_touching_games_or_control_files(
         b"synthetic world",
     )?;
     let other = parent.join("other-cache");
-    apply(
-        &root,
-        requested(None, Some(other.clone())),
-        false,
-        &CancellationToken::new(),
-        &|_| {},
-    )?;
-    finish_retained(&root, true)?;
-    apply(
-        &root,
-        Locations::default(),
-        false,
-        &CancellationToken::new(),
-        &|_| {},
-    )?;
-    finish_retained(&root, true)?;
+    apply_retry(&root, requested(None, Some(other.clone())), false)?;
+    retry_busy(|| finish_retained(&root, true))?;
+    apply_retry(&root, Locations::default(), false)?;
+    retry_busy(|| finish_retained(&root, true))?;
     assert!(Locations::load(&root)?.cache.is_none());
     assert_eq!(fs::read(root.join("objects/data"))?, b"reusable object");
     assert_eq!(
