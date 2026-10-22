@@ -53,7 +53,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
 | Authlib provider icon retrieval and display | Yes | Pending | Pending | Bounded validated fetch against the provider API host, data-dir cache, monogram fallback. ICO-only favicons fall back to the monogram (accepted limitation). Native display check pending. |
 | Provider URL/paste import, duplicate selection, HTTP consent | Yes | Pending | Pending | Address-bound consent. |
-| External quick-link text drop | Yes | Yes (Windows) | Pending | Owned native drop target (`crates/block-drop`); real browser→drop-zone drag on Windows AMD64 with a real Authlib provider and the duplicate path. macOS/Linux native targets pending. |
+| External quick-link text drop | Yes | Yes (Windows, Linux) | Pending | Owned native drop targets in `crates/block-drop`: OLE child HWND on Windows, XDND ARGB overlay on Linux X11, both reusing the existing discovery/consent/duplicate flow; real browser→drop-zone drags prove accept + reject paths. Wayland is not supported by the pinned GPUI (clear error; options recorded); macOS phase pending the user batch. |
 | Authlib password form, characters and final save | Yes | Pending | Pending | Local fixture allowed. |
 | Yggdrasil session lifecycle and launch injection | Yes | Pending | Pending | Local fixture allowed. |
 | Wizard back/cancel/finish, provider selection, stale results | Yes | Pending | Pending | Prepared identities stay transient. |
