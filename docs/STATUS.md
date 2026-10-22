@@ -104,7 +104,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| Light/dark layout, typography, icons and states | Partial | Pending | Pending | Prototype capture comparison pending. |
+| Light/dark layout, typography, icons and states | Partial | Pending | Pending | Windows captures complete; visual comparison in review. |
 | Directional 460 ms upstream opacity/offset transitions | Partial | Pending | Pending | Audit timing and directions. |
 | System/in-app reduced motion | Yes | Pending | Pending | Native interaction pending. |
 | Fit-to-display at creation and recovery | Yes | Partial | Pending | Linux AMD64 1280×800 captured. |
@@ -137,7 +137,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 - Windows intermittent lifecycle failure: bounded repeated host test still required; unwanted Java console fix awaits host validation.
 - Native screenshots cover 71 debug scenarios in light/dark; scenario captures are visual fixtures.
-- Comparison board: target/parity-shots/index.html (Windows primary); prototype references captured; Windows scenario refresh pending.
+- Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 Windows scenario shots (228 images) captured at c0a9dc5 with names and dimensions identical to the macOS set.
 - Remote picker captures prove navigation/windows, not native installation/Play.
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
@@ -154,7 +154,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
 | Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
 | Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
-| Prototype/native board and behavior acceptance | References captured; Windows scenario refresh, then one grouped review. |
+| Prototype/native board and behavior acceptance | Windows captures complete (228 images, c0a9dc5); one grouped review pending. |
 | Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
