@@ -545,7 +545,7 @@ impl Block {
             |profile| {
                 profile.memory.read(cx).value().parse::<u32>().map_or_else(
                     |_| format!("{} MiB", profile.memory.read(cx).value()),
-                    super::components::memory_label,
+                    components::memory_label,
                 )
             },
         );
