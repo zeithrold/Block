@@ -19,6 +19,9 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+/// Default size bound for SHA-256 artifacts downloaded by the generic store API.
+const MAX_SHA256_ARTIFACT_SIZE: u64 = 16 * 1024 * 1024;
+
 /// Explicit proxy behavior for all HTTP requests made by a [`Store`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -388,6 +391,25 @@ impl Store {
         Ok(self.root.join("objects").join(&sha1[..2]).join(sha1))
     }
 
+    /// Return a confined object path for an upstream SHA-256 artifact.
+    ///
+    /// # Errors
+    /// Fails if the digest is not a lowercase SHA-256 value.
+    pub fn sha256_object_path(&self, digest: &str) -> anyhow::Result<PathBuf> {
+        ensure!(
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "invalid SHA-256 digest"
+        );
+        Ok(self
+            .root
+            .join("objects-sha256")
+            .join(&digest[..2])
+            .join(format!("{digest}.jar")))
+    }
+
     /// Fetch mutable root metadata, or read it from cache in offline mode.
     ///
     /// # Errors
@@ -616,24 +638,41 @@ impl Store {
     /// Fetch an upstream SHA-256 artifact with bounded size and the store's
     /// proxy, concurrency, retry and aggregate rate policies. Only a verified
     /// temporary file is published; cancellation never replaces the destination.
+    ///
+    /// # Errors
+    /// Fails for invalid digests, transport or size failures, or cancellation.
     pub async fn fetch_sha256(
         &self,
         url: &str,
         digest: &str,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PathBuf> {
-        const MAX_SIZE: u64 = 16 * 1024 * 1024;
-        ensure!(
-            digest.len() == 64
-                && digest
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-            "invalid SHA-256 digest"
-        );
+        self.fetch_sha256_bounded(url, digest, MAX_SHA256_ARTIFACT_SIZE, cancel)
+            .await
+    }
+
+    /// Fetch an upstream SHA-256 artifact under an explicit size bound. Used by
+    /// larger official vendor archives (for example a Java runtime tarball)
+    /// while [`Self::fetch_sha256`] keeps the default artifact bound.
+    ///
+    /// # Errors
+    /// Fails for invalid digests or size bounds, transport or size failures, or
+    /// cancellation.
+    pub async fn fetch_sha256_bounded(
+        &self,
+        url: &str,
+        digest: &str,
+        max_size: u64,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<PathBuf> {
+        ensure!(max_size > 0, "invalid SHA-256 artifact size bound");
         ensure!(!cancel.is_cancelled(), "download cancelled");
-        let directory = self.root.join("objects-sha256").join(&digest[..2]);
+        let path = self.sha256_object_path(digest)?;
+        let directory = path
+            .parent()
+            .context("SHA-256 object has no parent")?
+            .to_owned();
         tokio::fs::create_dir_all(&directory).await?;
-        let path = directory.join(format!("{digest}.jar"));
         let lock = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -656,7 +695,7 @@ impl Store {
                 return Ok(None);
             };
             let size = file.metadata()?.len();
-            if size == 0 || size > MAX_SIZE {
+            if size == 0 || size > max_size {
                 return Ok(None);
             }
             let mut hash = Sha256::new();
@@ -721,7 +760,7 @@ impl Store {
                 let response = response.error_for_status()?;
                 total = response.content_length();
                 ensure!(
-                    total.is_none_or(|size| size > 0 && size <= MAX_SIZE),
+                    total.is_none_or(|size| size > 0 && size <= max_size),
                     "SHA-256 artifact exceeds the size limit"
                 );
                 let temporary = tempfile::NamedTempFile::new_in(&directory)?;
@@ -731,7 +770,7 @@ impl Store {
                 while let Some(bytes) = stream.try_next().await? {
                     received = received.saturating_add(bytes.len() as u64);
                     ensure!(
-                        received <= MAX_SIZE,
+                        received <= max_size,
                         "SHA-256 artifact exceeds the size limit"
                     );
                     if let Some(limiter) = &self.rate_limiter {
