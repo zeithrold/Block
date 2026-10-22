@@ -11,7 +11,7 @@ mod secret;
 
 pub use authlib::{
     AuthlibAuth, AuthlibProfile, AuthlibProvider, PendingAuthlibSignIn, PreparedAuthlibSignIn,
-    ProviderAddress, ProviderMetadata,
+    ProviderAddress, ProviderMetadata, skin_texture,
 };
 pub use callback::PendingSignIn;
 pub use credentials::probe_secure_storage;
@@ -116,6 +116,31 @@ impl AuthenticatedSession {
         self.expires_at
             .duration_since(SystemTime::now())
             .map_or(true, |remaining| remaining <= Duration::from_secs(60))
+    }
+}
+
+/// A real skin texture resolved from account data; no demo image is ever used.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkinTexture {
+    pub url: String,
+    pub variant: SkinVariant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkinVariant {
+    Classic,
+    Slim,
+}
+
+#[cfg(test)]
+impl AuthenticatedSession {
+    pub(crate) fn for_test(account: Account, access_token: &str, user_properties: &str) -> Self {
+        Self {
+            account,
+            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            access_token: SecretString::new(access_token.to_owned()),
+            user_properties: SecretString::new(user_properties.to_owned()),
+        }
     }
 }
 

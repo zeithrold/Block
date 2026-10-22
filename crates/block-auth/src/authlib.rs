@@ -761,6 +761,69 @@ impl AuthlibProvider {
     }
 }
 
+/// Read the account's textures property and return a skin only when its host is
+/// declared in the provider metadata. Malformed or undeclared textures are silent
+/// failures: callers fall back to initials instead of showing anything else.
+#[must_use]
+pub fn skin_texture(
+    session: &AuthenticatedSession,
+    provider: &AuthlibProvider,
+) -> Option<crate::SkinTexture> {
+    let properties: std::collections::BTreeMap<String, Vec<String>> =
+        serde_json::from_str(session.expose_user_properties()).ok()?;
+    let encoded = properties.get("textures")?.last()?;
+    let decoded = STANDARD.decode(encoded).ok()?;
+    if decoded.len() > 16 * 1024 {
+        return None;
+    }
+    let document: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    let skin = document.pointer("/textures/SKIN")?;
+    let url = skin.get("url")?.as_str()?;
+    if !skin_url_declared(url, &provider.metadata.skin_domains) {
+        return None;
+    }
+    let variant = if skin
+        .pointer("/metadata/model")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|model| model.eq_ignore_ascii_case("slim"))
+    {
+        crate::SkinVariant::Slim
+    } else {
+        crate::SkinVariant::Classic
+    };
+    Some(crate::SkinTexture {
+        url: url.to_owned(),
+        variant,
+    })
+}
+
+fn skin_url_declared(url: &str, domains: &[String]) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+        return false;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    domains.iter().any(|domain| domain_declares(domain, &host))
+}
+
+fn domain_declares(declared: &str, host: &str) -> bool {
+    let declared = declared.trim_end_matches('.').to_ascii_lowercase();
+    if let Some(suffix) = declared.strip_prefix("*.") {
+        return host == suffix || host.ends_with(&format!(".{suffix}"));
+    }
+    if let Some(suffix) = declared.strip_prefix('.') {
+        return host == suffix || host.ends_with(&format!(".{suffix}"));
+    }
+    host == declared
+}
+
 fn validate_name(name: &str) -> Result<()> {
     if name.trim().is_empty()
         || name != name.trim()
@@ -956,6 +1019,153 @@ fn metadata(json: &str, url: &Url) -> Result<ProviderMetadata> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    fn fixture_provider(domains: &[&str]) -> AuthlibProvider {
+        AuthlibProvider {
+            id: Uuid::from_u128(11),
+            name: "Fixture".into(),
+            api_url: "https://api.example.test/".into(),
+            allow_http: false,
+            metadata: ProviderMetadata {
+                server_name: None,
+                icon_url: "https://api.example.test/favicon.ico".into(),
+                skin_domains: domains.iter().map(|domain| (*domain).to_owned()).collect(),
+                signature_public_key: String::new(),
+            },
+            metadata_json: "{}".into(),
+        }
+    }
+
+    fn textures_session(encoded: &str) -> AuthenticatedSession {
+        AuthenticatedSession::for_test(
+            Account {
+                reference: AccountRef {
+                    player_id: Uuid::from_u128(7),
+                },
+                provider: AccountProvider::Authlib,
+                player_name: "Player".into(),
+                client_id: String::new(),
+                credential_ref: String::new(),
+                authlib: Some(AuthlibAccount {
+                    provider_id: Uuid::from_u128(11),
+                    login: "player@example.test".into(),
+                }),
+            },
+            "synthetic-access",
+            &serde_json::json!({ "textures": [encoded] }).to_string(),
+        )
+    }
+
+    fn textures_value(url: &str, slim: bool) -> String {
+        let document = serde_json::json!({
+            "textures": {
+                "SKIN": {
+                    "url": url,
+                    "metadata": if slim { serde_json::json!({"model":"slim"}) } else { serde_json::json!({}) }
+                }
+            }
+        });
+        STANDARD.encode(serde_json::to_vec(&document).unwrap_or_default())
+    }
+
+    #[test]
+    fn textures_property_yields_the_declared_skin_and_variant()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let provider = fixture_provider(&["textures.example.test"]);
+        let encoded = textures_value("https://textures.example.test/skin/abc", true);
+        let skin = skin_texture(&textures_session(&encoded), &provider).ok_or("declared skin")?;
+        assert_eq!(skin.url, "https://textures.example.test/skin/abc");
+        assert_eq!(skin.variant, crate::SkinVariant::Slim);
+        let classic = textures_value("https://textures.example.test/skin/classic", false);
+        assert_eq!(
+            skin_texture(&textures_session(&classic), &provider)
+                .ok_or("declared skin")?
+                .variant,
+            crate::SkinVariant::Classic
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn skin_hosts_must_match_the_declared_domain_forms() {
+        let exact = fixture_provider(&["textures.example.test"]);
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value("https://textures.example.test/a", false)),
+                &exact
+            )
+            .is_some()
+        );
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value(
+                    "https://sub.textures.example.test/a",
+                    false
+                )),
+                &exact
+            )
+            .is_none(),
+            "an exact declaration must not accept subdomains"
+        );
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value("https://evil.example.net/a", false)),
+                &exact
+            )
+            .is_none()
+        );
+        let suffix = fixture_provider(&[".example.test"]);
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value("https://skins.example.test/a", false)),
+                &suffix
+            )
+            .is_some()
+        );
+        let wildcard = fixture_provider(&["*.skins.test"]);
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value("https://textures.skins.test/a", false)),
+                &wildcard
+            )
+            .is_some()
+        );
+        assert!(
+            skin_texture(
+                &textures_session(&textures_value("https://skins.test/a", false)),
+                &wildcard
+            )
+            .is_some()
+        );
+        for rejected in [
+            "http://example.net/@textures.example.test/a",
+            "https://user:pass@textures.example.test/a",
+            "ftp://textures.example.test/a",
+        ] {
+            assert!(
+                skin_texture(&textures_session(&textures_value(rejected, false)), &exact).is_none(),
+                "{rejected}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_textures_fall_back_silently() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let provider = fixture_provider(&["textures.example.test"]);
+        for encoded in [
+            "not base64".to_owned(),
+            STANDARD.encode(b"not json"),
+            STANDARD.encode(serde_json::to_vec(&serde_json::json!({"textures": {}}))?),
+            STANDARD.encode(serde_json::to_vec(
+                &serde_json::json!({"textures": {"SKIN": {}}}),
+            )?),
+        ] {
+            assert!(skin_texture(&textures_session(&encoded), &provider).is_none());
+        }
+        assert!(skin_texture(&textures_session(""), &provider).is_none());
+        Ok(())
+    }
 
     #[test]
     fn discovery_never_downgrades_https_even_after_http_consent() -> Result<()> {
