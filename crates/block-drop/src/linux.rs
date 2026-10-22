@@ -23,7 +23,7 @@ use async_channel::Sender as PayloadSender;
 use x11rb::{
     connection::Connection as _,
     protocol::xproto::{
-        Alloc, Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, Colormap,
+        Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, Colormap, ColormapAlloc,
         ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, StackMode,
         Visualid, Window, WindowClass,
     },
@@ -249,7 +249,7 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         .map(|visual| Visualid::from(visual.visual_id))
         .ok_or_else(|| anyhow!("the X11 session has no 32-bit ARGB visual"))?;
     let colormap = connection.generate_id()?;
-    connection.create_colormap(Alloc::NONE, colormap, root, visual)?;
+    connection.create_colormap(ColormapAlloc::NONE, colormap, root, visual)?;
     // XDND sources look up the immediate child of the root under the pointer, so
     // the target must be a top-level window, not a child of the app. A 32-bit
     // ARGB visual keeps it invisible under the compositor while it stays a real,
