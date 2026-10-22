@@ -28,3 +28,9 @@ jobs:
         run: python scripts/verify-platform.py --platform windows-arm64 --verify-host-only
       - name: Verify core, desktop, framework interactions, and session supervision
         run: python scripts/verify-platform.py --platform windows-arm64
+      - name: Upload the native ARM64 launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-windows-arm64
+          path: target/debug/block.exe
+          if-no-files-found: error
