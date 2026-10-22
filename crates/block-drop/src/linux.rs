@@ -27,6 +27,7 @@ use x11rb::{
         CreateWindowAux, EventMask, PropMode, Window, WindowClass,
     },
     rust_connection::RustConnection,
+    wrapper::ConnectionExt as _,
 };
 
 use crate::{DropZone, quick_link_payload};
@@ -106,10 +107,10 @@ impl NativeTarget {
         zone: DropZone,
         payloads: PayloadSender<String>,
     ) -> Result<Self> {
-        if parent <= 0 || parent > i64::from(u32::MAX) {
-            bail!("X11 window handle is missing");
-        }
-        let parent = u32::try_from(parent).map_err(|_| anyhow!("invalid X11 window handle"))?;
+        let parent = u32::try_from(parent)
+            .ok()
+            .filter(|parent| *parent != 0)
+            .ok_or_else(|| anyhow!("X11 window handle is missing"))?;
         let (commands, command_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread = thread::Builder::new()
