@@ -11,29 +11,18 @@ The pilot is the **complete product**:
 
 Only **architecture governance** is deferred to v0. That covers structural refactoring, layering, file splitting, lint tidy-up and cleaning up code that already works.
 
-## Where we are (2026-10-22, v8 handoff, HEAD `ae0b758`)
+## Where we are (2026-10-22, v8, HEAD `7da0662`)
 
 - DeepSeek Harness runs the rest of the pilot under the v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). v6/v7 are in Git history.
-- CI: green through `e0e29b1`. Run 39727660062 had one Linux ARM64 flake in a settings storage-worker test; it passed on rerun and must still be fixed (v8 Q0).
+- CI: four platforms green through `f30b8a7`; a storage-lock flake from an inherited `flock` in parallel tests is fixed with a bounded retry, and the Windows-only drop-target lints are fixed. Keep watching green before/after each merge.
 - Native app evidence:
-  - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again.
-  - Windows AMD64: Device Code; atomic Welcome; Vanilla → main menu → Stop with no console window.
-  - Linux ARM64 and Linux AMD64: Device Code.
-- Built, awaiting native proof:
-  - legacy Quick Play
-  - Linux ARM64 LWJGL substitution for 3.3.1+ and classifier-era manifests
-  - the gpui-component foundation; no surface migrated yet
-- Windows scenario captures (228 images) exist but go stale with the overlay refactor; one visual review follows the recapture.
-- Open:
-  - overlay refactor
-  - D5 remainder
-  - Windows ARM64
-  - real server joins
-  - OptiFine re-import
-  - D1–D3, D6, D8, D9
-  - most native E2E flows
-  - older representatives
-  - all acceptance
+  - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again. Recaptures/deeper flows wait for a Mac-idle window.
+  - Windows AMD64: Device Code; atomic Welcome; Vanilla → main menu → Stop; Q6 loader flows (Fabric/Quilt/Forge/NeoForge/legacy Forge), separated mode, crash help, interrupted-download retry, real quick-link drag.
+  - Linux ARM64: native 1.16.5/1.18.2 wizard → Play → menu → Stop with Azul runtimes; LWJGL2 picker restriction.
+  - Linux AMD64: native Welcome → Vanilla → menu → Stop; Q9 D6 short-display/reduced-motion/input checks; Authlib fixture sign-in + real avatar + injected 1.20.6 menu; provider icons; X11 quick-link drag.
+- Built and merged this round: in-window overlay refactor (Q1), real account avatars and provider icons (Q7b/c), native quick-link drop targets Windows+Linux (Q8/D3), Windows ARM64 LWJGL substitution (Q4 code), Linux arm64 managed Azul + substitution fixes.
+- Visual review: 142 single-window Windows scenario captures/boards at d1be580; the grouped review is with the user (accepted only by the user). macOS recapture waits for the Mac.
+- Open: user visual acceptance; Windows ARM64 native VM run; Q6 Windows Settings/SOCKS5/storage and Q6 fixes; Q10 older representatives + OptiFine native imports; OptiFine re-import code; macOS Q8 drop target, recapture and Mac-only checks; Windows lifecycle ×50; final doc/CI accuracy; all acceptance.
 
 ## Decisions (user, 2026-10-21)
 

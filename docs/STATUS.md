@@ -50,7 +50,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Microsoft browser PKCE and final confirmation | Yes | Yes (macOS) | Pending | Native authorization and secure save passed. |
 | Microsoft Device Code and final confirmation | Yes | Yes | Pending | macOS, Windows, Linux ARM64 and Linux AMD64 native saves passed; Linux AMD64 was 0f7e26b. |
 | Offline account and final confirmation | Yes | Pending | Pending | Validated Java UUID identity. |
-| Authlib provider add/edit/remove and discovery | Yes | Pending | Pending | Linked-account protection. |
+| Authlib provider add/edit/remove and discovery | Yes | Yes (fixture, Linux AMD64) | Pending | Linked-account protection. Native fixture add/consent/discovery/duplicate and delete paths observed; Windows/macOS native checks pending. |
 | Authlib provider icon retrieval and display | Yes | Yes (fixture, Linux AMD64) | Pending | Bounded validated fetch against the provider API host, data-dir cache (file+sidecar digests verified), monogram fallback. Native fixture checks: good icon shown/cached, corrupt and oversized rejected silently to monogram with no cache, stale cache offline still shown, missing cache offline monogram. ICO-only favicons fall back to the monogram (accepted limitation). |
 | Provider URL/paste import, duplicate selection, HTTP consent | Yes | Pending | Pending | Address-bound consent. |
 | External quick-link text drop | Yes | Yes (Windows, Linux) | Pending | Owned native drop targets in `crates/block-drop`: OLE child HWND on Windows, XDND ARGB overlay on Linux X11, both reusing the existing discovery/consent/duplicate flow; real browser→drop-zone drags prove accept + reject paths. Wayland is not supported by the pinned GPUI (clear error; options recorded); macOS phase pending the user batch. |
@@ -75,7 +75,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | NeoForge full catalog and installation | Yes | Pending | Pending | Includes 1.20.1 and 26.x. |
 | OptiFine standalone/Forge import and installation | Partial | Pending | Pending | Existing-target re-import UI missing. |
 | Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
-| Productized LWJGL 3 ARM64 compatibility and Java 8 | Partial | Pending | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives for 3.3.1+ manifests; pre-3.3.1 composition and ARM64 Java 8 pending. |
+| Productized LWJGL 3 ARM64 compatibility and Java 8 | Yes | Partial | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives (pre-3.3.1 → reviewed 3.3.1 composition) and provisions Azul Zulu Java 8 via official metadata; native 1.16.5/1.18.2 Play verified. Windows ARM64 substitution merged (016c695), native VM run pending. |
 | ARM64 LWJGL 2 picker restriction | Yes | Yes (Linux ARM64) | Pending | Rows stay visible but disabled with the inline reason; typed exact IDs are refused in-dialog. Native proof on Linux ARM64 (851e23b); macOS/Windows ARM64 picker checks pending. |
 | Deletion, confirmation and linked Profiles | Yes | Pending | Pending | Player files retained. |
 
@@ -106,8 +106,8 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | Light/dark layout, typography, icons and states | Partial | Pending | Pending | Windows captures complete; visual comparison in review. |
 | Directional 460 ms upstream opacity/offset transitions | Partial | Pending | Pending | Audit timing and directions. |
-| System/in-app reduced motion | Yes | Pending | Pending | Native interaction pending. |
-| Fit-to-display at creation and recovery | Yes | Partial | Pending | Linux AMD64 1280×800 captured. |
+| System/in-app reduced motion | Yes | Yes (Linux AMD64) | Pending | In-app toggle native; Linux system reads GTK `gsettings`, Windows system reads `SPI_GETCLIENTAREAANIMATION` (native Windows check pending), macOS NSWorkspace. |
+| Fit-to-display at creation and recovery | Yes | Yes (Linux AMD64) | Pending | 1280×800 and 1366×768 captured (Home clamps to 432×620, management 960×600 fits). Windows/macOS native checks pending. |
 | CJK IME, clipboard, search and scrolling | Partial | Pending | Pending | Real input checks pending. |
 | Enter/Escape/Tab, draft/error preservation | Partial | Pending | Pending | Full interaction checks pending. |
 | In-window overlays: Sheets for Home drawers, Dialogs elsewhere | Yes | Partial | Pending | Windows AMD64 native check passed on c18e416: one window in every state, stacked Dialog over Sheet, Escape closes only the topmost layer, focus returns to the avatar, Add account is the Accounts page in the same window and saves/restarts correctly. macOS native overlay check deferred while the Mac is in use; scenario captures exist. |
@@ -155,7 +155,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
 - All four test hosts share a WireGuard overlay (Mac hub 10.77.0.1; Windows AMD64 10.77.0.11, Windows ARM64 10.77.0.12, Linux ARM64 10.77.0.21, Linux AMD64 10.77.0.22); the Mac forwards between peers and the fixed Mac LAN address is the endpoint. The Linux AMD64 VM must still be started detached from its Windows host, and its login keyring relocks after a reboot.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
-- Q9 D6 on Linux AMD64 (191bf24): 1366×768 fit-to-display clamps Home to 432×620 and fits management 960×600; in-app reduced motion removes transitions; upstream 460 ms sheet/page transitions observed; Tab/Enter/Escape, clipboard, search, scrolling and draft restore pass. Linux system reduced motion is now read from GTK `gsettings`; Windows system reduced motion is still unwired (in-app toggle works). Minor: opening a section dialog clears the inline field error and cancelling does not restore it (toast/draft stay; next Continue revalidates).
+- Q9 D6 on Linux AMD64 (191bf24): 1366×768 fit-to-display clamps Home to 432×620 and fits management 960×600; in-app reduced motion removes transitions; upstream 460 ms sheet/page transitions observed; Tab/Enter/Escape, clipboard, search, scrolling and draft restore pass. Linux system reduced motion is now read from GTK `gsettings`; Linux and Windows system reduced-motion queries are both wired (Windows native recheck pending). Minor: opening a section dialog clears the inline field error and cancelling does not restore it (toast/draft stay; next Continue revalidates).
 - Linux AMD64 Q6 native flow passed on 016c695: fresh data dir, Welcome Vanilla 1.20.6, Offline account, real install + managed Mojang runtime, Play → main menu → Stop, restart persistence; evidence in target/parity-shots/linux-amd64/e2e-q6-*.png. Narration only is unavailable on that host because official 1.20.6 metadata ships no Linux `libflite.so`; the game reaches the menu and audio/rendering work. Known upstream limitation, no launcher fix.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
@@ -172,7 +172,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
 | Older official OptiFine JAR | Downloads contains 1.16.5 G8 and 1.12.2 G5; import validation pending. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
-| Real quick-link drag on hosts automation cannot drive | Windows AMD64 done with a real SendInput browser drag. macOS drag still needs the user batch (Mac in use); Linux X11/Wayland phases pending. |
+| Real quick-link drag on hosts automation cannot drive | Windows AMD64 done with a real SendInput browser drag. macOS drag still needs the user batch (Mac in use); Linux X11 verified, Wayland documented unsupported. |
 
 ## v0 notes
 
