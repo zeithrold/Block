@@ -28,6 +28,22 @@ pub fn quick_link_payload(text: &str) -> Option<&str> {
     (!payload.is_empty()).then_some(payload)
 }
 
+/// Picks the text type the target will accept from an XDND offer.
+///
+/// `UTF8_STRING` is preferred, then `text/plain`, then legacy `STRING`. Any offer
+/// without one of those (files, URLs, images, ...) yields `None` so the zone
+/// never accepts a payload it cannot validate as a quick link.
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    expect(dead_code, reason = "consumed by the XDND backend on Linux")
+)]
+#[must_use]
+pub(crate) fn text_offer(types: &[u32], utf8: u32, text_plain: u32, string: u32) -> Option<u32> {
+    [utf8, text_plain, string]
+        .into_iter()
+        .find(|candidate| types.contains(candidate))
+}
+
 /// Logical bounds of the rendered drop zone inside a window client area.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DropZone {
@@ -74,13 +90,19 @@ impl DropZone {
 #[cfg(windows)]
 mod windows;
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
+mod linux;
+
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
 mod stub;
 
 #[cfg(windows)]
 use windows::NativeTarget;
 
-#[cfg(not(windows))]
+#[cfg(all(unix, not(target_os = "macos")))]
+use linux::NativeTarget;
+
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
 use stub::NativeTarget;
 
 /// Whether the operating system asks applications to reduce motion.
@@ -137,7 +159,7 @@ impl DropTarget {
 
 #[cfg(test)]
 mod tests {
-    use super::{DropZone, quick_link_payload};
+    use super::{DropZone, quick_link_payload, text_offer};
 
     #[test]
     fn quick_link_payload_accepts_the_authlib_scheme() {
@@ -164,6 +186,23 @@ mod tests {
             None
         );
         assert_eq!(quick_link_payload(""), None);
+    }
+
+    #[test]
+    fn xdnd_offers_choose_a_supported_text_type() {
+        let (utf8, text_plain, string) = (10, 11, 12);
+        assert_eq!(text_offer(&[10, 13], utf8, text_plain, string), Some(10));
+        assert_eq!(text_offer(&[11], utf8, text_plain, string), Some(11));
+        assert_eq!(text_offer(&[12], utf8, text_plain, string), Some(12));
+        assert_eq!(
+            text_offer(&[10, 11, 12], utf8, text_plain, string),
+            Some(10),
+            "UTF8_STRING wins when several text formats are offered"
+        );
+        assert_eq!(text_offer(&[], utf8, text_plain, string), None);
+        for other in [&[13u32][..], &[14, 15], &[100]] {
+            assert_eq!(text_offer(other, utf8, text_plain, string), None);
+        }
     }
 
     #[test]
