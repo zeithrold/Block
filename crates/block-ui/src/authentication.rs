@@ -114,11 +114,11 @@ struct DeviceCode {
 #[derive(Debug)]
 pub(crate) struct AuthProviderDraft {
     id: uuid::Uuid,
-    name: gpui::Entity<super::TextInput>,
-    address: gpui::Entity<super::TextInput>,
-    observed_address: String,
-    accepted_http: Option<String>,
-    error: Option<String>,
+    pub(crate) name: gpui::Entity<super::TextInput>,
+    pub(crate) address: gpui::Entity<super::TextInput>,
+    pub(crate) observed_address: String,
+    pub(crate) accepted_http: Option<String>,
+    pub(crate) error: Option<String>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     saved: Option<uuid::Uuid>,
 }

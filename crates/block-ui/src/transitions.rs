@@ -34,8 +34,6 @@ pub(super) struct MotionState {
 impl Default for MotionState {
     fn default() -> Self {
         Self {
-            #[cfg(windows)]
-            provider_drop: None,
             page: Scene::new(Scope::Page),
             detail: Scene::new(Scope::Detail),
             wizard: Scene::new(Scope::Wizard),
@@ -301,6 +299,8 @@ impl Block {
             show_command: self.show_command,
             recipe: self.recipe.clone(),
             recipe_load: super::RecipeLoadState::default(),
+            #[cfg(windows)]
+            provider_drop: None,
         }
     }
 }
