@@ -1,5 +1,6 @@
 //! Recipe parsers compile immutable preparation plans and complete Java commands.
 
+pub mod azul;
 pub mod catalog;
 pub mod command;
 pub mod crash;

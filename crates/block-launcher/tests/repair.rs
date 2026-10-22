@@ -44,6 +44,7 @@ fn plan(resource: Resource, destination: &str) -> ExecutionPlan {
         }],
         resources: vec![resource],
         compatibility: None,
+        runtime_substitution: None,
         command: CommandTemplate {
             java: JavaExecutable::Managed {
                 path: "runtimes/test/bin/java".into(),

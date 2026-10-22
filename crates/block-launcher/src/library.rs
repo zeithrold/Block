@@ -328,11 +328,17 @@ impl Library {
         Ok(launch)
     }
 
-    /// Announce an applied compatibility substitution so launches never hide it.
+    /// Announce applied substitutions so launches never hide them.
     fn announce_compatibility(&self, plan: &ExecutionPlan) {
         if let Some(note) = &plan.compatibility {
             (self.events)(crate::executor::ExecutionEvent::Log {
                 line: format!("Compatibility: {note}"),
+                stderr: false,
+            });
+        }
+        if let Some(note) = &plan.runtime_substitution {
+            (self.events)(crate::executor::ExecutionEvent::Log {
+                line: format!("Runtime: {note}"),
                 stderr: false,
             });
         }
