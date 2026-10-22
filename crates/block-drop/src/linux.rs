@@ -15,7 +15,7 @@ use std::{
     fmt,
     sync::mpsc::{self, Receiver, Sender, TryRecvError},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, anyhow};
@@ -151,10 +151,15 @@ impl Drop for NativeTarget {
 
 struct Ready {
     connection: RustConnection,
+    /// The GPUI client window whose position anchors the rendered zone.
+    parent: Window,
+    root: Window,
     window: Window,
     atoms: Atoms,
     payloads: PayloadSender<String>,
     drag: DragState,
+    zone: DropZone,
+    last_refresh: Instant,
 }
 
 fn run(
@@ -194,8 +199,19 @@ fn run(
         if shutdown {
             break;
         }
+        if state.last_refresh.elapsed() >= Duration::from_millis(200) {
+            refresh(&mut state);
+        }
         match state.connection.poll_for_event() {
-            Ok(Some(event)) => handle_event(&mut state, event),
+            Ok(Some(event)) => {
+                if let x11rb::protocol::Event::ConfigureNotify(configure) = &event
+                    && configure.window == state.parent
+                {
+                    // The product window moved or was restacked; follow it.
+                    refresh(&mut state);
+                }
+                handle_event(&mut state, event);
+            }
             Ok(None) => thread::sleep(POLL_INTERVAL),
             Err(_) => break,
         }
@@ -280,17 +296,33 @@ fn zone_rect(zone: DropZone) -> (u16, u16, u16, u16) {
     )
 }
 
-fn configure_zone(state: &Ready, zone: DropZone) {
-    let (x, y, width, height) = zone_rect(zone);
+fn configure_zone(state: &mut Ready, zone: DropZone) {
+    state.zone = zone;
+    refresh(state);
+}
+
+/// Place the input-only overlay at the zone's absolute root coordinates and keep
+/// it above the product window, following later moves and restacks.
+fn refresh(state: &mut Ready) {
+    let Ok(cookie) = state
+        .connection
+        .translate_coordinates(state.parent, state.root, 0, 0)
+    else {
+        return;
+    };
+    let Ok(origin) = cookie.reply() else {
+        return;
+    };
+    let (x, y, width, height) = zone_rect(state.zone);
     let aux = ConfigureWindowAux::new()
-        .x(i32::from(x))
-        .y(i32::from(y))
+        .x(i32::from(x) + i32::from(origin.dst_x))
+        .y(i32::from(y) + i32::from(origin.dst_y))
         .width(u32::from(width))
-        .height(u32::from(height));
-    // SAFETY: the window belongs to this connection and the request only changes
-    // its geometry; ConfigureWindowAux is a plain value.
+        .height(u32::from(height))
+        .stack_mode(StackMode::ABOVE);
     let _ = state.connection.configure_window(state.window, &aux);
     let _ = state.connection.flush();
+    state.last_refresh = Instant::now();
 }
 
 fn handle_event(state: &mut Ready, event: x11rb::protocol::Event) {
