@@ -52,10 +52,10 @@ fn profile_subpage_cancel_restores_its_checkpoint_and_done_only_changes_the_draf
             assert_eq!(view.snapshot.profiles[0].appearance.color, ProfileColor::Gray);
             view.handle(UiAction::ProfilePage(EditorPage::Launch), window, cx);
             if let Some(Form::Profile(form)) = &view.form {
-                form.memory.update(cx, |field, cx| field.set_value("8192", cx));
+                form.memory.update(cx, |field, cx| field.set_value("8", cx));
             }
             view.handle(UiAction::ProfilePageCancel, window, cx);
-            assert!(matches!(&view.form, Some(Form::Profile(form)) if form.memory.read(cx).value() == "2048"));
+            assert!(matches!(&view.form, Some(Form::Profile(form)) if form.memory.read(cx).value() == "2"));
             view.handle(UiAction::CancelForm, window, cx);
             assert!(view.form.is_none());
             assert_eq!(view.snapshot.profiles[0].memory_mib, 2048);
@@ -101,12 +101,12 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             if let Some(Form::Profile(form)) = &view.form {
-                form.memory.update(cx, |field, cx| field.set_value("4096", cx));
+                form.memory.update(cx, |field, cx| field.set_value("4", cx));
                 form.jvm.update(cx, |field, cx| field.set_value("\"unfinished", cx));
             }
             view.handle(UiAction::SaveProfile, window, cx);
             assert!(matches!(&view.form, Some(Form::Profile(form)) if form.jvm.read(cx).focus_handle(cx).is_focused(window)
-                && form.memory.read(cx).value() == "4096"));
+                && form.memory.read(cx).value() == "4"));
             assert_eq!(view.snapshot.profiles[0].memory_mib, 2048);
             assert!(!view.busy);
         });
@@ -139,8 +139,7 @@ fn final_save_persists_the_complete_profile_and_subpage_actions_do_not_write(
                 view.handle(UiAction::EditProfile, window, cx);
                 view.handle(UiAction::ProfilePage(EditorPage::Launch), window, cx);
                 if let Some(Form::Profile(form)) = &view.form {
-                    form.memory
-                        .update(cx, |field, cx| field.set_value("6144", cx));
+                    form.memory.update(cx, |field, cx| field.set_value("6", cx));
                     form.jvm.update(cx, |field, cx| {
                         field.set_value("-Dtitle=\"Hello world\"", cx);
                     });
@@ -377,4 +376,39 @@ fn saving_after_inspection_changes_restores_the_current_detail_instead_of_an_old
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn profile_memory_validation_uses_gb_and_enforces_the_one_to_thirty_two_gb_bounds(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.tab = Tab::Instances;
+            view.snapshot = ready_snapshot();
+            view.handle(UiAction::EditProfile, window, cx);
+            let Some(Form::Profile(form)) = &view.form else {
+                return;
+            };
+            for (value, expected) in [
+                ("0.5", None),
+                ("33", None),
+                ("1", Some(1024)),
+                ("32", Some(32768)),
+                ("1.5", Some(1536)),
+            ] {
+                form.memory
+                    .update(cx, |field, cx| field.set_value(value, cx));
+                let parsed = crate::profile_editor::parse_profile(form, cx);
+                match expected {
+                    Some(mib) => {
+                        assert_eq!(parsed.map(|profile| profile.memory_mib), Ok(mib), "{value}")
+                    }
+                    None => assert!(parsed.is_err(), "{value}"),
+                }
+            }
+        });
+    });
 }

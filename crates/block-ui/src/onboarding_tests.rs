@@ -145,14 +145,14 @@ fn component_dialog_cancel_rolls_back_all_values_and_done_keeps_only_the_draft(
                     .update(cx, |field, cx| field.set_value("1920", cx));
                 profile
                     .memory
-                    .update(cx, |field, cx| field.set_value("4096", cx));
+                    .update(cx, |field, cx| field.set_value("4", cx));
                 profile.fullscreen = true;
             }
             view.finish_onboarding_section(true, window, cx);
             assert!(view.shell.surfaces.top().is_none());
             assert!(view.shell.wizard.profile.as_ref().is_some_and(|profile| {
                 profile.width.read(cx).value() == "1280"
-                    && profile.memory.read(cx).value() == "2048"
+                    && profile.memory.read(cx).value() == "2"
                     && !profile.fullscreen
             }));
             view.open_onboarding_section(WizardPage::Location, window, cx);
@@ -358,7 +358,7 @@ fn create_uses_the_reviewed_configuration_and_setup_save_retry_does_not_create_t
                     });
                     profile
                         .memory
-                        .update(cx, |field, cx| field.set_value("4096", cx));
+                        .update(cx, |field, cx| field.set_value("4", cx));
                     profile
                         .jvm
                         .update(cx, |field, cx| field.set_value("-Dkept=true", cx));

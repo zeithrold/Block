@@ -172,7 +172,7 @@ impl ProfileDraft {
             name: input("New Profile", "Profile name", cx),
             server: input("", "play.example.com:25565", cx),
             connect_on_launch: false,
-            memory: input(&defaults.memory_mib.to_string(), "2048", cx),
+            memory: input(&components::memory_gb_text(defaults.memory_mib), "2", cx),
             java: input(&defaults.java, "Absolute path to Java", cx),
             jvm: input(&defaults.jvm_arguments, "Extra JVM arguments", cx),
             width: input(&defaults.width.to_string(), "1280", cx),
@@ -203,7 +203,7 @@ impl ProfileDraft {
             Some(WizardField::ProfileName)
         } else if self.server_preferences(cx).validate().is_err() {
             Some(WizardField::Server)
-        } else if !valid_number(&self.memory, 256, 65536) {
+        } else if components::parse_memory_gb(&self.memory.read(cx).value()).is_err() {
             Some(WizardField::Memory)
         } else if !self.managed
             && !std::path::Path::new(self.java.read(cx).value().trim()).is_absolute()
@@ -254,13 +254,8 @@ impl ProfileDraft {
             "Give the Profile a name of 1–80 characters."
         );
         let defaults = super::settings::GameDefaults {
-            memory_mib: self
-                .memory
-                .read(cx)
-                .value()
-                .trim()
-                .parse()
-                .context("Enter maximum memory as a whole number of MiB.")?,
+            memory_mib: components::parse_memory_gb(&self.memory.read(cx).value())
+                .map_err(|message| anyhow::anyhow!(message))?,
             java: if self.managed {
                 String::new()
             } else {
@@ -1344,17 +1339,10 @@ impl Block {
             }
         }
         if self.tab == Tab::Onboarding {
-            if !profile
-                .memory
-                .read(cx)
-                .value()
-                .trim()
-                .parse::<u32>()
-                .is_ok_and(|value| (256..=65536).contains(&value))
-            {
+            if components::parse_memory_gb(&profile.memory.read(cx).value()).is_err() {
                 return Some((
                     WizardField::Memory,
-                    "Maximum memory must be between 256 and 65536 MiB.".into(),
+                    "Choose a memory limit between 1 and 32 GB.".into(),
                 ));
             }
             if let Err(error) = super::parse_arguments(&profile.jvm.read(cx).value()) {
@@ -2297,9 +2285,9 @@ impl Block {
             .gap_4()
             .child(self.wizard_field(
                 WizardField::Memory,
-                "Maximum memory (MiB)",
+                "Maximum memory (GB)",
                 &profile.memory,
-                Some("1024 MiB = 1 GiB. Supported range: 256–65536 MiB."),
+                Some("Allowed: 1–32 GB. Step: 1 GB."),
             ))
             .child(self.wizard_field(WizardField::Jvm, "Extra JVM arguments", &profile.jvm, None))
             .children(
@@ -3344,7 +3332,7 @@ impl Block {
             form.loader_label()
         };
         let memory = profile.map_or_else(
-            || self.saved_preferences.game.memory_mib.to_string(),
+            || components::memory_gb_text(self.saved_preferences.game.memory_mib),
             |profile| profile.memory.read(cx).value(),
         );
         let java = profile.map_or_else(
@@ -3391,7 +3379,7 @@ impl Block {
                     .child(div().min_w_0().child(note("NEW PROFILE")).child(profile_name)))) )
             .child(div().flex().flex_wrap().gap_3().children([
                 ("Launch target", launch_target),
-                ("Maximum memory", memory.parse::<u32>().map_or_else(|_| memory.clone(), components::memory_label)),
+                ("Maximum memory", components::parse_memory_gb(&memory).map_or_else(|_| memory.clone(), components::memory_label)),
                 ("Server", profile.map_or_else(|| "Choose in game".to_owned(), |profile| { let value = profile.server.read(cx).value(); if value.trim().is_empty() { "Choose in game".into() } else { value } })),
                 ("Automatic connection", if profile.is_some_and(|profile| profile.connect_on_launch) {
                     match automatic_connection {

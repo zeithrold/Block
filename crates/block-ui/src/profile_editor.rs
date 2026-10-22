@@ -490,7 +490,7 @@ impl Block {
         }
         fields = fields.child(self.profile_inheritance_fields(form, cx));
         fields = fields
-            .child(self.profile_field(EditorField::Memory, "Maximum memory (MiB)", &form.memory))
+            .child(self.profile_field(EditorField::Memory, "Maximum memory (GB)", &form.memory))
             .child(self.profile_field(EditorField::Jvm, "Additional JVM arguments", &form.jvm))
             .child(self.profile_field(EditorField::Game, "Additional game arguments", &form.game))
             .child(note(
@@ -813,20 +813,8 @@ pub(super) fn parse_profile(
         .server
         .validate()
         .map_err(|error| (EditorField::Server, error.to_string()))?;
-    profile.memory_mib = form
-        .memory
-        .read(cx)
-        .value()
-        .trim()
-        .parse()
-        .ok()
-        .filter(|memory| (256..=65536).contains(memory))
-        .ok_or_else(|| {
-            (
-                EditorField::Memory,
-                "Memory must be between 256 and 65536 MiB".into(),
-            )
-        })?;
+    profile.memory_mib = components::parse_memory_gb(&form.memory.read(cx).value())
+        .map_err(|message| (EditorField::Memory, message))?;
     let java = form.java.read(cx).value();
     profile.runtime = if form.managed {
         RuntimeSelection::Managed

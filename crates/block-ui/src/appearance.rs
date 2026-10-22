@@ -29,7 +29,11 @@ impl Preferences {
     pub(super) fn load(root: &Path) -> anyhow::Result<Self> {
         match std::fs::read(root.join("preferences.json")) {
             Ok(bytes) => {
-                let preferences: Self = serde_json::from_slice(&bytes)?;
+                let mut preferences: Self = serde_json::from_slice(&bytes)?;
+                // Older preferences may store memory outside the 1–32 GB
+                // product range; clamp on load and persist on the next save.
+                preferences.game.memory_mib =
+                    block_launcher::clamp_memory_mib(preferences.game.memory_mib);
                 preferences.validate()?;
                 Ok(preferences)
             }
@@ -188,6 +192,28 @@ mod tests {
         };
         assert!(preferences.save(root.path()).is_err());
         assert_eq!(std::fs::read(path)?, original);
+        Ok(())
+    }
+
+    #[test]
+    fn loading_out_of_range_stored_memory_clamps_to_the_product_bounds() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("preferences.json");
+        for (stored, expected) in [(256, 1024), (65536, 32768), (4096, 4096)] {
+            let preferences = Preferences {
+                onboarding_complete: true,
+                game: super::super::settings::GameDefaults {
+                    memory_mib: stored,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            std::fs::write(&path, serde_json::to_vec(&preferences)?)?;
+            let loaded = Preferences::load(root.path())?;
+            assert_eq!(loaded.game.memory_mib, expected);
+            loaded.save(root.path())?;
+            assert_eq!(Preferences::load(root.path())?.game.memory_mib, expected);
+        }
         Ok(())
     }
 }

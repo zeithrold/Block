@@ -549,10 +549,9 @@ impl Block {
         let memory = profile.map_or_else(
             || "Default".into(),
             |profile| {
-                profile.memory.read(cx).value().parse::<u32>().map_or_else(
-                    |_| format!("{} MiB", profile.memory.read(cx).value()),
-                    components::memory_label,
-                )
+                let value = profile.memory.read(cx).value();
+                components::parse_memory_gb(&value)
+                    .map_or_else(|_| "Choose a memory limit".into(), components::memory_label)
             },
         );
         let window = profile.map_or_else(

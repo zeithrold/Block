@@ -126,8 +126,8 @@ impl LaunchRecipe {
             "instance ID must contain 1..64 ASCII letters, digits, underscores or hyphens"
         );
         ensure!(
-            (256..=65536).contains(&self.memory_mib),
-            "memory_mib must be between 256 and 65536"
+            (crate::MIN_MEMORY_MIB..=crate::MAX_MEMORY_MIB).contains(&self.memory_mib),
+            "memory_mib must be between 1024 and 32768"
         );
         self.session.validate()?;
         Ok(())

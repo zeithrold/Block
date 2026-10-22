@@ -725,6 +725,10 @@ impl Catalog {
             document.schema_version == 1,
             "unsupported catalog schema; original file was preserved"
         );
+        // Older catalogs may store memory outside the 1–32 GB product range.
+        // Clamp on load so they keep opening; the clamped value is written back
+        // by the next catalog write.
+        migrate_memory_bounds(&mut document.snapshot);
         validate_snapshot(&document.snapshot)?;
         let result = operation(&mut document.snapshot)?;
         if write {
@@ -735,6 +739,12 @@ impl Catalog {
             temp.persist(path)?;
         }
         Ok(result)
+    }
+}
+
+fn migrate_memory_bounds(snapshot: &mut Snapshot) {
+    for profile in &mut snapshot.profiles {
+        profile.memory_mib = crate::clamp_memory_mib(profile.memory_mib);
     }
 }
 

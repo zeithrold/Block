@@ -280,8 +280,8 @@ impl Profile {
         }
         validate_name(&self.name)?;
         ensure!(
-            (256..=65536).contains(&self.memory_mib),
-            "memory must be between256 and65536MiB"
+            (crate::MIN_MEMORY_MIB..=crate::MAX_MEMORY_MIB).contains(&self.memory_mib),
+            "Memory must be between 1 and 32 GB"
         );
         ensure!(
             self.jvm_args
