@@ -136,8 +136,8 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 
 ## Verification notes
 
-- Windows intermittent lifecycle failure: bounded repeated host test still required. CREATE_NO_WINDOW validated natively on Windows through install and Play on 1ac4564.
-- Known low-frequency test flake (pre-existing): block-launcher `storage::tests::cache_can_return_to_the_managed_root_without_touching_games_or_control_files` failed 2/25 under load, then passed 55/55 stress runs; no code change, tracked until it reappears.
+- Q9 D8 Windows lifecycle ×50 on e4b3be6: 49/50 passed; the failure (and 1/60 isolated repro) was a ~2% Windows race where the atomic session-record replace hit ERROR_ACCESS_DENIED/ERROR_SHARING_VIOLATION from a transient external handle, leaving the monitor record active. Fixed with a bounded retry (5 attempts, 20→200 ms, Windows errors 5/32 only) in session_host storage; 50/50 full-suite and 100/100 isolated runs then passed. Evidence in target/parity-shots/windows-amd64/q9-lifecycle/.
+- Storage lock flake (pre-existing) was an inherited `flock` across a concurrent fork/exec; a bounded 500 ms retry on transient would-block (and test retries) now prevents it, with repeated workspace runs green.
 - Native screenshots cover 71 debug scenarios in light/dark; every overlay now renders inside its parent window (one capture per scenario). Scenario captures are visual fixtures.
 - Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 single-window Windows scenario shots (71 stems) captured at d1be580 after the overlay refactor and Q2 fixes.
 - Remote picker captures prove navigation and overlays, not native installation/Play.
