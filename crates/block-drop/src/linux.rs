@@ -159,6 +159,7 @@ struct Ready {
     parent: Window,
     root: Window,
     window: Window,
+    gc: Gcontext,
     atoms: Atoms,
     payloads: PayloadSender<String>,
     drag: DragState,
@@ -265,6 +266,8 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
             &aux,
         )
         .map_err(|error| anyhow!("could not create the X11 drop window: {error}"))?;
+    let gc = connection.generate_id()?;
+    connection.create_gc(gc, window, &CreateGCAux::new())?;
     set_shapes(&connection, window, 1, 1)?;
     connection.change_property32(
         PropMode::REPLACE,
@@ -279,6 +282,7 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         parent,
         root,
         window,
+        gc,
         atoms,
         payloads,
         drag: DragState::empty(),
@@ -347,18 +351,38 @@ fn refresh(state: &mut Ready) {
         .stack_mode(StackMode::ABOVE);
     let _ = state.connection.configure_window(state.window, &aux);
     let _ = set_shapes(&state.connection, state.window, width, height);
+    // Mirror the product window's pixels so the overlay is visually identical
+    // to the rendered zone while still being a real, hittable X11 window.
+    let _ = state.connection.copy_area(
+        state.parent,
+        state.window,
+        state.gc,
+        i32::from(x),
+        i32::from(y),
+        0,
+        0,
+        width,
+        height,
+    );
     let _ = state.connection.flush();
     state.last_refresh = Instant::now();
 }
 
-/// Makes the overlay invisible (empty bounding shape) but keeps the whole zone
-/// inside its input shape so pointer hit-testing still selects it.
+/// Gives the overlay the exact zone rectangle as both its bounding and input
+/// shape. The overlay paints the product window's pixels underneath, so making
+/// it a real (visible) window keeps XDND's XQueryPointer lookup working.
 fn set_shapes(
     connection: &RustConnection,
     window: Window,
     width: u16,
     height: u16,
 ) -> std::result::Result<(), x11rb::errors::ConnectionError> {
+    let rect = [Rectangle {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    }];
     connection.shape_rectangles(
         shape::SO::SET,
         shape::SK::BOUNDING,
@@ -366,7 +390,7 @@ fn set_shapes(
         window,
         0,
         0,
-        &[],
+        &rect,
     )?;
     connection.shape_rectangles(
         shape::SO::SET,
@@ -375,12 +399,7 @@ fn set_shapes(
         window,
         0,
         0,
-        &[Rectangle {
-            x: 0,
-            y: 0,
-            width,
-            height,
-        }],
+        &rect,
     )?;
     Ok(())
 }
