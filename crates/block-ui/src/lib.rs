@@ -55,6 +55,10 @@ pub fn initialize(cx: &mut gpui::App) {
     if !cx.has_global::<gpui_base::GlobalState>() {
         gpui_base::init(cx);
     }
+    // Dialog and sheet primitives (overlay stack, scrim, Escape dismissal and
+    // focus restore) come from the component library instead of a home-grown
+    // window manager. Product content and palette stay in this crate.
+    gpui_component::init(cx);
 }
 
 fn bind_navigation_keys(cx: &mut gpui::App) {
