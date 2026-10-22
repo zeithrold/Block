@@ -358,7 +358,7 @@ fn set_shapes(
     window: Window,
     width: u16,
     height: u16,
-) -> Result<(), x11rb::errors::ConnectionError> {
+) -> std::result::Result<(), x11rb::errors::ConnectionError> {
     connection.shape_rectangles(
         shape::SO::SET,
         shape::SK::BOUNDING,
