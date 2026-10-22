@@ -633,7 +633,10 @@ impl Block {
         let choices = APP_MENU
             .into_iter()
             .filter(|item| {
-                self.tab != Tab::Onboarding || matches!(item.tab, Tab::Settings | Tab::About)
+                // The setup draft keeps its own surface; only Settings and About
+                // are reachable previews until setup is finished.
+                (self.tab != Tab::Onboarding && self.shell.guide_preview.is_none())
+                    || matches!(item.tab, Tab::Settings | Tab::About)
             })
             .map(|item| SelectChoice {
                 label: item.label.into(),

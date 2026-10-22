@@ -103,7 +103,7 @@ impl OfflineSession {
                 && username
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
-            "offline username must contain 1..16 ASCII letters, digits or underscores"
+            "Offline username must be 1–16 letters, digits or underscores."
         );
         Ok(())
     }

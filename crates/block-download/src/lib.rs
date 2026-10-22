@@ -86,7 +86,7 @@ impl DownloadOptions {
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
             (1..=16).contains(&self.max_concurrent),
-            "download concurrency must be 1..=16"
+            "Choose between 1 and 16 parallel downloads."
         );
         ensure!(self.max_retries <= 10, "download retries must be 0..=10");
         ensure!(

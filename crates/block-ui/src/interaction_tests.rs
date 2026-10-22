@@ -154,3 +154,49 @@ fn guide_information_preserves_setup_draft_and_cancels_settings_preview(
         && !view.shell.surfaces.is_open()
         && matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Retain 世界")));
 }
+
+#[gpui::test]
+fn games_route_during_setup_keeps_the_setup_page_with_a_status(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    cx.simulate_resize(size(px(960.), px(600.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.saved_preferences.reduce_motion = true;
+            view.preferences.onboarding_complete = false;
+            view.saved_preferences.onboarding_complete = false;
+            view.begin_onboarding(cx);
+            if let Some(crate::Form::Instance(form)) = &view.form {
+                form.name
+                    .update(cx, |input, cx| input.set_value("Keep setup", cx));
+            }
+            // A programmatic Games route while setup is active must not blank
+            // the page: setup stays available and reports why.
+            view.handle(UiAction::Tab(Tab::Instances), window, cx);
+            assert_eq!(view.tab, Tab::Onboarding);
+            assert!(view.shell.guide_preview.is_none());
+            assert!(view.status.contains("Finish setup to see your games."));
+            assert!(view.shell.toast.as_ref().is_some_and(|toast| {
+                toast
+                    .message
+                    .contains("Finish setup to see your games.")
+            }));
+            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Keep setup"));
+            // Reproduce the observed menu path: preview Settings from setup,
+            // then request Games. The preview is left and setup keeps its draft.
+            view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            assert_eq!(view.tab, Tab::Settings);
+            assert!(view.shell.guide_preview.is_some());
+            view.handle(UiAction::Tab(Tab::Instances), window, cx);
+            assert_eq!(view.tab, Tab::Onboarding);
+            assert!(view.shell.guide_preview.is_none());
+            assert!(view.status.contains("Finish setup to see your games."));
+            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Keep setup"));
+        });
+    });
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::control_bounds(cx, "onboarding-components").is_some(),
+        "setup must render a meaningful page after the blocked Games route"
+    );
+}
