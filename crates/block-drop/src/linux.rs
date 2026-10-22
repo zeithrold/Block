@@ -26,8 +26,8 @@ use x11rb::{
         shape::{self, ConnectionExt as _},
         xproto::{
             Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering,
-            ConfigureWindowAux, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask,
-            Gcontext, PropMode, Rectangle, StackMode, Window, WindowClass,
+            ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode,
+            Rectangle, StackMode, Window, WindowClass,
         },
     },
     rust_connection::RustConnection,
@@ -159,7 +159,6 @@ struct Ready {
     parent: Window,
     root: Window,
     window: Window,
-    gc: Gcontext,
     atoms: Atoms,
     payloads: PayloadSender<String>,
     drag: DragState,
@@ -266,8 +265,6 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
             &aux,
         )
         .map_err(|error| anyhow!("could not create the X11 drop window: {error}"))?;
-    let gc = connection.generate_id()?;
-    connection.create_gc(gc, window, &CreateGCAux::new())?;
     set_shapes(&connection, window, 1, 1)?;
     connection.change_property32(
         PropMode::REPLACE,
@@ -282,7 +279,6 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         parent,
         root,
         window,
-        gc,
         atoms,
         payloads,
         drag: DragState::empty(),
@@ -351,26 +347,13 @@ fn refresh(state: &mut Ready) {
         .stack_mode(StackMode::ABOVE);
     let _ = state.connection.configure_window(state.window, &aux);
     let _ = set_shapes(&state.connection, state.window, width, height);
-    // Mirror the product window's pixels so the overlay is visually identical
-    // to the rendered zone while still being a real, hittable X11 window.
-    let _ = state.connection.copy_area(
-        state.parent,
-        state.window,
-        state.gc,
-        x.min(i16::MAX as u16) as i16,
-        y.min(i16::MAX as u16) as i16,
-        0,
-        0,
-        width,
-        height,
-    );
     let _ = state.connection.flush();
     state.last_refresh = Instant::now();
 }
 
-/// Gives the overlay the exact zone rectangle as both its bounding and input
-/// shape. The overlay paints the product window's pixels underneath, so making
-/// it a real (visible) window keeps XDND's XQueryPointer lookup working.
+/// Makes the overlay invisible with an empty bounding shape while keeping the
+/// whole zone inside its input shape, so pointer hit-testing still selects it
+/// without covering the rendered zone.
 fn set_shapes(
     connection: &RustConnection,
     window: Window,
@@ -390,7 +373,7 @@ fn set_shapes(
         window,
         0,
         0,
-        &rect,
+        &[],
     )?;
     connection.shape_rectangles(
         shape::SO::SET,
