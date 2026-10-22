@@ -91,7 +91,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, PathPromptOptions,
     Pixels, Render, SharedString, Styled as _, WeakEntity, Window, div, px, rgb,
 };
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 
@@ -389,8 +389,9 @@ pub struct Block {
     show_command: bool,
     recipe: Option<LaunchRecipe>,
     recipe_load: RecipeLoadState,
-    /// Windows-only OLE drop target over the rendered provider drop zone.
-    #[cfg(windows)]
+    /// Owned native drop target (OLE on Windows, XDND on Linux) over the
+    /// rendered provider drop zone.
+    #[cfg(any(windows, target_os = "linux"))]
     provider_drop: Option<ProviderDrop>,
 }
 
@@ -417,8 +418,8 @@ impl RecipeLoadState {
     }
 }
 
-/// Owns the Windows child HWND that receives provider quick-link drops.
-#[cfg(windows)]
+/// Owns the native child window that receives provider quick-link drops.
+#[cfg(any(windows, target_os = "linux"))]
 #[derive(Debug)]
 struct ProviderDrop {
     target: block_drop::DropTarget,
@@ -575,7 +576,7 @@ impl Block {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             provider_drop: None,
         };
         view.initialize_browsers(cx);
@@ -2343,7 +2344,7 @@ impl Render for Block {
 impl Block {
     /// Attach or release the Windows OLE drop target as the provider draft appears
     /// or disappears. Non-Windows platforms keep this a no-op.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn sync_provider_drop(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
         let drafting = self
             .shell
@@ -2360,12 +2361,36 @@ impl Block {
         let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
             return;
         };
-        let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        let parent = match handle.as_raw() {
+            #[cfg(windows)]
+            RawWindowHandle::Win32(win32) => Some(win32.hwnd.get() as isize),
+            #[cfg(target_os = "linux")]
+            RawWindowHandle::Xcb(xcb) => isize::try_from(xcb.window.get()).ok(),
+            #[cfg(target_os = "linux")]
+            RawWindowHandle::Xlib(xlib) => isize::try_from(xlib.window).ok(),
+            #[cfg(target_os = "linux")]
+            RawWindowHandle::Wayland(_) => None,
+            _ => None,
+        };
+        let Some(parent) = parent else {
+            if let Some(draft) = self
+                .shell
+                .auth
+                .as_mut()
+                .and_then(|state| state.provider_draft_mut())
+                && draft.error.is_none()
+            {
+                draft.error = Some(if cfg!(target_os = "linux") {
+                    "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.".to_owned()
+                } else {
+                    "Drag and drop is unavailable: unsupported windowing system.".to_owned()
+                });
+            }
             return;
         };
         let (sender, receiver) = async_channel::bounded::<String>(4);
         let zone = block_drop::DropZone::new(0.0, 0.0, 0.0, 0.0, window.scale_factor());
-        match block_drop::DropTarget::attach(win32.hwnd.get(), zone, sender) {
+        match block_drop::DropTarget::attach(parent, zone, sender) {
             Ok(target) => {
                 self.provider_drop = Some(ProviderDrop { target });
                 cx.spawn(async move |view, cx| {
@@ -2391,8 +2416,8 @@ impl Block {
         }
     }
 
-    /// Keep the owned child HWND aligned with the rendered drop zone.
-    #[cfg(windows)]
+    /// Keep the owned native child window aligned with the rendered drop zone.
+    #[cfg(any(windows, target_os = "linux"))]
     fn position_provider_drop(&mut self, bounds: &[Bounds<Pixels>], scale: f32) {
         let Some(first) = bounds.first() else {
             return;
@@ -2420,7 +2445,7 @@ impl Block {
 
     /// Feed an accepted quick link through the same recognise/normalise path as
     /// pasting it and pressing "Recognize address".
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn apply_provider_drop(&mut self, payload: String, cx: &mut Context<'_, Self>) {
         if let Some(draft) = self
             .shell
@@ -2437,36 +2462,38 @@ impl Block {
         cx.notify();
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     fn sync_provider_drop(&mut self, _window: &Window, _cx: &mut Context<'_, Self>) {}
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     #[expect(
         dead_code,
-        reason = "the drop zone only drives real bounds and payloads on Windows"
+        reason = "the drop zone only drives real bounds and payloads where a native target exists"
     )]
     fn position_provider_drop(&mut self, _bounds: &[Bounds<Pixels>], _scale: f32) {}
 
-    #[cfg(not(windows))]
-    #[expect(dead_code, reason = "quick-link drops are a Windows OLE capability")]
+    #[cfg(not(any(windows, target_os = "linux")))]
+    #[expect(
+        dead_code,
+        reason = "quick-link drops are a Windows OLE and Linux XDND capability"
+    )]
     fn apply_provider_drop(&mut self, _payload: String, _cx: &mut Context<'_, Self>) {}
 }
 
-/// Subscribe the rendered drop zone to its real window bounds (Windows only).
-#[cfg(windows)]
+/// Subscribe the rendered drop zone to its real window bounds (Windows and X11).
+#[cfg(any(windows, target_os = "linux"))]
 fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui::Div {
     zone.on_children_prepainted(move |bounds, window, cx| {
         if let Some(view) = view.upgrade() {
             let scale = window.scale_factor();
-            view.update(cx, |view, cx| {
+            view.update(cx, |view, _| {
                 view.position_provider_drop(&bounds, scale);
-                cx.notify();
             });
         }
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpui::Div {
     zone
 }
@@ -2677,7 +2704,7 @@ mod tests {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             provider_drop: None,
         }
     }
