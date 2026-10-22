@@ -18,17 +18,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use async_channel::Sender as PayloadSender;
 use x11rb::{
     connection::Connection as _,
-    protocol::{
-        shape::{self, ConnectionExt as _},
-        xproto::{
-            Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ClipOrdering,
-            ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode,
-            Rectangle, StackMode, Window, WindowClass,
-        },
+    protocol::xproto::{
+        Alloc, Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, Colormap,
+        ConfigureWindowAux, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, StackMode,
+        Visualid, Window, WindowClass,
     },
     rust_connection::RustConnection,
     wrapper::ConnectionExt as _,
@@ -159,6 +156,7 @@ struct Ready {
     parent: Window,
     root: Window,
     window: Window,
+    colormap: Colormap,
     atoms: Atoms,
     payloads: PayloadSender<String>,
     drag: DragState,
@@ -221,6 +219,7 @@ fn run(
         }
         let _ = state.connection.flush();
     }
+    let _ = state.connection.free_colormap(state.colormap);
     let _ = state.connection.destroy_window(state.window);
     let _ = state.connection.flush();
 }
@@ -229,16 +228,33 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
     let (connection, screen) =
         x11rb::connect(None).map_err(|error| anyhow!("could not open the X11 display: {error}"))?;
     let atoms = intern_atoms(&connection)?;
-    let root = connection
+    let root_info = connection
         .setup()
         .roots
         .get(screen)
-        .map(|root| root.root)
         .ok_or_else(|| anyhow!("the X11 display has no root window"))?;
+    let root = root_info.root;
+    let compositor = connection
+        .intern_atom(false, b"_NET_WM_CM_S0")?
+        .reply()?
+        .atom;
+    if connection.get_selection_owner(compositor)?.reply()?.owner == 0 {
+        bail!("the X11 session has no compositor");
+    }
+    let visual = root_info
+        .allowed_depths
+        .iter()
+        .find(|depth| depth.depth == 32)
+        .and_then(|depth| depth.visuals.first())
+        .map(|visual| Visualid::from(visual.visual_id))
+        .ok_or_else(|| anyhow!("the X11 session has no 32-bit ARGB visual"))?;
+    let colormap = connection.generate_id()?;
+    connection.create_colormap(Alloc::NONE, colormap, root, visual)?;
     // XDND sources look up the immediate child of the root under the pointer, so
-    // the target must be a top-level window, not a child of the app. It is
-    // InputOutput because GTK sources skip InputOnly windows; an empty bounding
-    // shape makes it invisible while the input shape keeps the whole zone hittable.
+    // the target must be a top-level window, not a child of the app. A 32-bit
+    // ARGB visual keeps it invisible under the compositor while it stays a real,
+    // hittable InputOutput window (GTK sources skip InputOnly windows and
+    // intersect the bounding and input shapes when hit-testing).
     connection
         .change_window_attributes(
             parent,
@@ -249,10 +265,12 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
     let aux = CreateWindowAux::new()
         .override_redirect(1)
         .background_pixel(0)
+        .border_pixel(0)
+        .colormap(colormap)
         .event_mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY);
     connection
         .create_window(
-            0,
+            32,
             window,
             root,
             0,
@@ -261,11 +279,10 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
             1,
             0,
             WindowClass::INPUT_OUTPUT,
-            x11rb::COPY_FROM_PARENT,
+            visual,
             &aux,
         )
         .map_err(|error| anyhow!("could not create the X11 drop window: {error}"))?;
-    set_shapes(&connection, window, 1, 1)?;
     connection.change_property32(
         PropMode::REPLACE,
         window,
@@ -279,6 +296,7 @@ fn open(parent: Window, zone: DropZone, payloads: PayloadSender<String>) -> Resu
         parent,
         root,
         window,
+        colormap,
         atoms,
         payloads,
         drag: DragState::empty(),
@@ -346,45 +364,8 @@ fn refresh(state: &mut Ready) {
         .height(u32::from(height))
         .stack_mode(StackMode::ABOVE);
     let _ = state.connection.configure_window(state.window, &aux);
-    let _ = set_shapes(&state.connection, state.window, width, height);
     let _ = state.connection.flush();
     state.last_refresh = Instant::now();
-}
-
-/// Makes the overlay invisible with an empty bounding shape while keeping the
-/// whole zone inside its input shape, so pointer hit-testing still selects it
-/// without covering the rendered zone.
-fn set_shapes(
-    connection: &RustConnection,
-    window: Window,
-    width: u16,
-    height: u16,
-) -> std::result::Result<(), x11rb::errors::ConnectionError> {
-    let rect = [Rectangle {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    }];
-    connection.shape_rectangles(
-        shape::SO::SET,
-        shape::SK::BOUNDING,
-        ClipOrdering::UNSORTED,
-        window,
-        0,
-        0,
-        &[],
-    )?;
-    connection.shape_rectangles(
-        shape::SO::SET,
-        shape::SK::INPUT,
-        ClipOrdering::UNSORTED,
-        window,
-        0,
-        0,
-        &rect,
-    )?;
-    Ok(())
 }
 
 fn handle_event(state: &mut Ready, event: x11rb::protocol::Event) {
