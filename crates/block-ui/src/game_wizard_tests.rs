@@ -3,7 +3,7 @@
 use block_launcher::catalog::{ProfileColor, ProfileIcon, ProfileMode};
 use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, point, px, size};
 
-use super::{CreationKind, WizardPage, WizardState, WizardStep};
+use super::{CreationKind, WizardField, WizardPage, WizardState, WizardStep};
 use crate::{Form, test_support::ready_snapshot};
 
 #[gpui::test]
@@ -357,7 +357,7 @@ fn separated_profile_review_preserves_home_selection_until_submission(cx: &mut T
                 .update(cx, |field, cx| field.set_value("Creative 中文", cx));
             profile
                 .memory
-                .update(cx, |field, cx| field.set_value("4096", cx));
+                .update(cx, |field, cx| field.set_value("4", cx));
         }
         view.wizard_profile_icon(ProfileIcon::Leaf);
         view.wizard_profile_color(ProfileColor::Green);
@@ -700,7 +700,7 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
                     .update(cx, |field, cx| field.set_value("Creative 中文", cx));
                 profile
                     .memory
-                    .update(cx, |field, cx| field.set_value("4096", cx));
+                    .update(cx, |field, cx| field.set_value("4", cx));
                 profile.server.update(cx, |field, cx| {
                     field.set_value("play.example.test:25565", cx);
                 });
@@ -878,7 +878,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
     );
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.error_field),
-        Some(super::WizardField::Width)
+        Some(WizardField::Width)
     );
     view.update(cx, |view, cx| {
         if let Some(profile) = &mut view.shell.wizard.profile {
@@ -1004,7 +1004,7 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
     );
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.error_field),
-        Some(super::WizardField::Server)
+        Some(WizardField::Server)
     );
     assert_eq!(
         view.read_with(cx, |view, _| view.snapshot.profiles.len()),
@@ -1302,4 +1302,51 @@ fn x64_version_picker_keeps_lwjgl2_versions_selectable(cx: &mut TestAppContext) 
     });
     cx.simulate_resize(size(px(960.), px(600.)));
     cx.run_until_parked();
+}
+
+#[gpui::test]
+fn profile_memory_validation_and_values_use_gb_with_one_to_thirty_two_gb_bounds(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    view.update(cx, |view, cx| {
+        view.preferences.reduce_motion = true;
+        view.begin_game_wizard(cx);
+        let Some(profile) = view.shell.wizard.profile.as_mut() else {
+            return;
+        };
+        profile
+            .memory
+            .update(cx, |field, cx| field.set_value("0.5", cx));
+        assert_eq!(profile.invalid_field(cx), Some(WizardField::Memory));
+        profile
+            .memory
+            .update(cx, |field, cx| field.set_value("33", cx));
+        assert_eq!(profile.invalid_field(cx), Some(WizardField::Memory));
+        profile
+            .memory
+            .update(cx, |field, cx| field.set_value("1", cx));
+        assert_eq!(profile.invalid_field(cx), None);
+        let one = profile.values(cx);
+        assert!(one.is_ok());
+        if let Ok(one) = one {
+            assert_eq!(one.defaults.memory_mib, 1024);
+        }
+        profile
+            .memory
+            .update(cx, |field, cx| field.set_value("32", cx));
+        let max = profile.values(cx);
+        assert!(max.is_ok());
+        if let Ok(max) = max {
+            assert_eq!(max.defaults.memory_mib, 32768);
+        }
+        profile
+            .memory
+            .update(cx, |field, cx| field.set_value("1.5", cx));
+        let finer = profile.values(cx);
+        assert!(finer.is_ok());
+        if let Ok(finer) = finer {
+            assert_eq!(finer.defaults.memory_mib, 1536);
+        }
+    });
 }

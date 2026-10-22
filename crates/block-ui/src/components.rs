@@ -544,6 +544,42 @@ pub(super) fn memory_label(mib: u32) -> String {
     }
 }
 
+/// Editable GB text for a stored MiB value. Whole GB stays whole; finer values
+/// already present in a catalog keep up to three decimal places.
+pub(super) fn memory_gb_text(mib: u32) -> String {
+    if mib.is_multiple_of(1024) {
+        return (mib / 1024).to_string();
+    }
+    let mut text = format!("{:.3}", f64::from(mib) / 1024.0);
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
+/// Parse the editable GB field into MiB and enforce the product range.
+pub(super) fn parse_memory_gb(value: &str) -> Result<u32, String> {
+    let text = value.trim();
+    let message = "Choose a memory limit between 1 and 32 GB.".to_owned();
+    let gb = text.parse::<f64>().map_err(|_| message.clone())?;
+    if !gb.is_finite() {
+        return Err(message);
+    }
+    let mib = (gb * 1024.0).round();
+    if !(f64::from(block_launcher::MIN_MEMORY_MIB)..=f64::from(block_launcher::MAX_MEMORY_MIB))
+        .contains(&mib)
+    {
+        return Err(message);
+    }
+    if (mib / 1024.0 - gb).abs() > 0.000_5 {
+        return Err("Enter a memory limit in GB with up to three decimal places.".into());
+    }
+    Ok(mib as u32)
+}
+
 pub(super) fn badge(
     label: impl Into<SharedString>,
     palette: Palette,
@@ -1393,3 +1429,36 @@ mod tests {
 #[cfg(test)]
 #[path = "radio_group_tests.rs"]
 mod radio_group_tests;
+
+#[cfg(test)]
+mod memory_tests {
+    use super::{memory_gb_text, parse_memory_gb};
+
+    #[test]
+    fn memory_bounds_migrate_to_the_prototype_one_to_thirty_two_gb_range() {
+        assert_eq!(parse_memory_gb("1"), Ok(1024));
+        assert_eq!(parse_memory_gb("32"), Ok(32768));
+        assert_eq!(parse_memory_gb("1.5"), Ok(1536));
+        assert_eq!(parse_memory_gb("2.5"), Ok(2560));
+        assert_eq!(
+            parse_memory_gb("1023.999"),
+            Err("Choose a memory limit between 1 and 32 GB.".into())
+        );
+        assert_eq!(
+            parse_memory_gb("0.25"),
+            Err("Choose a memory limit between 1 and 32 GB.".into())
+        );
+        assert_eq!(
+            parse_memory_gb("33"),
+            Err("Choose a memory limit between 1 and 32 GB.".into())
+        );
+        assert_eq!(
+            parse_memory_gb("not-a-number"),
+            Err("Choose a memory limit between 1 and 32 GB.".into())
+        );
+        assert_eq!(memory_gb_text(1024), "1");
+        assert_eq!(memory_gb_text(1536), "1.5");
+        assert_eq!(memory_gb_text(2560), "2.5");
+        assert_eq!(memory_gb_text(32768), "32");
+    }
+}

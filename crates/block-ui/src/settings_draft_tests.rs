@@ -350,7 +350,7 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             if let Some(draft) = &view.settings_form {
                 draft
                     .memory
-                    .update(cx, |input, cx| input.set_value("8192", cx));
+                    .update(cx, |input, cx| input.set_value("8", cx));
                 draft
                     .concurrent
                     .update(cx, |input, cx| input.set_value("3", cx));
@@ -359,7 +359,7 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             view.reset_settings(cx);
             assert!(view.settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
-                    && draft.memory.read(cx).value() == "2048"
+                    && draft.memory.read(cx).value() == "2"
                     && draft.concurrent.read(cx).value() == "3"
                     && draft.appearance == Appearance::Dark
                     && draft.is_dirty(&view.saved_preferences, cx)
@@ -376,7 +376,7 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
             assert!(view.settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
-                    && draft.memory.read(cx).value() == "4096"
+                    && draft.memory.read(cx).value() == "4"
                     && !draft.is_dirty(&view.saved_preferences, cx)
             }));
         });
@@ -504,15 +504,15 @@ fn outgoing_snapshot_owns_independent_inputs_scroll_and_reveal_state(
         if let Some(draft) = &view.settings_form {
             draft
                 .memory
-                .update(cx, |input, cx| input.set_value("8192", cx));
+                .update(cx, |input, cx| input.set_value("8", cx));
             draft.scroll.set_offset(gpui::point(px(0.), px(-96.)));
             draft.reveal.set(None);
         }
         assert!(frozen.as_ref().is_some_and(|frozen| {
             view.settings_form.as_ref().is_some_and(|live| {
                 frozen.memory.entity_id() != live.memory.entity_id()
-                    && frozen.memory.read(cx).value() == "2048"
-                    && live.memory.read(cx).value() == "8192"
+                    && frozen.memory.read(cx).value() == "2"
+                    && live.memory.read(cx).value() == "8"
                     && frozen.scroll.offset().y == px(-24.)
                     && live.scroll.offset().y == px(-96.)
                     && frozen.reveal.get() == Some(SettingsField::Width)
@@ -549,7 +549,7 @@ fn settings_click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
 }
 
 #[gpui::test]
-fn memory_stepper_uses_exact_mib_preserves_cancel_and_really_saves_preferences(
+fn memory_stepper_uses_one_gb_steps_preserves_cancel_and_really_saves_preferences(
     cx: &mut gpui::TestAppContext,
 ) {
     let result = (|| -> anyhow::Result<()> {
@@ -570,8 +570,7 @@ fn memory_stepper_uses_exact_mib_preserves_cancel_and_really_saves_preferences(
         settings_click(cx, "settings-memory-increase");
         assert!(view.read_with(cx, |view, cx| {
             view.settings_form.as_ref().is_some_and(|draft| {
-                draft.memory.read(cx).value() == "2304"
-                    && draft.is_dirty(&view.saved_preferences, cx)
+                draft.memory.read(cx).value() == "3" && draft.is_dirty(&view.saved_preferences, cx)
             })
         }));
         assert_eq!(
@@ -584,10 +583,10 @@ fn memory_stepper_uses_exact_mib_preserves_cancel_and_really_saves_preferences(
             view.update(cx, |view, cx| {
                 view.handle(UiAction::Tab(Tab::Settings), window, cx);
                 if let Some(draft) = &view.settings_form {
-                    assert_eq!(draft.memory.read(cx).value(), "2048");
+                    assert_eq!(draft.memory.read(cx).value(), "2");
                     draft
                         .memory
-                        .update(cx, |field, cx| field.set_value("513", cx));
+                        .update(cx, |field, cx| field.set_value("1.5", cx));
                 }
             });
         });
@@ -595,10 +594,10 @@ fn memory_stepper_uses_exact_mib_preserves_cancel_and_really_saves_preferences(
         assert!(view.read_with(cx, |view, cx| {
             view.settings_form
                 .as_ref()
-                .is_some_and(|draft| draft.memory.read(cx).value() == "769")
+                .is_some_and(|draft| draft.memory.read(cx).value() == "2.5")
         }));
         settings_click(cx, "save-preferences");
-        assert_eq!(Preferences::load(root.path())?.game.memory_mib, 769);
+        assert_eq!(Preferences::load(root.path())?.game.memory_mib, 2560);
         assert!(view.read_with(cx, |view, cx| {
             view.settings_form
                 .as_ref()
@@ -632,7 +631,7 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
     assert!(view.read_with(cx, |view, cx| {
         view.settings_form
             .as_ref()
-            .is_some_and(|draft| draft.memory.read(cx).value() == "2304")
+            .is_some_and(|draft| draft.memory.read(cx).value() == "3")
     }));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -660,7 +659,7 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
             if let Some(draft) = &view.settings_form {
                 draft.memory.update(cx, |field, cx| {
                     field.unmark_text(window, cx);
-                    field.set_value("65536", cx);
+                    field.set_value("32", cx);
                 });
             }
             view.adjust_settings_memory(true, cx);
@@ -668,19 +667,19 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
                 view.settings_form
                     .as_ref()
                     .map(|draft| draft.memory.read(cx).value()),
-                Some("65536".into())
+                Some("32".into())
             );
             if let Some(draft) = &view.settings_form {
                 draft
                     .memory
-                    .update(cx, |field, cx| field.set_value("256", cx));
+                    .update(cx, |field, cx| field.set_value("1", cx));
             }
             view.adjust_settings_memory(false, cx);
             assert_eq!(
                 view.settings_form
                     .as_ref()
                     .map(|draft| draft.memory.read(cx).value()),
-                Some("256".into())
+                Some("1".into())
             );
             if let Some(draft) = &view.settings_form {
                 assert_eq!(draft.width.read(cx).value(), "1280");
@@ -748,4 +747,41 @@ fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
         })
     })();
     assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn settings_memory_validation_uses_gb_and_enforces_the_one_to_thirty_two_gb_bounds(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.select_settings_page(1, window, cx);
+            let Some(draft) = view.settings_form.as_ref() else {
+                return;
+            };
+            let draft = draft.snapshot(cx);
+            for (value, expected) in [
+                ("0.5", None),
+                ("33", None),
+                ("1", Some(1024)),
+                ("32", Some(32768)),
+                ("1.5", Some(1536)),
+            ] {
+                draft
+                    .memory
+                    .update(cx, |field, cx| field.set_value(value, cx));
+                match expected {
+                    Some(mib) => assert_eq!(
+                        draft.parse_game(cx).ok().map(|game| game.memory_mib),
+                        Some(mib),
+                        "{value}"
+                    ),
+                    None => assert!(draft.parse_game(cx).is_err(), "{value}"),
+                }
+            }
+        });
+    });
 }

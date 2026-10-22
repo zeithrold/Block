@@ -24,3 +24,14 @@ pub mod support;
 
 pub use block_download::{DownloadEvent, DownloadOptions, EventSink, ProxyMode, Resource, Store};
 pub use tokio_util::sync::CancellationToken;
+
+/// Lowest supported maximum memory for a launch Profile: 1 GB.
+pub const MIN_MEMORY_MIB: u32 = 1024;
+/// Highest supported maximum memory for a launch Profile: 32 GB.
+pub const MAX_MEMORY_MIB: u32 = 32768;
+
+/// Clamp a stored or user-entered maximum memory to the supported 1–32 GB range.
+#[must_use]
+pub fn clamp_memory_mib(value: u32) -> u32 {
+    value.clamp(MIN_MEMORY_MIB, MAX_MEMORY_MIB)
+}

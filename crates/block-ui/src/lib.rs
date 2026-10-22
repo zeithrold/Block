@@ -2007,7 +2007,7 @@ impl Block {
         self.shell.editor = self.begin_profile_editor(window, cx);
         self.form = Some(Form::Profile(Box::new(ProfileForm {
             name: input(&profile.name, "Profile name", cx),
-            memory: input(&profile.memory_mib.to_string(), "2048", cx),
+            memory: input(&components::memory_gb_text(profile.memory_mib), "2", cx),
             java: input(&java, "Absolute path to Java executable", cx),
             jvm: input(
                 &format_arguments(&profile.jvm_args),
@@ -3639,7 +3639,8 @@ mod tests {
         });
         click_selector(cx, "save-profile");
         assert!(view.read_with(cx, |view, _| {
-            view.status.contains("Memory must be between")
+            view.status
+                .contains("Choose a memory limit between 1 and 32 GB.")
         }));
         assert_eq!(
             view.read_with(cx, |view, _| view.profile().map(|p| p.memory_mib)),

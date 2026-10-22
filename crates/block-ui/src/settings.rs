@@ -78,8 +78,9 @@ impl GameDefaults {
 
     pub(super) fn apply_to(&self, profile: &mut Profile) -> anyhow::Result<()> {
         ensure!(
-            (256..=65536).contains(&self.memory_mib),
-            "Memory must be between 256 and 65536 MiB"
+            (block_launcher::MIN_MEMORY_MIB..=block_launcher::MAX_MEMORY_MIB)
+                .contains(&self.memory_mib),
+            "Choose a memory limit between 1 and 32 GB."
         );
         ensure!(
             (320..=16384).contains(&self.width),
@@ -291,7 +292,7 @@ impl SettingsDraft {
         };
         let scroll = ScrollHandle::new();
         let draft = Self {
-            memory: input(&game.memory_mib.to_string(), "2048", cx),
+            memory: input(&components::memory_gb_text(game.memory_mib), "2", cx),
             java: input(&game.java, "Automatic · leave empty", cx),
             java_automatic: game.java.is_empty(),
             window_custom: !WINDOW_PRESETS.contains(&(game.width, game.height)),
@@ -470,13 +471,10 @@ impl SettingsDraft {
             }
             path
         };
+        let memory_mib = components::parse_memory_gb(&self.memory.read(cx).value())
+            .map_err(|message| SettingsError::at(SettingsField::Memory, message))?;
         let game = GameDefaults {
-            memory_mib: number(
-                &self.memory,
-                SettingsField::Memory,
-                "Memory must be a whole number of MiB",
-                cx,
-            )?,
+            memory_mib,
             java,
             jvm_arguments: self.jvm.read(cx).value(),
             width: number(
@@ -495,11 +493,6 @@ impl SettingsDraft {
             show_snapshots: self.show_snapshots,
         };
         for (valid, field, message) in [
-            (
-                (256..=65536).contains(&game.memory_mib),
-                SettingsField::Memory,
-                "Memory must be between 256 and 65536 MiB",
-            ),
             (
                 (320..=16384).contains(&game.width),
                 SettingsField::Width,
@@ -586,7 +579,10 @@ impl SettingsDraft {
             }
             1 => {
                 for (input, value) in [
-                    (&self.memory, defaults.game.memory_mib.to_string()),
+                    (
+                        &self.memory,
+                        components::memory_gb_text(defaults.game.memory_mib),
+                    ),
                     (&self.java, defaults.game.java),
                     (&self.jvm, defaults.game.jvm_arguments),
                     (&self.width, defaults.game.width.to_string()),
@@ -1541,46 +1537,31 @@ impl Block {
         if memory.is_composing() {
             return;
         }
-        let Ok(value) = memory.value().trim().parse::<u32>() else {
+        let Ok(value) = components::parse_memory_gb(&memory.value()) else {
             return;
         };
-        if !(256..=65536).contains(&value) {
-            return;
-        }
         let next = if increase {
-            value.saturating_add(256).min(65536)
+            value
+                .saturating_add(1024)
+                .min(block_launcher::MAX_MEMORY_MIB)
         } else {
-            value.saturating_sub(256).max(256)
+            value
+                .saturating_sub(1024)
+                .max(block_launcher::MIN_MEMORY_MIB)
         };
-        draft
-            .memory
-            .update(cx, |input, cx| input.set_value(&next.to_string(), cx));
+        draft.memory.update(cx, |input, cx| {
+            input.set_value(&components::memory_gb_text(next), cx);
+        });
         draft.notice = None;
         cx.notify();
     }
 
     fn settings_memory_field(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let value = draft
-            .memory
-            .read(cx)
-            .value()
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .filter(|value| (256..=65536).contains(value));
+        let value = components::parse_memory_gb(&draft.memory.read(cx).value()).ok();
         let composing = draft.memory.read(cx).is_composing();
         let friendly = value.map_or_else(
-            || "Enter a whole number of MiB.".to_owned(),
-            |value| {
-                if value % 1024 == 0 {
-                    format!("{} GiB ({value} MiB)", value / 1024)
-                } else {
-                    format!(
-                        "Approximately {:.3} GiB ({value} MiB)",
-                        f64::from(value) / 1024.
-                    )
-                }
-            },
+            || "Choose a memory limit between 1 and 32 GB.".to_owned(),
+            components::memory_label,
         );
 
         let step = |increase: bool| {
@@ -1599,9 +1580,9 @@ impl Block {
                         || composing
                         || value.is_none_or(|value| {
                             if increase {
-                                value == 65536
+                                value == block_launcher::MAX_MEMORY_MIB
                             } else {
-                                value == 256
+                                value == block_launcher::MIN_MEMORY_MIB
                             }
                         }),
                     ..Default::default()
@@ -1613,14 +1594,34 @@ impl Block {
                     .render(14., self.palette.foreground),
             )
         };
-        div().min_w_0().flex().flex_col().gap_2()
-            .child(self.settings_field(draft, SettingsField::Memory, "Default memory (MiB)", Some("Allowed: 256–65536 MiB. Step: 256 MiB. Arrow Up/Down adjusts the focused value.")))
-            .child(div().flex().items_center().gap_2().child(step(false)).child(step(true))
-                .child(note(friendly).id("settings-memory-friendly")))
+        div()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.settings_field(
+                draft,
+                SettingsField::Memory,
+                "Default memory (GB)",
+                Some("Allowed: 1–32 GB. Step: 1 GB. Arrow Up/Down adjusts the focused value."),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(step(false))
+                    .child(step(true))
+                    .child(note(friendly).id("settings-memory-friendly")),
+            )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.modifiers == gpui::Modifiers::none()
                     && matches!(event.keystroke.key.as_str(), "up" | "down")
-                    && view.settings_form.as_ref().is_some_and(|draft| !draft.memory.read(cx).is_composing() && draft.memory.read(cx).focus_handle(cx).is_focused(window)) {
+                    && view.settings_form.as_ref().is_some_and(|draft| {
+                        !draft.memory.read(cx).is_composing()
+                            && draft.memory.read(cx).focus_handle(cx).is_focused(window)
+                    })
+                {
                     view.adjust_settings_memory(event.keystroke.key == "up", cx);
                     cx.stop_propagation();
                 }
@@ -1917,7 +1918,9 @@ mod tests {
             assert!(view.read_with(cx, |view, cx| {
                 view.settings_form.as_ref().is_some_and(|draft| {
                     draft.page == 1 && draft.memory.read(cx).value() == "not-a-number"
-                }) && view.status.contains("Memory must be a whole number")
+                }) && view
+                    .status
+                    .contains("Choose a memory limit between 1 and 32 GB.")
             }));
             let status = cx.debug_bounds("settings-field-Memory");
             assert!(status.is_some_and(
@@ -1927,7 +1930,7 @@ mod tests {
                 if let Some(draft) = &mut view.settings_form {
                     draft
                         .memory
-                        .update(cx, |input, cx| input.set_value("2048", cx));
+                        .update(cx, |input, cx| input.set_value("2", cx));
                     draft
                         .concurrent
                         .update(cx, |input, cx| input.set_value("0", cx));
