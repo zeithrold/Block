@@ -78,9 +78,10 @@ Only **architecture governance** is deferred to v0. That covers structural refac
 
 | Host | Notes |
 | --- | --- |
-| Linux ARM64 `LINUX_VM_SSH` | Debian 13, KDE Wayland + Xwayland. Prepend `~/.cargo/bin` to `PATH`. Run GUI apps with `DISPLAY=:0`; capture with `scrot`, drive with `xdotool` |
-| Windows AMD64 `WINDOWS_SSH` | Windows 10, PowerShell, output in GBK. The SSH session has no desktop, so start GUI apps with `schtasks /create /it`. Drive C: is low on space |
-| Linux AMD64 `LINUX_AMD64_VM_SSH` | Off by default; it is a VMware guest on the Windows host. Start it with `& "C:\Program Files\VMware\VMware Workstation\vmrun.exe" -T ws start "D:\Virtual Machines\Block-Debian-AMD64\block-debian-amd64.vmx" nogui` and stop it with `... stop <vmx> soft` |
+| Linux ARM64 `LINUX_ARM64_VM_SSH` | Debian 13, KDE Wayland + Xwayland. Prepend `~/.cargo/bin` to `PATH`. Run GUI apps with `DISPLAY=:0`; capture with `scrot`, drive with `xdotool` |
+| Windows AMD64 `WINDOWS_AMD64_SSH` | Windows 10, PowerShell, output in GBK. The SSH session has no desktop, so start GUI apps with `schtasks /create /it`. Drive C: is low on space |
+| Windows ARM64 `WINDOWS_ARM64_SSH` | Windows on ARM; same PowerShell/scheduled-task rules. Used for ARM64 native checks |
+| Linux AMD64 `LINUX_AMD64_VM_SSH` | VMware guest on the Windows AMD64 host. Start it DETACHED (WMI `Win32_Process.Create`, never as the last command of an SSH session) with `vmrun -T ws start "D:\Virtual Machines\Block-Debian-AMD64\block-debian-amd64.vmx" nogui`; while the Windows wired Ethernet is disconnected, reach the guest with `ssh -o ProxyJump="$WINDOWS_AMD64_SSH"`. Its login keyring relocks after a reboot |
 
 Keep one checkout per host at `~/block-src` and update it with `git fetch`. Never copy `target/` or player data.
 
