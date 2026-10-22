@@ -98,6 +98,21 @@ impl Fixture {
                 "downloads": {"artifact": artifact}
             }));
         }
+        // Windows ARM64 review replaces the x64 classifier with the published
+        // ARM64 one; keep the synthetic manifest shaped like a real 1.20.6 one.
+        {
+            let mut artifact = client.clone();
+            artifact["path"] = json!("lwjgl-3.3.3-natives-windows.jar");
+            libraries.push(json!({
+                "name": "org.lwjgl:lwjgl:3.3.3:natives-windows",
+                "rules": [{"action": "allow", "os": {"name": "windows"}}],
+                "downloads": {"artifact": artifact}
+            }));
+            seed_maven(
+                &root,
+                "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows-arm64.jar",
+            )?;
+        }
         let mut asset_index = assets;
         asset_index["id"] = json!("fixture");
         asset_index["totalSize"] = json!(0);
@@ -190,6 +205,17 @@ impl Drop for Fixture {
             let _ = temporary.keep();
         }
     }
+}
+
+fn seed_maven(root: &Path, url: &str) -> anyhow::Result<()> {
+    let metadata = root.join("metadata");
+    fs::create_dir_all(&metadata)?;
+    let key = format!("{:x}", Sha1::digest(url.as_bytes()));
+    fs::write(
+        metadata.join(format!("maven-{key}.json")),
+        serde_json::to_vec(&json!({"sha1": format!("{:040x}", 1), "size": 1, "url": url}))?,
+    )?;
+    Ok(())
 }
 
 fn object(store: &Store, bytes: &[u8]) -> anyhow::Result<serde_json::Value> {
