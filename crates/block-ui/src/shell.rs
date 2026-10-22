@@ -478,11 +478,23 @@ impl Block {
                 }),
             );
         content = content.child(self.home_task(window, cx));
-        if self.busy {
+        // While an install/repair runs the Play action queues instead of
+        // disappearing, so the user can ask for a launch without waiting.
+        let queue_play = self.play_queue_eligible() && account.is_some();
+        if self.busy && !queue_play {
             return content.into_any_element();
         }
         let profile = self.profile();
-        let (label, action) =
+        let (label, action) = if queue_play {
+            (
+                if self.pending_play {
+                    "Launch queued"
+                } else {
+                    "Queue launch"
+                },
+                UiAction::Play,
+            )
+        } else {
             match profile.and_then(|profile| self.snapshot.selection(&profile.id).ok()) {
                 Some((_, _, target)) => match &target.status {
                     block_launcher::catalog::InstallStatus::Ready if account.is_none() => {
@@ -499,13 +511,22 @@ impl Block {
                 },
                 None if profile.is_some() => ("Repair game", UiAction::Repair),
                 None => ("Create game", UiAction::CreateInstance),
-            };
+            }
+        };
         if account.is_none() && matches!(action, UiAction::SignIn | UiAction::CreateInstance) {
             return content.into_any_element();
         }
-        let description = profile
-            .map_or("Start a new adventure", |profile| profile.name.as_str())
-            .to_owned();
+        let description = if queue_play {
+            if self.pending_play {
+                "Starts as soon as the install finishes".to_owned()
+            } else {
+                "Starts after the current install finishes".to_owned()
+            }
+        } else {
+            profile
+                .map_or("Start a new adventure", |profile| profile.name.as_str())
+                .to_owned()
+        };
         let icon = match &action {
             UiAction::Play => super::design::Icon::Play,
             UiAction::SignIn => super::design::Icon::Account,

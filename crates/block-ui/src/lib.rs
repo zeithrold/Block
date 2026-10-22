@@ -1226,7 +1226,7 @@ impl Block {
         let retry_setup_save = matches!(action, UiAction::OnboardingNext)
             && self.tab == Tab::Onboarding
             && self.onboarding_progress == onboarding::Progress::Created;
-        if self.busy && !retry_setup_save && !Self::available_while_busy(&action) {
+        if self.busy && !retry_setup_save && !self.can_activate(&action) {
             return;
         }
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
@@ -1995,6 +1995,9 @@ impl Block {
 
     fn play(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy {
+            if self.operation_kind != OperationKind::Install {
+                return;
+            }
             self.pending_play = true;
             self.status =
                 "Launch queued · it starts as soon as the current operation finishes".into();
@@ -2034,6 +2037,20 @@ impl Block {
                 self.play_stop.clone(),
             );
         }
+    }
+
+    /// Play may be queued while an install/repair is keeping the app busy.
+    fn play_queue_eligible(&self) -> bool {
+        self.busy
+            && self.operation_kind == OperationKind::Install
+            && self.active_run.is_none()
+            && self.profile().is_some()
+    }
+
+    /// Whether an action may run while another operation is in progress.
+    fn can_activate(&self, action: &UiAction) -> bool {
+        Self::available_while_busy(action)
+            || matches!(action, UiAction::Play) && self.play_queue_eligible()
     }
 
     /// Start a Play that was queued while another operation was in progress.
@@ -2143,7 +2160,7 @@ impl Block {
             }
             _ => components::ButtonVariant::Outline,
         };
-        let disabled = self.busy && !Self::available_while_busy(&action)
+        let disabled = self.busy && !self.can_activate(&action)
             || matches!(action, UiAction::SignIn) && self.busy && self.shell.auth.is_none()
             || matches!(action, UiAction::Stop) && !self.can_stop();
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
@@ -2529,6 +2546,57 @@ fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpu
 /// Whether a queued Play may start now that the previous operation ended.
 const fn ready_for_pending_launch(pending: bool, busy: bool, has_active_run: bool) -> bool {
     pending && !busy && !has_active_run
+}
+
+#[cfg(test)]
+mod queued_play_ui_tests {
+    use super::{OperationKind, Tab, UiAction};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn play_queues_only_while_installing_and_drains_after_the_install(cx: &mut TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+            let (_, profile) =
+                catalog.create_instance("Queued".into(), "1.20.6".into(), None, None)?;
+            let snapshot = catalog.snapshot()?;
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            view.update(cx, |view, _| {
+                view.snapshot = snapshot;
+                view.selected_profile = Some(profile.id.clone());
+                view.busy = true;
+                view.operation_kind = OperationKind::Launch;
+            });
+            // A launch already running does not queue another one.
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.handle(UiAction::Play, window, cx));
+            });
+            assert!(!view.read_with(cx, |view, _| view.pending_play));
+            assert!(!view.read_with(cx, |view, _| view.status.contains("Launch queued")));
+
+            // An install may be asked to launch as soon as it finishes.
+            view.update(cx, |view, _| view.operation_kind = OperationKind::Install);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.handle(UiAction::Play, window, cx));
+            });
+            assert!(view.read_with(cx, |view, _| view.pending_play));
+            assert!(view.read_with(cx, |view, _| view.status.contains("Launch queued")));
+            assert!(view.read_with(cx, |view, _| view.busy));
+
+            // Completion drains the queue through the normal Play path (no
+            // account in this fixture, so it lands on the Accounts tab).
+            view.update(cx, |view, cx| {
+                view.busy = false;
+                view.operation_kind = OperationKind::General;
+                view.start_pending_play(cx);
+            });
+            assert!(!view.read_with(cx, |view, _| view.pending_play));
+            assert_eq!(view.read_with(cx, |view, _| view.tab), Tab::Accounts);
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
 }
 
 #[cfg(test)]
