@@ -303,6 +303,7 @@ impl Block {
             recipe_load: super::RecipeLoadState::default(),
             #[cfg(any(windows, target_os = "linux"))]
             provider_drop: None,
+            pending_play: false,
         }
     }
 }

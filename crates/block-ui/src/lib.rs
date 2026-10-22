@@ -393,6 +393,8 @@ pub struct Block {
     /// rendered provider drop zone.
     #[cfg(any(windows, target_os = "linux"))]
     provider_drop: Option<ProviderDrop>,
+    /// A Play requested while another operation was running, started on completion.
+    pending_play: bool,
 }
 
 #[derive(Debug, Default)]
@@ -578,6 +580,7 @@ impl Block {
             recipe_load: RecipeLoadState::default(),
             #[cfg(any(windows, target_os = "linux"))]
             provider_drop: None,
+            pending_play: false,
         };
         view.initialize_browsers(cx);
         let load = if view.engine.is_some() {
@@ -783,7 +786,10 @@ impl Block {
                 }
                 Message::Command(command) => self.command = Some(command),
                 Message::Log(line) => self.push_log(line),
-                Message::Session(record) => self.session_updated(*record),
+                Message::Session(record) => {
+                    self.session_updated(*record);
+                    self.start_pending_play(cx);
+                }
                 Message::Crash {
                     report,
                     directory,
@@ -823,6 +829,7 @@ impl Block {
                             self.report(format!("Failed · {error}"));
                         }
                     }
+                    self.start_pending_play(cx);
                 }
                 Message::Recipe(result) => {
                     let launch = self.recipe_load.finish(result.is_ok());
@@ -1727,7 +1734,7 @@ impl Block {
                     }
                 }
             }
-            UiAction::Play => self.play(),
+            UiAction::Play => self.play(cx),
             UiAction::Repair => {
                 if let Some(profile) = self.profile().cloned() {
                     self.begin_cancellable("Repairing installation · verifying shared resources");
@@ -1738,6 +1745,7 @@ impl Block {
                 }
             }
             UiAction::Stop => {
+                self.pending_play = false;
                 if self.can_stop() {
                     self.play_stop.cancel();
                     if let Some(id) = &self.active_run {
@@ -1981,7 +1989,15 @@ impl Block {
         })));
     }
 
-    fn play(&mut self) {
+    fn play(&mut self, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            self.pending_play = true;
+            self.status =
+                "Launch queued · it starts as soon as the current operation finishes".into();
+            cx.notify();
+            return;
+        }
+        self.pending_play = false;
         let Some(profile) = self.selected_profile.clone() else {
             self.report("Create or select a profile first".into());
             return;
@@ -2013,6 +2029,14 @@ impl Block {
                 self.cancel.clone(),
                 self.play_stop.clone(),
             );
+        }
+    }
+
+    /// Start a Play that was queued while another operation was in progress.
+    fn start_pending_play(&mut self, cx: &mut Context<'_, Self>) {
+        if ready_for_pending_launch(self.pending_play, self.busy, self.active_run.is_some()) {
+            self.pending_play = false;
+            self.play(cx);
         }
     }
 
@@ -2498,6 +2522,24 @@ fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpu
     zone
 }
 
+/// Whether a queued Play may start now that the previous operation ended.
+const fn ready_for_pending_launch(pending: bool, busy: bool, has_active_run: bool) -> bool {
+    pending && !busy && !has_active_run
+}
+
+#[cfg(test)]
+mod pending_launch_tests {
+    use super::ready_for_pending_launch;
+
+    #[test]
+    fn pending_launch_waits_for_the_running_operation() {
+        assert!(!ready_for_pending_launch(true, true, false));
+        assert!(!ready_for_pending_launch(true, false, true));
+        assert!(!ready_for_pending_launch(false, false, false));
+        assert!(ready_for_pending_launch(true, false, false));
+    }
+}
+
 fn panel() -> gpui::Div {
     div()
         .flex()
@@ -2706,6 +2748,7 @@ mod tests {
             recipe_load: RecipeLoadState::default(),
             #[cfg(any(windows, target_os = "linux"))]
             provider_drop: None,
+            pending_play: false,
         }
     }
 
@@ -3387,9 +3430,9 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         let (view, cx) = crate::test_support::window(cx, test_view);
-        view.update(cx, |view, _| {
+        view.update(cx, |view, cx| {
             view.selected_profile = Some("profile".into());
-            view.play();
+            view.play(cx);
         });
         assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Accounts);
         assert!(!view.read_with(cx, |view, _| view.busy));
@@ -3556,7 +3599,7 @@ mod tests {
                 view.read_with(cx, |view, _| view.selected_account.clone()),
                 None
             );
-            view.update(cx, |view, _| view.play());
+            view.update(cx, |view, cx| view.play(cx));
             assert!(view.read_with(cx, |view, _| {
                 view.status.contains("default account is unavailable")
             }));
