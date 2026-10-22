@@ -37,7 +37,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector windows. |
+| Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector sheets. |
 | Real account avatars in Home and selectors | No | Pending | Pending | Initial fallback only. |
 | Play/Stop, recovery and crash help | Yes | Partial | Pending | Windows Play/Stop and macOS relaunch passed; crash help pending. |
 | Downloads, retries and file details | Yes | Pending | Pending | Real byte events. |
@@ -90,7 +90,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Downloads: System/Direct/HTTP(S)/SOCKS5 and connection test | Yes | Pending | Pending | Draft-bound probe. |
 | Parallel 1–16, retries 0–10, nonnegative MB/s limit | Yes | Pending | Pending | Real transport policies. |
 | Storage: paths, verified relocation, interruption recovery | Yes | Pending | Pending | Original copies retained. |
-| Relocation leases and confirmed retained-copy cleanup | Yes | Pending | Pending | Independent cleanup window. |
+| Relocation leases and confirmed retained-copy cleanup | Yes | Pending | Pending | Cleanup confirmation dialog. |
 
 ### About and Welcome
 
@@ -110,7 +110,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Fit-to-display at creation and recovery | Yes | Partial | Pending | Linux AMD64 1280×800 captured. |
 | CJK IME, clipboard, search and scrolling | Partial | Pending | Pending | Real input checks pending. |
 | Enter/Escape/Tab, draft/error preservation | Partial | Pending | Pending | Full interaction checks pending. |
-| Independent windows, parent close and child reuse | Yes | Partial | Pending | Remote picker smoke only. |
+| In-window overlays: Sheets for Home drawers, Dialogs elsewhere | Yes | Pending | Pending | Escape closes the topmost layer, focus is trapped and restored, and background input is blocked by the library. Native open/stack/Escape check pending on Windows and macOS. |
 
 ## Smoke matrix
 
@@ -136,9 +136,9 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 ## Verification notes
 
 - Windows intermittent lifecycle failure: bounded repeated host test still required. CREATE_NO_WINDOW validated natively on Windows through install and Play on 1ac4564.
-- Native screenshots cover 71 debug scenarios in light/dark; scenario captures are visual fixtures.
+- Native screenshots cover 71 debug scenarios in light/dark; every overlay now renders inside its parent window (one capture per scenario). Scenario captures are visual fixtures.
 - Comparison board: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 Windows scenario shots (228 images) captured at c0a9dc5 with names and dimensions identical to the macOS set.
-- Remote picker captures prove navigation/windows, not native installation/Play.
+- Remote picker captures prove navigation and overlays, not native installation/Play.
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
 - macOS storage relocation/cleanup followed by game menu passed through the API.

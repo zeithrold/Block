@@ -34,17 +34,7 @@ def main():
     folder = "native" if args.platform == "macos-arm64" else f"{args.platform}/scenarios"
     native, prototype = shots(folder), shots("proto")
     paired = dict(native)
-    used_children = set()
-    # Auth states live in the independent Add account window. The parent
-    # Accounts page is context, not the matching wizard state.
-    for key in prototype:
-        if key.startswith("auth-"):
-            stem, theme = key.rsplit("-", 1)
-            child = f"{stem}-add-account-1-{theme}"
-            if child in native:
-                paired[key] = native[child]
-                used_children.add(child)
-    keys = sorted((set(native) | set(prototype)) - used_children)
+    keys = sorted(set(native) | set(prototype))
     cards = []
     for key in keys:
         home = key.startswith("home-")
@@ -73,7 +63,7 @@ def main():
     @media(max-width:700px){body{padding:12px}.pair{grid-template-columns:1fr}}
     </style><header><h1>Block visual review</h1>
     <p>Debug UI scenarios use synthetic fixtures and make no network requests. They do not verify sign-in, installation or game launch. Missing screenshots remain explicit.</p>
-    <p>Compare content at equal logical scale. Native titlebars and independent dialog windows are intended differences. Additional native windows appear as separate entries. The React screenshot task has not completed until the reference images are present.</p></header>'''
+    <p>Compare content at equal logical scale. Native titlebars and in-window overlay chrome are intended differences. The React screenshot task has not completed until the reference images are present.</p></header>'''
     html += f'<p>Primary comparison: <strong>{escape(args.platform)}</strong>. <a href="index.html">Windows</a> · <a href="macos-arm64.html">macOS</a>. Missing platform captures remain pending.</p>'
     html += "".join(cards) + '<div class="remote"><h1>Actual remote UI smoke</h1>' + "".join(remote) + '</div></html>'
     OUTPUT.mkdir(parents=True, exist_ok=True)

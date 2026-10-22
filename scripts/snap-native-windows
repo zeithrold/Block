@@ -48,20 +48,7 @@ GIT = (
 )
 DEFAULT_TIMEOUT = 2700
 
-# The dialog scenarios open a second window, so wait for both before capturing.
-# Keep this list identical to scripts/snap-native.
-DIALOGS = {
-    "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
-    "download-files", "wizard-version-picker", "wizard-loader-picker",
-    "wizard-fabric-picker", "wizard-quilt-picker", "wizard-loader-loading",
-    "wizard-neoforge-picker",
-    "wizard-loader-error", "wizard-loader-empty",
-    "wizard-configuration", "welcome-version-picker", "remove-confirmation",
-    "remove-account-confirmation", "remove-provider-confirmation",
-    "separate-confirmation", "games-help",
-    "storage-cleanup-confirmation",
-    "welcome-settings", "welcome-about",
-}
+# Overlays render inside the product window: every scenario is one capture.
 
 CAPTURE_CS = r'''using System;
 using System.Collections.Generic;
@@ -883,7 +870,9 @@ def list_scenarios():
 
 
 def required_windows(name):
-    return 2 if (name in DIALOGS or name.startswith("auth-")) else 1
+    # Overlays render inside the product window: one window per scenario.
+    del name
+    return 1
 
 
 def shot_table(scenarios, themes):

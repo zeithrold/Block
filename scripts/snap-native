@@ -69,18 +69,9 @@ def main():
                     app = subprocess.Popen([binary, "--scenario", name, "--theme", theme], cwd=ROOT, stdout=log, stderr=log)
                     try:
                         windows = []
-                        dialog = name in {
-                            "home-profile-drawer", "home-account-drawer", "home-downloads-drawer",
-                            "download-files", "wizard-version-picker", "wizard-loader-picker",
-                            "wizard-fabric-picker", "wizard-quilt-picker", "wizard-loader-loading",
-                            "wizard-neoforge-picker",
-                            "wizard-loader-error", "wizard-loader-empty",
-                            "wizard-configuration", "welcome-version-picker", "remove-confirmation",
-                            "remove-account-confirmation", "remove-provider-confirmation", "separate-confirmation", "games-help",
-                            "storage-cleanup-confirmation",
-                            "welcome-settings", "welcome-about",
-                        } or name.startswith("auth-")
-                        required = 2 if dialog else 1
+                        # Overlays render inside the product window, so a
+                        # scenario is always one window capture.
+                        required = 1
                         deadline = time.monotonic() + 12
                         last = None
                         stable = time.monotonic()
