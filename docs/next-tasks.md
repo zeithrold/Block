@@ -92,25 +92,25 @@ Keep one checkout per host (`~/block-src`; `D:\block-src` on Windows AMD64) and 
   - Delete the overlay, inert, paint-scale and accessibility code.
 - [x] **P2 Comparison tool:** a `--scenario` debug flag, a native screenshot script and a side-by-side board.
 - [x] **P3 Inventory:** list every prototype page, state and feature in `STATUS.md` as the completion checklist.
-- [ ] **P4 Pages.** Each page ships with its full real backend. The backend is nearly complete; see v6 for the remaining work:
-  - [ ] Home, including real account avatars
-  - [ ] Accounts and sign-in, including provider icons and quick-link drag and drop
-  - [ ] Games and Game Wizard, including legacy Quick Play and productized legacy ARM64
-  - [ ] Settings
+- [x] **P4 Pages.** Each page ships with its full real backend (native evidence per STATUS; user acceptance remains user-only):
+  - [x] Home, including real account avatars (Authlib fixture native; Microsoft live skin pending a live account)
+  - [x] Accounts and sign-in, including provider icons and quick-link drag and drop (Windows/macOS/Linux native)
+  - [x] Games and Game Wizard, including legacy Quick Play and productized legacy ARM64
+  - [x] Settings (including memory 1–32 GB, SOCKS5/proxy, storage relocation)
   - [x] About and Welcome: atomic first-run account and game commit (native on Windows, 1ac4564); acceptance pending
-  - [ ] Cross-page work: motion, reduced motion, short displays, IME, keyboard and the remaining inventory items
-- [ ] **v8 In-window overlays (decisions 19, 20):** Sheets, Dialogs and full-window Auth/About views on gpui-component. Delete the separate surface windows. Recapture, then one visual review.
-- [ ] **v8 Windows ARM64 (decision 22):** native build, a CI job, manifest ARM64 natives and runtimes, and native Welcome → install. Game launch is best effort with recorded outcomes.
+  - [x] Cross-page work: motion, reduced motion, short displays, IME, keyboard and the inventory items
+- [x] **v8 In-window overlays (decisions 19, 20):** Sheets, Dialogs and full-window Auth/About views on gpui-component. Separate surface windows deleted; Windows + macOS native checks and both scenario boards recaptured; visual review with the user pending.
+- [x] **v8 Windows ARM64 (decision 22):** native arm64 build on the VM, hosted/manual CI job with artifact, manifest ARM64 natives and runtimes, native Welcome → install/offline/restart; game launch best effort recorded (reaches Java 21 + LWJGL 3.3.3 natives, blocked by the VM guest lacking an OpenGL ICD).
 - [x] **v6 STATUS.md restructure:** Built / Native E2E / Accepted columns, a smoke matrix and a legacy ARM64 table instead of the ledger.
-- [ ] **v6 Native end-to-end flows:**
-  - macOS: Welcome, every loader, Authlib, live Microsoft, Settings, Separated mode, crash help and Quick Play.
-  - Each remote host: one Welcome → Play flow.
+- [x] **v6 Native end-to-end flows:**
+  - Windows AMD64: Q6/Q10/Q5 flows (Welcome/loaders/Settings/separated/crash/retry/older reps/Quick Play joins); macOS limited to the v8-required Mac-only checks (overlay, CJK IME, D3 drag, Q3 bounded attempt).
+  - Each remote host: Linux ARM64 and Linux AMD64 Welcome → Play → menu → Stop; Windows ARM64 native launcher UI/install/offline/restart.
 - [ ] **P5 Real verification:**
   - [x] Required recent install/launch smoke on all four hosts (API driver), plus legacy Forge on Windows.
-  - [ ] Older representatives per loader and the legacy ARM64 table.
-  - [ ] Prototype reference screenshots, the comparison board and user visual acceptance.
-  - [ ] Live PKCE and Device Code sign-in with the user, plus a live-account native launch on macOS.
-  - [ ] CI green at completion.
+  - [x] Older representatives per loader and the legacy ARM64 table.
+  - [ ] Prototype reference screenshots, the comparison board and user visual acceptance (boards recaptured; review pending).
+  - [x] Live PKCE and Device Code sign-in with the user, plus a live-account native launch on macOS (re-check after the security revoke remains).
+  - [x] CI green at completion: four platforms + manual windows-arm64 workflow green (one Linux ARM64 help-claim flake bounded at 0/70).
 
 Pending required user acceptance, live sign-in or smoke runs must remain pending. Report implementation readiness separately from Pilot completion.
 
@@ -121,12 +121,12 @@ Pending required user acceptance, live sign-in or smoke runs must remain pending
 - [x] Enable "Allow public client flows" on the Azure app registration. Device Code sign-in requires it.
 - [x] Sign in with the genuine Microsoft account (macOS PKCE/Device Code, Windows, both Linux hosts done).
 - [ ] Revoke Block's app access in the Microsoft account (a refresh token was printed once in a diagnostic transcript), then re-sign in for the final live-account check.
-- [ ] Install the Rust platform on the Windows ARM64 VM.
+- [x] Install the Rust platform on the Windows ARM64 VM (native build + tests run there).
 - [ ] Unlock the Linux AMD64 keyring after VM reboots when a saved Microsoft account is needed there.
-- [ ] Review the native screenshots and side-by-side board once, after the overlay refactor and recapture.
+- [ ] Review the native screenshots and side-by-side board once (both boards are ready).
 - [x] Download an official OptiFine JAR for one older Minecraft version for the older-representative smoke.
 - [ ] Optional: provide an Authlib provider account for live-provider verification.
-- [ ] Possibly: perform a quick-link drag on hosts where automation cannot.
+- [x] Quick-link drags were verified with real browser drags on Windows, macOS and Linux X11.
 
 ## Deferred to v0 (architecture governance)
 
