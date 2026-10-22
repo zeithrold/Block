@@ -101,6 +101,7 @@ fn all_919_versions_compile_for_the_three_x64_os_families() -> anyhow::Result<()
                     .clone(),
                 runtime: None,
                 library_overrides: BTreeMap::new(),
+                companion_libraries: Vec::new(),
                 classifier_overrides: BTreeMap::new(),
                 compatibility: None,
             };
@@ -166,6 +167,7 @@ fn saved_plans_bind_identity_late_and_preserve_argument_boundaries() -> anyhow::
         },
         runtime: None,
         library_overrides: BTreeMap::new(),
+        companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
     };
@@ -270,6 +272,7 @@ fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> an
         },
         runtime: None,
         library_overrides: BTreeMap::new(),
+        companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
     };

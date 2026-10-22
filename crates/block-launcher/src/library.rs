@@ -522,6 +522,7 @@ mod instance_defaults_tests {
             },
             runtime: None,
             library_overrides: BTreeMap::new(),
+            companion_libraries: Vec::new(),
             classifier_overrides: BTreeMap::new(),
             compatibility: None,
         };
