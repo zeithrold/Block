@@ -18,20 +18,37 @@ fn decimal_megabytes_preserve_backend_bytes_without_float_rounding() -> anyhow::
     Ok(())
 }
 
+/// Wait for the storage worker's real end state.
+///
+/// `pending` clears inside the `StorageFinished` handler, but the widget state a
+/// caller asserts on is settled by the same wake-up. Requiring the finished
+/// state to hold across two polls keeps a test from racing a state that only
+/// settles one poll later, and a timeout names the condition that never held.
 fn wait_storage(
     view: &gpui::Entity<crate::Block>,
     cx: &mut gpui::VisualTestContext,
 ) -> anyhow::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while view.read_with(cx, |view, _| view.shell.storage.pending.is_some()) {
+    let mut settled = 0;
+    loop {
+        view.update(cx, crate::Block::poll);
+        let (pending, busy) = view.read_with(cx, |view, _| {
+            (view.shell.storage.pending.is_some(), view.busy)
+        });
+        if pending || busy {
+            settled = 0;
+        } else {
+            settled += 1;
+            if settled >= 2 {
+                return Ok(());
+            }
+        }
         anyhow::ensure!(
             std::time::Instant::now() < deadline,
-            "Storage worker did not finish"
+            "Storage worker did not finish: pending={pending} busy={busy}"
         );
-        view.update(cx, crate::Block::poll);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    Ok(())
 }
 
 #[gpui::test]
@@ -178,13 +195,31 @@ fn storage_worker_saves_real_locations_preserves_edited_drafts_and_keeps_old_cop
             })
         });
         wait_storage(&view, cx)?;
-        assert!(view.read_with(cx, |view, cx| !view.busy
-            && view.shell.storage.error.is_none()
-            && view.shell.storage.cleanup.is_some()
-            && view.storage_dirty(cx)
-            && view.settings_form.as_ref().is_some_and(
-                |draft| draft.library.read(cx).value() == later.display().to_string()
-            )));
+        assert!(
+            !view.read_with(cx, |view, _| view.busy),
+            "the storage worker must clear its busy state before the test asserts"
+        );
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.storage.error.clone()),
+            None,
+            "a successful relocation must not record an error"
+        );
+        assert!(
+            view.read_with(cx, |view, _| view.shell.storage.cleanup.is_some()),
+            "a relocation that retained the previous copy must expose its cleanup"
+        );
+        assert!(
+            view.read_with(cx, |view, cx| view.storage_dirty(cx)),
+            "the draft edited after saving must remain dirty"
+        );
+        assert_eq!(
+            view.read_with(cx, |view, cx| view
+                .settings_form
+                .as_ref()
+                .map(|draft| draft.library.read(cx).value())),
+            Some(later.display().to_string()),
+            "the current draft must keep the path edited after saving"
+        );
         let saved = block_launcher::storage::Locations::load(&root)?;
         assert_eq!(saved.library, Some(library.clone()));
         assert_eq!(saved.cache, Some(cache.clone()));
