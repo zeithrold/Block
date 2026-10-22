@@ -397,6 +397,13 @@ impl SurfaceWindows {
                         .px(px(0.))
                         .pt(px(0.))
                         .pb(px(0.))
+                } else if matches!(kind, Surface::AuthProviderAdd) {
+                    dialog
+                        .font_family(super::design::FONT_FAMILY)
+                        .w(px(460.))
+                        .px(px(0.))
+                        .pt(px(24.))
+                        .pb(px(0.))
                 } else {
                     dialog
                         .font_family(super::design::FONT_FAMILY)
@@ -800,6 +807,7 @@ impl Block {
             Surface::OnboardingSection(_) | Surface::WizardSection(_) => {
                 self.cancel_component_draft(cx);
             }
+            Surface::AuthProviderAdd => self.cancel_auth_provider(cx),
             _ => {}
         }
         SurfaceWindows::restore_surface_focus(entry.return_focus, entry.parent, window, cx);
@@ -852,6 +860,7 @@ impl Surface {
             }
             Self::DownloadFiles(_)
             | Self::GamesHelp
+            | Self::AuthProviderAdd
             | Self::OnboardingSection(_)
             | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
             Self::DeleteProfile(_)

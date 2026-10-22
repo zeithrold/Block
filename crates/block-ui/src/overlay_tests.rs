@@ -411,3 +411,34 @@ fn onboarding_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut Test
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
 }
+
+#[gpui::test]
+fn auth_provider_add_opens_as_dialog_and_escape_dismisses_it(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    let trigger_focus = cx.update(|window, cx| window.focused(cx));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.shell
+                .surfaces
+                .open(Surface::AuthProviderAdd, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        cx.windows().len(),
+        1,
+        "the provider form stays inside the window"
+    );
+    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::AuthProviderAdd)
+        ));
+    });
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
+}

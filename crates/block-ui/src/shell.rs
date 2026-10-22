@@ -1104,6 +1104,13 @@ impl Block {
                 false,
             ),
             Surface::GamesHelp => (div().px(px(24.)).child(self.render_games_help(cx)), false),
+            Surface::AuthProviderAdd => (
+                div()
+                    .px(px(24.))
+                    .pb(px(24.))
+                    .child(self.render_auth_provider_add(cx)),
+                true,
+            ),
             _ => (
                 div()
                     .px(px(24.))
