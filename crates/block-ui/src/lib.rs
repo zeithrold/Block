@@ -2490,21 +2490,25 @@ mod tests {
         // so the hitboxes belong to the current view rather than its first frame.
         cx.update(|window, _| window.refresh());
         cx.run_until_parked();
-        let bounds = crate::test_support::control_bounds(cx, selector);
-        assert!(bounds.is_some(), "missing selector: {selector}");
-        let Some(mut bounds) = bounds else {
+        let mut bounds = None;
+        // A dialog can mount on the frame after the caller's click, and its
+        // entrance animation shifts the target while the hitbox is located.
+        // Locate, settle, re-locate until the painted bounds stop moving.
+        for _ in 0..3 {
+            let current = crate::test_support::control_bounds(cx, selector);
+            assert!(current.is_some(), "missing selector: {selector}");
+            if bounds == current {
+                break;
+            }
+            bounds = current;
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(500));
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+        }
+        let Some(bounds) = bounds else {
             return;
         };
-        // A dialog can mount on the frame after the caller's click; its entrance
-        // animation then shifts the target while the hitbox is being located.
-        // Settle once more and re-locate immediately before pressing.
-        cx.executor()
-            .advance_clock(std::time::Duration::from_millis(500));
-        cx.update(|window, _| window.refresh());
-        cx.run_until_parked();
-        if let Some(settled) = crate::test_support::control_bounds(cx, selector) {
-            bounds = settled;
-        }
         {
             let window_count = cx.windows().len();
             cx.simulate_click(bounds.center(), gpui::Modifiers::none());
