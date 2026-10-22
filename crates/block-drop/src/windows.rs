@@ -19,7 +19,7 @@ use windows::{
     Win32::{
         Foundation::{COLORREF, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINTL, WPARAM},
         System::{
-            Com::{FORMATETC, IDataObject, STGMEDIUM},
+            Com::{FORMATETC, IDataObject},
             LibraryLoader::GetModuleHandleW,
             Memory::{GlobalLock, GlobalUnlock},
             Ole::{
@@ -37,7 +37,7 @@ use windows::{
     core::{HSTRING, Ref, implement},
 };
 
-use crate::{DropTarget, DropZone, quick_link_payload};
+use crate::{DropZone, quick_link_payload};
 
 const DROP_WINDOW_CLASS: windows::core::PCWSTR = windows::core::w!("BlockQuickLinkDrop");
 /// `CF_UNICODETEXT` without pulling in the clipboard feature set.
@@ -127,7 +127,7 @@ impl ZoneDropTarget {
 impl IDropTarget_Impl for ZoneDropTarget_Impl {
     fn DragEnter(
         &self,
-        data: Ref<IDataObject>,
+        data: Ref<'_, IDataObject>,
         _keys: MODIFIERKEYS_FLAGS,
         _point: &POINTL,
         effect: *mut DROPEFFECT,
@@ -156,7 +156,7 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
 
     fn Drop(
         &self,
-        data: Ref<IDataObject>,
+        data: Ref<'_, IDataObject>,
         _keys: MODIFIERKEYS_FLAGS,
         _point: &POINTL,
         effect: *mut DROPEFFECT,
@@ -180,7 +180,7 @@ impl IDropTarget_Impl for ZoneDropTarget_Impl {
 /// Owned child window plus its registered OLE drop target.
 pub(crate) struct NativeTarget {
     hwnd: isize,
-    drop_target: IDropTarget,
+    _drop_target: IDropTarget,
 }
 
 impl fmt::Debug for NativeTarget {
@@ -269,7 +269,7 @@ impl NativeTarget {
             .context("could not register the OLE drop target")?;
         Ok(Self {
             hwnd: hwnd.0 as isize,
-            drop_target,
+            _drop_target: drop_target,
         })
     }
 
