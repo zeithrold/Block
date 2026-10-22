@@ -122,6 +122,7 @@ pub enum DiagnosisKind {
     JavaVersion,
     ModDependencies,
     GraphicsInitialization,
+    SessionReservation,
     Unknown,
 }
 
@@ -430,6 +431,15 @@ const RULES: &[Rule] = &[
             "pixel format not accelerated",
             "no opengl context found",
             "could not create opengl context",
+        ],
+    ),
+    (
+        DiagnosisKind::SessionReservation,
+        "A previous session still reserves this game directory",
+        "Confirm the previous Minecraft window and Block session have ended. If they have, recover this game directory's session reservation before playing again; do not clear it while the game may still be running.",
+        &[
+            "has a reserved session",
+            "reserved session; reconnect to its supervisor",
         ],
     ),
 ];

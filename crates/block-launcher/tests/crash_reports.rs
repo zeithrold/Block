@@ -281,3 +281,30 @@ fn windows_exception_status_is_preserved_without_sign_loss() {
     let stopped = ExitOutcome::from_status(ExitStatus::from_raw(1), true);
     assert_eq!(stopped.kind, ExitKind::Stopped);
 }
+
+#[test]
+fn reserved_game_directory_becomes_an_actionable_session_diagnosis() {
+    let mut start_failed = report("");
+    start_failed.outcome.kind = ExitKind::StartFailed;
+    start_failed.outcome.code = None;
+    let result = CrashReport::new(
+        start_failed.context,
+        start_failed.outcome,
+        "this game directory has a reserved session; reconnect to its supervisor or confirm the previous game has ended before recovering it",
+        Vec::new(),
+    );
+    assert_eq!(result.diagnoses.len(), 1);
+    assert_eq!(result.diagnoses[0].kind, DiagnosisKind::SessionReservation);
+    assert_eq!(result.diagnoses[0].confidence, Confidence::Possible);
+    assert!(result.diagnoses[0].evidence[0].contains("reserved session"));
+    assert!(
+        result.diagnoses[0]
+            .suggested_action
+            .contains("Confirm the previous Minecraft window")
+    );
+    assert!(
+        !result.diagnoses[0]
+            .suggested_action
+            .contains("export diagnostics")
+    );
+}
