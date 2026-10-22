@@ -286,6 +286,109 @@ async fn linux_arm64_substitutes_published_arm64_natives_and_records_the_composi
 }
 
 #[tokio::test]
+async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_composition()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (path, original) = manifest("1.16.5")?;
+    let context = offline_context(directory.path(), &original)?;
+    let modules = [
+        "lwjgl",
+        "lwjgl-glfw",
+        "lwjgl-jemalloc",
+        "lwjgl-openal",
+        "lwjgl-opengl",
+        "lwjgl-stb",
+        "lwjgl-tinyfd",
+    ];
+    let mut urls = Vec::new();
+    for (index, module) in modules.iter().enumerate() {
+        urls.push(format!(
+            "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.1/{module}-3.3.1.jar"
+        ));
+        urls.push(format!(
+            "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.1/{module}-3.3.1-natives-linux-arm64.jar"
+        ));
+        let _ = index;
+    }
+    for artifact in ["jna", "jna-platform"] {
+        urls.push(format!(
+            "https://repo.maven.apache.org/maven2/net/java/dev/jna/{artifact}/5.13.0/{artifact}-5.13.0.jar"
+        ));
+    }
+    urls.push(
+        "https://libraries.minecraft.net/com/mojang/text2speech/1.12.4/text2speech-1.12.4.jar"
+            .into(),
+    );
+    // Planning only needs published descriptors; digests are synthetic offline fixtures.
+    let synthetic: Vec<String> = (1..=urls.len())
+        .map(|index| format!("{index:040x}"))
+        .collect();
+    let artifacts: Vec<(&str, &str)> = urls
+        .iter()
+        .zip(&synthetic)
+        .map(|(url, sha1)| (url.as_str(), sha1.as_str()))
+        .collect();
+    seed_maven(directory.path(), &artifacts)?;
+
+    let mut recipe = recipe(path)?;
+    recipe.compatibility = Compatibility::Official;
+    recipe.target = Some(Target {
+        os: OperatingSystem::Linux,
+        arch: Architecture::Aarch64,
+        os_version: "6.1".into(),
+    });
+    let resolved = resolve(&recipe, &context).await?;
+    // Seven core replacements, the JNA pair and text2speech as companions.
+    assert_eq!(resolved.library_overrides.len(), 10);
+    // Every selected LWJGL module also receives an ARM64 native classifier.
+    assert_eq!(resolved.classifier_overrides.len(), 7);
+    let note = resolved
+        .compatibility
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("substitution was not recorded"))?;
+    assert!(note.contains("reviewed 3.3.1 composition"), "{note}");
+    assert!(note.contains("JNA 5.13.0"), "{note}");
+    assert!(note.contains("text2speech 1.12.4"), "{note}");
+    assert!(note.contains("narration"), "{note}");
+    let plan = compile(&recipe, &resolved)?;
+    assert_eq!(plan.compatibility.as_deref(), Some(note.as_str()));
+    for module in modules {
+        assert!(
+            plan.command
+                .classpath
+                .iter()
+                .any(|path| path.ends_with(&format!("{module}-3.3.1.jar"))),
+            "{module} 3.3.1 core jar missing"
+        );
+        assert!(
+            plan.resources.iter().any(|resource| resource
+                .url
+                .ends_with(&format!("{module}-3.3.1-natives-linux-arm64.jar"))),
+            "{module} ARM64 native missing"
+        );
+        assert!(
+            !plan.resources.iter().any(|resource| resource
+                .url
+                .ends_with(&format!("{module}-3.2.2-natives-linux.jar"))),
+            "{module} x64 native survived the reviewed composition"
+        );
+    }
+    assert!(
+        plan.command
+            .classpath
+            .iter()
+            .any(|path| path.ends_with("jna-5.13.0.jar"))
+    );
+    assert!(
+        plan.command
+            .classpath
+            .iter()
+            .any(|path| path.ends_with("text2speech-1.12.4.jar"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn cancellation_interrupts_a_stalled_metadata_response() -> anyhow::Result<()> {
     use std::time::Duration;
 

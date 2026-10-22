@@ -182,18 +182,29 @@ fn plan_libraries(
                 .as_ref()
                 .and_then(|classifiers| classifiers.get(&key))
                 .with_context(|| format!("native classifier {key} missing for {}", library.name))?;
+            // Linux ARM64 substitutes the reviewed ARM64 classifier for every
+            // selected LWJGL module; other libraries keep their official native
+            // and their documented limitation (for example narration).
+            let reviewed = metadata.classifier_overrides.get(&library.name);
             ensure!(
-                target.arch != Architecture::Aarch64 || target.os != OperatingSystem::Linux,
-                "legacy native classifier {} has no reviewed Linux ARM64 recipe",
+                !(target.arch == Architecture::Aarch64
+                    && target.os == OperatingSystem::Linux
+                    && library.name.starts_with("org.lwjgl:")
+                    && reviewed.is_none()),
+                "Linux ARM64 requires the reviewed replacement for {}",
                 library.name
             );
-            files.resources.push(Resource {
-                sha1: artifact.sha1.clone(),
-                size: artifact.size,
-                url: artifact.url.clone(),
-            });
+            let resource = reviewed.map_or_else(
+                || Resource {
+                    sha1: artifact.sha1.clone(),
+                    size: artifact.size,
+                    url: artifact.url.clone(),
+                },
+                |replacement| replacement.resource.clone(),
+            );
+            files.resources.push(resource.clone());
             files.actions.push(PrepareAction::Extract {
-                sha1: artifact.sha1.clone(),
+                sha1: resource.sha1,
                 directory: natives.clone(),
                 excludes: library
                     .extract

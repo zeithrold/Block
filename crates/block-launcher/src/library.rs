@@ -525,6 +525,7 @@ mod instance_defaults_tests {
             },
             runtime: None,
             library_overrides: BTreeMap::new(),
+            classifier_overrides: BTreeMap::new(),
             compatibility: None,
         };
         let mut plan = crate::plan::compile(&recipe, &metadata)?;

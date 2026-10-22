@@ -107,6 +107,9 @@ pub const REVIEWED_LINUX_ARM64_LWJGL: &str = "3.3.1";
 /// The reviewed JNA release whose bundled natives include Linux and macOS ARM64.
 pub const REVIEWED_ARM64_JNA: &str = "5.13.0";
 
+/// The reviewed text2speech release that loads without an ARM64 native wrapper.
+pub const REVIEWED_TEXT2SPEECH: &str = "1.12.4";
+
 /// Whether this LWJGL 3 release publishes official Linux ARM64 natives.
 #[must_use]
 pub fn lwjgl_supports_linux_arm64(version: &str) -> bool {
@@ -136,9 +139,15 @@ pub fn linux_arm64_lwjgl_plan(versions: &BTreeSet<String>) -> Result<LinuxArm64L
     {
         return Ok(LinuxArm64LwjglPlan::SameVersion);
     }
+    if versions
+        .iter()
+        .all(|version| matches!(version.as_str(), "3.2.1" | "3.2.2"))
+    {
+        return Ok(LinuxArm64LwjglPlan::ReplaceWith(REVIEWED_LINUX_ARM64_LWJGL));
+    }
     let selected = versions.iter().cloned().collect::<Vec<_>>().join(", ");
     Err(format!(
-        "no reviewed Linux ARM64 composition exists for LWJGL {selected}; reviewed: {REVIEWED_LINUX_ARM64_LWJGL} or newer, whose official natives-linux-arm64 classifiers are substituted explicitly"
+        "no reviewed Linux ARM64 composition exists for LWJGL {selected}; reviewed: {REVIEWED_LINUX_ARM64_LWJGL} or newer, and the 3.2.1/3.2.2 replacement with {REVIEWED_LINUX_ARM64_LWJGL}"
     ))
 }
 
@@ -219,6 +228,11 @@ pub fn plan_support(plan: &ExecutionPlan) -> NativeSupport {
                 evidence.legacy = true;
             }
             if filename.ends_with("-natives-linux-arm64.jar") {
+                arm64_native = true;
+            }
+        }
+        for resource in &plan.resources {
+            if plan_filename(&resource.url).ends_with("-natives-linux-arm64.jar") {
                 arm64_native = true;
             }
         }
@@ -414,15 +428,14 @@ mod tests {
             linux_arm64_lwjgl_plan(&versions(&["3.3.1", "3.3.3"])),
             Ok(LinuxArm64LwjglPlan::SameVersion)
         );
-        // The proven 1.16.5 composition is not wired into planning yet.
-        let error = linux_arm64_lwjgl_plan(&versions(&["3.2.1", "3.2.2"]))
-            .err()
-            .map(|reason| reason.to_owned());
-        assert!(
-            error
-                .as_ref()
-                .is_some_and(|reason| reason.contains("3.2.1, 3.2.2")),
-            "{error:?}"
+        // The proven 1.16.5 composition replaces the classifier-era release.
+        assert_eq!(
+            linux_arm64_lwjgl_plan(&versions(&["3.2.1", "3.2.2"])),
+            Ok(LinuxArm64LwjglPlan::ReplaceWith(REVIEWED_LINUX_ARM64_LWJGL))
+        );
+        assert_eq!(
+            linux_arm64_lwjgl_plan(&versions(&["3.2.2"])),
+            Ok(LinuxArm64LwjglPlan::ReplaceWith(REVIEWED_LINUX_ARM64_LWJGL))
         );
         let error = linux_arm64_lwjgl_plan(&versions(&["3.1.6"]))
             .err()
