@@ -73,7 +73,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | Quilt installation and build selection | Yes | Pending | Pending | Older representative pending. |
 | Forge modern/legacy installation and build selection | Yes | Pending | Pending | Windows native legacy flow pending. |
 | NeoForge full catalog and installation | Yes | Pending | Pending | Includes 1.20.1 and 26.x. |
-| OptiFine standalone/Forge import and installation | Partial | Pending | Pending | Existing-target re-import UI missing. |
+| OptiFine standalone/Forge import and installation | Yes | Partial | Pending | Existing-target re-import now edits OptiFine in Instance settings (select/replace/remove with draft Cancel/Done, atomic catalog commit + reinstall); wizard path unchanged. Native 1.16.5 G8 and 1.21.1 J1 launches passed on Windows; 1.12.2 G5 is a Forge-tweaker JAR without a declared Forge version (issue-reference changelog) and needs the standalone variant or a product decision. |
 | Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
 | Productized LWJGL 3 ARM64 compatibility and Java 8 | Yes | Partial | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives (pre-3.3.1 → reviewed 3.3.1 composition) and provisions Azul Zulu Java 8 via official metadata; native 1.16.5/1.18.2 Play verified. Windows ARM64 substitution merged (016c695), native VM run pending. |
 | ARM64 LWJGL 2 picker restriction | Yes | Yes (Linux ARM64) | Pending | Rows stay visible but disabled with the inline reason; typed exact IDs are refused in-dialog. Native proof on Linux ARM64 (851e23b); macOS/Windows ARM64 picker checks pending. |
