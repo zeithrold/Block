@@ -407,7 +407,7 @@ pub(super) fn select_trigger(
     .min_w_0()
     .justify_between()
     .child(div().flex_1().min_w_0().text_ellipsis().child(value.into()))
-    .child(Icon::Selector.render(14., palette.muted))
+    .child(Icon::ChevronDown.render(14., palette.muted))
 }
 
 /// Percentage is integer-weighted to avoid alpha changes affecting text as well.
