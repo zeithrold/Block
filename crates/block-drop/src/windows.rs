@@ -207,7 +207,7 @@ impl fmt::Debug for NativeTarget {
 }
 
 fn hwnd_of(raw: isize) -> Option<HWND> {
-    (raw != 0).then(|| HWND(raw as *mut core::ffi::c_void))
+    (raw != 0).then_some(HWND(raw as *mut core::ffi::c_void))
 }
 
 /// Minimal window procedure: the layered child paints nothing of its own.
