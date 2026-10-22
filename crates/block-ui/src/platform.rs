@@ -19,9 +19,37 @@ pub(super) fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
 
-// These platforms retain the application's existing preference. Their system
-// integration needs platform-specific implementation and CI validation.
-#[cfg(not(target_os = "macos"))]
+/// GTK/GNOME exposes the system animation preference through gsettings.
+#[cfg(target_os = "linux")]
+pub(super) fn system_reduce_motion() -> bool {
+    let output = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+        .output();
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| animations_disabled(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(target_os = "linux")]
+fn animations_disabled(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("false")
+}
+
+/// Windows system motion preference still needs a platform query; the in-app
+/// preference remains authoritative until that lands.
+#[cfg(target_os = "windows")]
 pub(super) const fn system_reduce_motion() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gsettings_animation_values_are_interpreted_strictly() {
+        assert!(super::animations_disabled("false\n"));
+        assert!(!super::animations_disabled("true\n"));
+        assert!(!super::animations_disabled(""));
+    }
 }
