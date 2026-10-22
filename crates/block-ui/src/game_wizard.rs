@@ -15,7 +15,13 @@ use std::{
 };
 
 use super::browser::CollectionLoad;
-use block_launcher::{CancellationToken, catalog::LoaderKind, install::fabric::LoaderVersion};
+use block_launcher::{
+    CancellationToken,
+    catalog::LoaderKind,
+    install::fabric::LoaderVersion,
+    platform::Architecture,
+    support::{legacy_lwjgl_message, legacy_lwjgl_reason},
+};
 use gpui::{
     AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, ScrollHandle, Styled as _, Window, div, px, rgb,
@@ -1158,14 +1164,61 @@ impl Block {
         }
     }
 
+    /// Host architecture used by the native version-availability policy.
+    fn host_architecture(&self) -> Architecture {
+        if let Some(arch) = self.host_arch_override {
+            return arch;
+        }
+        if cfg!(target_arch = "aarch64") {
+            Architecture::Aarch64
+        } else if cfg!(target_arch = "x86") {
+            Architecture::X86
+        } else {
+            Architecture::X86_64
+        }
+    }
+
+    /// LWJGL 2-era restriction reason for a catalog version, if unavailable on
+    /// this host. Unknown or not-yet-loaded versions are left to installation
+    /// verification, which applies the same official-metadata rule.
+    pub(super) fn wizard_version_restriction(&self, version: &str) -> Option<&'static str> {
+        let version = version.trim();
+        let entry = self
+            .version_catalog
+            .iter()
+            .find(|entry| entry.id == version)?;
+        legacy_lwjgl_reason(self.host_architecture(), entry, &self.version_catalog)
+    }
+
+    /// Catalog-level note explaining the ARM64 LWJGL 2 restriction.
+    fn wizard_version_legacy_note(&self) -> Option<gpui::Div> {
+        let restricted = self
+            .version_catalog
+            .iter()
+            .any(|entry| self.wizard_version_restriction(&entry.id).is_some());
+        restricted.then(|| {
+            div()
+                .debug_selector(|| "wizard-version-legacy-note".into())
+                .child(note(format!(
+                    "1.12.2 and earlier are unavailable on this ARM64 host: {}",
+                    block_launcher::support::LWJGL2_ARM64_REASON
+                )))
+        })
+    }
+
     pub(super) fn set_wizard_version(&mut self, version: String, cx: &mut Context<'_, Self>) {
-        let Some(Form::Instance(form)) = &mut self.form else {
-            return;
-        };
         let version = if version.trim().len() == version.len() {
             version
         } else {
             version.trim().to_owned()
+        };
+        if self.wizard_version_restriction(&version).is_some() {
+            self.shell.wizard.version_notice = Some(legacy_lwjgl_message(&version));
+            cx.notify();
+            return;
+        }
+        let Some(Form::Instance(form)) = &mut self.form else {
+            return;
         };
         let changed = form.version.read(cx).value() != version;
         if changed {
@@ -1227,6 +1280,10 @@ impl Block {
                 WizardField::Version,
                 "Choose a Minecraft version from the list.".into(),
             ));
+        }
+        if page == WizardPage::Version && self.wizard_version_restriction(version.trim()).is_some()
+        {
+            return Some((WizardField::Version, legacy_lwjgl_message(version.trim())));
         }
         if matches!(page, WizardPage::Version | WizardPage::Loader)
             && let Some(issue) = self.wizard_loader_issue(cx)
@@ -2621,7 +2678,11 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return;
         };
-        let versions = self.matching_wizard_versions(form, cx);
+        let versions: Vec<_> = self
+            .matching_wizard_versions(form, cx)
+            .into_iter()
+            .filter(|(version, _)| self.wizard_version_restriction(version).is_none())
+            .collect();
         if versions.is_empty() {
             return;
         }
@@ -2681,6 +2742,7 @@ impl Block {
                 cx.listener(|view, &(): &(), window, cx| view.handle(UiAction::WizardSnapshots, window, cx))))
             .child(div().id("wizard-version-result-count")
                 .text_xs().text_color(rgb(self.palette.muted)).child(format!("{count} {result}")))
+            .children(self.wizard_version_legacy_note())
             .child(self.wizard_version_list(form, versions, cx))
             .child(components::field_with("Selected version ID", &form.version, self.palette, FieldOptions {
                 required: true,
@@ -2820,7 +2882,7 @@ impl Block {
                     .map(|(version, _)| components::RadioOption {
                         id: version.clone(),
                         checked: *version == selected,
-                        disabled: self.busy,
+                        disabled: self.busy || self.wizard_version_restriction(version).is_some(),
                         action: UiAction::SelectVersion(version.clone()),
                     })
                     .collect(),
@@ -2840,6 +2902,7 @@ impl Block {
                     .enumerate()
                     .map(|(index, (version, kind))| {
                         let active = version == selected;
+                        let restriction = self.wizard_version_restriction(&version);
                         let id = version.clone();
                         group.item(
                             &id,
@@ -2849,7 +2912,7 @@ impl Block {
                                 active,
                                 self.palette,
                                 ControlState {
-                                    disabled: self.busy,
+                                    disabled: self.busy || restriction.is_some(),
                                     ..ControlState::default()
                                 },
                                 cx.listener(move |view, &(): &(), window, cx| {
@@ -2874,7 +2937,19 @@ impl Block {
                             } else {
                                 self.palette.background
                             }))
-                            .child(div().flex_1())
+                            .child(if let Some(reason) = restriction {
+                                div().flex_1().min_w_0().child(
+                                    div()
+                                        .debug_selector(move || {
+                                            format!("wizard-version-reason-{index}")
+                                        })
+                                        .text_xs()
+                                        .text_color(rgb(self.palette.muted))
+                                        .child(reason),
+                                )
+                            } else {
+                                div().flex_1()
+                            })
                             .children(kind.map(|kind| {
                                 components::badge(
                                     Self::wizard_version_kind(kind),

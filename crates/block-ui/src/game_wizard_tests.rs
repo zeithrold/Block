@@ -86,12 +86,19 @@ fn entry(
     id: &str,
     kind: minecraft_manifest::model::VersionType,
 ) -> minecraft_manifest::model::VersionEntry {
+    // Synthetic entries carry plausible release times: the ARM64 version policy
+    // classifies LWJGL 2-era versions by the official catalog times.
+    let release_time = match id {
+        "1.12.2" => "2017-09-18T11:33:40+00:00",
+        "b1.7.3" | "a1.2.6" => "2011-06-30T00:00:00+00:00",
+        _ => "2024-01-01T00:00:00+00:00",
+    };
     minecraft_manifest::model::VersionEntry {
         id: id.into(),
         kind,
         url: "https://example.invalid/manifest".into(),
-        time: String::new(),
-        release_time: String::new(),
+        time: release_time.into(),
+        release_time: release_time.into(),
         sha1: "0".repeat(40),
         compliance_level: 1,
     }
@@ -1194,4 +1201,113 @@ fn loader_empty_error_retry_and_delisted_build_states_cannot_be_committed_as_van
         assert!(view.validate_instance_draft(cx));
         assert!(view.snapshot.instances.is_empty());
     });
+}
+
+fn picker_catalog_entry(
+    id: &str,
+    kind: minecraft_manifest::model::VersionType,
+    release_time: &str,
+) -> minecraft_manifest::model::VersionEntry {
+    minecraft_manifest::model::VersionEntry {
+        id: id.into(),
+        kind,
+        url: format!("https://example.invalid/{id}.json"),
+        time: release_time.into(),
+        release_time: release_time.into(),
+        sha1: "a".repeat(40),
+        compliance_level: 1,
+    }
+}
+
+fn picker_catalog() -> Vec<minecraft_manifest::model::VersionEntry> {
+    use minecraft_manifest::model::VersionType;
+    vec![
+        picker_catalog_entry("1.21.1", VersionType::Release, "2024-08-08T12:21:54+00:00"),
+        picker_catalog_entry("1.20.6", VersionType::Release, "2024-04-29T12:47:07+00:00"),
+        picker_catalog_entry("1.18.2", VersionType::Release, "2022-02-28T11:22:16+00:00"),
+        picker_catalog_entry("1.16.5", VersionType::Release, "2021-01-14T16:05:29+00:00"),
+        picker_catalog_entry("1.13", VersionType::Release, "2018-07-18T12:57:53+00:00"),
+        picker_catalog_entry("1.12.2", VersionType::Release, "2017-09-18T11:33:40+00:00"),
+        picker_catalog_entry("1.8.9", VersionType::Release, "2015-12-09T09:19:57+00:00"),
+    ]
+}
+
+#[gpui::test]
+fn arm64_version_picker_disables_lwjgl2_versions_with_the_reason(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.host_arch_override = Some(block_launcher::platform::Architecture::Aarch64);
+        view.version_catalog = picker_catalog();
+        view.begin_game_wizard(cx);
+        view
+    });
+    view.update(cx, |view, cx| {
+        use block_launcher::support::LWJGL2_ARM64_REASON;
+        assert_eq!(
+            view.wizard_version_restriction("1.12.2"),
+            Some(LWJGL2_ARM64_REASON)
+        );
+        assert_eq!(
+            view.wizard_version_restriction("1.8.9"),
+            Some(LWJGL2_ARM64_REASON)
+        );
+        assert_eq!(view.wizard_version_restriction("1.16.5"), None);
+        assert_eq!(view.wizard_version_restriction("1.18.2"), None);
+
+        // Mouse/keyboard rows and the version setter cannot choose the version.
+        view.set_wizard_version("1.20.6".into(), cx);
+        view.set_wizard_version("1.12.2".into(), cx);
+        assert!(
+            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.20.6")
+        );
+        assert!(
+            view.shell.wizard.version_notice.as_ref().is_some_and(|notice| notice.contains(LWJGL2_ARM64_REASON))
+        );
+
+        // An exact ID typed into the field is rejected by validation with the same reason.
+        view.open_game_wizard_page(Some(WizardPage::Version), cx);
+        if let Some(Form::Instance(form)) = &view.form {
+            form.version.update(cx, |field, cx| field.set_value("1.12.2", cx));
+        }
+        assert!(!view.validate_wizard_section(WizardPage::Version, cx));
+        assert!(
+            view.shell.wizard.error.as_ref().is_some_and(|error| error.contains(LWJGL2_ARM64_REASON)),
+            "{:?}",
+            view.shell.wizard.error
+        );
+    });
+    cx.simulate_resize(size(px(960.), px(600.)));
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-version-legacy-note").is_some(),
+        "the ARM64 reason must be visible above the version list"
+    );
+}
+
+#[gpui::test]
+fn x64_version_picker_keeps_lwjgl2_versions_selectable(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.host_arch_override = Some(block_launcher::platform::Architecture::X86_64);
+        view.version_catalog = picker_catalog();
+        view.begin_game_wizard(cx);
+        view
+    });
+    view.update(cx, |view, cx| {
+        assert_eq!(view.wizard_version_restriction("1.12.2"), None);
+        view.set_wizard_version("1.12.2".into(), cx);
+        assert!(
+            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.12.2")
+        );
+        view.open_game_wizard_page(Some(WizardPage::Version), cx);
+        assert!(view.validate_wizard_section(WizardPage::Version, cx));
+    });
+    cx.simulate_resize(size(px(960.), px(600.)));
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-version-legacy-note").is_none(),
+        "x64 hosts must not show the ARM64 restriction"
+    );
 }

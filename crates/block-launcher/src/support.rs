@@ -99,6 +99,47 @@ impl NativeSupport {
     }
 }
 
+/// The last official Minecraft release whose client bundles LWJGL 2.
+pub const LAST_LWJGL2_RELEASE: &str = "1.12.2";
+
+/// Reason a LWJGL 2-era version is unavailable on native ARM64 hosts.
+pub const LWJGL2_ARM64_REASON: &str = "official LWJGL 2 natives are x86/x64 only";
+
+/// Release time of [`LAST_LWJGL2_RELEASE`] in the official version index. Used
+/// as a fallback only when the catalog has not loaded the 1.12.2 entry yet.
+const LAST_LWJGL2_RELEASE_TIME: &str = "2017-09-18T11:33:40+00:00";
+
+/// Why a catalog version cannot run natively on the requested architecture.
+///
+/// LWJGL 2-era versions (1.12.2 and earlier, including their snapshots) have
+/// official natives only for x86/x64. The official catalog's release times are
+/// authoritative; the 1.12.2 entry is the boundary of the LWJGL 3 switch.
+#[must_use]
+pub fn legacy_lwjgl_reason(
+    arch: Architecture,
+    entry: &minecraft_manifest::model::VersionEntry,
+    catalog: &[minecraft_manifest::model::VersionEntry],
+) -> Option<&'static str> {
+    if arch != Architecture::Aarch64 {
+        return None;
+    }
+    let boundary = catalog
+        .iter()
+        .find(|entry| entry.id == LAST_LWJGL2_RELEASE)
+        .map_or(LAST_LWJGL2_RELEASE_TIME, |entry| {
+            entry.release_time.as_str()
+        });
+    // The official index uses one ISO-8601 format and offset for every entry, so
+    // the lexicographic order matches chronological order.
+    (entry.release_time.as_str() <= boundary).then_some(LWJGL2_ARM64_REASON)
+}
+
+/// Message shown when a specific version is refused on native ARM64.
+#[must_use]
+pub fn legacy_lwjgl_message(version: &str) -> String {
+    format!("Minecraft {version} cannot run natively on ARM64: {LWJGL2_ARM64_REASON}")
+}
+
 /// The reviewed LWJGL release that ships official Linux ARM64 natives.
 /// Manifests that select the older 3.2.x modules are replaced with this release,
 /// the composition proven on Linux ARM64 1.16.5.
@@ -405,10 +446,94 @@ fn starts_with_digit(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinuxArm64LwjglPlan, REVIEWED_LINUX_ARM64_LWJGL, linux_arm64_lwjgl_plan,
+        LAST_LWJGL2_RELEASE, LWJGL2_ARM64_REASON, LinuxArm64LwjglPlan, REVIEWED_LINUX_ARM64_LWJGL,
+        legacy_lwjgl_message, legacy_lwjgl_reason, linux_arm64_lwjgl_plan,
         lwjgl_supports_linux_arm64,
     };
+    use crate::platform::Architecture;
+    use minecraft_manifest::model::{VersionEntry, VersionType};
     use std::collections::BTreeSet;
+
+    fn catalog_entry(id: &str, release_time: &str) -> VersionEntry {
+        VersionEntry {
+            id: id.into(),
+            kind: VersionType::Release,
+            url: format!("https://example.invalid/{id}.json"),
+            time: release_time.into(),
+            release_time: release_time.into(),
+            sha1: "a".repeat(40),
+            compliance_level: 1,
+        }
+    }
+
+    fn catalog() -> Vec<VersionEntry> {
+        vec![
+            catalog_entry("1.21.1", "2024-08-08T12:21:54+00:00"),
+            catalog_entry("1.18.2", "2022-02-28T11:22:16+00:00"),
+            catalog_entry("1.16.5", "2021-01-14T16:05:29+00:00"),
+            catalog_entry("1.13", "2018-07-18T12:57:53+00:00"),
+            catalog_entry(LAST_LWJGL2_RELEASE, "2017-09-18T11:33:40+00:00"),
+            catalog_entry("1.8.9", "2015-12-09T09:19:57+00:00"),
+            catalog_entry("17w43a", "2017-10-25T14:13:24+00:00"),
+        ]
+    }
+
+    fn entry(catalog: &[VersionEntry], id: &str) -> anyhow::Result<VersionEntry> {
+        catalog
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing catalog entry {id}"))
+    }
+
+    #[test]
+    fn arm64_marks_lwjgl2_versions_unsupported_and_keeps_modern_ones() -> anyhow::Result<()> {
+        let catalog = catalog();
+        for legacy in [LAST_LWJGL2_RELEASE, "1.8.9"] {
+            assert_eq!(
+                legacy_lwjgl_reason(Architecture::Aarch64, &entry(&catalog, legacy)?, &catalog),
+                Some(LWJGL2_ARM64_REASON),
+                "{legacy}"
+            );
+        }
+        for modern in ["1.13", "1.16.5", "1.18.2", "1.21.1", "17w43a"] {
+            assert_eq!(
+                legacy_lwjgl_reason(Architecture::Aarch64, &entry(&catalog, modern)?, &catalog),
+                None,
+                "{modern}"
+            );
+        }
+        assert!(
+            legacy_lwjgl_message("1.12.2").contains(LWJGL2_ARM64_REASON),
+            "the refusal must keep the published reason"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn x64_keeps_lwjgl2_versions_supported() -> anyhow::Result<()> {
+        for arch in [Architecture::X86_64, Architecture::X86] {
+            let catalog = catalog();
+            for id in [LAST_LWJGL2_RELEASE, "1.8.9"] {
+                assert_eq!(
+                    legacy_lwjgl_reason(arch, &entry(&catalog, id)?, &catalog),
+                    None,
+                    "{id}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn missing_catalog_boundary_uses_the_recorded_release_time() {
+        let catalog = vec![catalog_entry("1.8.9", "2015-12-09T09:19:57+00:00")];
+        let entry = catalog[0].clone();
+        assert_eq!(
+            legacy_lwjgl_reason(Architecture::Aarch64, &entry, &catalog),
+            Some(LWJGL2_ARM64_REASON)
+        );
+    }
 
     fn versions(values: &[&str]) -> BTreeSet<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
