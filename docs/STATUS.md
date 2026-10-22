@@ -146,6 +146,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
 - Windows native first-run flow passed on 1ac4564: pending identity discarded on quit, account and game saved together, real 1.20.6 download, Play, main menu and Stop.
 - CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
+- Linux AMD64 VM infrastructure: start it detached from the Windows host (WMI or a /IT task), never from an SSH one-liner; while the Windows host's wired Ethernet is disconnected, reach the guest from the Mac with ProxyJump through the Windows host. Its login keyring relocks after a reboot.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Close owned test apps/tasks and softly stop the AMD64 VM after each remote session.
 
