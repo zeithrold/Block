@@ -241,6 +241,7 @@ async fn linux_arm64_overrides(
     let mut artifacts = Vec::new();
     let mut classifiers = Vec::new();
     let mut versions = BTreeSet::new();
+    let mut arm64_selected = false;
     let mut jna = Vec::new();
     let mut text2speech = Vec::new();
     for library in &parsed.manifest.libraries {
@@ -258,6 +259,12 @@ async fn linux_arm64_overrides(
                 continue;
             }
             versions.insert(parts[1].to_owned());
+            if parts
+                .get(2)
+                .is_some_and(|classifier| *classifier == "natives-linux-arm64")
+            {
+                arm64_selected = true;
+            }
             artifacts.push((
                 library.name.clone(),
                 parts[0].to_owned(),
@@ -342,8 +349,10 @@ async fn linux_arm64_overrides(
             },
         );
     }
+    // A manifest may already select official ARM64 natives (for example a
+    // synthetic fixture or a future official update); nothing needs replacing.
     ensure!(
-        !artifact_overrides.is_empty() || !classifier_overrides.is_empty(),
+        !artifact_overrides.is_empty() || !classifier_overrides.is_empty() || arm64_selected,
         "this version selects no LWJGL 3 Linux artifacts to substitute"
     );
     let mut companions = Vec::new();
@@ -400,6 +409,8 @@ async fn linux_arm64_overrides(
             "Linux ARM64: the manifest's LWJGL {} is replaced with the reviewed {lwjgl} composition and its official natives-linux-arm64 classifiers from Maven Central",
             versions.iter().cloned().collect::<Vec<_>>().join("/")
         )
+    } else if artifact_overrides.is_empty() && classifier_overrides.is_empty() {
+        format!("Linux ARM64: LWJGL {lwjgl} already selects official natives-linux-arm64 artifacts")
     } else {
         format!(
             "Linux ARM64: LWJGL {lwjgl} keeps its version and uses the official natives-linux-arm64 classifiers from Maven Central"
