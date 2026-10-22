@@ -262,12 +262,18 @@ async fn compatibility_overrides(
         Compatibility::Official => {
             if target.os == OperatingSystem::Linux && target.arch == Architecture::Aarch64 {
                 linux_arm64_overrides(recipe, parsed, target, context).await
+            } else if target.os == OperatingSystem::Windows && target.arch == Architecture::Aarch64
+            {
+                windows_arm64_overrides(recipe, parsed, target, context).await
             } else {
                 Ok((BTreeMap::new(), BTreeMap::new(), Vec::new(), None))
             }
         }
         Compatibility::LinuxArm64Lwjgl3 => {
             linux_arm64_overrides(recipe, parsed, target, context).await
+        }
+        Compatibility::WindowsArm64Lwjgl3 => {
+            windows_arm64_overrides(recipe, parsed, target, context).await
         }
         Compatibility::MacosJna513 => Ok((
             macos_jna_overrides(recipe, parsed, target, context).await?,
@@ -510,6 +516,151 @@ async fn linux_arm64_overrides(
         Some(format!(
             "{note}; narration has no native ARM64 flite wrapper, so it stays unavailable"
         )),
+    ))
+}
+
+/// Replace the LWJGL native artifacts a Windows ARM64 host cannot load.
+///
+/// The decision is keyed on the manifest's own LWJGL modules, not on Minecraft
+/// versions: 3.3.1 and newer keep their release and swap every selected
+/// `natives-windows` classifier for the published `natives-windows-arm64` one,
+/// while classifier-era 3.2.x manifests move to the reviewed 3.3.1 composition
+/// whose natives are the first official Windows ARM64 publication. Every
+/// artifact URL is checked through the published Maven metadata before it can
+/// be planned, and x64 Windows targets never enter this path.
+async fn windows_arm64_overrides(
+    recipe: &LaunchRecipe,
+    parsed: &ParsedRecipe,
+    target: &Target,
+    context: &ResolveContext,
+) -> anyhow::Result<AppliedOverrides> {
+    ensure!(
+        target.os == OperatingSystem::Windows && target.arch == Architecture::Aarch64,
+        "windows_arm64_lwjgl3 requires a Windows ARM64 target"
+    );
+    let mut artifacts = Vec::new();
+    let mut classifiers = Vec::new();
+    let mut versions = BTreeSet::new();
+    let mut arm64_selected = false;
+    for library in &parsed.manifest.libraries {
+        if !crate::rules::allowed(library.rules.as_deref(), target, &recipe.features)? {
+            continue;
+        }
+        if library.name.starts_with("org.lwjgl.lwjgl:") {
+            anyhow::bail!(
+                "this version uses LWJGL 2, whose official natives are x86/x64 only; Windows ARM64 support covers LWJGL 3-era versions"
+            );
+        }
+        if let Some(rest) = library.name.strip_prefix("org.lwjgl:") {
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            versions.insert(parts[1].to_owned());
+            if parts
+                .get(2)
+                .is_some_and(|classifier| *classifier == "natives-windows-arm64")
+            {
+                arm64_selected = true;
+            }
+            artifacts.push((
+                library.name.clone(),
+                parts[0].to_owned(),
+                parts[1].to_owned(),
+                parts.get(2).map(|classifier| (*classifier).to_owned()),
+            ));
+            if let Some(classifier) = library
+                .natives
+                .as_ref()
+                .and_then(|natives| natives.get("windows"))
+            {
+                classifiers.push((
+                    library.name.clone(),
+                    parts[0].to_owned(),
+                    parts[1].to_owned(),
+                    classifier.clone(),
+                ));
+            }
+        }
+    }
+    let plan = crate::support::windows_arm64_lwjgl_plan(&versions)
+        .map_err(|reason| anyhow::anyhow!(reason))?;
+    let reviewed = match plan {
+        crate::support::WindowsArm64LwjglPlan::SameVersion => None,
+        crate::support::WindowsArm64LwjglPlan::ReplaceWith(version) => Some(version),
+    };
+    let mut artifact_overrides = BTreeMap::new();
+    let mut classifier_overrides = BTreeMap::new();
+    let mut reviewed_module = None;
+    for (name, module, manifest_version, classifier) in artifacts {
+        let version = reviewed.unwrap_or(&manifest_version);
+        let filename = match classifier.as_deref() {
+            Some("natives-windows-arm64") => continue,
+            Some("natives-windows") => {
+                reviewed_module.get_or_insert(version.to_owned());
+                format!("{module}-{version}-natives-windows-arm64.jar")
+            }
+            Some(_) => continue,
+            None if reviewed.is_some() => {
+                reviewed_module.get_or_insert(version.to_owned());
+                format!("{module}-{version}.jar")
+            }
+            None => continue,
+        };
+        let url =
+            format!("https://repo.maven.apache.org/maven2/org/lwjgl/{module}/{version}/{filename}");
+        artifact_overrides.insert(
+            name,
+            LibraryOverride {
+                resource: context.store.describe_maven(&url).await?,
+                filename,
+            },
+        );
+    }
+    for (name, module, manifest_version, classifier) in classifiers {
+        ensure!(
+            classifier == "natives-windows",
+            "unexpected Windows native classifier {classifier} for {name}"
+        );
+        let version = reviewed.unwrap_or(&manifest_version);
+        let filename = format!("{module}-{version}-natives-windows-arm64.jar");
+        let url =
+            format!("https://repo.maven.apache.org/maven2/org/lwjgl/{module}/{version}/{filename}");
+        reviewed_module.get_or_insert(version.to_owned());
+        classifier_overrides.insert(
+            name,
+            LibraryOverride {
+                resource: context.store.describe_maven(&url).await?,
+                filename,
+            },
+        );
+    }
+    // A manifest may already select official ARM64 natives (for example a
+    // synthetic fixture or a future official update); nothing needs replacing.
+    ensure!(
+        !artifact_overrides.is_empty() || !classifier_overrides.is_empty() || arm64_selected,
+        "this version selects no LWJGL 3 Windows artifacts to substitute"
+    );
+    let lwjgl = reviewed_module.unwrap_or_default();
+    let note = if reviewed.is_some() {
+        format!(
+            "Windows ARM64: the manifest's LWJGL {} is replaced with the reviewed {lwjgl} composition and its official natives-windows-arm64 classifiers from Maven Central",
+            versions.iter().cloned().collect::<Vec<_>>().join("/")
+        )
+    } else if artifact_overrides.is_empty() && classifier_overrides.is_empty() {
+        format!(
+            "Windows ARM64: LWJGL {lwjgl} already selects official natives-windows-arm64 artifacts"
+        )
+    } else {
+        format!(
+            "Windows ARM64: LWJGL {lwjgl} keeps its version and uses the official natives-windows-arm64 classifiers from Maven Central"
+        )
+    };
+    Ok((
+        artifact_overrides,
+        classifier_overrides,
+        Vec::new(),
+        Some(note),
     ))
 }
 

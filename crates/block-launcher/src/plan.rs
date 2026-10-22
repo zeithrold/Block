@@ -158,6 +158,16 @@ fn plan_libraries(
                     "Linux ARM64 requires the explicit linux_arm64_lwjgl3 compatibility recipe"
                 );
             }
+            if target.os == OperatingSystem::Windows
+                && target.arch == Architecture::Aarch64
+                && library.name.starts_with("org.lwjgl:")
+                && library.name.ends_with(":natives-windows")
+            {
+                ensure!(
+                    metadata.library_overrides.contains_key(&library.name),
+                    "Windows ARM64 requires the explicit windows_arm64_lwjgl3 compatibility recipe"
+                );
+            }
             let (resource, filename) =
                 if let Some(replacement) = metadata.library_overrides.get(&library.name) {
                     (replacement.resource.clone(), replacement.filename.as_str())
@@ -207,6 +217,14 @@ fn plan_libraries(
                     && library.name.starts_with("org.lwjgl:")
                     && reviewed.is_none()),
                 "Linux ARM64 requires the reviewed replacement for {}",
+                library.name
+            );
+            ensure!(
+                !(target.arch == Architecture::Aarch64
+                    && target.os == OperatingSystem::Windows
+                    && library.name.starts_with("org.lwjgl:")
+                    && reviewed.is_none()),
+                "Windows ARM64 requires the reviewed replacement for {}",
                 library.name
             );
             let resource = reviewed.map_or_else(

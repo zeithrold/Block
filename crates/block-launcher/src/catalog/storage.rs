@@ -806,6 +806,8 @@ fn new_profile(instance: &Instance, name: String) -> Profile {
         server: super::ServerPreferences::default(),
         compatibility: if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
             Compatibility::LinuxArm64Lwjgl3
+        } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
+            Compatibility::WindowsArm64Lwjgl3
         } else {
             Compatibility::Official
         },

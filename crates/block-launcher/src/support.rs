@@ -145,6 +145,11 @@ pub fn legacy_lwjgl_message(version: &str) -> String {
 /// the composition proven on Linux ARM64 1.16.5.
 pub const REVIEWED_LINUX_ARM64_LWJGL: &str = "3.3.1";
 
+/// The reviewed LWJGL release that ships official Windows ARM64 natives from
+/// Maven Central (`natives-windows-arm64` classifiers). Manifests that select the
+/// older 3.2.x modules are replaced with this release.
+pub const REVIEWED_WINDOWS_ARM64_LWJGL: &str = "3.3.1";
+
 /// The reviewed JNA release whose bundled natives include Linux and macOS ARM64.
 pub const REVIEWED_ARM64_JNA: &str = "5.13.0";
 
@@ -198,6 +203,51 @@ pub fn linux_arm64_lwjgl_plan(versions: &BTreeSet<String>) -> Result<LinuxArm64L
     ))
 }
 
+/// Whether this LWJGL 3 release publishes official Windows ARM64 natives.
+#[must_use]
+pub fn lwjgl_supports_windows_arm64(version: &str) -> bool {
+    version_at_least(version, REVIEWED_WINDOWS_ARM64_LWJGL)
+}
+
+/// The reviewed Windows ARM64 composition for one manifest's selected LWJGL modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsArm64LwjglPlan {
+    /// The selected modules already publish ARM64 natives at their own version.
+    SameVersion,
+    /// Replace every selected module with this reviewed LWJGL release.
+    ReplaceWith(&'static str),
+}
+
+/// Decide the reviewed Windows ARM64 substitution for a manifest's LWJGL modules.
+///
+/// # Errors
+/// Fails with a human-readable reason when no reviewed composition exists.
+pub fn windows_arm64_lwjgl_plan(
+    versions: &BTreeSet<String>,
+) -> Result<WindowsArm64LwjglPlan, String> {
+    if versions.is_empty() {
+        return Err("the manifest selects no LWJGL 3 modules".into());
+    }
+    if versions
+        .iter()
+        .all(|version| lwjgl_supports_windows_arm64(version))
+    {
+        return Ok(WindowsArm64LwjglPlan::SameVersion);
+    }
+    if versions
+        .iter()
+        .all(|version| matches!(version.as_str(), "3.2.1" | "3.2.2"))
+    {
+        return Ok(WindowsArm64LwjglPlan::ReplaceWith(
+            REVIEWED_WINDOWS_ARM64_LWJGL,
+        ));
+    }
+    let selected = versions.iter().cloned().collect::<Vec<_>>().join(", ");
+    Err(format!(
+        "no reviewed Windows ARM64 composition exists for LWJGL {selected}; reviewed: {REVIEWED_WINDOWS_ARM64_LWJGL} or newer, and the 3.2.1/3.2.2 replacement with {REVIEWED_WINDOWS_ARM64_LWJGL}"
+    ))
+}
+
 /// Inspect selected native artifacts without downloading game assets or runtimes.
 ///
 /// This policy establishes native architecture availability, not compatibility of arbitrary mods.
@@ -217,6 +267,9 @@ pub fn manifest_support(
         }
         (OperatingSystem::Linux, Architecture::Aarch64) => {
             linux_arm64_support(manifest, target, features)
+        }
+        (OperatingSystem::Windows, Architecture::Aarch64) => {
+            windows_arm64_support(manifest, target, features)
         }
         _ => Ok(NativeSupport::Supported),
     }
@@ -300,6 +353,41 @@ pub fn plan_support(plan: &ExecutionPlan) -> NativeSupport {
             })
         });
     }
+    if plan.target.os == OperatingSystem::Windows {
+        // The Windows plan carries the substituted ARM64 classifiers explicitly.
+        let mut legacy = false;
+        let mut arm64_native = false;
+        for path in &plan.command.classpath {
+            let filename = plan_filename(path);
+            if filename.starts_with("lwjgl-2.") || filename.starts_with("lwjgl_util-2.") {
+                legacy = true;
+            }
+            if filename.ends_with("-natives-windows-arm64.jar") {
+                arm64_native = true;
+            }
+        }
+        for resource in &plan.resources {
+            if plan_filename(&resource.url).ends_with("-natives-windows-arm64.jar") {
+                arm64_native = true;
+            }
+        }
+        let reason = if legacy {
+            Some(NativeSupportReason::LegacyLwjgl)
+        } else if !arm64_native {
+            Some(NativeSupportReason::MissingArm64Artifact {
+                library: "Windows ARM64 natives".into(),
+            })
+        } else {
+            None
+        };
+        return reason.map_or(NativeSupport::Supported, |reason| {
+            NativeSupport::Unsupported(UnsupportedNativeSupport {
+                version: plan.version.clone(),
+                target: plan.target.clone(),
+                reason,
+            })
+        });
+    }
     let mut evidence = NativeEvidence::default();
     for path in &plan.command.classpath {
         evidence.record(path);
@@ -322,7 +410,10 @@ fn plan_filename(path: &str) -> &str {
 /// Whether this target always needs an architecture review before planning.
 const fn needs_arm64_policy(target: &Target) -> bool {
     matches!(target.arch, Architecture::Aarch64)
-        && matches!(target.os, OperatingSystem::Macos | OperatingSystem::Linux)
+        && matches!(
+            target.os,
+            OperatingSystem::Macos | OperatingSystem::Linux | OperatingSystem::Windows
+        )
 }
 
 /// Linux ARM64 selects its substitution explicitly in the plan; this policy only
@@ -361,6 +452,52 @@ fn linux_arm64_support(
                     versions.iter().cloned().collect::<Vec<_>>().join(", ")
                 ),
             })
+    };
+    Ok(reason.map_or(NativeSupport::Supported, |reason| {
+        NativeSupport::Unsupported(UnsupportedNativeSupport {
+            version: manifest.id.clone(),
+            target: target.clone(),
+            reason,
+        })
+    }))
+}
+
+/// Windows ARM64 selects its substitution explicitly in the plan; this policy only
+/// rejects versions for which no reviewed official composition exists.
+fn windows_arm64_support(
+    manifest: &VersionManifest,
+    target: &Target,
+    features: &BTreeMap<String, bool>,
+) -> anyhow::Result<NativeSupport> {
+    let mut legacy = false;
+    let mut versions = BTreeSet::new();
+    for library in &manifest.libraries {
+        if !rules::allowed(library.rules.as_deref(), target, features)? {
+            continue;
+        }
+        if library.name.starts_with("org.lwjgl.lwjgl:") {
+            legacy = true;
+        }
+        if let Some(rest) = library.name.strip_prefix("org.lwjgl:")
+            && let Some((_, version)) = rest.split_once(':')
+            && let Some(version) = version.split(':').next()
+        {
+            versions.insert(version.to_owned());
+        }
+    }
+    let reason = if legacy {
+        Some(NativeSupportReason::LegacyLwjgl)
+    } else if versions.is_empty() {
+        Some(NativeSupportReason::MissingCoreArtifact)
+    } else {
+        windows_arm64_lwjgl_plan(&versions).err().map(|_| {
+            NativeSupportReason::MissingArm64Artifact {
+                library: format!(
+                    "LWJGL {}",
+                    versions.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            }
+        })
     };
     Ok(reason.map_or(NativeSupport::Supported, |reason| {
         NativeSupport::Unsupported(UnsupportedNativeSupport {
