@@ -443,3 +443,219 @@ async fn cancellation_interrupts_a_stalled_metadata_response() -> anyhow::Result
     assert!(error.to_string().contains("resolution cancelled"));
     Ok(())
 }
+
+#[tokio::test]
+async fn windows_arm64_substitutes_the_published_natives_and_records_the_composition()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (path, original) = manifest("1.20.6")?;
+    let context = offline_context(directory.path(), &original)?;
+    let modules = [
+        "lwjgl",
+        "lwjgl-freetype",
+        "lwjgl-glfw",
+        "lwjgl-jemalloc",
+        "lwjgl-openal",
+        "lwjgl-opengl",
+        "lwjgl-stb",
+        "lwjgl-tinyfd",
+    ];
+    // Planning only needs published descriptors; digests are synthetic offline fixtures.
+    let urls: Vec<String> = modules
+        .iter()
+        .map(|module| {
+            format!(
+                "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.3/{module}-3.3.3-natives-windows-arm64.jar"
+            )
+        })
+        .collect();
+    let synthetic: Vec<String> = (1..=urls.len())
+        .map(|index| format!("{index:040x}"))
+        .collect();
+    let artifacts: Vec<(&str, &str)> = urls
+        .iter()
+        .zip(&synthetic)
+        .map(|(url, sha1)| (url.as_str(), sha1.as_str()))
+        .collect();
+    seed_maven(directory.path(), &artifacts)?;
+
+    let mut recipe = recipe(path)?;
+    recipe.compatibility = Compatibility::Official;
+    recipe.target = Some(Target {
+        os: OperatingSystem::Windows,
+        arch: Architecture::Aarch64,
+        os_version: "10.0.26100".into(),
+    });
+    let resolved = resolve(&recipe, &context).await?;
+    assert_eq!(resolved.library_overrides.len(), modules.len());
+    assert!(resolved.classifier_overrides.is_empty());
+    let note = resolved
+        .compatibility
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("substitution was not recorded"))?;
+    assert!(note.contains("Windows ARM64"), "{note}");
+    assert!(note.contains("natives-windows-arm64"), "{note}");
+    let plan = compile(&recipe, &resolved)?;
+    assert_eq!(plan.compatibility.as_deref(), Some(note.as_str()));
+    for module in modules {
+        assert!(
+            plan.command
+                .classpath
+                .iter()
+                .any(|path| path.ends_with(&format!("{module}-3.3.3-natives-windows-arm64.jar"))),
+            "{module} ARM64 native missing from the plan"
+        );
+    }
+    assert!(
+        !plan
+            .resources
+            .iter()
+            .any(|resource| resource.url.ends_with("-natives-windows.jar")),
+        "the x64 Windows natives must not survive an ARM64 plan"
+    );
+
+    // The same manifest stays official on x64 Windows: no substitution, no note.
+    recipe.target = Some(Target {
+        os: OperatingSystem::Windows,
+        arch: Architecture::X86_64,
+        os_version: "10.0.26100".into(),
+    });
+    let official = resolve(&recipe, &context).await?;
+    assert!(official.library_overrides.is_empty());
+    assert!(official.classifier_overrides.is_empty());
+    assert!(official.compatibility.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn classifier_era_manifest_is_replaced_with_the_reviewed_windows_arm64_composition()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (path, original) = manifest("1.16.5")?;
+    let context = offline_context(directory.path(), &original)?;
+    let modules = [
+        "lwjgl",
+        "lwjgl-glfw",
+        "lwjgl-jemalloc",
+        "lwjgl-openal",
+        "lwjgl-opengl",
+        "lwjgl-stb",
+        "lwjgl-tinyfd",
+    ];
+    let mut urls = Vec::new();
+    for module in modules {
+        urls.push(format!(
+            "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.1/{module}-3.3.1.jar"
+        ));
+        urls.push(format!(
+            "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.1/{module}-3.3.1-natives-windows-arm64.jar"
+        ));
+    }
+    let synthetic: Vec<String> = (1..=urls.len())
+        .map(|index| format!("{index:040x}"))
+        .collect();
+    let artifacts: Vec<(&str, &str)> = urls
+        .iter()
+        .zip(&synthetic)
+        .map(|(url, sha1)| (url.as_str(), sha1.as_str()))
+        .collect();
+    seed_maven(directory.path(), &artifacts)?;
+
+    let mut recipe = recipe(path)?;
+    recipe.compatibility = Compatibility::Official;
+    recipe.target = Some(Target {
+        os: OperatingSystem::Windows,
+        arch: Architecture::Aarch64,
+        os_version: "10.0.26100".into(),
+    });
+    let resolved = resolve(&recipe, &context).await?;
+    // Seven core replacements and the seven matching ARM64 classifiers.
+    assert_eq!(resolved.library_overrides.len(), modules.len());
+    assert_eq!(resolved.classifier_overrides.len(), modules.len());
+    let note = resolved
+        .compatibility
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("substitution was not recorded"))?;
+    assert!(note.contains("reviewed 3.3.1 composition"), "{note}");
+    assert!(note.contains("Windows ARM64"), "{note}");
+    let plan = compile(&recipe, &resolved)?;
+    assert_eq!(plan.compatibility.as_deref(), Some(note.as_str()));
+    for module in modules {
+        assert!(
+            plan.command
+                .classpath
+                .iter()
+                .any(|path| path.ends_with(&format!("{module}-3.3.1.jar"))),
+            "{module} 3.3.1 core jar missing"
+        );
+        assert!(
+            plan.resources.iter().any(|resource| resource
+                .url
+                .ends_with(&format!("{module}-3.3.1-natives-windows-arm64.jar"))),
+            "{module} ARM64 native missing"
+        );
+        assert!(
+            !plan.resources.iter().any(|resource| resource
+                .url
+                .ends_with(&format!("{module}-3.2.2-natives-windows.jar"))),
+            "{module} x64 native survived the reviewed composition"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn windows_arm64_missing_artifact_is_reported_with_the_planned_url() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (path, original) = manifest("1.20.6")?;
+    let context = offline_context(directory.path(), &original)?;
+    // Everything except lwjgl-stb's ARM64 native is published; resolution must
+    // stop at the missing artifact instead of planning an x64 DLL.
+    let modules = [
+        "lwjgl",
+        "lwjgl-freetype",
+        "lwjgl-glfw",
+        "lwjgl-jemalloc",
+        "lwjgl-openal",
+        "lwjgl-opengl",
+        "lwjgl-tinyfd",
+    ];
+    let urls: Vec<String> = modules
+        .iter()
+        .map(|module| {
+            format!(
+                "https://repo.maven.apache.org/maven2/org/lwjgl/{module}/3.3.3/{module}-3.3.3-natives-windows-arm64.jar"
+            )
+        })
+        .collect();
+    let synthetic: Vec<String> = (1..=urls.len())
+        .map(|index| format!("{index:040x}"))
+        .collect();
+    let artifacts: Vec<(&str, &str)> = urls
+        .iter()
+        .zip(&synthetic)
+        .map(|(url, sha1)| (url.as_str(), sha1.as_str()))
+        .collect();
+    seed_maven(directory.path(), &artifacts)?;
+    let mut recipe = recipe(path)?;
+    recipe.compatibility = Compatibility::Official;
+    recipe.target = Some(Target {
+        os: OperatingSystem::Windows,
+        arch: Architecture::Aarch64,
+        os_version: "10.0.26100".into(),
+    });
+    let error = resolve(&recipe, &context)
+        .await
+        .err()
+        .context("resolution planned an ARM64 version without every native")?;
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("missing offline Maven descriptor"),
+        "{message}"
+    );
+    assert!(
+        message.contains("lwjgl-stb-3.3.3-natives-windows-arm64.jar"),
+        "{message}"
+    );
+    Ok(())
+}
