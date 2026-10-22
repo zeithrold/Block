@@ -103,7 +103,10 @@ def main():
                         except subprocess.TimeoutExpired:
                             app.terminate()
                             app.wait(timeout=5)
-    subprocess.run([sys.executable, ROOT / "scripts/parity-board"], check=True)
+    subprocess.run(
+        [sys.executable, ROOT / "scripts/parity-board", "--platform", "macos-arm64"],
+        check=True,
+    )
 
 
 if __name__ == "__main__":
