@@ -2897,6 +2897,7 @@ mod tests {
     fn actual_block_form_routes_unicode_input_tab_and_compatible_loader_selection(
         cx: &mut gpui::TestAppContext,
     ) {
+        use gpui_component::WindowExt as _;
         let (view, cx) = crate::test_support::window(cx, test_view);
         let bounds = cx.debug_bounds("create-instance");
         assert!(bounds.is_some());
@@ -2935,7 +2936,17 @@ mod tests {
         );
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
+        cx.run_until_parked();
+        let dialog = cx.update(|window, cx| window.has_active_dialog(cx));
+        let bounds = cx.debug_bounds("wizard-loader-neoforge");
+        let size = cx.update(|window, _| window.viewport_size());
+        eprintln!("loader dialog={dialog} size={size:?} neoforge={bounds:?}");
         click_selector(cx, "wizard-loader-neoforge");
+        cx.run_until_parked();
+        let dialog = cx.update(|window, cx| window.has_active_dialog(cx));
+        eprintln!("after click dialog={dialog}");
+        let bounds = cx.debug_bounds("wizard-loader-neoforge");
+        eprintln!("after click neoforge={bounds:?}");
         let state = view.read_with(cx, |view, cx| {
             view.form.as_ref().map(|form| match form {
                 super::Form::Instance(form) => (
