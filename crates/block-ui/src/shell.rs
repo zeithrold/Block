@@ -260,6 +260,13 @@ impl Block {
     }
 
     pub(super) fn navigation_title(&self) -> &'static str {
+        if self.shell.guide_preview.is_some() {
+            return match self.tab {
+                Tab::Settings => "Settings",
+                Tab::About => "About Block",
+                _ => "Block",
+            };
+        }
         if self.tab == Tab::Accounts && self.shell.providers.visible {
             return "Authlib providers";
         }
@@ -1039,19 +1046,27 @@ impl Block {
         if section {
             return content.into_any_element();
         }
+        // The separator spans the dialog edge to edge, while the actions keep
+        // the same inset as the body.
         content
             .child(
                 div()
                     .w_full()
                     .mt_4()
                     .pt_4()
-                    .px(px(24.))
+                    .pb_4()
                     .border_t_1()
                     .border_color(rgb(self.palette.border))
                     .flex()
                     .justify_end()
-                    .gap_2()
-                    .children(self.surface_dialog_actions(&kind, cx)),
+                    .child(
+                        div()
+                            .px(px(24.))
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .children(self.surface_dialog_actions(&kind, cx)),
+                    ),
             )
             .into_any_element()
     }
