@@ -495,18 +495,21 @@ impl Block {
         let rows = self.onboarding_review_rows(form, cx);
         div().flex().flex_col().gap_6()
             .child(self.setup_heading("03 / READY TO GO", "A world of possibilities.", if created { "Your game has been saved. Finish to return to Home." } else { "Review your choices. Each Change button returns to its draft." }))
-            .child(components::card(self.palette).py_0().px_4().children(rows.into_iter().enumerate().map(|(index, (title, value, action))| {
-                let mut row = div().py_3().flex().gap_3().items_center()
-                    .child(self.setup_caption(title).flex_shrink_0().w(px(76.)))
-                    .child(div().flex_1().min_w_0().text_sm().whitespace_normal().child(value))
-                    .children((!created).then(|| components::button_sized(
-                        format!("onboarding-review-change-{index}"), "Change", self.palette, ButtonVariant::Ghost, ButtonSize::Small,
-                        ControlState { disabled: self.busy, ..ControlState::default() },
-                        cx.listener(move |view, &(): &(), window, cx| view.handle(action.clone(), window, cx)),
-                    )));
-                if index != 0 { row = row.border_t_1().border_color(rgb(self.palette.border)); }
-                row
-            })))
+            .child(components::card(self.palette).py_0().px_4().child(
+                div().flex().flex_wrap().gap_3().children(rows.into_iter().enumerate().map(|(index, (title, value, action))| {
+                    // Ten review rows do not fit the fixed footer in one column;
+                    // a wrapped grid keeps every value visible without scrolling.
+                    div().w(px(266.)).min_w_0().py_2().flex().flex_col().gap_1()
+                        .child(div().flex().items_center().justify_between().gap_2()
+                            .child(self.setup_caption(title).min_w_0())
+                            .children((!created).then(|| components::button_sized(
+                                format!("onboarding-review-change-{index}"), "Change", self.palette, ButtonVariant::Ghost, ButtonSize::Small,
+                                ControlState { disabled: self.busy, ..ControlState::default() },
+                                cx.listener(move |view, &(): &(), window, cx| view.handle(action.clone(), window, cx)),
+                            ))))
+                        .child(div().text_sm().whitespace_normal().child(value))
+                })),
+            ))
             .children(created.then(|| components::badge("Game saved", self.palette, BadgeVariant::Primary)))
             .children((self.busy && created).then(|| components::progress(ProgressState::Indeterminate, self.palette)))
             .children(self.busy.then(|| self.setup_caption(self.status.clone())))
@@ -539,7 +542,12 @@ impl Block {
         );
         let memory = profile.map_or_else(
             || "Default".into(),
-            |profile| format!("{} MiB", profile.memory.read(cx).value()),
+            |profile| {
+                profile.memory.read(cx).value().parse::<u32>().map_or_else(
+                    |_| format!("{} MiB", profile.memory.read(cx).value()),
+                    super::components::memory_label,
+                )
+            },
         );
         let window = profile.map_or_else(
             || "Default".into(),
