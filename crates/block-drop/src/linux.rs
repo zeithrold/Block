@@ -66,10 +66,11 @@ struct Atoms {
 
 struct DragState {
     source: Window,
-    /// Target type the source offered and we will request on drop.
-    offered: Option<Atom>,
+    /// Text target types to try in order on drop.
+    targets: Vec<Atom>,
     accepted: bool,
     pending: bool,
+    next_target: usize,
     drop_time: u32,
 }
 
@@ -77,9 +78,10 @@ impl DragState {
     const fn empty() -> Self {
         Self {
             source: 0,
-            offered: None,
+            targets: Vec::new(),
             accepted: false,
             pending: false,
+            next_target: 0,
             drop_time: 0,
         }
     }
@@ -397,23 +399,29 @@ fn handle_enter(state: &mut Ready, data: [u32; 5]) {
     } else {
         data[2..].get(..count as usize).unwrap_or(&[]).to_vec()
     };
-    let mut offered = crate::text_offer(
+    let offered = crate::text_offer(
         &types,
         state.atoms.utf8,
         state.atoms.text_plain,
         state.atoms.string,
     );
-    // Some GTK sources advertise more than three types through XdndTypeList.
-    // Read the property again at enter time in that case; when it is still
-    // unavailable the drop requests UTF8_STRING optimistically, and the
-    // payload validation below still rejects anything that is not a quick link.
-    if offered.is_none() && types.is_empty() {
-        offered = Some(state.atoms.utf8);
+    // Some GTK sources put their targets in XdndTypeList; if even that is not
+    // available yet, try the usual text targets in order on drop. Every target
+    // conversion is still validated as a quick link before anything is
+    // delivered, so a refused or non-text offer simply falls through.
+    let mut targets = Vec::with_capacity(3);
+    if let Some(offered) = offered {
+        targets.push(offered);
+    }
+    for fallback in [state.atoms.utf8, state.atoms.text_plain, state.atoms.string] {
+        if !targets.contains(&fallback) {
+            targets.push(fallback);
+        }
     }
     state.drag.reset();
     state.drag.source = source;
-    state.drag.offered = offered;
-    state.drag.accepted = offered.is_some();
+    state.drag.targets = targets;
+    state.drag.accepted = true;
 }
 
 fn read_type_list(state: &Ready, source: Window) -> Vec<Atom> {
@@ -465,30 +473,41 @@ fn handle_drop(state: &mut Ready, data: [u32; 5]) {
         state.atoms.text_plain,
         state.atoms.string,
     ) {
-        state.drag.offered = Some(target);
-        state.drag.accepted = true;
+        state.drag.targets.retain(|existing| *existing != target);
+        state.drag.targets.insert(0, target);
     }
-    let Some(target) = state.drag.offered.filter(|_| state.drag.accepted) else {
-        finish(state, source, false);
+    state.drag.pending = true;
+    state.drag.next_target = 0;
+    request_next_target(state);
+}
+
+/// Requests the next text target; when every candidate is refused the drop is
+/// finished as unsuccessful.
+fn request_next_target(state: &mut Ready) {
+    let Some(target) = state.drag.targets.get(state.drag.next_target).copied() else {
+        state.drag.pending = false;
+        finish(state, state.drag.source, false);
         state.drag.reset();
         return;
     };
-    state.drag.pending = true;
+    state.drag.next_target += 1;
     let _ = state.connection.convert_selection(
         state.window,
         state.atoms.selection,
         target,
         state.atoms.property,
-        data[2],
+        state.drag.drop_time,
     );
     let _ = state.connection.flush();
 }
 
 fn handle_selection(state: &mut Ready, event: x11rb::protocol::xproto::SelectionNotifyEvent) {
-    if !state.drag.pending || event.requestor != state.window || event.property == 0 {
-        state.drag.pending = false;
-        finish(state, state.drag.source, false);
-        state.drag.reset();
+    if !state.drag.pending || event.requestor != state.window {
+        return;
+    }
+    if event.property == 0 {
+        // The source refused this target type; try the next candidate.
+        request_next_target(state);
         return;
     }
     let text = state
