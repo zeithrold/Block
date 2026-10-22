@@ -39,7 +39,7 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 | --- | --- | --- | --- | --- |
 | Profile/account selection; empty/loading/error states | Yes | Pending | Pending | Persistent catalog and selector sheets. |
 | Real account avatars in Home and selectors | Yes | Pending | Pending | Microsoft active skin and Authlib declared textures only; bounded validated fetch, data-dir cache with digest/URL/structure revalidation, silent initials fallback (no demo skins). Native display check pending. |
-| Play/Stop, recovery and crash help | Yes | Partial | Pending | Windows Play/Stop and macOS relaunch passed; crash help pending. |
+| Play/Stop, recovery and crash help | Yes | Yes (Windows, Linux) | Pending | Windows Q6 Play/Stop all loaders, crash help with recovery, and Linux ARM64/AMD64 menu→Stop passed. macOS native check pending. |
 | Downloads, retries and file details | Yes | Pending | Pending | Real byte events. |
 
 ### Accounts and sign-in
@@ -63,41 +63,41 @@ Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Na
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| Bundled/Separated browsing, search, details, Home sync | Yes | Pending | Pending | Mode rules persisted. |
-| Profile/Instance appearance and settings drafts | Yes | Pending | Pending | Version/loader immutable. |
+| Bundled/Separated browsing, search, details, Home sync | Yes | Yes (Windows) | Pending | Q6 separated mode: one-way conversion, second Profile sharing an Instance and Home sync exercised natively. |
+| Profile/Instance appearance and settings drafts | Yes | Yes (Windows) | Pending | Theme/reduced-motion and separated-profile drafts exercised natively; version/loader immutable. |
 | Icons/colors, memory/JVM, Java/window defaults, folders/account | Yes | Pending | Pending | Compiled into launch recipes. |
 | Bundled two-step / Separated four-step creation | Yes | Pending | Pending | Atomic Instance/Profile pair. |
-| Version, loader/build and location pickers | Yes | Pending | Pending | Real catalogs. |
-| Vanilla installation, progress, retry and resume | Yes | Partial | Pending | macOS/Windows Welcome/install/Play passed; retry pending. |
-| Fabric installation and build selection | Yes | Pending | Pending | Official catalog. |
-| Quilt installation and build selection | Yes | Pending | Pending | Older representative pending. |
-| Forge modern/legacy installation and build selection | Yes | Pending | Pending | Windows native legacy flow pending. |
-| NeoForge full catalog and installation | Yes | Pending | Pending | Includes 1.20.1 and 26.x. |
-| OptiFine standalone/Forge import and installation | Yes | Partial | Pending | Existing-target re-import now edits OptiFine in Instance settings (select/replace/remove with draft Cancel/Done, atomic catalog commit + reinstall); wizard path unchanged. Native 1.16.5 G8 and 1.21.1 J1 launches passed on Windows; 1.12.2 G5 is a Forge-tweaker JAR without a declared Forge version (issue-reference changelog) and needs the standalone variant or a product decision. |
+| Version, loader/build and location pickers | Yes | Yes (Windows, Linux) | Pending | Real catalogs; Q6/Q10 loader picks, Q3 ARM64 restriction, Q9 search/scroll. |
+| Vanilla installation, progress, retry and resume | Yes | Yes (Windows, Linux) | Pending | Windows Q6 interrupted download→Retry→Repair complete→launch; Q10 1.8.9/1.12.2; Linux AMD64 Q6 1.20.6. |
+| Fabric installation and build selection | Yes | Yes (Windows, Linux) | Pending | Q6 Windows Fabric 0.19.5→title; Q10 Fabric 1.16.5→title; Linux fixture/AMD64 paths. |
+| Quilt installation and build selection | Yes | Yes (Windows) | Pending | Q6 Quilt 0.30.1 on 1.21.11; Q10 Quilt 1.18.2→title; no-builds error now clean. |
+| Forge modern/legacy installation and build selection | Yes | Yes (Windows) | Pending | Q6 Forge 1.21.11 and legacy Forge 1.12.2→title (FML log); Q10 legacy rep. |
+| NeoForge full catalog and installation | Yes | Yes (Windows) | Pending | Q6 NeoForge 21.11.48→title; queued-Play UI follow-up in progress. |
+| OptiFine standalone/Forge import and installation | Yes | Yes (Windows) | Pending | Existing-target re-import edits OptiFine in Instance settings (select/replace/remove, draft Cancel/Done, atomic catalog commit + reinstall). Native 1.21.1 J1, 1.16.5 G8 and 1.12.2 G5 standalone reached the menu with OptiFineTweaker logs. G5-as-Forge remains refused (no declared Forge version); the older C5 installer format lacks launchwrapper-of.txt and is unsupported. |
 | Quick Play and saved server settings | Yes | Pending | Pending | Manifest Quick Play for 1.20+, legacy --server/--port for older releases. |
 | Productized LWJGL 3 ARM64 compatibility and Java 8 | Yes | Partial | Pending | Linux ARM64 substitutes official ARM64 LWJGL natives (pre-3.3.1 → reviewed 3.3.1 composition) and provisions Azul Zulu Java 8 via official metadata; native 1.16.5/1.18.2 Play verified. Windows ARM64 substitution merged (016c695), native VM run pending. |
 | ARM64 LWJGL 2 picker restriction | Yes | Yes (Linux ARM64) | Pending | Rows stay visible but disabled with the inline reason; typed exact IDs are refused in-dialog. Native proof on Linux ARM64 (851e23b); macOS/Windows ARM64 picker checks pending. |
-| Deletion, confirmation and linked Profiles | Yes | Pending | Pending | Player files retained. |
+| Deletion, confirmation and linked Profiles | Yes | Yes (Windows) | Pending | Q6 separated deletion dialog; player marker file survived, linked Profile rules held. |
 
 ### Settings
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
-| General: theme preview/save/cancel, reduced motion | Yes | Pending | Pending | Saved and preview values separate. |
+| General: theme preview/save/cancel, reduced motion | Yes | Yes (Windows, Linux) | Pending | Windows Q6 Dark preview/Cancel/Save; Linux in-app + GTK system reduced motion; Windows SPI query wired. |
 | Game: Java, memory/JVM, window/fullscreen, snapshots | Yes | Pending | Pending | New-game defaults only. |
 | Memory 1–32 GB, Java choice, window presets/custom, JVM | Yes | Pending | Pending | Validated defaults. |
-| Profiles: confirmed one-way conversion, Restore defaults | Yes | Pending | Pending | Mode preserved by reset. |
-| Downloads: System/Direct/HTTP(S)/SOCKS5 and connection test | Yes | Pending | Pending | Draft-bound probe. |
+| Profiles: confirmed one-way conversion, Restore defaults | Yes | Yes (Windows) | Pending | Q6 one-way conversion confirmed natively. Restore defaults still pending. |
+| Downloads: System/Direct/HTTP(S)/SOCKS5 and connection test | Yes | Yes (Windows) | Pending | Q6 local SOCKS5 forwarder: test HTTP 200 + 22 CONNECT lines during a real install; reset to Direct. |
 | Parallel 1–16, retries 0–10, nonnegative MB/s limit | Yes | Pending | Pending | Real transport policies. |
-| Storage: paths, verified relocation, interruption recovery | Yes | Pending | Pending | Original copies retained. |
-| Relocation leases and confirmed retained-copy cleanup | Yes | Pending | Pending | Cleanup confirmation dialog. |
+| Storage: paths, verified relocation, interruption recovery | Yes | Yes (Windows) | Pending | Q6 native relocation, retained-copy cleanup dialog, relocated game launched. |
+| Relocation leases and confirmed retained-copy cleanup | Yes | Yes (Windows) | Pending | Q6 cleanup dialog confirmed the retained copy removal; lock retry hardened for parallel tests. |
 
 ### About and Welcome
 
 | Feature | Built | Native E2E | Accepted | Note |
 | --- | --- | --- | --- | --- |
 | About: build/product, brand, links and copy actions | Yes | Pending | Pending | Real information. |
-| Welcome: three steps, drafts, skip, download/retry | Yes | Pending | Pending | No implicit identity on Skip. |
+| Welcome: three steps, drafts, skip, download/retry | Yes | Yes (Windows, Linux) | Pending | Q6 Skip created no identity; download/retry and Welcome flows on Windows/Linux. |
 | Welcome: atomic new-account/game final commit | Yes | Yes (Windows) | Pending | Identity is memory-only until the final commit; failed save rolls back. Native run 1ac4564. |
 
 ### Cross-page
@@ -119,7 +119,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Host | Vanilla | Fabric | Quilt | Forge | NeoForge | OptiFine | Authlib | Older |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | macOS ARM64 | 1.20.6 UI 78f1595 | 1.20.6 API 41982ff | 1.20.6 API 41982ff | 1.20.1/1.21.1 API 80ed125 | 1.20.1/1.21.1/26.3 API 80ed125 | 1.21.1 standalone/Forge API 78f1595 | 1.20.6 API fixture 553834f | NeoForge 1.20.1 API 80ed125 |
-| Windows AMD64 | 1.20.6 UI 1ac4564 | 1.20.6 API bb901b7 | | 1.21.1 API 168a6e1 | | | | Forge 1.12.2 API 168a6e1 |
+| Windows AMD64 | 1.20.6/1.8.9/1.12.2 native Q6/Q10 | 1.16.5 native Q10 | 1.18.2 native Q10 | 1.21.11 + 1.12.2 native Q6 | 1.21.11 native Q6 | 1.21.1/1.16.5/1.12.2 native Q10 | | Forge 1.12.2 native Q6 |
 | Linux AMD64 | 1.20.6 native UI 016c695 | 1.20.6 API bd5f6ff | | 1.21.1 API bd5f6ff | | | | |
 | Linux ARM64 | 1.16.5/1.18.2 native menus (Azul runtime) 851e23b | 1.20.6 API bb901b7 | | 1.21.1 API bb901b7 | | | | 1.12.2 picker disabled (native proof) 851e23b |
 
