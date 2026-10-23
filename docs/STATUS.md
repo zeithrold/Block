@@ -13,6 +13,27 @@ User decision, 2026-10-23; full scope and ownership: [next-tasks.md](next-tasks.
 
 The inventory's Built / Native E2E columns provide Milestone II functional evidence. Its Accepted column records Milestone III user acceptance. A defect that prevents a core task remains a Milestone II usability issue even when it appears in the UI. This split does not mark pending evidence or acceptance as complete.
 
+## Milestone II screenshot deliverables (user decision, 2026-10-23)
+
+Milestone II must leave a complete screenshot evidence set for Milestone III review; visual/interaction acceptance itself still belongs to Milestone III. All items below are **prepared artifacts**, not acceptance.
+
+| Deliverable | Current state |
+| --- | --- |
+| Native scene matrix, Windows + macOS, 71 scenarios × light/dark | Windows 142 shots at `bae97f0` and macOS 142 shots at `3f151b4` exist under `target/parity-shots/{windows-amd64/scenarios,native}`; recapture after relevant code changes. |
+| Scenario→page/state mapping manifest | Not produced. The boards pair 39 scenario names with React references; 32 are native-only and 4 are reference-only, leaving 72 missing-side placeholders per board in both themes. |
+| Missing React prototype references | Not captured. Prototype snapshot `fd2713b` with Playwright is available; the 32 native-only states need reference captures or a written native-only explanation. |
+| E2E flow screenshot index (Q5/Q6/Q7/Q8/Q10 and platform E2E) | Not produced. Individual `e2e-*` images/logs exist under `target/parity-shots/*`; they need one linked index with captions. |
+| Per-page real-data light/dark screenshots: Home, Accounts, Games, Wizard, Settings, About, Welcome | Not produced. Planned on Windows AMD64 (primary) and macOS ARM64 using existing seeded data; scenario fixtures alone are not enough. |
+
+Status: **paused before this work started** at the user's request (interview). Do not start builds, captures, VM runs or live checks until the user explicitly asks to begin.
+
+## Session checkpoint (2026-10-23)
+
+- Milestone II functional evidence is complete except the screenshot set above, the security revoke plus final live Microsoft sign-in/relaunch check, and Microsoft live-avatar verification.
+- CI is green at `2ce25e7` for the four push platforms; the manual `windows-arm64` workflow is green at `82b3847` with an uploaded native launcher artifact.
+- Windows ARM64 native launcher evidence exists; its game launch is blocked only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 is environment-blocked; 1.16.5/1.12.2 have no official ARM64 Java 8.
+- All workstreams are inactive and the goal is not running; the Mac-hosted VMs are not running. No Accepted marker has been set.
+
 ## Product decisions and intended differences
 
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
