@@ -63,6 +63,8 @@ Toast motion follow-up: entrance and stack movement now use Sonner's 400 ms CSS 
 
 Drawer entrance follow-up: the panel now uses the prototype's 450 ms custom Bézier curve, with a separate backdrop curve and the 2 px closed offset. Matched foreground macOS/browser samples reduced mean panel animation-phase error from 7.711% to 0.052%; trigger-relative startup differences remain separately reported. The local macOS gate passed 556 tests across 39 suites. [Measurement method and remaining review](drawer-motion-comparison.md) distinguish curve evidence from desktop visual acceptance; Accepted remains Pending.
 
+Home primary-action follow-up: Create game, Repair and Download previously inherited Outline hover/pressed backgrounds under a primary-colored idle override, leaving light text on a light hover surface. Home now explicitly requests the Primary variant for its changing command, preserving coherent idle/hover/pressed styles. A rendered contrast regression reproduced the Create game hover failure (1.04:1) and now covers Create/Launch/Retry download/Download in both themes; broader desktop acceptance remains pending.
+
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
 - Windows is the primary native UI/E2E and visual-review platform (user decision, 2026-10-22); retain platform-specific macOS/Linux checks.
 - New catalogs use Bundled mode: one Instance and exactly one associated Profile; names and appearance match Home.

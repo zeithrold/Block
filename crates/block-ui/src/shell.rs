@@ -515,8 +515,17 @@ impl Block {
             UiAction::CreateInstance => super::design::Icon::Plus,
             _ => super::design::Icon::Download,
         };
+        // The Home action stays primary when its command becomes Create,
+        // Repair or Download; changing only the idle fill leaves Outline's
+        // hover/pressed colors behind.
         let primary = self
-            .button("home-play", "", action, cx)
+            .button_with_variant(
+                "home-play",
+                "",
+                action,
+                super::components::ButtonVariant::Primary,
+                cx,
+            )
             .w_full()
             .min_w_0()
             .h(px(80.))
@@ -525,8 +534,6 @@ impl Block {
             .items_center()
             .justify_center()
             .text_xl()
-            .bg(rgb(self.palette.primary))
-            .text_color(rgb(self.palette.on_primary))
             .child(
                 div()
                     .flex()

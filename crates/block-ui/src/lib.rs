@@ -2199,6 +2199,17 @@ impl Block {
             | UiAction::CloseWindow => components::ButtonVariant::Ghost,
             _ => components::ButtonVariant::Outline,
         };
+        self.button_with_variant(id, label, action, variant, cx)
+    }
+
+    fn button_with_variant(
+        &self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        action: UiAction,
+        variant: components::ButtonVariant,
+        cx: &Context<'_, Self>,
+    ) -> components::Control {
         let disabled = self.busy && !self.can_activate(&action)
             || matches!(action, UiAction::SignIn) && self.busy && self.shell.auth.is_none()
             || matches!(action, UiAction::Stop) && !self.can_stop();

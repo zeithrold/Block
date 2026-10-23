@@ -138,6 +138,111 @@ fn configured_home(view: &gpui::Entity<crate::Block>, cx: &mut gpui::VisualTestC
     frame(cx, 500);
 }
 
+fn home_action_background(cx: &mut gpui::VisualTestContext) -> gpui::Rgba {
+    let bounds = crate::test_support::control_bounds(cx, "home-play");
+    assert!(bounds.is_some(), "Home primary action is present");
+    let bounds = bounds.unwrap_or_default();
+    let color = cx.update(|window, _| {
+        let scale = window.scale_factor();
+        window.painted_quads().into_iter().find_map(|quad| {
+            ((quad.bounds.size.width.0 - f32::from(bounds.size.width) * scale).abs() < 0.5
+                && (quad.bounds.size.height.0 - f32::from(bounds.size.height) * scale).abs() < 0.5)
+                .then(|| quad.background.as_solid().map(gpui::Hsla::to_rgb))
+                .flatten()
+        })
+    });
+    assert!(color.is_some(), "primary action has a painted background");
+    color.unwrap_or_default()
+}
+
+fn contrast_ratio(a: gpui::Rgba, b: gpui::Rgba) -> f32 {
+    let luminance = |color: gpui::Rgba| {
+        let linear = |channel: f32| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+#[gpui::test]
+fn home_primary_action_keeps_readable_hover_and_pressed_colors_for_every_action(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.simulate_resize(gpui::size(gpui::px(432.), gpui::px(768.)));
+    configured_home(&view, cx);
+    for (appearance, palette) in [
+        (crate::Appearance::Light, crate::Palette::LIGHT),
+        (crate::Appearance::Dark, crate::Palette::DARK),
+    ] {
+        for (action, status) in [
+            ("create", None),
+            ("launch", Some(InstallStatus::Ready)),
+            (
+                "retry",
+                Some(InstallStatus::Failed {
+                    message: "Interrupted".into(),
+                }),
+            ),
+            ("download", Some(InstallStatus::Pending)),
+        ] {
+            cx.simulate_mouse_move(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                None,
+                gpui::Modifiers::none(),
+            );
+            view.update(cx, |view, cx| {
+                view.preferences.appearance = appearance;
+                if let Some(status) = status {
+                    view.snapshot = crate::test_support::ready_snapshot();
+                    view.snapshot.instances[0].targets[0].status = status;
+                    view.selected_profile = Some("profile-a".into());
+                    view.selected_instance = Some("instance-a".into());
+                } else {
+                    view.snapshot = Default::default();
+                    view.selected_profile = None;
+                    view.selected_instance = None;
+                }
+                cx.notify();
+            });
+            cx.run_until_parked();
+            let bounds = crate::test_support::control_bounds(cx, "home-play").unwrap_or_default();
+            let background = gpui::rgb(palette.background);
+            let foreground = gpui::rgb(palette.on_primary);
+            let position = gpui::point(bounds.left() + gpui::px(20.), bounds.center().y);
+            for state in ["normal", "hover", "pressed"] {
+                if state == "hover" {
+                    cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
+                } else if state == "pressed" {
+                    cx.simulate_mouse_down(
+                        position,
+                        gpui::MouseButton::Left,
+                        gpui::Modifiers::none(),
+                    );
+                }
+                cx.run_until_parked();
+                let painted = background.blend(home_action_background(cx));
+                let contrast = contrast_ratio(foreground, painted);
+                assert!(
+                    contrast >= 4.5,
+                    "{appearance:?} {action} {state}: {contrast:.2}:1 against {painted:?}"
+                );
+            }
+            // Release outside the action to inspect pressed styling without
+            // creating a game, retrying downloads or launching the fixture.
+            let outside = gpui::point(gpui::px(0.), gpui::px(0.));
+            cx.simulate_mouse_move(outside, gpui::MouseButton::Left, gpui::Modifiers::none());
+            cx.simulate_mouse_up(outside, gpui::MouseButton::Left, gpui::Modifiers::none());
+        }
+    }
+}
+
 #[gpui::test]
 fn task_phase_and_progress_follow_real_events_without_replaying_local_entry(
     cx: &mut gpui::TestAppContext,
