@@ -24,7 +24,7 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
   - Linux AMD64: native Welcome → Vanilla → menu → Stop; Q9 D6 short-display/reduced-motion/input checks; Authlib fixture sign-in + real avatar + injected 1.20.6 menu; provider icons; X11 quick-link drag.
   - Windows ARM64: native launcher build, Welcome, catalog, install, offline account and restart persistence passed; game rendering is blocked by the VM's missing OpenGL ICD, a recorded best-effort boundary.
 - Windows Settings/SOCKS5/storage, loader and older-version flows, OptiFine re-import, queued Play, and lifecycle race fixes have evidence in STATUS.md and target/parity-shots/.
-- Milestone II remaining: **prepare the complete screenshot evidence set** (native scene matrices for Windows/macOS, a scenario→page/state mapping manifest, the missing React prototype references, an E2E flow screenshot index, and real-data light/dark screenshots for Home/Accounts/Games/Wizard/Settings/About/Welcome), then the security revoke and final live-account sign-in/relaunch check plus Microsoft live-avatar verification. Screenshot preparation is a Milestone II deliverable; it has **not been started** (paused at the user's request for an interview). Completion has not been declared.
+- Milestone II remaining: **prepare the complete screenshot evidence set** (native scene matrices for Windows/macOS, a scenario→page/state mapping manifest, the missing React prototype references, an E2E flow screenshot index, and real-data light/dark screenshots for Home/Accounts/Games/Wizard/Settings/About/Welcome). The screenshot set is partially prepared (Windows/macOS per-page shots, 21/32 missing references, native matrices); mapping manifest/board rebuild still pending. The security revoke and live-account re-sign-in/relaunch checks are complete on all five platforms (macOS, Windows AMD64, Linux ARM64, Linux AMD64, Windows ARM64). Completion has not been declared.
 - Milestone III backlog: page-by-page visual and interaction review using the completed Milestone II screenshot set; macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720; interaction fixes and acceptance. Each platform currently has 142 native scenario images; only 39 scenario names pair with React references and each board has 72 missing-side placeholders despite no broken image links, which the Milestone II screenshot preparation must resolve or explain.
 
 ## Decisions (user, 2026-10-21)
@@ -126,10 +126,10 @@ Report Milestone II usability, Milestone III interaction acceptance, Milestone I
 - [x] Provide the official OptiFine 1.21.1 JAR.
 - [x] Enable "Allow public client flows" on the Azure app registration. Device Code sign-in requires it.
 - [x] Sign in with the genuine Microsoft account (macOS PKCE/Device Code, Windows, both Linux hosts done).
-- [ ] Revoke Block's app access in the Microsoft account (a refresh token was printed once in a diagnostic transcript), then re-sign in for the final live-account check.
+- [x] Revoke Block's app access in the Microsoft account (a refresh token was printed once in a diagnostic transcript), then re-sign in for the final live-account check (done on all five platforms; re-revoking the new test grant is optional).
 - [x] Install the Rust platform on the Windows ARM64 VM (native build + tests run there).
-- [ ] Unlock the Linux AMD64 keyring after VM reboots when a saved Microsoft account is needed there.
-- [ ] Milestone III: review native screenshots and behavior page by page after reference/mapping gaps are resolved or explained.
+- [x] Linux AMD64 keyring was unlocked for the live check; it relocks after a reboot and only needs attention again for future saved-account runs.
+- [ ] Milestone III (Codex): review native screenshots and behavior page by page after reference/mapping gaps are resolved or explained.
 - [x] Download an official OptiFine JAR for one older Minecraft version for the older-representative smoke.
 - [ ] Optional: provide an Authlib provider account for live-provider verification.
 - [x] Quick-link drags were verified with real browser drags on Windows, macOS and Linux X11.

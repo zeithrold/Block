@@ -32,7 +32,9 @@ Status: **paused before this work started** at the user's request (interview). D
 - Milestone II functional evidence is complete except the screenshot set above, the security revoke plus final live Microsoft sign-in/relaunch check, and Microsoft live-avatar verification.
 - CI is green at `2ce25e7` for the four push platforms; the manual `windows-arm64` workflow is green at `82b3847` with an uploaded native launcher artifact.
 - Windows ARM64 native launcher evidence exists; its game launch is blocked only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 is environment-blocked; 1.16.5/1.12.2 have no official ARM64 Java 8.
-- All workstreams are inactive and the goal is not running; the Mac-hosted VMs are not running. No Accepted marker has been set.
+- All five platforms completed live Microsoft re-sign-in with real avatars after the security revoke: macOS PKCE, Windows AMD64 Device Code, Linux ARM64/AMD64 Device Code, Windows ARM64 Device Code. macOS and Windows AMD64 passed a game menu plus the relaunch/no-sign-in check; Linux ARM64 passed the same with 1.16.5; Linux AMD64 game launch and Windows ARM64 game render were skipped for time/environment.
+- Screenshot preparation is partially done: Windows 34 per-page shots, macOS 38 per-page shots, 21/32 missing React references captured (11 documented as no prototype equivalent), native scene matrices exist. Mapping manifest/board rebuild and the remaining reference decisions are still pending.
+- All workstreams are inactive and no goal is driving work; the Mac-hosted VMs may be running for these checks. No Accepted marker has been set.
 
 ## Product decisions and intended differences
 
@@ -204,13 +206,13 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Item | Status |
 | --- | --- |
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
-| Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
+| Microsoft live sign-in across platforms | Complete after the security revoke: macOS PKCE, Windows AMD64 Device Code, Linux ARM64/AMD64 Device Code and Windows ARM64 Device Code all saved the live account with a real avatar; macOS and Windows AMD64 reached a game menu and passed the relaunch/no-sign-in check. |
 | Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
 | Prototype/native board and behavior acceptance | Milestone III: 142 Windows + 142 macOS native scenario images exist; reference/mapping gaps must be resolved or explained before page-by-page user acceptance. macOS overlay/IME/drag native checks passed. |
-| Mac GUI lock (2026-10-23) | The Mac locked at the login screen around 01:16; macOS OS reduced-motion, transition-frame audit and the literal management-page fit check need an unlocked interactive session. Fit-to-display Home/management-width evidence was captured before lock. |
+| Mac GUI lock (2026-10-23) | Resolved: the user unlocked the Mac and the live PKCE check passed. The remaining macOS OS reduced-motion, transition-frame audit and literal 1280×720 management-page checks belong to Milestone III and can run in a later interactive session. |
 | Windows ARM64 Q4 run | Resolved on the VM: native `cargo build -p block-app --bin block` (LLVM for ring, MSVC ARM64) produced the ARM64 launcher; native UI opened, official catalog loaded, 1.20.6 installed with the managed Mojang windows-arm64 Java 21.0.7 runtime, offline account saved and persisted across restart. Game launch reaches Java/LWJGL 3.3.3 with the natives-windows-arm64 substitution but the VMware Fusion ARM64 guest has no OpenGL ICD (`GLFW error 65542 WGL`), so no main menu; VMware Tools for ARM64 installed without a 3D/OpenGL driver. Environment limitation, not a launcher defect. |
 | Windows ARM64 game launch | 1.20.6 native-path evidence: managed Java 21.0.7, LWJGL 3.3.3, Compatibility "Windows ARM64: LWJGL 3.3.3 ... official natives-windows-arm64" and the ARM64 natives on the classpath; blocked from the menu only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 environment-blocked by the same; 1.16.5/1.12.2 have no official ARM64 Java 8. x64 emulation remains a product choice, not implemented. |
-| Diagnostic token exposure (2026-10-22) | A refresh token was printed once in a host diagnostic transcript (no file/commit/log). Revoke Block's app access in the Microsoft account and sign in again when convenient. |
+| Diagnostic token exposure (2026-10-22) | Block access was revoked, then live sign-in was completed again on macOS, Windows AMD64, Linux ARM64, Linux AMD64 and Windows ARM64 with real avatars and launch/relaunch checks (Linux AMD64 game launch and Windows ARM64 game render were skipped for time/environment). Re-revoking the new test grant is an optional security follow-up. |
 | Older official OptiFine JAR | 1.16.5 G8 and 1.12.2 G5 standalone validated and launched; G5-as-Forge stays refused (no declared Forge version); C5 (2017 old installer format, no launchwrapper-of.txt) is unsupported. |
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
 | Real quick-link drag on hosts automation cannot drive | Real browser drags verified on Windows AMD64, macOS (Chrome→zone) and Linux X11; Wayland documented unsupported. No remaining user drag batch. |
