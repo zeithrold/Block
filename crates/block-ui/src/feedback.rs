@@ -540,9 +540,9 @@ impl Render for ToastLayer {
             .flex()
             .justify_center()
             .items_end()
-            .pb(self.bottom + inset.bottom)
-            .pl(inset.left)
-            .pr(inset.right)
+            // Root plugins already live inside WindowBorder's content box.
+            // Only the width calculation needs the outer viewport's insets.
+            .pb(self.bottom)
             .child(stack)
     }
 }
