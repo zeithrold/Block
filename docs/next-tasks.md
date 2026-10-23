@@ -1,28 +1,31 @@
 # Block: Pilot Task List
 
-Date: 2026-10-21, updated 2026-10-22 for v8. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Execution prompts: [codex-goal-prompt.md](codex-goal-prompt.md).
+Date: 2026-10-21, updated 2026-10-23 for the milestone split. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [codex-goal-prompt.md](codex-goal-prompt.md).
 
-## What "Pilot" means
+## Development milestones (user decision, 2026-10-23)
 
-The pilot is the **complete product**:
-- every page of the prototype is matched natively
-- every feature it exposes works against real services
-- nothing is faked or left as an unimplemented placeholder; genuine compatibility, validation and busy-state restrictions explain why an action is unavailable
+| Stage | Focus | Owner / current state |
+| --- | --- | --- |
+| Pilot Milestone II | Basic usability: real features and end-to-end flows work. Interaction polish is deferred. | DeepSeek; nearly complete, remaining functional verification stays explicit. |
+| Pilot Milestone III | Interaction quality: inspect and fix interactions one by one, including visual presentation, navigation, input, focus, overlays, motion and feedback. Architecture design is deferred. | Codex; next stage, not started by this planning update. |
+| Pilot Milestone IV | Begin architecture design, using the working product and interaction findings as inputs. | Future stage; implementation of a redesign needs its own scope. |
+| v0 | First public unstable release. | Future stage; release preparation and publication are separate from Pilot completion. |
 
-Only **architecture governance** is deferred to v0. That covers structural refactoring, layering, file splitting, lint tidy-up and cleaning up code that already works.
+These stages supersede the earlier combined Pilot acceptance gate and the rule that architecture waits for v0. Milestone II still requires real behavior rather than placeholders, safe persistence, and explicit compatibility limits. An interaction defect that blocks a core flow remains a Milestone II usability issue; visual or interaction refinement belongs to Milestone III. Only the user's review sets Accepted in Milestone III. Missing visual acceptance does not by itself block Milestone II completion.
 
-## Where we are (2026-10-22, v8, HEAD `7da0662`)
+## Where we are (2026-10-23, reviewed HEAD `2ce25e7`)
 
-- DeepSeek Harness runs the rest of the pilot under the v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). v6/v7 are in Git history.
-- CI: four platforms green through `f30b8a7`; a storage-lock flake from an inherited `flock` in parallel tests is fixed with a bounded retry, and the Windows-only drop-target lints are fixed. Keep watching green before/after each merge.
+- DeepSeek is closing Milestone II under the scoped v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). Codex owns Milestone III. v6/v7 are in Git history.
+- CI: four platforms green at `2ce25e7` (run 39831335710); Windows ARM64 green with an uploaded artifact at `82b3847` (run 39823711474). Changes between those commits are documentation only.
 - Native app evidence:
-  - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again. Recaptures/deeper flows wait for a Mac-idle window.
+  - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again; overlay, IME and real quick-link drag checks passed.
   - Windows AMD64: Device Code; atomic Welcome; Vanilla → main menu → Stop; Q6 loader flows (Fabric/Quilt/Forge/NeoForge/legacy Forge), separated mode, crash help, interrupted-download retry, real quick-link drag.
   - Linux ARM64: native 1.16.5/1.18.2 wizard → Play → menu → Stop with Azul runtimes; LWJGL2 picker restriction.
   - Linux AMD64: native Welcome → Vanilla → menu → Stop; Q9 D6 short-display/reduced-motion/input checks; Authlib fixture sign-in + real avatar + injected 1.20.6 menu; provider icons; X11 quick-link drag.
-- Built and merged this round: in-window overlay refactor (Q1), real account avatars and provider icons (Q7b/c), native quick-link drop targets Windows+Linux (Q8/D3), Windows ARM64 LWJGL substitution (Q4 code), Linux arm64 managed Azul + substitution fixes.
-- Visual review: 142 single-window Windows scenario captures/boards at d1be580; the grouped review is with the user (accepted only by the user). macOS recapture waits for the Mac.
-- Open: user visual acceptance; Windows ARM64 native VM run; Q6 Windows Settings/SOCKS5/storage and Q6 fixes; Q10 older representatives + OptiFine native imports; OptiFine re-import code; macOS Q8 drop target, recapture and Mac-only checks; Windows lifecycle ×50; final doc/CI accuracy; all acceptance.
+  - Windows ARM64: native launcher build, Welcome, catalog, install, offline account and restart persistence passed; game rendering is blocked by the VM's missing OpenGL ICD, a recorded best-effort boundary.
+- Windows Settings/SOCKS5/storage, loader and older-version flows, OptiFine re-import, queued Play, and lifecycle race fixes have evidence in STATUS.md and target/parity-shots/.
+- Milestone II remaining: security revoke and final live-account sign-in/relaunch check, Microsoft live avatar verification, and closure of any remaining core-flow gaps. Completion has not been declared.
+- Milestone III backlog: prototype/native comparison mapping and missing references; page-by-page visual and interaction review; macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720. Each platform has 142 native scenario images; only 39 scenario names currently pair with React references, and each board has 72 missing-side placeholders despite no broken image links.
 
 ## Decisions (user, 2026-10-21)
 
@@ -32,7 +35,7 @@ Only **architecture governance** is deferred to v0. That covers structural refac
 4. Windows are fixed-size. Users cannot resize them.
 5. Delete all GPUI patches and the `vendor/` copies. Use the published crates unmodified.
 6. ~~Dialogs become real native windows rendered by GPUI.~~ Superseded by 19.
-7. Pilot means the complete product. Only architecture governance waits for v0.
+7. The combined Pilot completion definition and architecture-at-v0 rule are superseded by the 2026-10-23 milestone split above.
 8. The full backend is in scope, using official sources only. Mirrors such as BMCLAPI are not supported for now.
 9. The user owns a genuine Minecraft account. User-assisted live sign-in waits until the morning of 2026-10-22, Asia/Taipei, when the user is available; use Offline accounts and local fixtures meanwhile.
 10. Project-authored docs, code comments, commit messages and UI strings committed from this work are in English. Preserve original third-party source and license text.
@@ -78,7 +81,9 @@ Only **architecture governance** is deferred to v0. That covers structural refac
 
 Keep one checkout per host (`~/block-src`; `D:\block-src` on Windows AMD64) and update it with `git fetch`. Never copy `target/` or player data.
 
-## Pilot Goal
+## Existing Pilot work checklist
+
+P0–P5 below are historical work-package names, not the new milestone numbers. Built and native functional evidence feed Milestone II; visual and interaction acceptance feeds Milestone III.
 
 - [x] **P0 Baseline:**
   - Snapshot-commit the prototype.
@@ -105,14 +110,14 @@ Keep one checkout per host (`~/block-src`; `D:\block-src` on Windows AMD64) and 
 - [x] **v6 Native end-to-end flows:**
   - Windows AMD64: Q6/Q10/Q5 flows (Welcome/loaders/Settings/separated/crash/retry/older reps/Quick Play joins); macOS limited to the v8-required Mac-only checks (overlay, CJK IME, D3 drag, Q3 bounded attempt).
   - Each remote host: Linux ARM64 and Linux AMD64 Welcome → Play → menu → Stop; Windows ARM64 native launcher UI/install/offline/restart.
-- [ ] **P5 Real verification:**
+- [ ] **P5 Verification across Milestones II and III:**
   - [x] Required recent install/launch smoke on all four hosts (API driver), plus legacy Forge on Windows.
   - [x] Older representatives per loader and the legacy ARM64 table.
-  - [ ] Prototype reference screenshots, the comparison board and user visual acceptance (boards recaptured; review pending).
-  - [x] Live PKCE and Device Code sign-in with the user, plus a live-account native launch on macOS (re-check after the security revoke remains).
+  - [ ] Milestone III: complete prototype references/mappings, the comparison board and user visual/interaction acceptance.
+  - [ ] Milestone II: revoke app access and complete the final live-account re-sign-in/relaunch check; earlier PKCE, Device Code and native launch runs passed.
   - [x] CI green at completion: four platforms + manual windows-arm64 workflow green (one Linux ARM64 help-claim flake bounded at 0/70).
 
-Pending required user acceptance, live sign-in or smoke runs must remain pending. Report implementation readiness separately from Pilot completion.
+Report Milestone II usability, Milestone III interaction acceptance, Milestone IV architecture design and v0 release readiness separately. Pending live checks and smoke runs remain explicit; Milestone III acceptance is not a Milestone II gate.
 
 ## Needs the user
 
@@ -123,14 +128,18 @@ Pending required user acceptance, live sign-in or smoke runs must remain pending
 - [ ] Revoke Block's app access in the Microsoft account (a refresh token was printed once in a diagnostic transcript), then re-sign in for the final live-account check.
 - [x] Install the Rust platform on the Windows ARM64 VM (native build + tests run there).
 - [ ] Unlock the Linux AMD64 keyring after VM reboots when a saved Microsoft account is needed there.
-- [ ] Review the native screenshots and side-by-side board once (both boards are ready).
+- [ ] Milestone III: review native screenshots and behavior page by page after reference/mapping gaps are resolved or explained.
 - [x] Download an official OptiFine JAR for one older Minecraft version for the older-representative smoke.
 - [ ] Optional: provide an Authlib provider account for live-provider verification.
 - [x] Quick-link drags were verified with real browser drags on Windows, macOS and Linux X11.
 
-## Deferred to v0 (architecture governance)
+## Pilot Milestone IV: architecture design inputs
 
-- Per-page entities, replacing engine polling with async events, splitting `lib.rs` and `game_wizard.rs`.
-- Lint tidy-up and dead-abstraction cleanup.
-- Accessibility, packaging, signing and release.
-- Mirror download sources (BMCLAPI).
+- Evaluate per-page entities, engine polling versus async events, and boundaries in `lib.rs` and `game_wizard.rs`.
+- Evaluate lint tidy-up and dead abstractions as part of the design; the milestone split does not itself authorize a broad rewrite.
+
+## v0: first public unstable release
+
+- Prepare release packaging, signing and distribution, and define the public compatibility/known-issues statement.
+- Publication requires a separate release action; the stage definition does not publish anything.
+- Accessibility and mirror download sources (BMCLAPI) remain deferred without a scheduled milestone.

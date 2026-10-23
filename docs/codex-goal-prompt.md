@@ -1,30 +1,32 @@
-# Goal Prompt (v8)
+# Goal Prompt (v8, scoped to Pilot Milestone II)
 
-Context, decisions and test hosts: [next-tasks.md](next-tasks.md). Status: [STATUS.md](STATUS.md). Earlier prompts (v6 "Pilot Completion Goal", v7 "Pilot Relay Goal") are in Git history at `ae0b758`; v8 replaces both and is self-contained.
+Context, decisions and test hosts: [next-tasks.md](next-tasks.md). Status: [STATUS.md](STATUS.md). Earlier prompts (v6 "Pilot Completion Goal", v7 "Pilot Relay Goal") are in Git history at `ae0b758`. The 2026-10-23 milestone split scopes this prompt to DeepSeek's Milestone II functional closeout. Codex owns Milestone III interactions; Milestone IV begins architecture design; v0 is the first public unstable release.
 
 | Prompt | Runner | When |
 | --- | --- | --- |
-| Pilot Goal v8 | DeepSeek Harness (dsh): main agent plus DeepSeek subagents | From 2026-10-22, for the rest of the pilot |
+| Milestone II closeout, v8 | DeepSeek Harness (dsh): main agent plus DeepSeek subagents | Functional closeout; remaining interaction work passes to Codex in Milestone III |
 
 ---
 
 ## Pilot Goal v8
 
 ```text
-Goal: Finish the Block pilot. First reach "implementation ready; awaiting user verification", then completion together with the user. You are the main agent. You run the whole remaining pilot in DeepSeek Harness and may run DeepSeek subagents (rule 12).
+Goal: Finish Pilot Milestone II: basic usability. You are DeepSeek's main agent for functional closeout and may run DeepSeek subagents (rule 12). Read the current milestone split and status before using the historical handoff and Q0-Q10 queue below.
 
-"Complete" means a complete native Minecraft launcher:
-- it matches the React prototype, under the product decisions in docs/STATUS.md and docs/next-tasks.md
+Milestone II completion means a usable native Minecraft launcher:
+- its core tasks work under the product decisions in docs/STATUS.md and docs/next-tasks.md
 - every exposed feature works against real services
 - nothing is faked or left as a placeholder
-Only architecture governance waits for v0. Only the user's review sets Accepted.
+Interaction polish, visual parity and user interaction acceptance belong to Pilot Milestone III, owned by Codex. Architecture design begins in Pilot Milestone IV. v0 is the first public unstable release. Only the user's review sets Accepted; Accepted is not a Milestone II gate.
+
+The Q0-Q10 queue below preserves the earlier work packages and evidence requirements. Use STATUS.md for current completion, and do not repeat completed flows without a relevant change. Q2 visual references/review and the remaining Q9 motion/short-display interaction checks transfer to Milestone III. Fix an interaction issue in Milestone II only when it blocks basic use. Keep all deferred checks visible rather than marking them verified.
 
 Repository: /Users/zeithrold/Documents/Develop/Native/Block (GitHub zeithrold/Block, public; CI .github/workflows/check.yml runs on every push).
 Prototype, a read-only reference: /Users/zeithrold/Documents/Develop/Frontend/Block-UI at snapshot commit fd2713b. Its README.md is the design spec; its app/ source is the layout and behavior reference.
 Read first, in this order:
 1. this prompt
 2. docs/STATUS.md
-3. docs/next-tasks.md (Decisions 1–25, Operations, Test hosts)
+3. docs/next-tasks.md (milestone split, Decisions 1–25, Operations, Test hosts)
 4. `git status` and `git log --oneline 442b94e..`
 5. the justfile
 6. scripts/snap-native, scripts/snap-native-windows and scripts/parity-board
@@ -93,7 +95,7 @@ No STATUS row is Accepted.
 5. Read before writing. Before changing a subsystem, read its code and tests and follow their patterns: error types, cancellation tokens, revision/stale-result guards, fixture servers.
    - Before using gpui-component, read its source in ~/.cargo/registry (version 0.8.0) and its examples. Do not guess APIs.
 6. No architecture work: no structural refactors, new layers, file splits or tidying of working code.
-   - When structure gets in the way, add one line to STATUS "v0 notes" (at most 15 lines) and keep going.
+   - When structure gets in the way, add one line to STATUS "Pilot Milestone IV: architecture notes" (at most 15 lines) and keep going.
    - Deleting window_surfaces.rs as part of Q1 is product work, not governance.
 7. Lints:
    - Keep clippy::all, the deny list (unwrap/expect/panic/todo/dbg/unimplemented/wildcard_imports) and `unsafe_code = "forbid"`.
@@ -279,7 +281,7 @@ Q8. D3 quick-link drag and drop (decision 16; mandatory).
      - macOS: an owned NSView subview
      - Linux: X11 XDND; try Wayland
    - Never modify, swizzle or re-register GPUI's classes, views or drop targets.
-   - Only this crate lowers unsafe_code to deny, and allows it only in its platform modules, with a SAFETY comment on every unsafe block. Record the exception in v0 notes.
+   - Only this crate lowers unsafe_code to deny, and allows it only in its platform modules, with a SAFETY comment on every unsafe block. Record the exception in the Milestone IV architecture notes.
    - Behavior: accept the `text/plain` payload `authlib-injector:yggdrasil-server:<URI-encoded API root>`, fill the editable name/API fields and continue through the existing discovery, consent and duplicate flow.
    - Tests: payload parsing and import rules only.
    - Platform order: Windows → macOS → Linux X11 → Wayland attempt.
@@ -313,14 +315,14 @@ Q10. Older representatives and closing.
 - the same CI failure survives three fix attempts
 - Windows ARM64 needs a product choice (x64 emulation, or a non-official runtime source)
 
-== Completion ==
-Complete when:
-- every STATUS inventory row is Built, Native E2E (or "fixture" where allowed) and Accepted
-- D1–D9, decisions 14–16 and 19–25 are implemented and verified (Minecraft on Windows ARM64 counts as best effort, like legacy ARM64)
+== Milestone II completion ==
+Complete Milestone II when:
+- exposed features and required core native flows have Built and Native E2E evidence (or "fixture" where allowed), with compatibility limits stated
+- the functional portions of D1–D9 and decisions 14–16 and 19–25 are implemented and verified; remaining interaction refinements are assigned to Milestone III (Minecraft on Windows ARM64 counts as best effort, like legacy ARM64)
 - live Microsoft PKCE and Device Code are verified with the user, plus the live-account relaunch check
 - the smoke matrix (including Windows ARM64), the older representatives and the legacy ARM64 table are complete and honest
 - CI is green on every matrix platform and STATUS.md is accurate
-If user acceptance, live sign-in, a user-supplied JAR or a user-performed drag is still pending, report "implementation ready; awaiting user verification" with the explicit list, never "Pilot Goal complete". An established legacy ARM64 or Windows ARM64 game limitation is a stated support boundary, not a pending item.
+If a required functional live sign-in, user-supplied JAR or user-performed drag is still pending, report "Milestone II implementation ready; awaiting functional verification" with the explicit list. Visual/interaction acceptance stays pending for Milestone III and does not alone block Milestone II. Report completion by milestone; never use "Pilot Goal complete" to imply all later stages are done. An established legacy ARM64 or Windows ARM64 game limitation is a stated support boundary, not a pending item.
 
 == Reporting ==
 After each queue item, send a short Chinese message covering:

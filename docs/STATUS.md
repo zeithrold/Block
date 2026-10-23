@@ -1,6 +1,17 @@
 # Block Pilot Status
 
-Updated: 2026-10-22. Built, native verification and user acceptance are separate gates.
+Updated: 2026-10-23. Built, native verification and user acceptance are separate gates.
+
+## Development milestones
+
+User decision, 2026-10-23; full scope and ownership: [next-tasks.md](next-tasks.md).
+
+- **Pilot Milestone II — basic usability (DeepSeek):** nearly complete. Real features and core native flows work; final functional checks remain explicit. Interaction polish and visual acceptance are not completion gates for this stage.
+- **Pilot Milestone III — interaction quality (Codex):** inspect and repair interactions one by one, including visual presentation, focus/input, navigation, overlays, motion and feedback. Defer architecture design. Reference/mapping gaps, user review and the remaining Mac interaction checks belong here.
+- **Pilot Milestone IV — architecture design:** begin design after the interaction stage; preserve earlier evidence as design input.
+- **v0 — public unstable release:** prepare and publish the first unstable release as a separate stage.
+
+The inventory's Built / Native E2E columns provide Milestone II functional evidence. Its Accepted column records Milestone III user acceptance. A defect that prevents a core task remains a Milestone II usability issue even when it appears in the UI. This split does not mark pending evidence or acceptance as complete.
 
 ## Product decisions and intended differences
 
@@ -31,7 +42,7 @@ Updated: 2026-10-22. Built, native verification and user acceptance are separate
 
 ## Page inventory
 
-Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Native E2E requires the actual app and real services; allowed local providers are labeled fixture.
+Yes = built; Partial = a stated gap remains; Pending = not verified/accepted. Native E2E requires the actual app and real services; allowed local providers are labeled fixture. Read each row's remaining gap against the milestone scope above.
 
 ### Home
 
@@ -140,7 +151,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - Q9 D8 Windows lifecycle ×50 on e4b3be6: 49/50 passed; the failure (and 1/60 isolated repro) was a ~2% Windows race where the atomic session-record replace hit ERROR_ACCESS_DENIED/ERROR_SHARING_VIOLATION from a transient external handle, leaving the monitor record active. Fixed with a bounded retry (5 attempts, 20→200 ms, Windows errors 5/32 only) in session_host storage; 50/50 full-suite and 100/100 isolated runs then passed. Evidence in target/parity-shots/windows-amd64/q9-lifecycle/.
 - Storage lock flake (pre-existing) was an inherited `flock` across a concurrent fork/exec; a bounded 500 ms retry on transient would-block (and test retries) now prevents it, with repeated workspace runs green.
 - Native screenshots cover 71 debug scenarios in light/dark; every overlay now renders inside its parent window (one capture per scenario). Scenario captures are visual fixtures.
-- Comparison boards: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 single-window scenario shots each on the current code (Windows at bae97f0, macOS at 3f151b4), 71 stems light/dark, 126×960×600 + 16×432×768; both boards have 0 missing image references.
+- Comparison boards: target/parity-shots/index.html (Windows primary) and macos-arm64.html; 142 single-window scenario shots each (Windows at bae97f0, macOS at 3f151b4), 71 stems light/dark, 126×960×600 + 16×432×768. The 2026-10-23 review confirmed no broken image links, but only 39 scene names pair with React references: 32 native-only and 4 reference-only names leave 72 missing-side placeholders per board (both themes). Resolve mappings, capture missing references or explain native-only states in Milestone III; the comparison set is not complete.
 - Remote picker captures prove navigation and overlays, not native installation/Play.
 - Installer processors use verified Store inputs and run offline; macOS SOCKS5 backend smoke passed.
 - macOS live PKCE/Device Code, native Welcome/download/Play/menu/Stop and restart/Play/menu/Stop passed; dedicated test accounts retained.
@@ -174,7 +185,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Azure public client flows and readiness for live sign-in | Confirmed enabled and ready; native macOS PKCE saved successfully. |
 | Microsoft macOS PKCE/Device Code and batched remote Device Code | macOS passed; Windows/Linux ARM64 saved; AMD64 Linux keyring configured; native preflight diagnosis pending. |
 | Linux AMD64 secure credential store | Resolved: host store is healthy (probe and in-app preflight pass). The earlier failure was a launch without MICROSOFT_CLIENT_ID, not the store. |
-| Prototype/native board and behavior acceptance | Both boards recaptured on current code (142 Windows + 142 macOS); macOS overlay/IME/drag native checks passed; one grouped review with the user, acceptance pending. |
+| Prototype/native board and behavior acceptance | Milestone III: 142 Windows + 142 macOS native scenario images exist; reference/mapping gaps must be resolved or explained before page-by-page user acceptance. macOS overlay/IME/drag native checks passed. |
 | Mac GUI lock (2026-10-23) | The Mac locked at the login screen around 01:16; macOS OS reduced-motion, transition-frame audit and the literal management-page fit check need an unlocked interactive session. Fit-to-display Home/management-width evidence was captured before lock. |
 | Windows ARM64 Q4 run | Resolved on the VM: native `cargo build -p block-app --bin block` (LLVM for ring, MSVC ARM64) produced the ARM64 launcher; native UI opened, official catalog loaded, 1.20.6 installed with the managed Mojang windows-arm64 Java 21.0.7 runtime, offline account saved and persisted across restart. Game launch reaches Java/LWJGL 3.3.3 with the natives-windows-arm64 substitution but the VMware Fusion ARM64 guest has no OpenGL ICD (`GLFW error 65542 WGL`), so no main menu; VMware Tools for ARM64 installed without a 3D/OpenGL driver. Environment limitation, not a launcher defect. |
 | Windows ARM64 game launch | 1.20.6 native-path evidence: managed Java 21.0.7, LWJGL 3.3.3, Compatibility "Windows ARM64: LWJGL 3.3.3 ... official natives-windows-arm64" and the ARM64 natives on the classpath; blocked from the menu only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 environment-blocked by the same; 1.16.5/1.12.2 have no official ARM64 Java 8. x64 emulation remains a product choice, not implemented. |
@@ -183,9 +194,9 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 | Authlib live account | Optional; use a labeled local fixture otherwise. |
 | Real quick-link drag on hosts automation cannot drive | Real browser drags verified on Windows AMD64, macOS (Chrome→zone) and Linux X11; Wayland documented unsupported. No remaining user drag batch. |
 
-## v0 notes
+## Pilot Milestone IV: architecture notes
 
 - Scoped unsafe exception: `crates/block-drop` is the only crate that lowers `unsafe_code` (workspace still forbids it); every unsafe block carries a SAFETY comment, and the crate owns its child HWND/IDropTarget without patching, subclassing or swizzling GPUI.
-- Architecture governance, file splitting, layering and lint tidy-up remain deferred.
+- Architecture design, including file boundaries, layering and lint governance, begins in Milestone IV; redesign implementation needs a defined scope.
 - Preserve clippy::all, existing deny list and unsafe_code=forbid outside the authorized dedicated drop-target crate.
-- Accessibility, release packaging/signing and mirror sources remain deferred.
+- Release packaging/signing and public distribution belong to v0, the first unstable release. Accessibility and mirror sources remain deferred without a scheduled milestone.
