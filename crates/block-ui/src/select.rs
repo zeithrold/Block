@@ -726,13 +726,21 @@ impl Block {
                         div()
                             .flex()
                             .flex_col()
-                            .gap_1()
+                            .gap(px(2.))
                             .child(div().text_sm().child("Block"))
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.))
                                     .text_xs()
                                     .text_color(rgb(self.palette.muted))
-                                    .child(format!("v{}", self.build_info.version)),
+                                    .child(format!("v{}", self.build_info.version))
+                                    .child(super::components::badge(
+                                        "pilot M2",
+                                        self.palette,
+                                        super::components::BadgeVariant::Secondary,
+                                    )),
                             ),
                     ),
             )
