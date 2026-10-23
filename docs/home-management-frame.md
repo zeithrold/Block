@@ -39,17 +39,23 @@ Only the outgoing page body is retained. Its snapshot owns no engine or credenti
 
 ## Management navigation principles (user decision)
 
-Management-to-management navigation now crossfades the outgoing and incoming panes with **12 px maximum horizontal travel**. The sidebar starts first and takes 200 ms; the detail pane starts 40 ms later and also takes 200 ms, for a 240 ms timeline. The title area and native window stay fixed. This replaces the former whole-page, full-width translation that the user found dizzying.
+Management-to-management navigation now crossfades the outgoing and incoming panes with **12 px maximum sidebar travel and 20 px maximum right-content travel**. The sidebar starts first and takes 200 ms; the detail pane starts 40 ms later and also takes 200 ms, for a 240 ms timeline. The title area and native window stay fixed. This replaces the former whole-page, full-width translation that the user found dizzying.
 
-A sidebar selection within the current management page animates only the right content: a 180 ms horizontal crossfade with at most 12 px travel. The sidebar's position and opacity stay fixed; its selection feedback updates immediately. The same bounded content motion applies to wizard steps. These scopes do not combine with the Home/window morph.
+A sidebar selection within the current management page animates only the right content: a 180 ms horizontal crossfade with at most 20 px travel. The sidebar's position and opacity stay fixed; its selection feedback updates immediately. The same bounded content motion applies to wizard steps. These scopes do not combine with the Home/window morph.
 
 The timeline begins on the first incoming paint. A heavier initial layout therefore cannot consume the 40 ms delay before either pane has appeared. Paint acknowledgements belong to individual runs, so an interrupted run's callback cannot start its replacement. Rapid retargeting retains only one outgoing snapshot, preferring the currently more visible layer when the incoming page has barely appeared.
 
 Outgoing controls are inert. Live editors continue accepting text during these content transitions. Tab/Shift-Tab first settle the transition, repaint the live focus tree, then forward each queued traversal once to Base Root. Application/system reduced motion settles immediately and drops outgoing snapshots.
 
-The foreground macOS pane replay recorded **228 active-window paint samples**. Completed management switches showed a 34–40 ms observed start gap; native bounds stayed fixed, horizontal poses stayed within 12 px, and the actual content-fragment bounds remained horizontal. Both Settings child selections kept the sidebar stationary. Action-to-settled times were 264–298 ms for management pages and 199–204 ms for child content, including initial layout/paint latency. A prior trace where the Instances first layout consumed the gap is retained as `target/pane-motion/before-paint-anchor.jsonl`.
+The earlier 12 px version's foreground macOS pane replay recorded **228 active-window paint samples**. Completed management switches showed a 34–40 ms observed start gap; native bounds stayed fixed, horizontal poses stayed within 12 px, and the actual content-fragment bounds remained horizontal. Both Settings child selections kept the sidebar stationary. Action-to-settled times were 264–298 ms for management pages and 199–204 ms for child content, including initial layout/paint latency. A prior trace where the Instances first layout consumed the gap is retained as `target/pane-motion/before-paint-anchor.jsonl`.
 
 Replay with `BLOCK_FRAME_MOTION_TRACE=<file> BLOCK_PANE_MOTION_REPLAY=1` and `--scenario home-ready`, activate the window, then run `python3 scripts/analyze-pane-motion.py <file>`. Evidence is in `target/pane-motion/native.jsonl`, `measurement.json` and `macos-verify.log`; it remains local and does not set Accepted.
+
+## Shell alignment follow-up (2026-10-24)
+
+The app menu begins with the Brand display; its vertical padding is 4 px per side rather than 12 px. Navigation rows place the icon before the label and align both to the left, retaining menu roles, accessible labels and keyboard inspection. The shared title divider is inset 16 px from each window edge. Home's primary icon and two-line label align left with 20 px padding, reserving space for the 56 px profile selector. Home's composition and both window sizes are unchanged. At the user's request, right-content travel increased from 12 to 20 px; sidebar travel, easing, durations and the start gap are unchanged.
+
+The local native gate passed 573 tests across 39 suites. Actual macOS Home, menu and Accounts views were inspected and captured. A fresh replay recorded 246 foreground paints, kept the native origin/720 px height fixed, bounded sidebar/content travel at 12/20 px and kept the sidebar stationary during child navigation. The observed page start gap was 37–43 ms. Evidence: `target/ui-alignment/{home-light.jpg,menu-light.jpg,accounts-light.jpg,native.jsonl,measurement.json,macos-verify.log}`. These are native paint submissions rather than compositor timestamps; Windows/Linux visual review remains pending.
 
 ## Verification
 

@@ -37,7 +37,7 @@ fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &m
             panes
                 .detail
                 .current
-                .is_some_and(|pose| pose.opacity == 0. && pose.x == 12.)
+                .is_some_and(|pose| pose.opacity == 0. && pose.x == 20.)
         );
         assert!(view.motion.page.outgoing().is_some());
     });
@@ -56,7 +56,7 @@ fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &m
             panes
                 .detail
                 .current
-                .is_some_and(|pose| pose.opacity > 0. && pose.x <= 12.)
+                .is_some_and(|pose| pose.opacity > 0. && pose.x <= 20.)
         );
     });
     frame(cx, 160);
@@ -85,7 +85,7 @@ fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppC
     let content = cx.debug_bounds("navigation-current-1");
     assert!(
         content.is_some_and(|bounds| bounds.left() > px(360.)
-            && bounds.left() <= px(372.)
+            && bounds.left() <= px(380.)
             && bounds.top() == px(crate::design::CHROME_HEIGHT)),
         "only the right content moves horizontally: {content:?}"
     );
@@ -101,12 +101,12 @@ fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppC
         assert!(
             detail
                 .current
-                .is_some_and(|pose| pose.x > 0. && pose.x <= 12. && pose.opacity > 0.)
+                .is_some_and(|pose| pose.x > 0. && pose.x <= 20. && pose.opacity > 0.)
         );
         assert!(
             detail
                 .outgoing
-                .is_some_and(|pose| pose.x >= -12. && pose.opacity > 0.)
+                .is_some_and(|pose| pose.x >= -20. && pose.opacity > 0.)
         );
     });
     frame(cx, 145);

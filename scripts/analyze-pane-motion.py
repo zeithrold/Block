@@ -37,10 +37,12 @@ def analyze(records):
             raise ValueError("Management navigation resized the window")
         for row in frames:
             navigation = row["navigation"]
-            for track in [*navigation["panes"].values(), navigation["detail"], navigation["wizard"]]:
+            tracks = [(navigation["panes"]["sidebar"], 12), (navigation["panes"]["detail"], 20),
+                      (navigation["detail"], 20), (navigation["wizard"], 20)]
+            for track, distance in tracks:
                 for layer in ("current", "outgoing"):
                     pose = track[layer]
-                    if pose and (abs(pose["x"]) > 12.001 or not 0 <= pose["opacity"] <= 1):
+                    if pose and (abs(pose["x"]) > distance + .001 or not 0 <= pose["opacity"] <= 1):
                         raise ValueError(f"Unbounded pane motion: {pose}")
             if child:
                 sidebar = navigation["panes"]["sidebar"]
@@ -51,7 +53,7 @@ def analyze(records):
             raise ValueError("Management panes moved vertically")
         if child:
             fragments = [row for row in records[index:stop] if row["type"] == "fragment" and row["scope"] == 1]
-            if not fragments or any(abs(row["x"] - 360) > 12.001 or abs(row["y"] - frames[0]["body_y"]) > .01 for row in fragments):
+            if not fragments or any(abs(row["x"] - 360) > 20.001 or abs(row["y"] - frames[0]["body_y"]) > .01 for row in fragments):
                 raise ValueError("Child content did not keep a small horizontal-only displacement")
 
         def first(predicate):
@@ -71,7 +73,8 @@ def analyze(records):
     if sum(row["scope"] == "detail" for row in summaries) != 2:
         raise ValueError("Both child-page selections must be measured")
     return {"measurement": "native paint submission, not display presentation", "foreground_paint_count": len(paints),
-            "native_origins": origins, "native_heights": heights, "maximum_horizontal_distance": 12,
+            "native_origins": origins, "native_heights": heights, "maximum_sidebar_distance": 12,
+            "maximum_content_distance": 20,
             "page_detail_start_delay_ms": 40, "sequences": summaries}
 
 

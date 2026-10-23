@@ -394,15 +394,22 @@ impl<K: PartialEq, T> Transition<K, T> {
         } else {
             -1.
         };
+        // The immediate page track belongs to the sidebar. Delayed page
+        // content and in-page content share the slightly longer travel.
+        let distance = if self.scope == Scope::Page && delay_ms == 0 {
+            12.
+        } else {
+            20.
+        };
         Frame {
             current: self.current.as_ref().map(|_| Pose {
-                x: (1. - progress) * sign * 12.,
+                x: (1. - progress) * sign * distance,
                 opacity: progress,
             }),
             outgoing: self.outgoing.as_ref().map(|_| {
                 self.outgoing_from[usize::from(delay_ms != 0)].mix(
                     Pose {
-                        x: -sign * 12.,
+                        x: -sign * distance,
                         opacity: 0.,
                     },
                     progress,

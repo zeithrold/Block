@@ -7,7 +7,8 @@ use super::{Block, Form, Tab, UiAction, design::Icon, shell::Surface};
 use block_launcher::catalog::{DataPolicy, ProfileColor, ProfileIcon};
 use gpui::{
     App, Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Pixels, Point, RenderOnce, Styled as _, Window, div, point, px, rgb,
+    ParentElement as _, Pixels, Point, RenderOnce, StatefulInteractiveElement as _, Styled as _,
+    Window, div, point, px, rgb,
 };
 use std::{
     cell::Cell,
@@ -716,7 +717,7 @@ impl Block {
             .child(
                 div()
                     .px_2()
-                    .py_3()
+                    .py_1()
                     .flex()
                     .items_center()
                     .gap_3()
@@ -776,7 +777,11 @@ impl Block {
             let mut option = if state.menu.is_some() {
                 super::components::button_role(
                     id,
-                    choice.label.clone(),
+                    if app_item.is_some() {
+                        String::new()
+                    } else {
+                        choice.label.clone()
+                    },
                     self.palette,
                     super::components::ButtonVariant::Ghost,
                     control_state,
@@ -801,10 +806,10 @@ impl Block {
             }
             if let Some(item) = app_item {
                 option = option
-                    .flex_row_reverse()
-                    .justify_end()
+                    .aria_label(choice.label.clone())
                     .gap_2()
-                    .child(item.icon.render(16., self.palette.muted));
+                    .child(item.icon.render(16., self.palette.muted))
+                    .child(choice.label.clone());
                 if choice.selected {
                     option = option.bg(rgb(self.palette.accent));
                 }
