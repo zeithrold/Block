@@ -1,5 +1,7 @@
 # Goal Prompt (v8, scoped to Pilot Milestone II)
 
+Execution closed at `f2a5fd7` on 2026-10-23. This is the historical Milestone II prompt; its queue and handoff are not a current list of unfinished work. Use [STATUS.md](STATUS.md) and [next-tasks.md](next-tasks.md) for Milestone III. The source upload and status review do not restart this goal or set Accepted.
+
 Context, decisions and test hosts: [next-tasks.md](next-tasks.md). Status: [STATUS.md](STATUS.md). Earlier prompts (v6 "Pilot Completion Goal", v7 "Pilot Relay Goal") are in Git history at `ae0b758`. The 2026-10-23 milestone split scopes this prompt to DeepSeek's Milestone II functional closeout. Codex owns Milestone III interactions; Milestone IV begins architecture design; v0 is the first public unstable release.
 
 | Prompt | Runner | When |

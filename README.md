@@ -2,7 +2,9 @@
 
 A Minecraft Java Edition launcher MVP built with Rust and [GPUI](https://gpui.rs/), with a shared core for the native interface and command-line tool.
 
-Block separates persistent Instances, launch Profiles and Microsoft Accounts from transient LaunchPlans. The native interface creates installations, manages multiple Profiles, installs Vanilla or the supported NeoForge representative, and hands a verified Java invocation to an independent session supervisor. See [the acceptance ledger](docs/mvp-progress.md) for verified gameplay, authentication, crash assistance, and remaining platform gates.
+Block separates persistent Instances, launch Profiles and Accounts from transient LaunchPlans. The native interface manages games and accounts, installs Vanilla, Fabric, Quilt, Forge and NeoForge, imports user-provided official OptiFine JARs, and hands a verified Java invocation to an independent session supervisor. See [Pilot status](docs/STATUS.md) for current native evidence and compatibility limits, and [next tasks](docs/next-tasks.md) for the milestone plan. The [MVP acceptance record](docs/mvp-progress.md) preserves earlier baseline results.
+
+Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is next; user acceptance remains pending. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
 
 ## Prerequisites
 
@@ -76,9 +78,9 @@ Both interfaces reuse `block-launcher`. Source parsers and the pure compiler pro
 
 ## Compatibility
 
-The core targets macOS, Windows, and Linux. Planning can target another OS and CPU architecture; execution requires a matching host and Java architecture. Available Java runtimes and native libraries vary by Minecraft version. Linux ARM64 uses the explicit LWJGL compatibility policy and automatically locates an installed matching Java for managed Profiles because the current official runtime catalog has no Linux ARM64 entry; legacy ARM64 native support and execution through CPU emulation are outside this MVP.
+The launcher targets macOS ARM64, Windows AMD64/ARM64 and Linux AMD64/ARM64. Planning can target another OS and CPU architecture; execution requires a matching host and Java architecture. Available Java runtimes and native libraries vary by Minecraft version. Linux ARM64 uses explicit official LWJGL substitutions and provisions official Azul runtimes for supported legacy versions. Windows ARM64 also uses official LWJGL substitutions; launcher installation/account/restart flows passed, while game rendering on the test VM is blocked by its missing OpenGL ICD. macOS ARM64 1.16.5 has a recorded GLFW window-icon failure. LWJGL 2-era versions are disabled on ARM64 because the official native binaries are x86/x64 only. See [the platform and legacy compatibility tables](docs/STATUS.md) for tested combinations and remaining limits.
 
-The captured 919-version corpus exercises parsing and planning across all three x64 OS families. It does not establish graphical launch support for every version and platform. The product NeoForge representative is Minecraft1.20.6 with NeoForge20.6.144. Other Loader generations remain external research results and are not advertised as product installers. Actual Microsoft login, world gameplay, normal exit and relaunch remain distinct acceptance gates; a menu or synthetic protocol test does not establish them.
+The captured 919-version corpus exercises parsing and planning across all three x64 OS families. It does not establish graphical launch support for every version and platform. Native Pilot checks cover modern and older loader representatives, including legacy Forge and official OptiFine imports; they do not promise every version/loader combination. Actual Microsoft login, world gameplay, normal exit and relaunch remain distinct evidence; a menu or synthetic protocol test does not establish them.
 
 ## Development commands
 

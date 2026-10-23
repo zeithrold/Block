@@ -6,17 +6,17 @@ Date: 2026-10-21, updated 2026-10-23 for the milestone split. This file replaces
 
 | Stage | Focus | Owner / current state |
 | --- | --- | --- |
-| Pilot Milestone II | Basic usability: real features and end-to-end flows work. Interaction polish is deferred. | DeepSeek; nearly complete, remaining functional verification stays explicit. |
+| Pilot Milestone II | Basic usability: real features and end-to-end flows work. Interaction polish is deferred. | DeepSeek; complete at `f2a5fd7`, with documented compatibility and environment boundaries. |
 | Pilot Milestone III | Interaction quality: inspect and fix interactions one by one, including visual presentation, navigation, input, focus, overlays, motion and feedback. Architecture design is deferred. | Codex; next stage, not started by this planning update. |
 | Pilot Milestone IV | Begin architecture design, using the working product and interaction findings as inputs. | Future stage; implementation of a redesign needs its own scope. |
 | v0 | First public unstable release. | Future stage; release preparation and publication are separate from Pilot completion. |
 
 These stages supersede the earlier combined Pilot acceptance gate and the rule that architecture waits for v0. Milestone II still requires real behavior rather than placeholders, safe persistence, and explicit compatibility limits. An interaction defect that blocks a core flow remains a Milestone II usability issue; visual or interaction refinement belongs to Milestone III. Only the user's review sets Accepted in Milestone III. Missing visual acceptance does not by itself block Milestone II completion.
 
-## Where we are (2026-10-23, reviewed HEAD `2ce25e7`)
+## Where we are (2026-10-23, reviewed HEAD `f2a5fd7`)
 
-- DeepSeek is closing Milestone II under the scoped v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). Codex owns Milestone III. v6/v7 are in Git history.
-- CI: four platforms green at `2ce25e7` (run 39831335710); Windows ARM64 green with an uploaded artifact at `82b3847` (run 39823711474). Changes between those commits are documentation only.
+- DeepSeek completed Milestone II under the scoped v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). Codex's handoff review confirms the local artifact inventory and links; it does not repeat native E2E or set Accepted. Codex owns Milestone III, ready to begin. v6/v7 are in Git history.
+- CI: latest completed four-platform run is green at `df2db40` (run 39885268348); `c8406ad` and `f2a5fd7` documentation runs are still in progress at this review. Windows ARM64 is green with an uploaded artifact at `82b3847` (run 39823711474). Pending runs retain their own result.
 - Native app evidence:
   - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again; overlay, IME and real quick-link drag checks passed.
   - Windows AMD64: Device Code; atomic Welcome; Vanilla → main menu → Stop; Q6 loader flows (Fabric/Quilt/Forge/NeoForge/legacy Forge), separated mode, crash help, interrupted-download retry, real quick-link drag.
@@ -24,8 +24,9 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
   - Linux AMD64: native Welcome → Vanilla → menu → Stop; Q9 D6 short-display/reduced-motion/input checks; Authlib fixture sign-in + real avatar + injected 1.20.6 menu; provider icons; X11 quick-link drag.
   - Windows ARM64: native launcher build, Welcome, catalog, install, offline account and restart persistence passed; game rendering is blocked by the VM's missing OpenGL ICD, a recorded best-effort boundary.
 - Windows Settings/SOCKS5/storage, loader and older-version flows, OptiFine re-import, queued Play, and lifecycle race fixes have evidence in STATUS.md and target/parity-shots/.
-- Milestone II evidence complete: screenshot set prepared (native matrices, mapping manifest, React references/explained gaps, E2E index, per-page real-data captures, master index) and the security revoke plus live re-sign-in/avatar/launch checks completed on all five platforms. Milestone III (Codex) owns interaction review and acceptance.
-- Milestone III backlog: page-by-page visual and interaction review using the completed Milestone II screenshot set; macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720; interaction fixes and acceptance. Each platform currently has 142 native scenario images; only 39 scenario names pair with React references and each board has 72 missing-side placeholders despite no broken image links, which the Milestone II screenshot preparation must resolve or explain.
+- Milestone II evidence complete: screenshot set prepared (native matrices, mapping manifest, React references/explained gaps, E2E index, per-page real-data captures, master index), plus post-revoke live re-sign-in and avatars on all five platforms. Game-menu/relaunch checks passed on macOS, Windows AMD64 and Linux ARM64; Linux AMD64 live-account game launch was skipped for time, and Windows ARM64 rendering is environment-blocked. Milestone III (Codex) owns interaction review and acceptance.
+- Milestone III backlog: page-by-page visual and interaction review using the completed Milestone II screenshot set; macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720; interaction fixes and acceptance. Each platform has 142 native scenario images; 60 stems pair with React references, 11 native-only stems have written reasons, and 4 proto-only names are mapped/explained. The remaining 30 board placeholders are explained; no unresolved mapping or broken local link remains.
+- Git audit: all 14 Block worktrees are clean and all local branch commits are reachable from fetched remote refs. The screenshot directory is ignored and remains local; uploading source does not upload it. The user keeps Block-UI local without committing/uploading its capture-tool changes.
 
 ## Decisions (user, 2026-10-21)
 
@@ -98,7 +99,7 @@ P0–P5 below are historical work-package names, not the new milestone numbers. 
 - [x] **P2 Comparison tool:** a `--scenario` debug flag, a native screenshot script and a side-by-side board.
 - [x] **P3 Inventory:** list every prototype page, state and feature in `STATUS.md` as the completion checklist.
 - [x] **P4 Pages.** Each page ships with its full real backend (native evidence per STATUS; user acceptance remains user-only):
-  - [x] Home, including real account avatars (Authlib fixture native; Microsoft live skin pending a live account)
+  - [x] Home, including real account avatars (Authlib fixture native; Microsoft live skin on all five platforms)
   - [x] Accounts and sign-in, including provider icons and quick-link drag and drop (Windows/macOS/Linux native)
   - [x] Games and Game Wizard, including legacy Quick Play and productized legacy ARM64
   - [x] Settings (including memory 1–32 GB, SOCKS5/proxy, storage relocation)
@@ -115,10 +116,10 @@ P0–P5 below are historical work-package names, not the new milestone numbers. 
   - [x] Older representatives per loader and the legacy ARM64 table.
   - [x] Milestone II: complete screenshot evidence set prepared (`target/parity-shots/m2-artifacts.html`: matrices, mapping, references/explained gaps, E2E index, per-page real-data captures).
   - [ ] Milestone III: complete the comparison board and user visual/interaction acceptance using that set.
-  - [ ] Milestone II: revoke app access and complete the final live-account re-sign-in/relaunch check; earlier PKCE, Device Code and native launch runs passed.
+  - [x] Milestone II: app access revoked, then live-account re-sign-in and real avatars verified on all five platforms; macOS, Windows AMD64 and Linux ARM64 passed game-menu/relaunch checks. Linux AMD64 live-account game launch was skipped for time; Windows ARM64 rendering is environment-blocked by the missing OpenGL ICD.
   - [x] CI green at completion: four platforms + manual windows-arm64 workflow green (one Linux ARM64 help-claim flake bounded at 0/70).
 
-Report Milestone II usability, Milestone III interaction acceptance, Milestone IV architecture design and v0 release readiness separately. Pending live checks and smoke runs remain explicit; Milestone III acceptance is not a Milestone II gate.
+Report Milestone II usability, Milestone III interaction acceptance, Milestone IV architecture design and v0 release readiness separately. Recorded skips and platform limits remain explicit; Milestone III acceptance is not a Milestone II gate.
 
 ## Needs the user
 

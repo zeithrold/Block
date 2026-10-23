@@ -1,5 +1,7 @@
 # MVP implementation and acceptance
 
+Historical baseline record. For the current Pilot milestone status, five-platform evidence and compatibility limits, use [STATUS.md](STATUS.md) and [next-tasks.md](next-tasks.md). Milestone II is complete at `f2a5fd7`; its later results supersede pending items here without changing what the earlier baseline actually verified. Milestone III user acceptance remains pending.
+
 Independent per-session supervision and native crash assistance were added after the baseline gameplay/authentication acceptance below. Their implementation, failure boundaries and separate cross-platform verification results are recorded in [Session supervision and crash help](session-supervisor.md). Earlier baseline test counts do not replace that feature's complete verification runs.
 
 The target workflow is Microsoft sign-in → Instance → Profile → install → Play → world → normal exit → relaunch. Fresh Microsoft-authorized Vanilla and NeoForge sessions completed world entry, normal exit and same-world relaunch on macOS. Computer Use drove the native interface and games; a temporary application bundle around the identical Java executable made game windows targetable. Platform and runtime limits remain explicit below.
