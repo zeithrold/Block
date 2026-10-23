@@ -94,8 +94,7 @@ pub(super) fn viewport_with_role<E: ScrollContent>(
         .overflow_y_scroll()
         .track_scroll(scroll)
         .role(role)
-        .tab_index(0)
-        .focus(move |style| style.shadow(super::design::focus_ring(palette.ring)));
+        .tab_index(0);
     if horizontal {
         content = content.overflow_x_scroll();
     }
@@ -181,6 +180,8 @@ impl<E: ScrollContent> RenderOnce for ScrollArea<E> {
         ScrollViewport {
             content: self.content.into_element(),
             bar: base_scrollbar(&self.scroll, self.palette, horizontal).into_any_element(),
+            focus,
+            focus_color: self.palette.ring,
         }
     }
 }
@@ -190,6 +191,8 @@ impl<E: ScrollContent> RenderOnce for ScrollArea<E> {
 struct ScrollViewport<E: Element> {
     content: E,
     bar: AnyElement,
+    focus: FocusHandle,
+    focus_color: u32,
 }
 impl<E: Element> IntoElement for ScrollViewport<E> {
     type Element = Self;
@@ -249,6 +252,18 @@ impl<E: Element> Element for ScrollViewport<E> {
         self.content
             .paint(id, inspector, bounds, layout, &mut state.0, window, cx);
         self.bar.paint(window, cx);
+        if self.focus.is_focused(window) && window.last_input_was_keyboard() {
+            // A drop shadow fills the center of a transparent viewport. Paint
+            // an actual inside outline so focus cannot tint the page or change
+            // its layout; pointer focus needs no extra presentation.
+            let mut ring = gpui::outline(
+                bounds,
+                rgb(self.focus_color).opacity(0.5),
+                Default::default(),
+            );
+            ring.border_widths = gpui::Edges::all(px(2.));
+            window.paint_quad(ring);
+        }
     }
 }
 
@@ -356,3 +371,7 @@ fn page(scroll: &ScrollHandle, axis: Axis, direction: f32) {
         coordinate(scroll.offset(), axis) - length(scroll.bounds(), axis) * (direction * 0.9),
     );
 }
+
+#[cfg(test)]
+#[path = "scroll_area_tests.rs"]
+mod tests;

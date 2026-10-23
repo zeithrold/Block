@@ -65,6 +65,8 @@ Drawer entrance follow-up: the panel now uses the prototype's 450 ms custom Béz
 
 Home primary-action follow-up: Create game, Repair and Download previously inherited Outline hover/pressed backgrounds under a primary-colored idle override, leaving light text on a light hover surface. Home now explicitly requests the Primary variant for its changing command, preserving coherent idle/hover/pressed styles. A rendered contrast regression reproduced the Create game hover failure (1.04:1) and now covers Create/Launch/Retry download/Download in both themes; broader desktop acceptance remains pending.
 
+Shared scroll-viewport focus follow-up: clicking blank content previously applied a drop-shadow focus ring to a transparent viewport, tinting its whole interior gray. Home and Accounts reproduced the same issue; their common adapter also serves game/profile details, Settings, wizards, downloads, providers, About and game output. It now paints a transparent 2 px inside outline only for keyboard focus. Pointer focus, native scroll handles, item indices and layout are retained. Regressions cover both themes, caller-provided/default focus handles, pointer/keyboard switching, focus departure and Page Down/Home scrolling; broader native visual acceptance remains pending.
+
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
 - Windows is the primary native UI/E2E and visual-review platform (user decision, 2026-10-22); retain platform-specific macOS/Linux checks.
 - New catalogs use Bundled mode: one Instance and exactly one associated Profile; names and appearance match Home.
