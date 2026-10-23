@@ -338,7 +338,7 @@ impl ShellState {
             settings_page: self.settings_page,
             wizard: self.wizard.snapshot(cx),
             onboarding: self.onboarding.snapshot(cx),
-            system_window_chrome: self.system_window_chrome,
+            chrome_dragging: false,
         }
     }
 }

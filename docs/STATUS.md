@@ -45,6 +45,10 @@ Status: **complete for Milestone II**. These are prepared artifacts for Mileston
 - Evidence is local: `target/parity-shots/` is ignored by Git (about 232 MiB). A source push does not upload those screenshots or logs. Preserve this directory for Milestone III; do not interpret the GitHub source repository as an off-machine evidence archive.
 - Remaining acceptance work: page-by-page visuals and behavior, macOS system Reduce Motion, transition frames and actual management-page fit at 1280×720. Windows ARM64 rendering, macOS ARM64 1.16.5 and the skipped Linux AMD64 live-account game launch retain the limits below.
 
+## Milestone III custom-chrome increment (2026-10-23)
+
+The user authorized removing OS titlebars, including macOS traffic lights, and adding custom drag/minimize/close controls while retaining the restrained Home. The first implementation passed formatting, all-target/all-feature checking, strict Clippy and all 517 workspace tests. Production native checks on macOS/XFCE X11 have recorded evidence and limits; Windows AMD64 production build and core titlebar/drag/minimize/restore/close checks passed following the user's direct source-transfer authorization. These are separate from the earlier capability probes; see [implementation and verification](window-chrome-implementation.md). M04 remains open for its remaining platform/geometry and user-acceptance gates; Accepted is unchanged.
+
 ## Product decisions and intended differences
 
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
@@ -56,7 +60,8 @@ Status: **complete for Milestone II**. These are prepared artifacts for Mileston
 - Section Done updates only the local draft; Cancel restores its checkpoint. Final creation saves the Instance/Profile pair atomically.
 - Late results update actual catalog/session state, but cannot complete or clear a newer draft, wizard or authentication attempt.
 - Home is 432×768; full management pages are 960×600; dialogs use content-appropriate fixed sizes. Fit to short displays at creation.
-- macOS uses the upstream transparent titlebar and native traffic lights; Windows/Linux use system decorations.
+- Current implementation (2026-10-23): product windows request no native titlebar and use custom drag/minimize/close controls through published GPUI APIs. macOS native traffic lights and their reserved gap are removed. The first production increment has passed the local automated gate; platform-specific native evidence and remaining boundaries are recorded in [window-chrome-implementation.md](window-chrome-implementation.md). Accepted remains Pending.
+- Native chrome feasibility (2026-10-23): isolated probes verified system-titlebar removal and core window/dialog interaction on Windows AMD64, XFCE X11/Linux AMD64 and KDE Wayland/Linux ARM64 using unmodified dependencies. GPT-6 Luna's [KDE Xwayland follow-up](xwayland-compatibility-investigation.md) also verified core actions after correcting CSD hit coordinates; drag moved +48/+32 with uinput, while the XTest request was inert. The production increment uses a minimal header without the default Linux TitleBar maximize/zoom actions. CSD content-size differences and strict X11 WM size constraints remain separate integration boundaries. See [window-chrome-feasibility.md](window-chrome-feasibility.md). These earlier probes remain capability evidence, separate from production validation and full game-lifecycle acceptance.
 - Dialogs, drawers, wizard sections and the account flow are in-window overlay components built on the gpui-kit/gpui-component Dialog and Sheet primitives: prototype-aligned scrim, background interaction blocked, Escape closes, focus stays inside the overlay and is restored afterwards. Anchored menus/selects/tooltips use upstream Base components.
 - Accessibility semantics remain deferred; stacked overlays, system and in-app reduced motion are retained.
 - First run keeps Your game → Your account → Ready to go. Skipping creates no identity and never bypasses launch authorization.

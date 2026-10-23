@@ -9,8 +9,8 @@ use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
 use gpui::{
-    App, AppContext as _, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowDecorations,
-    WindowOptions, px, size,
+    App, AppContext as _, Bounds, KeyBinding, WindowBounds, WindowDecorations, WindowOptions, px,
+    size,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
@@ -119,7 +119,6 @@ fn run(args: Args) -> anyhow::Result<()> {
                     launch: args.launch,
                     profile: args.profile,
                     data_dir: args.data_dir,
-                    system_window_chrome: false,
                     build_info: block_ui::BuildInfo::default(),
                     #[cfg(debug_assertions)]
                     scenario: args.scenario.map(|name| block_ui::ScenarioOptions {
@@ -140,7 +139,6 @@ fn configure_application(cx: &mut App) {
     block_ui::initialize(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-    #[cfg(not(target_os = "linux"))]
     cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
             cx.quit();
@@ -149,20 +147,17 @@ fn configure_application(cx: &mut App) {
     .detach();
 }
 
-fn window_options(cx: &App, title: &str) -> WindowOptions {
+fn window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
     WindowOptions {
-        titlebar: Some(TitlebarOptions {
-            title: Some(title.to_owned().into()),
-            appears_transparent: cfg!(target_os = "macos"),
-            ..Default::default()
-        }),
-        window_decorations: Some(if cfg!(target_os = "macos") {
-            WindowDecorations::Client
-        } else {
-            WindowDecorations::Server
-        }),
+        // Product chrome is rendered by Block on every desktop platform.
+        // Linux compositors may ignore client-side decoration requests; the
+        // in-app controls remain available in that case as well.
+        titlebar: None,
+        window_decorations: Some(WindowDecorations::Client),
+        app_owns_titlebar_drag: true,
         is_resizable: false,
+        is_minimizable: true,
         app_id: Some("one.ztd.block".into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(360.0), px(540.0))),
@@ -178,9 +173,9 @@ fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()>
         source_sha256: option_env!("BLOCK_SOURCE_SHA256"),
         source_commit: option_env!("BLOCK_SOURCE_COMMIT"),
     };
-    let window_options = window_options(cx, "Block");
-    options.system_window_chrome = window_options.titlebar.is_some();
+    let window_options = window_options(cx);
     cx.open_window(window_options, |window, cx| {
+        window.set_window_title("Block");
         let view = cx.new(|cx| Block::new(window, cx, options));
         cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
     })?;
@@ -210,8 +205,9 @@ fn crash_application(root: PathBuf, report: CrashReport) -> anyhow::Result<()> {
                     Err(error) => eprintln!("Could not return to the instance: {error:#}"),
                 }
             };
-            let options = window_options(cx, "Block · Crash help");
+            let options = window_options(cx);
             match cx.open_window(options, |window, cx| {
+                window.set_window_title("Block · Crash help");
                 let view =
                     cx.new(|cx| CrashView::new(report, directory, return_to_profile, window, cx));
                 cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))

@@ -6,7 +6,7 @@ use block_launcher::crash::{Confidence, CrashReport, ExitKind};
 use gpui::{
     App, ClipboardItem, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    div, rgb,
+    WindowControlArea, div, px, rgb,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +56,7 @@ pub struct CrashView {
     show_details: bool,
     exporting: bool,
     status: Option<String>,
+    chrome_dragging: bool,
 }
 
 impl fmt::Debug for CrashView {
@@ -97,6 +98,7 @@ impl CrashView {
             show_details: false,
             exporting: false,
             status: None,
+            chrome_dragging: false,
         }
     }
 
@@ -246,7 +248,7 @@ impl Render for CrashView {
         }
         let mut body = div()
             .id("crash-help-content")
-            .size_full()
+            .w_full()
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -271,9 +273,87 @@ impl Render for CrashView {
         if self.show_details {
             body = body.child(self.details());
         }
+        let header = div()
+            .id("crash-window-chrome")
+            .debug_selector(|| "crash-window-chrome".into())
+            .h(px(40.))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .border_b_1()
+            .border_color(rgb(0x0033_4857))
+            .child(
+                div()
+                    .id("crash-window-title")
+                    .debug_selector(|| "crash-window-title".into())
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.chrome_dragging = true),
+                    )
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.chrome_dragging = false),
+                    )
+                    .on_mouse_move(
+                        cx.listener(|view, event: &gpui::MouseMoveEvent, window, _| {
+                            if view.chrome_dragging
+                                && event.pressed_button == Some(gpui::MouseButton::Left)
+                            {
+                                view.chrome_dragging = false;
+                                window.start_window_move();
+                            } else if event.pressed_button.is_none() {
+                                view.chrome_dragging = false;
+                            }
+                        }),
+                    )
+                    .child(div().text_sm().child("Block · Crash help")),
+            )
+            .child(
+                div()
+                    .id("crash-window-minimize")
+                    .debug_selector(|| "crash-window-minimize".into())
+                    .role(gpui::accesskit::Role::Button)
+                    .aria_label("Minimize Block crash help")
+                    .size(px(32.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(0x0029_3c4a)))
+                    .on_click(cx.listener(|_, _, window, _| window.minimize_window()))
+                    .child(super::design::Icon::Minus.render(16., 0x0095_a4b1)),
+            )
+            .child(
+                div()
+                    .id("crash-window-close")
+                    .debug_selector(|| "crash-window-close".into())
+                    .role(gpui::accesskit::Role::Button)
+                    .aria_label("Close Block crash help")
+                    .size(px(32.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(0x0029_3c4a)))
+                    .on_click(cx.listener(|_, _, window, _| window.remove_window()))
+                    .child(super::design::Icon::Close.render(16., 0x0095_a4b1)),
+            );
         div()
             .key_context("CrashHelp")
             .track_focus(&self.focus)
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|view, _, _, _| view.chrome_dragging = false),
+            )
             .on_action(cx.listener(|view, _: &NextControl, _, cx| {
                 view.focused_control = (view.focused_control + 1) % ACTIONS.len();
                 cx.notify();
@@ -289,9 +369,12 @@ impl Render for CrashView {
                 view.handle(HelpAction::Close, window, cx);
             }))
             .size_full()
+            .flex()
+            .flex_col()
             .bg(rgb(0x0017_232d))
             .text_color(rgb(0x00e9_f0f4))
-            .child(body)
+            .child(header)
+            .child(body.flex_1().min_h_0())
     }
 }
 

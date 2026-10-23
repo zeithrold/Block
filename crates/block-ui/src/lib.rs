@@ -109,7 +109,6 @@ pub struct LaunchOptions {
     pub launch: bool,
     pub profile: Option<String>,
     pub data_dir: Option<PathBuf>,
-    pub system_window_chrome: bool,
     pub build_info: BuildInfo,
     #[cfg(debug_assertions)]
     pub scenario: Option<ScenarioOptions>,
@@ -182,6 +181,8 @@ enum UiAction {
     ProfileColor(block_launcher::catalog::ProfileColor),
     SelectValue(Box<Self>),
     DismissToast,
+    MinimizeWindow,
+    CloseWindow,
     WizardPage(Option<WizardPage>),
     OnboardingNext,
     OnboardingBack,
@@ -527,7 +528,6 @@ impl Block {
             motion_dirty: true,
             visual_only: false,
             shell: ShellState {
-                system_window_chrome: options.system_window_chrome,
                 ..ShellState::default()
             },
             pending_window_size: None,
@@ -1566,6 +1566,8 @@ impl Block {
             UiAction::WizardCustomWindow => self.wizard_custom_window(),
             UiAction::WizardProfileConnect => self.wizard_profile_connect(),
             UiAction::DismissToast => self.shell.toast = None,
+            UiAction::MinimizeWindow => window.minimize_window(),
+            UiAction::CloseWindow => window.remove_window(),
             UiAction::SelectValue(action) => {
                 self.shell.surfaces.close(window, &self.focus, cx);
                 self.handle(*action, window, cx);
@@ -2187,9 +2189,11 @@ impl Block {
             UiAction::SignOut(_) | UiAction::ConfirmDelete | UiAction::StorageCleanup(_, true) => {
                 components::ButtonVariant::Destructive
             }
-            UiAction::Tab(_) | UiAction::Drawer(_) | UiAction::CancelForm => {
-                components::ButtonVariant::Ghost
-            }
+            UiAction::Tab(_)
+            | UiAction::Drawer(_)
+            | UiAction::CancelForm
+            | UiAction::MinimizeWindow
+            | UiAction::CloseWindow => components::ButtonVariant::Ghost,
             _ => components::ButtonVariant::Outline,
         };
         let disabled = self.busy && !self.can_activate(&action)
@@ -2293,6 +2297,8 @@ impl Block {
                 | UiAction::AuthCancel
                 | UiAction::AuthProviderCancel
                 | UiAction::AuthReopen
+                | UiAction::MinimizeWindow
+                | UiAction::CloseWindow
                 | UiAction::SignIn
                 | UiAction::AuthBack
                 | UiAction::AuthMethod(_)

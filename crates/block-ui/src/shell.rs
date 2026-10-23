@@ -10,7 +10,8 @@ use std::{
 
 use gpui::{
     AnyElement, Context, Image, ImageFormat, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div, img, px, rgb,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, WindowControlArea,
+    div, img, px, rgb,
 };
 
 use super::{Block, Form, Tab, UiAction, account_id, note, scroll_area::ScrollAreaExt as _};
@@ -81,7 +82,7 @@ pub(super) struct ShellState {
     pub settings_page: u8,
     pub wizard: super::game_wizard::WizardState,
     pub onboarding: super::onboarding::State,
-    pub system_window_chrome: bool,
+    pub chrome_dragging: bool,
 }
 
 /// Retain only the last truthful panel presentation through its local exit.
@@ -160,6 +161,10 @@ impl Block {
             .debug_selector(|| "block-shell".into())
             .key_context("LauncherForm")
             .track_focus(&self.focus)
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
+            )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
                     // Base Dialog owns Escape while a surface is mounted.
@@ -364,13 +369,7 @@ impl Block {
             .border_color(rgb(self.palette.border))
             .flex_shrink_0()
             .px_4()
-            .pl(px(
-                if cfg!(target_os = "macos") && self.shell.system_window_chrome {
-                    80.
-                } else {
-                    16.
-                },
-            ))
+            .pl(px(16.))
             .flex()
             .items_center()
             .gap_2()
@@ -384,11 +383,33 @@ impl Block {
             .child(
                 div()
                     .id("window-title")
+                    .debug_selector(|| "window-title".into())
                     .flex_1()
                     .h_full()
                     .flex()
                     .items_center()
                     .min_w_0()
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.shell.chrome_dragging = true),
+                    )
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
+                    )
+                    .on_mouse_move(
+                        cx.listener(|view, event: &gpui::MouseMoveEvent, window, _| {
+                            if view.shell.chrome_dragging
+                                && event.pressed_button == Some(gpui::MouseButton::Left)
+                            {
+                                view.shell.chrome_dragging = false;
+                                window.start_window_move();
+                            } else if event.pressed_button.is_none() {
+                                view.shell.chrome_dragging = false;
+                            }
+                        }),
+                    )
                     .child(div().truncate().text_sm().child(title)),
             )
             .children((!first_run && !authenticating).then(|| {
@@ -420,6 +441,24 @@ impl Block {
                         .into_any_element()
                 }
             }))
+            .child(
+                self.button("window-minimize", "", UiAction::MinimizeWindow, cx)
+                    .aria_label("Minimize Block")
+                    .w(px(32.))
+                    .h(px(32.))
+                    .px_0()
+                    .justify_center()
+                    .child(super::design::Icon::Minus.render(16., self.palette.muted)),
+            )
+            .child(
+                self.button("window-close", "", UiAction::CloseWindow, cx)
+                    .aria_label("Close Block")
+                    .w(px(32.))
+                    .h(px(32.))
+                    .px_0()
+                    .justify_center()
+                    .child(super::design::Icon::Close.render(16., self.palette.muted)),
+            )
     }
 
     pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {

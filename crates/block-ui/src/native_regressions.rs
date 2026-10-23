@@ -34,6 +34,22 @@ fn inside_viewport(cx: &mut VisualTestContext, selector: &'static str) -> Bounds
 }
 
 #[gpui::test]
+fn custom_window_chrome_keeps_drag_space_and_controls_inside_the_window(cx: &mut TestAppContext) {
+    let (_view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    for dimensions in [(960., 600.), (360., 540.)] {
+        cx.simulate_resize(size(px(dimensions.0), px(dimensions.1)));
+        let menu = inside_viewport(cx, "app-menu");
+        let title = inside_viewport(cx, "window-title");
+        let minimize = inside_viewport(cx, "window-minimize");
+        let close = inside_viewport(cx, "window-close");
+        assert!(menu.right() <= title.left());
+        assert!(title.right() <= minimize.left());
+        assert!(minimize.right() <= close.left());
+        assert!(title.size.width > px(0.));
+    }
+}
+
+#[gpui::test]
 fn busy_home_keeps_stop_reachable_and_cancels_the_operation(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let account = test_account()?;
@@ -162,6 +178,10 @@ fn crash_help_preserves_report_actions_in_the_default_window(cx: &mut TestAppCon
     });
     cx.simulate_resize(size(px(960.), px(600.)));
     for selector in [
+        "crash-window-chrome",
+        "crash-window-title",
+        "crash-window-minimize",
+        "crash-window-close",
         "crash-return",
         "crash-open-folder",
         "crash-export",
