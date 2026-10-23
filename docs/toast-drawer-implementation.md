@@ -33,9 +33,9 @@ foundation rather than creating a separate modal/focus system.
   focusing the stack expands it and pauses expiry; an active swipe also pauses
   expiry. Removed messages finish their exit before their storage is released.
 - The close button uses Base Button's keyboard and accessibility behavior.
-  Horizontal or downward swipes follow the pointer and fade the card. Releasing
-  below the dismissal threshold restores it. Pointer tracking continues outside
-  the original card within the window.
+  Horizontal or downward swipes follow the pointer. Releasing below the
+  dismissal threshold animates it back; an accepted swipe continues outward and
+  fades. Pointer tracking continues outside the original card within the window.
 - Width is capped at 356 logical pixels and fits short/narrow windows. The
   product reserves its existing Play/Save/Retry action rail so a transient
   message cannot cover those buttons. This is an intentional adaptation of the
@@ -49,6 +49,41 @@ foundation rather than creating a separate modal/focus system.
 Product messages are queued until the window's presentation pass, preserving
 several messages produced in one engine poll. The previous last-message shell
 state remains for existing status consumers; it no longer paints a second Toast.
+
+## Toast timing alignment
+
+The installed Sonner 2.0.8 `dist/styles.css` and `dist/index.mjs` are the source
+for this follow-up. The Shadcn wrapper and application CSS do not override these
+motion rules.
+
+| Path | Timing and travel |
+| --- | --- |
+| Entrance | 400 ms CSS `ease` (`cubic-bezier(.25, .1, .25, 1)`), from one measured card height below its resting position, with the same opacity curve. |
+| Stack arrival, expansion and collapse | 400 ms CSS `ease` for the final measured bottom edge, width, layer visibility and content fade. Interrupted transitions continue from their sampled values; reversals use the upstream CSS transition shortening behavior. |
+| Rejected swipe | Track the pointer directly, then return over 400 ms CSS `ease`. |
+| Accepted swipe | Continue from the release offset by another card width or height, fading over 200 ms CSS `ease-out` (`cubic-bezier(0, 0, .58, 1)`). |
+| Ordinary removal | Front/expanded cards request 400 ms movement and opacity. Collapsed back cards request 500 ms movement to 40% of their height and a 200 ms fade. Sonner removes the node after 200 ms in all these cases; Native retains that actual removal timing. |
+| Reduced motion | Settle all presentation channels immediately under either the application preference or the OS preference. Disabling the preference does not replay entrance. |
+
+Base's published `ToastStack` API offers spring response tokens rather than a
+CSS transition policy. Block disables only its presentation springs and retains
+its measurement, placement, hover and focus handling. A small prepaint adapter
+transitions the final measured bottom edge, so stack height and item offset do
+not compose two different trajectories. The same native prepaint offset moves
+the painted content, hitboxes and accessibility bounds. Width and content fade
+use the public Base transition primitives. No dependency patches are involved.
+
+The gesture axis locks after one logical pixel of travel. Crossing the other
+axis later does not change the card's direction or its dismissal test. Grabbing
+a returning card preserves its painted offset, so a new drag does not snap it
+back to the resting position. Upward travel uses Sonner's resistance formula.
+
+This aligns timing rather than implementing a browser renderer. Base still owns
+variable-height stack geometry and uses a width reduction for collapsed layers;
+the web implementation scales the entire card and adopts the front card's
+height. Native also retains its horizontal/downward displacement thresholds,
+four/eight-second lifetimes and action-rail offset. These intentional product
+adaptations are separate from the curve regression checks and desktop review.
 
 ## Drawer behavior
 
@@ -76,8 +111,13 @@ The component regressions exercise physical pointer/key events, retained exit,
 focus restoration, stacked dialogs, rapid reopening, short-window layout,
 expiry/coalescing, hover/focus pause, swipe dismissal and runtime reduced motion.
 They complement the existing selector, overlay and retry-action regressions.
+Toast timing regressions sample actual native card bounds at intermediate
+timestamps against browser CSS reference values, covering full-height entrance,
+stack retargeting, interrupted expansion/collapse, swipe return, outward swipe,
+ordinary/back-layer removal, diagonal axis locking, re-grabbing during return
+and runtime system reduced motion.
 The local macOS native gate passed formatting, all-target/all-feature checking,
-strict Clippy, 544 tests across 39 suites (zero failures or ignored tests), and
+strict Clippy, 554 tests across 39 suites (zero failures or ignored tests), and
 the desktop executable build. Motion fixtures select both normal and system-reduced
 policies within each test thread; they do not change the host OS preference.
 This is automated native evidence; the disposable

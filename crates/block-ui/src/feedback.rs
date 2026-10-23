@@ -13,14 +13,14 @@ use std::{
 };
 
 use gpui::{
-    Anchor, App, Context, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
+    Anchor, App, Axis, Context, ElementId, FocusHandle, InteractiveElement as _, IntoElement,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, Window, div, px, rgb,
+    SharedString, Styled as _, Window, div, prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_base::{
-    Root, RootPlugin, Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack,
-    ToastStackState, ToastTransitionStatus,
-    motion::{Presence, Transition},
+    Root, RootPlugin, TestSupportExt as _, Toast as BaseToast, ToastManager, ToastMotion,
+    ToastOptions, ToastStack, ToastStackState, ToastTransitionStatus,
+    motion::{Easing, Presence, Transition, transition},
 };
 
 use super::{Palette, design::Icon};
@@ -29,6 +29,10 @@ static NEXT_TOAST_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_TOASTS: usize = 5;
 const TOAST_WIDTH: f32 = 356.0;
 const TOAST_BOTTOM: f32 = 24.0;
+
+#[path = "toast_motion.rs"]
+mod toast_motion;
+use toast_motion::{SwipeExit, ToastPosition};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum ToastKind {
@@ -79,20 +83,23 @@ fn swipe_dismisses(dx: Pixels, dy: Pixels) -> bool {
     dx.abs() >= px(72.) || dy >= px(48.)
 }
 
-fn drag_visual(drag: Option<DragState>) -> (Pixels, Pixels, f32) {
-    drag.map_or((px(0.), px(0.), 1.0), |drag| {
+fn drag_visual(drag: Option<DragState>) -> gpui::Point<Pixels> {
+    drag.map_or(gpui::Point::default(), |drag| {
         let dx = drag.current.x - drag.start.x;
         let dy = drag.current.y - drag.start.y;
-        let visual_x = if dx.abs() >= dy.abs() { dx } else { px(0.) };
-        let visual_y = if dy >= px(0.) && dy.abs() > dx.abs() {
-            dy
-        } else {
-            px(0.)
-        };
-        let progress = (visual_x.abs() / px(160.))
-            .max(visual_y / px(120.))
-            .clamp(0., 1.);
-        (visual_x, visual_y, 1.0 - progress * 0.65)
+        drag.origin
+            + match drag.axis {
+                Some(Axis::Horizontal) => gpui::point(dx, px(0.)),
+                Some(Axis::Vertical) => gpui::point(
+                    px(0.),
+                    if dy >= px(0.) {
+                        dy
+                    } else {
+                        dy / (1.5 + dy.abs() / px(20.))
+                    },
+                ),
+                None => gpui::Point::default(),
+            }
     })
 }
 
@@ -137,14 +144,58 @@ fn animation_duration(reduced_motion: bool) -> Duration {
     if reduced_motion {
         Duration::ZERO
     } else {
-        Duration::from_millis(180)
+        Duration::from_millis(400)
     }
+}
+
+fn css_transition(reduced_motion: bool) -> Transition {
+    Transition::new(animation_duration(reduced_motion)).easing(Easing::Ease)
 }
 
 #[derive(Clone, Copy)]
 struct DragState {
     start: gpui::Point<Pixels>,
     current: gpui::Point<Pixels>,
+    origin: gpui::Point<Pixels>,
+    axis: Option<Axis>,
+}
+
+impl DragState {
+    fn new(start: gpui::Point<Pixels>, origin: gpui::Point<Pixels>) -> Self {
+        Self {
+            start,
+            current: start,
+            origin,
+            axis: None,
+        }
+    }
+
+    fn update(&mut self, position: gpui::Point<Pixels>) {
+        self.current = position;
+        let delta = position - self.start;
+        if self.axis.is_none() && delta.x.abs().max(delta.y.abs()) > px(1.) {
+            self.axis = Some(if delta.x.abs() > delta.y.abs() {
+                Axis::Horizontal
+            } else {
+                Axis::Vertical
+            });
+        }
+    }
+
+    fn dismisses(self) -> bool {
+        let offset = drag_visual(Some(self));
+        match self.axis {
+            Some(Axis::Horizontal) => swipe_dismisses(offset.x, px(0.)),
+            Some(Axis::Vertical) => swipe_dismisses(px(0.), offset.y),
+            None => false,
+        }
+    }
+}
+
+struct ToastAppearance {
+    palette: Palette,
+    width: Pixels,
+    rank: usize,
 }
 
 pub(super) struct ToastLayer {
@@ -153,6 +204,7 @@ pub(super) struct ToastLayer {
     stack_focus: FocusHandle,
     close_focus: HashMap<u64, FocusHandle>,
     gestures: Rc<RefCell<HashMap<u64, DragState>>>,
+    swipe_exits: HashMap<u64, SwipeExit>,
     timer_running: bool,
     last_tick: Option<Instant>,
     reduced_motion: bool,
@@ -176,6 +228,7 @@ impl ToastLayer {
             stack_focus: cx.focus_handle(),
             close_focus: HashMap::new(),
             gestures: Rc::default(),
+            swipe_exits: HashMap::new(),
             timer_running: false,
             last_tick: None,
             reduced_motion: cx.reduce_motion(),
@@ -286,6 +339,7 @@ impl ToastLayer {
         for (id, _) in advance.removed {
             self.close_focus.remove(&id);
             self.gestures.borrow_mut().remove(&id);
+            self.swipe_exits.remove(&id);
         }
         for id in expired {
             changed |= self.manager.dismiss(&id, now);
@@ -313,11 +367,11 @@ impl ToastLayer {
         if gestures.is_empty() {
             return;
         }
-        for (id, drag) in gestures {
-            if swipe_dismisses(
-                event.position.x - drag.start.x,
-                event.position.y - drag.start.y,
-            ) {
+        for (id, mut drag) in gestures {
+            drag.update(event.position);
+            if let Some(axis) = drag.axis.filter(|_| drag.dismisses()) {
+                self.swipe_exits
+                    .insert(id, SwipeExit::new(drag_visual(Some(drag)), axis));
                 self.dismiss(id, cx);
             }
         }
@@ -360,6 +414,8 @@ impl ToastLayer {
         self.gestures
             .borrow_mut()
             .retain(|id, _| self.manager.get(id).is_some());
+        self.swipe_exits
+            .retain(|id, _| self.manager.get(id).is_some());
     }
 
     fn toast_element(
@@ -367,10 +423,15 @@ impl ToastLayer {
         id: u64,
         toast: Toast,
         status: ToastTransitionStatus,
-        palette: Palette,
+        appearance: ToastAppearance,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> impl IntoElement {
+        let ToastAppearance {
+            palette,
+            width,
+            rank,
+        } = appearance;
         let (icon, tone, tint) = match toast.kind {
             ToastKind::Success => (Icon::Check, palette.success, palette.success_background),
             ToastKind::Error => (
@@ -386,73 +447,167 @@ impl ToastLayer {
             .get(&id)
             .cloned()
             .unwrap_or_else(|| cx.focus_handle());
-        let gestures = self.gestures.clone();
-        let press = move |event: &MouseDownEvent, _: &mut Window, _: &mut App| {
-            gestures.borrow_mut().insert(
-                id,
-                DragState {
-                    start: event.position,
-                    current: event.position,
-                },
-            );
-        };
         let drag = self.gestures.borrow().get(&id).copied();
-        let (drag_x, drag_y, drag_opacity) = drag_visual(drag);
+        let reduced = cx.reduce_motion();
+        let expanded = self.stack_state.is_expanded();
+        let policy = css_transition(reduced);
+        let drag_offset = transition(
+            ElementId::NamedInteger("block-toast-drag".into(), id),
+            drag_visual(drag),
+            if drag.is_some() {
+                Transition::new(Duration::ZERO)
+            } else {
+                policy.clone()
+            },
+            window,
+            cx,
+        );
+        let gestures = self.gestures.clone();
+        let entity_id = cx.entity().entity_id();
+        let press = move |event: &MouseDownEvent, _: &mut Window, cx: &mut App| {
+            gestures
+                .borrow_mut()
+                .insert(id, DragState::new(event.position, drag_offset));
+            cx.notify(entity_id);
+        };
+        let swipe = self.swipe_exits.get(&id).copied();
+        let swipe_progress = transition(
+            ElementId::NamedInteger("block-toast-swipe".into(), id),
+            if swipe.is_none() { 1. } else { 0. },
+            Transition::new(if reduced {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(200)
+            })
+            .easing(Easing::EaseOut),
+            window,
+            cx,
+        );
 
         let presence = Presence::new(
             ElementId::NamedInteger("block-toast-presence".into(), id),
-            status != ToastTransitionStatus::Ending,
+            status != ToastTransitionStatus::Ending || swipe.is_some(),
         )
-        .transition(Transition::new(animation_duration(cx.reduce_motion())))
+        .transition(
+            if status == ToastTransitionStatus::Ending && !expanded && rank > 0 {
+                Transition::new(if reduced {
+                    Duration::ZERO
+                } else {
+                    Duration::from_millis(500)
+                })
+                .easing(Easing::Ease)
+            } else {
+                policy.clone()
+            },
+        )
         .sample(window, cx);
+        let opacity = Presence::new(
+            ElementId::NamedInteger("block-toast-opacity".into(), id),
+            status != ToastTransitionStatus::Ending || swipe.is_some(),
+        )
+        .transition(
+            if status == ToastTransitionStatus::Ending && !expanded && rank > 0 {
+                Transition::new(if reduced {
+                    Duration::ZERO
+                } else {
+                    Duration::from_millis(200)
+                })
+                .easing(Easing::Ease)
+            } else {
+                policy.clone()
+            },
+        )
+        .sample(window, cx);
+        let card_width = transition(
+            ElementId::NamedInteger("block-toast-width".into(), id),
+            width
+                * if expanded {
+                    1.
+                } else {
+                    1. - 0.05 * rank.min(2) as f32
+                },
+            policy.clone(),
+            window,
+            cx,
+        );
+        let contents = transition(
+            ElementId::NamedInteger("block-toast-content".into(), id),
+            if expanded || rank == 0 { 1. } else { 0. },
+            policy.clone(),
+            window,
+            cx,
+        );
+        let visibility = transition(
+            ElementId::NamedInteger("block-toast-visibility".into(), id),
+            if expanded || rank < 3 { 1. } else { 0. },
+            policy,
+            window,
+            cx,
+        );
         let card = div()
-            .debug_selector(|| "toast".into())
             .occlude()
             .on_mouse_down(MouseButton::Left, press)
-            .opacity(presence.progress * drag_opacity)
-            .relative()
-            .left(drag_x)
-            .top(drag_y + px(12. * (1. - presence.progress)))
-            .flex()
-            .items_center()
-            .gap(px(12.))
-            .w_full()
-            .min_w_0()
-            .px(px(16.))
-            .py(px(14.))
+            .opacity(opacity.progress * swipe_progress * visibility)
+            .when(visibility == 0., |card| card.invisible())
+            .w(card_width)
+            .mx_auto()
             .rounded(px(14.))
             .border_1()
             .border_color(rgb(palette.border))
             .bg(rgb(palette.card))
             .text_color(rgb(palette.foreground))
             .shadow_lg()
-            .child(icon.render(18., tone))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_sm()
-                    .child(SharedString::from(toast.message)),
-            )
-            .child(
-                gpui_base::Button::new(ElementId::NamedInteger("block-toast-close".into(), id))
-                    .accessibility_label("Dismiss notification")
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .size(px(28.))
-                    .rounded(px(8.))
-                    .bg(rgb(tint))
-                    .cursor_pointer()
-                    .on_click(close)
-                    .track_focus(&close_focus)
-                    .tab_index(0)
-                    .tab_stop(true)
-                    .child(Icon::Close.render(14., palette.muted)),
-            );
-        BaseToast::new(ElementId::NamedInteger("block-toast".into(), id))
+                    .gap(px(12.))
+                    .w_full()
+                    .min_w_0()
+                    .px(px(16.))
+                    .py(px(14.))
+                    .opacity(contents)
+                    .child(icon.render(18., tone))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .child(SharedString::from(toast.message)),
+                    )
+                    .child(
+                        gpui_base::Button::new(ElementId::NamedInteger(
+                            "block-toast-close".into(),
+                            id,
+                        ))
+                        .accessibility_label("Dismiss notification")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(28.))
+                        .rounded(px(8.))
+                        .bg(rgb(tint))
+                        .cursor_pointer()
+                        .on_click(close)
+                        .track_focus(&close_focus)
+                        .tab_index(0)
+                        .tab_stop(true)
+                        .child(Icon::Close.render(14., palette.muted)),
+                    ),
+            )
+            .id(ElementId::NamedInteger("block-toast-card".into(), id))
+            .test_support();
+        let toast = BaseToast::new(ElementId::NamedInteger("block-toast".into(), id))
             .transition_status(status)
-            .child(card)
+            .child(div().debug_selector(|| "toast".into()).child(card));
+        ToastPosition::new(
+            id,
+            toast.into_any_element(),
+            presence.progress,
+            drag_offset,
+            swipe.map(|swipe| (swipe, swipe_progress)),
+            status == ToastTransitionStatus::Ending && !expanded && rank > 0,
+        )
     }
 }
 
@@ -475,14 +630,15 @@ impl Render for ToastLayer {
         let mut stack = ToastStack::new("block-toast-stack", self.stack_state.clone())
             .placement(Anchor::BottomCenter)
             .focus_handle(self.stack_focus.clone())
-            .motion(if cx.reduce_motion() {
-                ToastMotion {
-                    duration: Duration::ZERO,
-                    exit_duration: Duration::ZERO,
-                    ..ToastMotion::sonner()
-                }
-            } else {
-                ToastMotion::sonner()
+            // Keep Base's measurement, focus and hover behavior. Its public
+            // stack API only exposes springs, so animate the final measured
+            // item positions with CSS ease in ToastPosition instead.
+            .motion(ToastMotion {
+                duration: Duration::ZERO,
+                exit_duration: Duration::ZERO,
+                collapsed_scale_step: 0.,
+                collapsed_visible: usize::MAX,
+                ..ToastMotion::sonner()
             })
             .w(width)
             .max_w(px(TOAST_WIDTH));
@@ -492,10 +648,22 @@ impl Render for ToastLayer {
             .visible(MAX_TOASTS)
             .map(|(id, value, status)| (*id, value.borrow().clone(), status))
             .collect::<Vec<_>>();
-        for (id, toast, status) in entries {
+        let count = entries.len();
+        for (index, (id, toast, status)) in entries.into_iter().enumerate() {
             stack = stack.item(
                 ElementId::NamedInteger("block-toast-stack-item".into(), id),
-                self.toast_element(id, toast, status, palette, window, cx),
+                self.toast_element(
+                    id,
+                    toast,
+                    status,
+                    ToastAppearance {
+                        palette,
+                        width,
+                        rank: count - index - 1,
+                    },
+                    window,
+                    cx,
+                ),
             );
         }
         div()
@@ -515,7 +683,7 @@ impl Render for ToastLayer {
                                 if !gestures.is_empty() {
                                     if event.pressed_button == Some(MouseButton::Left) {
                                         for drag in gestures.values_mut() {
-                                            drag.current = event.position;
+                                            drag.update(event.position);
                                         }
                                     } else {
                                         gestures.clear();

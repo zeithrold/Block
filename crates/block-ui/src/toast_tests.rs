@@ -105,16 +105,13 @@ fn pause_uses_elapsed_duration_and_resume_expires_again() {
 
 #[test]
 fn swipe_translation_and_motion_respect_reduced_motion() {
-    let drag = DragState {
-        start: gpui::point(px(10.), px(10.)),
-        current: gpui::point(px(90.), px(14.)),
-    };
-    let (x, y, opacity) = drag_visual(Some(drag));
-    assert_eq!(x, px(80.));
-    assert_eq!(y, px(0.));
-    assert!(opacity < 1.0);
+    let mut drag = DragState::new(gpui::point(px(10.), px(10.)), gpui::Point::default());
+    drag.update(gpui::point(px(90.), px(14.)));
+    let offset = drag_visual(Some(drag));
+    assert_eq!(offset.x, px(80.));
+    assert_eq!(offset.y, px(0.));
     assert_eq!(animation_duration(true), Duration::ZERO);
-    assert!(animation_duration(false) > Duration::ZERO);
+    assert_eq!(animation_duration(false), Duration::from_millis(400));
 }
 
 #[test]
@@ -123,6 +120,18 @@ fn swipe_requires_horizontal_or_downward_travel() {
     assert!(swipe_dismisses(px(0.), px(48.)));
     assert!(!swipe_dismisses(px(30.), px(-50.)));
     assert!(!swipe_dismisses(px(20.), px(20.)));
+}
+
+#[test]
+fn diagonal_swipe_keeps_the_axis_selected_after_the_initial_slop() {
+    let mut drag = DragState::new(gpui::Point::default(), gpui::Point::default());
+    drag.update(gpui::point(px(10.), px(4.)));
+    drag.update(gpui::point(px(20.), px(120.)));
+    assert_eq!(drag.axis, Some(Axis::Horizontal));
+    assert_eq!(drag_visual(Some(drag)), gpui::point(px(20.), px(0.)));
+    assert!(!drag.dismisses());
+    drag.update(gpui::point(px(80.), px(120.)));
+    assert!(drag.dismisses());
 }
 
 #[gpui::test]
@@ -314,4 +323,270 @@ fn system_reduced_motion_settles_exit_with_the_app_preference_off(cx: &mut gpui:
     assert!(!view.read_with(cx, |view, _| view.preferences.reduce_motion));
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
     assert!(cx.debug_bounds("toast").is_none());
+}
+
+fn card(cx: &mut gpui::VisualTestContext, id: u64) -> gpui::Bounds<Pixels> {
+    cx.update(|window, _| {
+        gpui_base::test_support::find(
+            window,
+            &[],
+            &ElementId::NamedInteger("block-toast-card".into(), id),
+        )
+    })
+    .expect("painted card")
+    .bounds()
+}
+
+fn first_id(layer: &gpui::Entity<ToastLayer>, cx: &gpui::VisualTestContext) -> u64 {
+    layer.read_with(cx, |layer, _| {
+        *layer.manager.iter().next().expect("toast").0
+    })
+}
+
+fn assert_near(actual: Pixels, expected: Pixels) {
+    assert!(
+        (actual - expected).abs() < px(0.6),
+        "{actual:?} != {expected:?}"
+    );
+}
+
+#[gpui::test]
+fn entrance_travels_one_card_height_on_the_css_ease_curve(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 0);
+    let start = card(cx, id);
+    frame(cx, 100);
+    let quarter = card(cx, id);
+    frame(cx, 100);
+    let half = card(cx, id);
+    frame(cx, 200);
+    let settled = card(cx, id);
+    // Browser CSS ease: cubic-bezier(.25, .1, .25, 1), sampled at .25 and .5.
+    assert_near(start.origin.y - settled.origin.y, settled.size.height);
+    assert_near(
+        quarter.origin.y - settled.origin.y,
+        settled.size.height * 0.59149,
+    );
+    assert_near(
+        half.origin.y - settled.origin.y,
+        settled.size.height * 0.19760,
+    );
+}
+
+#[gpui::test]
+fn stack_retargets_from_its_painted_position_with_css_timing(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 500);
+    let initial = card(cx, id);
+    cx.update(|window, app| {
+        ToastLayer::enqueue(
+            vec![Toast::new("Second message".into(), ToastKind::Info)],
+            window,
+            app,
+        )
+    });
+    frame(cx, 0);
+    assert_near(card(cx, id).bottom(), initial.bottom());
+    frame(cx, 100);
+    let quarter = card(cx, id);
+    assert_near(quarter.bottom(), initial.bottom() - px(14.) * 0.40851);
+    assert_near(
+        quarter.size.width,
+        initial.size.width * (1. - 0.05 * 0.40851),
+    );
+    cx.update(|window, app| {
+        ToastLayer::enqueue(
+            vec![Toast::new("Third message".into(), ToastKind::Info)],
+            window,
+            app,
+        )
+    });
+    frame(cx, 0);
+    assert_near(card(cx, id).bottom(), quarter.bottom());
+    assert_near(card(cx, id).size.width, quarter.size.width);
+    frame(cx, 400);
+    assert_near(card(cx, id).bottom(), initial.bottom() - px(28.));
+    assert_near(card(cx, id).size.width, initial.size.width * 0.9);
+}
+
+#[gpui::test]
+fn stack_expand_and_interrupted_collapse_share_css_reversal_timing(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    let front = Toast::new("Front message".into(), ToastKind::Info);
+    let front_id = front.id;
+    cx.update(|window, app| ToastLayer::enqueue(vec![front], window, app));
+    frame(cx, 500);
+    let collapsed = card(cx, id);
+    let front = card(cx, front_id);
+    cx.simulate_mouse_move(front.center(), None, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).bottom(), collapsed.bottom());
+    frame(cx, 100);
+    let expanding = card(cx, id);
+    assert_near(
+        expanding.bottom(),
+        collapsed.bottom() - front.size.height * 0.40851,
+    );
+    cx.simulate_mouse_move(gpui::point(px(0.), px(0.)), None, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).bottom(), expanding.bottom());
+    frame(cx, 200);
+    assert_near(card(cx, id).bottom(), collapsed.bottom());
+    assert_near(card(cx, id).size.width, collapsed.size.width);
+}
+
+#[gpui::test]
+fn collapsed_back_toast_uses_500ms_motion_before_200ms_removal(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    cx.update(|window, app| {
+        ToastLayer::enqueue(
+            vec![Toast::new("Front message".into(), ToastKind::Info)],
+            window,
+            app,
+        )
+    });
+    frame(cx, 500);
+    let initial = card(cx, id);
+    layer.update(cx, |layer, cx| layer.dismiss(id, cx));
+    frame(cx, 0);
+    frame(cx, 100);
+    assert_near(
+        card(cx, id).origin.y,
+        initial.origin.y + initial.size.height * 0.4 * 0.29524,
+    );
+    frame(cx, 150);
+    assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_none()));
+}
+
+#[gpui::test]
+fn system_reduced_motion_settles_entry_without_replaying_when_disabled(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 0);
+    let start = card(cx, id);
+    frame(cx, 100);
+    let moving = card(cx, id);
+    assert!(moving.origin.y < start.origin.y);
+    let reduced_policy = crate::platform::test_system_motion(true);
+    view.update(cx, |_, cx| cx.notify());
+    frame(cx, 0);
+    let settled = card(cx, id);
+    assert_near(start.origin.y - settled.origin.y, settled.size.height);
+    drop(reduced_policy);
+    view.update(cx, |_, cx| cx.notify());
+    frame(cx, 100);
+    assert_near(card(cx, id).origin.y, settled.origin.y);
+}
+
+#[gpui::test]
+fn rejected_swipe_returns_over_400ms_without_snapping(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 500);
+    let initial = card(cx, id);
+    let end = initial.center() + gpui::point(px(20.), px(0.));
+    cx.simulate_mouse_down(initial.center(), MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.x, initial.origin.x + px(20.));
+    cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.x, initial.origin.x + px(20.));
+    frame(cx, 100);
+    assert_near(card(cx, id).origin.x, initial.origin.x + px(20.) * 0.59149);
+    frame(cx, 300);
+    assert_near(card(cx, id).origin.x, initial.origin.x);
+    assert!(layer.read_with(cx, |layer, _| layer.swipe_exits.is_empty()));
+}
+
+#[gpui::test]
+fn grabbing_a_returning_toast_continues_from_its_painted_offset(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 500);
+    let initial = card(cx, id);
+    let end = initial.center() + gpui::point(px(20.), px(0.));
+    cx.simulate_mouse_down(initial.center(), MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    frame(cx, 100);
+    let returning = card(cx, id);
+    cx.simulate_mouse_down(
+        returning.center(),
+        MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.x, returning.origin.x);
+    let end = returning.center() + gpui::point(px(10.), px(0.));
+    cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.x, returning.origin.x + px(10.));
+    cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    frame(cx, 400);
+    assert_near(card(cx, id).origin.x, initial.origin.x);
+}
+
+#[gpui::test]
+fn accepted_swipe_continues_outward_from_release_with_200ms_ease_out(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 500);
+    let initial = card(cx, id);
+    let end = initial.center() + gpui::point(px(80.), px(0.));
+    cx.simulate_mouse_down(initial.center(), MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    let dragged = card(cx, id);
+    cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.x, dragged.origin.x);
+    frame(cx, 100);
+    // Browser CSS ease-out: cubic-bezier(0, 0, .58, 1), sampled at .5.
+    assert_near(
+        card(cx, id).origin.x,
+        dragged.origin.x + initial.size.width * 0.68464,
+    );
+    frame(cx, 150);
+    assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()
+        && layer.swipe_exits.is_empty()));
+}
+
+#[gpui::test]
+fn ordinary_exit_matches_the_prototype_200ms_retention(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 500);
+    let initial = card(cx, id);
+    layer.update(cx, |layer, cx| layer.dismiss(id, cx));
+    frame(cx, 0);
+    assert_near(card(cx, id).origin.y, initial.origin.y);
+    frame(cx, 100);
+    assert_near(
+        card(cx, id).origin.y,
+        initial.origin.y + initial.size.height * 0.40851,
+    );
+    frame(cx, 150);
+    assert!(cx.debug_bounds("toast").is_none());
+    assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
 }
