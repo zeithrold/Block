@@ -4,7 +4,15 @@ use std::time::Duration;
 use crate::{Block, UiAction, shell::Drawer};
 use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px, size};
 
-fn fixture(cx: &mut TestAppContext, reduced: bool) -> (Entity<Block>, &mut VisualTestContext) {
+fn fixture(
+    cx: &mut TestAppContext,
+    reduced: bool,
+) -> (
+    Entity<Block>,
+    &mut VisualTestContext,
+    crate::platform::SystemMotionOverride,
+) {
+    let system_motion = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.snapshot = crate::test_support::ready_snapshot();
@@ -16,7 +24,7 @@ fn fixture(cx: &mut TestAppContext, reduced: bool) -> (Entity<Block>, &mut Visua
     });
     cx.simulate_resize(size(px(432.), px(768.)));
     cx.run_until_parked();
-    (view, cx)
+    (view, cx, system_motion)
 }
 
 fn act(view: &Entity<Block>, action: UiAction, cx: &mut VisualTestContext) {
@@ -41,7 +49,7 @@ fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> gpui::Bounds<gp
 
 #[gpui::test]
 fn handle_drag_tracks_pointer_rebounds_then_dismisses_and_restores_focus(cx: &mut TestAppContext) {
-    let (view, cx) = fixture(cx, true);
+    let (view, cx, _system_motion) = fixture(cx, true);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     let start_panel = bounds(cx, "block-drawer");
@@ -86,7 +94,7 @@ fn handle_drag_tracks_pointer_rebounds_then_dismisses_and_restores_focus(cx: &mu
 
 #[gpui::test]
 fn body_pointer_motion_does_not_start_a_drawer_gesture(cx: &mut TestAppContext) {
-    let (view, cx) = fixture(cx, true);
+    let (view, cx, _system_motion) = fixture(cx, true);
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     let panel = bounds(cx, "block-drawer");
     let list = bounds(cx, "selector-results");
@@ -109,7 +117,7 @@ fn body_pointer_motion_does_not_start_a_drawer_gesture(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn short_window_caps_panel_and_keeps_management_action_visible(cx: &mut TestAppContext) {
-    let (view, cx) = fixture(cx, true);
+    let (view, cx, _system_motion) = fixture(cx, true);
     cx.simulate_resize(size(px(360.), px(540.)));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     let panel = bounds(cx, "block-drawer");
@@ -129,7 +137,7 @@ fn short_window_caps_panel_and_keeps_management_action_visible(cx: &mut TestAppC
 
 #[gpui::test]
 fn exit_keeps_body_and_modal_input_until_animation_finishes(cx: &mut TestAppContext) {
-    let (view, cx) = fixture(cx, false);
+    let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     frame(cx, 500);
@@ -150,7 +158,7 @@ fn exit_keeps_body_and_modal_input_until_animation_finishes(cx: &mut TestAppCont
 
 #[gpui::test]
 fn rapid_reopen_cannot_be_removed_by_the_previous_exit(cx: &mut TestAppContext) {
-    let (view, cx) = fixture(cx, false);
+    let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     frame(cx, 500);
@@ -183,7 +191,7 @@ fn dialog_opened_during_drawer_exit_keeps_focus_and_returns_to_the_trigger(
 ) {
     use gpui_component::WindowExt as _;
 
-    let (view, cx) = fixture(cx, false);
+    let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     frame(cx, 500);
@@ -195,5 +203,18 @@ fn dialog_opened_during_drawer_exit_keeps_focus_and_returns_to_the_trigger(
     assert_eq!(cx.update(|window, cx| window.focused(cx)), dialog_focus);
     crate::test_support::press(cx, "escape");
     frame(cx, 250);
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), invoking_focus);
+}
+
+#[gpui::test]
+fn system_reduced_motion_closes_immediately_with_the_app_preference_off(cx: &mut TestAppContext) {
+    let (view, cx, _normal_policy) = fixture(cx, false);
+    let invoking_focus = cx.update(|window, cx| window.focused(cx));
+    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    frame(cx, 500);
+    let _reduced_policy = crate::platform::test_system_motion(true);
+    act(&view, UiAction::Drawer(None), cx);
+    assert!(!view.read_with(cx, |view, _| view.preferences.reduce_motion));
+    assert!(crate::test_support::control_bounds(cx, "block-drawer").is_none());
     assert_eq!(cx.update(|window, cx| window.focused(cx)), invoking_focus);
 }

@@ -11,7 +11,35 @@
 
 /// Either preference can request reduced motion; the app cannot override the OS.
 pub(super) fn reduce_motion(application_preference: bool) -> bool {
+    #[cfg(test)]
+    if let Some(system_preference) = TEST_SYSTEM_MOTION.get() {
+        return application_preference || system_preference;
+    }
     application_preference || system_reduce_motion()
+}
+
+// Motion tests must exercise both policies even on a runner whose OS already
+// requests reduced motion. Scope the input to the test thread, without changing
+// the desktop preference or leaking a policy to other tests.
+#[cfg(test)]
+thread_local! {
+    static TEST_SYSTEM_MOTION: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) struct SystemMotionOverride(Option<bool>);
+
+#[cfg(test)]
+impl Drop for SystemMotionOverride {
+    fn drop(&mut self) {
+        TEST_SYSTEM_MOTION.set(self.0);
+    }
+}
+
+#[cfg(test)]
+#[must_use]
+pub(super) fn test_system_motion(reduced: bool) -> SystemMotionOverride {
+    SystemMotionOverride(TEST_SYSTEM_MOTION.replace(Some(reduced)))
 }
 
 #[cfg(target_os = "macos")]

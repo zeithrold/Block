@@ -5,6 +5,18 @@
 )]
 use super::*;
 
+fn fixture(
+    cx: &mut gpui::TestAppContext,
+) -> (
+    gpui::Entity<crate::Block>,
+    &mut gpui::VisualTestContext,
+    crate::platform::SystemMotionOverride,
+) {
+    let system_motion = crate::platform::test_system_motion(false);
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    (view, cx, system_motion)
+}
+
 #[test]
 fn toast_ids_are_stable_across_clones_and_lifetimes_follow_kind() {
     let success = Toast::new("saved".into(), ToastKind::Success);
@@ -115,7 +127,7 @@ fn swipe_requires_horizontal_or_downward_travel() {
 
 #[gpui::test]
 fn adapter_coalesces_duplicates_without_restarting_the_entry_phase(cx: &mut gpui::TestAppContext) {
-    let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (_, cx, _system_motion) = fixture(cx);
     let layer = cx.update(|window, app| {
         Root::read(window, app)
             .plugin::<ToastLayer>()
@@ -154,7 +166,7 @@ fn adapter_coalesces_duplicates_without_restarting_the_entry_phase(cx: &mut gpui
 
 #[gpui::test]
 fn adapter_expires_after_executor_clock_advances(cx: &mut gpui::TestAppContext) {
-    let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (_, cx, _system_motion) = fixture(cx);
     let layer = cx.update(|window, app| {
         Root::read(window, app)
             .plugin::<ToastLayer>()
@@ -204,7 +216,7 @@ fn enqueue(cx: &mut gpui::VisualTestContext) -> gpui::Entity<ToastLayer> {
 
 #[gpui::test]
 fn pointer_hover_pauses_expiry_and_leaving_resumes_it(cx: &mut gpui::TestAppContext) {
-    let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (_, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
     frame(cx, 500);
     let card = cx.debug_bounds("toast").expect("painted toast");
@@ -229,7 +241,7 @@ fn pointer_hover_pauses_expiry_and_leaving_resumes_it(cx: &mut gpui::TestAppCont
 
 #[gpui::test]
 fn keyboard_close_uses_native_activation_and_pauses_expiry(cx: &mut gpui::TestAppContext) {
-    let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (_, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
     frame(cx, 500);
     let focus = layer
@@ -251,7 +263,7 @@ fn keyboard_close_uses_native_activation_and_pauses_expiry(cx: &mut gpui::TestAp
 
 #[gpui::test]
 fn swipe_tracks_pointer_outside_card_and_dismisses(cx: &mut gpui::TestAppContext) {
-    let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (_, cx, _system_motion) = fixture(cx);
     cx.simulate_resize(gpui::size(px(432.), px(768.)));
     let layer = enqueue(cx);
     frame(cx, 500);
@@ -271,7 +283,7 @@ fn swipe_tracks_pointer_outside_card_and_dismisses(cx: &mut gpui::TestAppContext
 
 #[gpui::test]
 fn enabling_reduced_motion_settles_an_in_progress_exit(cx: &mut gpui::TestAppContext) {
-    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let (view, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
     frame(cx, 500);
     let id = layer.read_with(cx, |layer, _| {
@@ -283,6 +295,23 @@ fn enabling_reduced_motion_settles_an_in_progress_exit(cx: &mut gpui::TestAppCon
         cx.notify();
     });
     cx.run_until_parked();
+    assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
+    assert!(cx.debug_bounds("toast").is_none());
+}
+
+#[gpui::test]
+fn system_reduced_motion_settles_exit_with_the_app_preference_off(cx: &mut gpui::TestAppContext) {
+    let (view, cx, _normal_policy) = fixture(cx);
+    let layer = enqueue(cx);
+    frame(cx, 500);
+    let id = layer.read_with(cx, |layer, _| {
+        *layer.manager.iter().next().expect("toast").0
+    });
+    layer.update(cx, |layer, cx| layer.dismiss(id, cx));
+    let _reduced_policy = crate::platform::test_system_motion(true);
+    view.update(cx, |_, cx| cx.notify());
+    frame(cx, 0);
+    assert!(!view.read_with(cx, |view, _| view.preferences.reduce_motion));
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
     assert!(cx.debug_bounds("toast").is_none());
 }

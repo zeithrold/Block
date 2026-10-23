@@ -77,8 +77,10 @@ focus restoration, stacked dialogs, rapid reopening, short-window layout,
 expiry/coalescing, hover/focus pause, swipe dismissal and runtime reduced motion.
 They complement the existing selector, overlay and retry-action regressions.
 The local macOS native gate passed formatting, all-target/all-feature checking,
-strict Clippy, 542 tests across 39 suites (zero failures or ignored tests), and
-the desktop executable build. This is automated native evidence; the disposable
+strict Clippy, 544 tests across 39 suites (zero failures or ignored tests), and
+the desktop executable build. Motion fixtures select both normal and system-reduced
+policies within each test thread; they do not change the host OS preference.
+This is automated native evidence; the disposable
 CLI preview could not be bound reliably by the desktop automation, so the new
 components' actual desktop gesture/visual verdict remains pending.
 Run the complete native gate with
