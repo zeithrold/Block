@@ -19,13 +19,14 @@ Milestone II must leave a complete screenshot evidence set for Milestone III rev
 
 | Deliverable | Current state |
 | --- | --- |
-| Native scene matrix, Windows + macOS, 71 scenarios × light/dark | Windows 142 shots at `bae97f0` and macOS 142 shots at `3f151b4` exist under `target/parity-shots/{windows-amd64/scenarios,native}`; recapture after relevant code changes. |
-| Scenario→page/state mapping manifest | Not produced. The boards pair 39 scenario names with React references; 32 are native-only and 4 are reference-only, leaving 72 missing-side placeholders per board in both themes. |
-| Missing React prototype references | Not captured. Prototype snapshot `fd2713b` with Playwright is available; the 32 native-only states need reference captures or a written native-only explanation. |
-| E2E flow screenshot index (Q5/Q6/Q7/Q8/Q10 and platform E2E) | Not produced. Individual `e2e-*` images/logs exist under `target/parity-shots/*`; they need one linked index with captions. |
-| Per-page real-data light/dark screenshots: Home, Accounts, Games, Wizard, Settings, About, Welcome | Not produced. Planned on Windows AMD64 (primary) and macOS ARM64 using existing seeded data; scenario fixtures alone are not enough. |
+| Native scene matrix, Windows + macOS, 71 scenarios × light/dark | Complete: Windows 142 shots (`windows-amd64/scenarios/`, `bae97f0`) and macOS 142 shots (`native/`, `3f151b4`), both boards rebuilt on those images. |
+| Scenario→page/state mapping manifest | Complete: `target/parity-shots/m2-mapping.html` / `m2-mapping.md`; 71 native stems, **60 paired with React references, 11 native-only with written reasons, 0 unresolved**; 4 proto-only names mapped/explained. |
+| Missing React prototype references | Complete: 21 of the 32 native-only states captured (42 new images, prototype snapshot `fd2713b`, headless Playwright light/dark); the other 11 have documented no-equivalent reasons; `proto/` now has 128 images and `proto/task39-mapping.txt`. Boards: 30 placeholders remain (15 stems ×2 themes) and each is explained by the mapping; no unexplained native/reference gap. |
+| E2E flow screenshot index | Complete: `target/parity-shots/e2e-index.html` — 376 images + 11 log/text files, 387 links, 0 missing; grouped Q5/Q6/Q7/Q8/Q9/Q10 with Q1/Q3/other sections. |
+| Per-page real-data light/dark screenshots | Complete: Windows 34 PNG + README (`windows-amd64/pages/`), macOS 38 PNG + README (`macos-arm64/pages/`), covering Welcome/Home/Accounts/Add provider/Games/detail/Instance settings/Wizard steps/Settings pages/About with seeded offline account + installed 1.20.6. |
+| Master artifact index | `target/parity-shots/m2-artifacts.html` links boards, mapping, E2E index, matrices, per-page captures, prototype references and all live evidence. |
 
-Status: **paused before this work started** at the user's request (interview). Do not start builds, captures, VM runs or live checks until the user explicitly asks to begin.
+Status: **complete for Milestone II**. These are prepared artifacts for Milestone III review, not user acceptance.
 
 ## Session checkpoint (2026-10-23)
 
@@ -33,7 +34,7 @@ Status: **paused before this work started** at the user's request (interview). D
 - CI is green at `2ce25e7` for the four push platforms; the manual `windows-arm64` workflow is green at `82b3847` with an uploaded native launcher artifact.
 - Windows ARM64 native launcher evidence exists; its game launch is blocked only by the Fusion ARM64 guest lacking an OpenGL ICD. 1.18.2 is environment-blocked; 1.16.5/1.12.2 have no official ARM64 Java 8.
 - All five platforms completed live Microsoft re-sign-in with real avatars after the security revoke: macOS PKCE, Windows AMD64 Device Code, Linux ARM64/AMD64 Device Code, Windows ARM64 Device Code. macOS and Windows AMD64 passed a game menu plus the relaunch/no-sign-in check; Linux ARM64 passed the same with 1.16.5; Linux AMD64 game launch and Windows ARM64 game render were skipped for time/environment.
-- Screenshot preparation is partially done: Windows 34 per-page shots, macOS 38 per-page shots, 21/32 missing React references captured (11 documented as no prototype equivalent), native scene matrices exist. Mapping manifest/board rebuild and the remaining reference decisions are still pending.
+- Milestone II screenshot evidence is complete: Windows/macOS native matrices (142 each), mapping manifest (60 paired / 11 explained / 0 unresolved), 21 missing React references captured plus 11 documented no-equivalent states, E2E index (0 missing links), 34 Windows + 38 macOS per-page real-data captures, and a master artifact index at `target/parity-shots/m2-artifacts.html`.
 - All workstreams are inactive and no goal is driving work; the Mac-hosted VMs may be running for these checks. No Accepted marker has been set.
 
 ## Product decisions and intended differences

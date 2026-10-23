@@ -24,7 +24,7 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
   - Linux AMD64: native Welcome → Vanilla → menu → Stop; Q9 D6 short-display/reduced-motion/input checks; Authlib fixture sign-in + real avatar + injected 1.20.6 menu; provider icons; X11 quick-link drag.
   - Windows ARM64: native launcher build, Welcome, catalog, install, offline account and restart persistence passed; game rendering is blocked by the VM's missing OpenGL ICD, a recorded best-effort boundary.
 - Windows Settings/SOCKS5/storage, loader and older-version flows, OptiFine re-import, queued Play, and lifecycle race fixes have evidence in STATUS.md and target/parity-shots/.
-- Milestone II remaining: **prepare the complete screenshot evidence set** (native scene matrices for Windows/macOS, a scenario→page/state mapping manifest, the missing React prototype references, an E2E flow screenshot index, and real-data light/dark screenshots for Home/Accounts/Games/Wizard/Settings/About/Welcome). The screenshot set is partially prepared (Windows/macOS per-page shots, 21/32 missing references, native matrices); mapping manifest/board rebuild still pending. The security revoke and live-account re-sign-in/relaunch checks are complete on all five platforms (macOS, Windows AMD64, Linux ARM64, Linux AMD64, Windows ARM64). Completion has not been declared.
+- Milestone II evidence complete: screenshot set prepared (native matrices, mapping manifest, React references/explained gaps, E2E index, per-page real-data captures, master index) and the security revoke plus live re-sign-in/avatar/launch checks completed on all five platforms. Milestone III (Codex) owns interaction review and acceptance.
 - Milestone III backlog: page-by-page visual and interaction review using the completed Milestone II screenshot set; macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720; interaction fixes and acceptance. Each platform currently has 142 native scenario images; only 39 scenario names pair with React references and each board has 72 missing-side placeholders despite no broken image links, which the Milestone II screenshot preparation must resolve or explain.
 
 ## Decisions (user, 2026-10-21)
@@ -113,7 +113,7 @@ P0–P5 below are historical work-package names, not the new milestone numbers. 
 - [ ] **P5 Verification across Milestones II and III:**
   - [x] Required recent install/launch smoke on all four hosts (API driver), plus legacy Forge on Windows.
   - [x] Older representatives per loader and the legacy ARM64 table.
-  - [ ] Milestone II: prepare the complete screenshot evidence set (native scene matrices, scenario→page/state mapping, missing React references, E2E flow index, per-page real-data light/dark screenshots).
+  - [x] Milestone II: complete screenshot evidence set prepared (`target/parity-shots/m2-artifacts.html`: matrices, mapping, references/explained gaps, E2E index, per-page real-data captures).
   - [ ] Milestone III: complete the comparison board and user visual/interaction acceptance using that set.
   - [ ] Milestone II: revoke app access and complete the final live-account re-sign-in/relaunch check; earlier PKCE, Device Code and native launch runs passed.
   - [x] CI green at completion: four platforms + manual windows-arm64 workflow green (one Linux ARM64 help-claim flake bounded at 0/70).
