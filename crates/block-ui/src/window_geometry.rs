@@ -2,6 +2,31 @@
 
 use gpui::{App, Bounds, Pixels, Size, Window, px, size};
 
+/// The same inner bounds used by the component library's window border. Tiled
+/// Linux edges have no shadow or border; overlays must not cover resize chrome.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "Shared by product overlay hosts."
+)]
+pub(super) fn content_insets(window: &Window) -> gpui::Edges<Pixels> {
+    let mut insets = gpui_component::window_paddings(window);
+    if let gpui::Decorations::Client { tiling } = window.window_decorations() {
+        if !tiling.top {
+            insets.top += px(1.);
+        }
+        if !tiling.bottom {
+            insets.bottom += px(1.);
+        }
+        if !tiling.left {
+            insets.left += px(1.);
+        }
+        if !tiling.right {
+            insets.right += px(1.);
+        }
+    }
+    insets
+}
+
 /// GPUI exposes full display bounds, not the desktop work area. Reserve logical
 /// pixels for panels, a system titlebar and resize borders without changing WM
 /// settings. A window deliberately placed outside this area cannot be moved with

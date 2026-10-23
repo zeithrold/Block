@@ -57,6 +57,8 @@ The user authorized removing OS titlebars, including macOS traffic lights, and a
 
 ## Product decisions and intended differences
 
+Toast/Drawer increment (2026-10-23): shared feedback now uses Base ToastManager/ToastStack, with coalescing, timed/paused expiry, keyboard close, swipe and reduced motion. Home's three drawers use Base Sheet semantics with a draggable handle, bounded content, rebound and retained exit/focus restoration. The Home body and underlying task flows are preserved. Verification scope and outstanding desktop/visual review are tracked in [toast-drawer-implementation.md](toast-drawer-implementation.md); Accepted remains Pending.
+
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
 - Windows is the primary native UI/E2E and visual-review platform (user decision, 2026-10-22); retain platform-specific macOS/Linux checks.
 - New catalogs use Bundled mode: one Instance and exactly one associated Profile; names and appearance match Home.

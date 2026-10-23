@@ -235,7 +235,7 @@ fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestApp
     });
     cx.run_until_parked();
     assert_eq!(cx.windows().len(), 1, "the sheet stays inside Home");
-    cx.update(|window, cx| assert!(window.has_active_sheet(cx)));
+    cx.update(|window, cx| assert!(crate::drawer::DrawerLayer::is_open(window, cx)));
     view.read_with(cx, |view, _| {
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
@@ -251,7 +251,7 @@ fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestApp
     cx.run_until_parked();
     assert_eq!(cx.windows().len(), 1);
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
-    cx.update(|window, cx| assert!(!window.has_active_sheet(cx)));
+    cx.update(|window, cx| assert!(!crate::drawer::DrawerLayer::is_open(window, cx)));
     assert_eq!(
         cx.update(|window, cx| window.focused(cx)),
         trigger_focus,
@@ -279,7 +279,7 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
         assert_eq!(view.shell.surfaces.layers().count(), 2);
     });
     cx.update(|window, cx| {
-        assert!(window.has_active_sheet(cx));
+        assert!(crate::drawer::DrawerLayer::is_open(window, cx));
         assert!(window.has_active_dialog(cx));
     });
 
@@ -293,14 +293,14 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
         assert_eq!(view.shell.surfaces.layers().count(), 1);
     });
     cx.update(|window, cx| {
-        assert!(window.has_active_sheet(cx));
+        assert!(crate::drawer::DrawerLayer::is_open(window, cx));
         assert!(!window.has_active_dialog(cx));
     });
 
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
-    cx.update(|window, cx| assert!(!window.has_active_sheet(cx)));
+    cx.update(|window, cx| assert!(!crate::drawer::DrawerLayer::is_open(window, cx)));
 }
 
 #[gpui::test]
@@ -359,7 +359,7 @@ fn download_files_dialog_stacks_above_the_downloads_sheet(cx: &mut TestAppContex
         assert_eq!(view.shell.surfaces.layers().count(), 2);
     });
     cx.update(|window, cx| {
-        assert!(window.has_active_sheet(cx));
+        assert!(crate::drawer::DrawerLayer::is_open(window, cx));
         assert!(window.has_active_dialog(cx));
     });
     crate::test_support::press(cx, "escape");
@@ -371,7 +371,7 @@ fn download_files_dialog_stacks_above_the_downloads_sheet(cx: &mut TestAppContex
         ));
     });
     cx.update(|window, cx| {
-        assert!(window.has_active_sheet(cx));
+        assert!(crate::drawer::DrawerLayer::is_open(window, cx));
         assert!(!window.has_active_dialog(cx));
     });
 }

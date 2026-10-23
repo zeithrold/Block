@@ -234,6 +234,8 @@ impl Block {
         let query_entity = state.query.clone();
         div()
             .id("search-selector")
+            .h_full()
+            .min_h_0()
             .min_w_0()
             .flex()
             .flex_col()
@@ -245,6 +247,7 @@ impl Block {
             }))
             .child(
                 div()
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -271,24 +274,27 @@ impl Block {
                     )),
             )
             .child(rows)
-            .child(self.button(
-                if accounts {
-                    "manage-accounts"
-                } else {
-                    "manage-games"
-                },
-                if accounts {
-                    "Manage accounts"
-                } else {
-                    "Manage games"
-                },
-                UiAction::Tab(if accounts {
-                    super::Tab::Accounts
-                } else {
-                    super::Tab::Instances
-                }),
-                cx,
-            ))
+            .child(
+                self.button(
+                    if accounts {
+                        "manage-accounts"
+                    } else {
+                        "manage-games"
+                    },
+                    if accounts {
+                        "Manage accounts"
+                    } else {
+                        "Manage games"
+                    },
+                    UiAction::Tab(if accounts {
+                        super::Tab::Accounts
+                    } else {
+                        super::Tab::Instances
+                    }),
+                    cx,
+                )
+                .flex_shrink_0(),
+            )
             .into_any_element()
     }
 
@@ -307,9 +313,8 @@ impl Block {
         let mut rows = div()
             .id("selector-results")
             .debug_selector(|| "selector-results".into())
-            .h((window.viewport_size().height - px(220.)).clamp(px(120.), px(360.)))
+            .flex_1()
             .min_h_0()
-            .flex_shrink_0()
             .children(choices.iter().enumerate().map(|(index, choice)| {
                 self.selector_row(drawer, choice, active == Some(index), state, window, cx)
             }));

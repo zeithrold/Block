@@ -321,6 +321,7 @@ impl ShellState {
             output_scroll: frozen_scroll(&self.output_scroll),
             downloads: self.downloads.snapshot(),
             toast: self.toast.clone(),
+            pending_toasts: Vec::new(),
             auth: self.auth.as_ref().map(|auth| auth.snapshot(cx)),
             editor: self.editor.snapshot(),
             instance_editor: self

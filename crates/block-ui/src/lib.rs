@@ -11,6 +11,8 @@ mod connection_test;
 mod crash_view;
 mod design;
 mod downloads;
+mod drawer;
+mod drawer_gestures;
 mod engine;
 mod feedback;
 mod game_wizard;
@@ -55,10 +57,11 @@ pub fn initialize(cx: &mut gpui::App) {
     if !cx.has_global::<gpui_base::GlobalState>() {
         gpui_base::init(cx);
     }
-    // Dialog and sheet primitives (overlay stack, scrim, Escape dismissal and
-    // focus restore) come from the component library instead of a home-grown
-    // window manager. Product content and palette stay in this crate.
+    // Modal semantics stay in Base Sheet/Dialog. Product drawer motion sits
+    // below dialogs, and transient feedback sits above both.
+    ProductRoot::register_plugin(cx, drawer::DrawerLayer::new);
     gpui_component::init(cx);
+    ProductRoot::register_plugin(cx, feedback::ToastLayer::new);
 }
 
 fn bind_navigation_keys(cx: &mut gpui::App) {
@@ -180,7 +183,6 @@ enum UiAction {
     ProfileIcon(block_launcher::catalog::ProfileIcon),
     ProfileColor(block_launcher::catalog::ProfileColor),
     SelectValue(Box<Self>),
-    DismissToast,
     MinimizeWindow,
     CloseWindow,
     WizardPage(Option<WizardPage>),
@@ -1106,7 +1108,9 @@ impl Block {
     }
 
     fn push_toast(&mut self, message: String, kind: feedback::ToastKind) {
-        self.shell.toast = Some(feedback::Toast::new(message, kind));
+        let toast = feedback::Toast::new(message, kind);
+        self.shell.toast = Some(toast.clone());
+        self.shell.pending_toasts.push(toast);
     }
 
     /// True while the first-run setup draft is active (the setup page or its
@@ -1565,7 +1569,6 @@ impl Block {
             UiAction::WizardWindow { width, height } => self.wizard_window(width, height, cx),
             UiAction::WizardCustomWindow => self.wizard_custom_window(),
             UiAction::WizardProfileConnect => self.wizard_profile_connect(),
-            UiAction::DismissToast => self.shell.toast = None,
             UiAction::MinimizeWindow => window.minimize_window(),
             UiAction::CloseWindow => window.remove_window(),
             UiAction::SelectValue(action) => {
@@ -2303,7 +2306,6 @@ impl Block {
                 | UiAction::AuthBack
                 | UiAction::AuthMethod(_)
                 | UiAction::CopyDeviceCode
-                | UiAction::DismissToast
                 | UiAction::SetAppearance(_)
                 | UiAction::ReduceMotion
                 | UiAction::DefaultJavaAutomatic(_)
@@ -2413,6 +2415,15 @@ impl Render for Block {
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);
+        let action_rail = if self.tab == Tab::Home && self.form.is_none() {
+            104.
+        } else if patterns::is_narrow(window.viewport_size()) {
+            design::NARROW_FOOTER
+        } else {
+            design::MANAGEMENT_FOOTER
+        };
+        feedback::ToastLayer::reserve_actions(px(action_rail + 12.), window, cx);
+        feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();
         window.set_window_title(&if self.tab == Tab::Home && self.shell.auth.is_none() {

@@ -66,6 +66,7 @@ pub(super) struct ShellState {
     pub help_scroll: gpui::ScrollHandle,
     pub output_scroll: gpui::ScrollHandle,
     pub toast: Option<super::feedback::Toast>,
+    pub pending_toasts: Vec<super::feedback::Toast>,
     pub auth: Option<super::authentication::AuthWizard>,
     pub editor: super::profile_editor::EditorState,
     pub instance_editor: Option<super::instance_editor::InstanceEditor>,
@@ -203,65 +204,7 @@ impl Block {
             .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
             .child(div().flex_1().min_h_0().child(content));
         root = root.children(self.render_popups(window, cx));
-        if let Some(toast) = &self.shell.toast {
-            root = root.child(self.render_toast(toast, window, cx));
-        }
         root
-    }
-
-    fn render_toast(
-        &self,
-        toast: &super::feedback::Toast,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        let (icon, color) = match toast.kind {
-            super::feedback::ToastKind::Success => {
-                (super::design::Icon::Check, self.palette.success)
-            }
-            super::feedback::ToastKind::Error => {
-                (super::design::Icon::Error, self.palette.destructive)
-            }
-            super::feedback::ToastKind::Info => {
-                (super::design::Icon::Info, self.palette.foreground)
-            }
-        };
-        let rail = if self.tab == Tab::Home && self.form.is_none() {
-            104.
-        } else if super::patterns::is_narrow(window.viewport_size()) {
-            super::design::NARROW_FOOTER
-        } else {
-            super::design::MANAGEMENT_FOOTER
-        };
-        div()
-            .absolute()
-            .bottom(px(rail + 12.))
-            .left_0()
-            .right_0()
-            .flex()
-            .justify_center()
-            .px_4()
-            .child(
-                div()
-                    .id("toast")
-                    .debug_selector(|| "toast".into())
-                    .occlude()
-                    .max_w(px(560.))
-                    .p_3()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(rgb(self.palette.border))
-                    .bg(rgb(self.palette.popover))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(icon.render(18., color))
-                    .child(div().flex_1().text_sm().child(toast.message.clone()))
-                    .child(
-                        self.button("toast-dismiss", "", UiAction::DismissToast, cx)
-                            .child(super::design::Icon::Close.render(14., self.palette.muted)),
-                    ),
-            )
     }
 
     pub(super) fn navigation_title(&self) -> &'static str {
@@ -1141,19 +1084,19 @@ impl Block {
             .into_any_element()
     }
 
-    /// The sheet header copy and height fraction for one home drawer.
+    /// Desired content height; the presentation caps this to 80% of the client.
     pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
         match kind {
             Surface::Drawer(Drawer::Profiles) => {
-                ("Switch Profile", "Choose how you want to play.", 0.62)
+                ("Switch Profile", "Choose how you want to play.", 540.)
             }
             Surface::Drawer(Drawer::Accounts) => (
                 "Switch Account",
                 "Choose the account you want to use.",
-                0.62,
+                540.,
             ),
-            Surface::Drawer(Drawer::Downloads) => ("Downloads", "Track your download tasks.", 0.56),
-            _ => ("", "", 0.5),
+            Surface::Drawer(Drawer::Downloads) => ("Downloads", "Track your download tasks.", 440.),
+            _ => ("", "", 440.),
         }
     }
 
@@ -1161,28 +1104,21 @@ impl Block {
     /// description, scrim, dismissal and focus; this renders the product list.
     pub(super) fn render_surface_sheet_body(
         &self,
-        revision: usize,
+        kind: &Surface,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
-        let kind = self
-            .shell
-            .surfaces
-            .layers()
-            .find(|layer| layer.revision == revision)
-            .map(|layer| layer.kind.clone());
-        let Some(kind) = kind else {
-            return div().into_any_element();
-        };
-        match &kind {
+        match kind {
             Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
-                .w_full()
+                .size_full()
+                .min_h_0()
                 .flex()
                 .flex_col()
                 .child(self.render_selector_body(*drawer, window, cx))
                 .into_any_element(),
             Surface::Drawer(Drawer::Downloads) => div()
-                .w_full()
+                .size_full()
+                .min_h_0()
                 .flex()
                 .flex_col()
                 .child(self.render_downloads_body(window, cx))

@@ -1,5 +1,5 @@
 //! Product overlays: one logical layer stack presented through the component
-//! library's dialog and sheet layers inside the product window.
+//! library's modal primitives inside the product window.
 #![expect(
     clippy::redundant_pub_crate,
     reason = "Overlay ownership is internal to the product."
@@ -11,7 +11,7 @@ use super::{
 };
 use gpui::{
     App, AppContext as _, Context, FocusHandle, Focusable as _, IntoElement, ParentElement as _,
-    Render, Styled as _, WeakEntity, Window, div, px, rgb,
+    Render, Styled as _, WeakEntity, Window, div, px,
 };
 use gpui_component::WindowExt as _;
 use std::{cell::RefCell, collections::HashMap};
@@ -24,9 +24,9 @@ pub(super) struct SurfaceLayer {
     return_focus: Option<FocusHandle>,
 }
 
-/// The single product overlay stack. Presentation (scrim, Escape, focus trap,
-/// focus restore, motion) belongs to the component library; this list decides
-/// what is open, in which order, and how a dismissal settles product state.
+/// The single product overlay stack. The library owns modal input/focus, while
+/// DrawerLayer retains product content through its exit. This list decides what
+/// is open, in which order, and how a dismissal settles product state.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Overlays {
     trigger_focus: RefCell<HashMap<&'static str, FocusHandle>>,
@@ -63,7 +63,7 @@ impl Overlays {
         self.top().is_some()
     }
 
-    fn contains(&self, revision: usize) -> bool {
+    pub(super) fn contains(&self, revision: usize) -> bool {
         self.entries.iter().any(|entry| entry.revision == revision)
     }
 
@@ -99,7 +99,8 @@ impl Overlays {
             kind,
             focus: focus.clone(),
             revision,
-            return_focus: window.focused(cx),
+            return_focus: super::drawer::DrawerLayer::closing_return_focus(window, cx)
+                .or_else(|| window.focused(cx)),
         };
         if matches!(entry.kind, Surface::Select(_)) {
             focus.focus(window, cx);
@@ -115,7 +116,7 @@ impl Overlays {
                 Self::open_surface_dialog(overlay_kind, revision, window, cx);
             }
             OverlayPresentation::Sheet => {
-                Self::open_surface_sheet(overlay_kind, revision, window, cx);
+                Self::open_surface_sheet(overlay_kind, self.entries.last().cloned(), window, cx);
             }
         }
         true
@@ -130,14 +131,24 @@ impl Overlays {
         let entry = self.entries.pop()?;
         match entry.kind.overlay() {
             Some(OverlayPresentation::Dialog) => window.close_dialog(cx),
-            Some(OverlayPresentation::Sheet) => window.close_sheet(cx),
-            None => {}
+            Some(OverlayPresentation::Sheet)
+                if !super::drawer::DrawerLayer::close(entry.revision, None, window, cx) =>
+            {
+                entry
+                    .return_focus
+                    .as_ref()
+                    .unwrap_or(fallback)
+                    .focus(window, cx);
+            }
+            Some(OverlayPresentation::Sheet) | None => {}
         }
-        entry
-            .return_focus
-            .as_ref()
-            .unwrap_or(fallback)
-            .focus(window, cx);
+        if entry.kind.overlay() != Some(OverlayPresentation::Sheet) {
+            entry
+                .return_focus
+                .as_ref()
+                .unwrap_or(fallback)
+                .focus(window, cx);
+        }
         Some(entry.kind)
     }
 
@@ -146,18 +157,22 @@ impl Overlays {
             .entries
             .iter()
             .any(|entry| entry.kind.overlay() == Some(OverlayPresentation::Dialog));
-        let had_sheet = self
+        let sheet = self
             .entries
             .iter()
-            .any(|entry| entry.kind.overlay() == Some(OverlayPresentation::Sheet));
+            .find(|entry| entry.kind.overlay() == Some(OverlayPresentation::Sheet))
+            .map(|entry| entry.revision);
         self.entries.clear();
         if had_dialog {
             window.close_all_dialogs(cx);
         }
-        if had_sheet {
-            window.close_sheet(cx);
+        if let Some(revision) = sheet {
+            if !super::drawer::DrawerLayer::close(revision, Some(fallback.clone()), window, cx) {
+                fallback.focus(window, cx);
+            }
+        } else {
+            fallback.focus(window, cx);
         }
-        fallback.focus(window, cx);
     }
 
     /// Present an overlay surface through the component library's dialog layer.
@@ -178,7 +193,6 @@ impl Overlays {
             SurfaceOverlayBody {
                 owner: observer,
                 revision,
-                sheet: false,
             }
         });
         // The window root and neighbouring surface state are still settling
@@ -256,22 +270,15 @@ impl Overlays {
     /// Present an overlay surface as a bottom sheet inside the current window.
     fn open_surface_sheet(
         kind: Surface,
-        revision: usize,
+        entry: Option<SurfaceLayer>,
         window: &mut Window,
         cx: &mut Context<'_, Block>,
     ) {
         let owner = cx.weak_entity();
-        let observer = owner.clone();
-        let body = cx.new(|cx| {
-            if let Some(owner) = observer.upgrade() {
-                cx.observe(&owner, |_, _, cx| cx.notify()).detach();
-            }
-            SurfaceOverlayBody {
-                owner: observer,
-                revision,
-                sheet: true,
-            }
-        });
+        let Some(entry) = entry else {
+            return;
+        };
+        let revision = entry.revision;
         window.defer(cx, move |window, cx| {
             let Some(view) = owner.upgrade() else {
                 return;
@@ -279,52 +286,20 @@ impl Overlays {
             if !view.read(cx).shell.surfaces.contains(revision) {
                 return;
             }
-            let build_owner = owner.clone();
-            let body = body.clone();
-            window.open_sheet_at(
-                gpui_component::Placement::Bottom,
+            super::drawer::DrawerLayer::open(
+                owner,
+                kind,
+                revision,
+                entry.focus.clone(),
+                entry.return_focus,
+                window,
                 cx,
-                move |sheet, _sheet_window, sheet_cx| {
-                    let Some(view) = build_owner.upgrade() else {
-                        return sheet;
-                    };
-                    let view = view.read(sheet_cx);
-                    let (title, description, fraction) = view.surface_sheet_chrome(&kind);
-                    let muted = view.palette.muted;
-                    let body = body.clone();
-                    let dismiss = build_owner.clone();
-                    sheet
-                        .size(gpui::DefiniteLength::Fraction(fraction))
-                        .overlay(true)
-                        .overlay_closable(true)
-                        .on_close(move |_, window, cx| {
-                            let _ = dismiss.update(cx, |view, cx| {
-                                view.dismiss_surface_overlay(revision, window, cx)
-                            });
-                        })
-                        .title(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap_2()
-                                .child(div().w(px(36.)).h(px(4.)).rounded_full().bg(rgb(muted)))
-                                .child(div().text_lg().child(title))
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(gpui::FontWeight::NORMAL)
-                                        .text_color(rgb(muted))
-                                        .child(description),
-                                ),
-                        )
-                        .child(body)
-                },
             );
-            if let Some(focus) = view.read(cx).surface_input_focus(revision, cx) {
-                focus.focus(window, cx);
-            }
+            let focus = view
+                .read(cx)
+                .surface_input_focus(revision, cx)
+                .unwrap_or(entry.focus);
+            focus.focus(window, cx);
         });
     }
 }
@@ -334,20 +309,14 @@ impl Overlays {
 struct SurfaceOverlayBody {
     owner: WeakEntity<Block>,
     revision: usize,
-    sheet: bool,
 }
 
 impl Render for SurfaceOverlayBody {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let revision = self.revision;
-        let sheet = self.sheet;
         self.owner
             .update(cx, |view, cx| {
-                if sheet {
-                    view.render_surface_sheet_body(revision, window, cx)
-                } else {
-                    view.render_surface_dialog_body(revision, window, cx)
-                }
+                view.render_surface_dialog_body(revision, window, cx)
             })
             .unwrap_or_else(|_| div().into_any_element())
     }
@@ -393,7 +362,7 @@ impl Block {
     /// The library dismissed a layer itself (Escape, backdrop or close button).
     /// Drop exactly that logical layer; a late dismissal for an older revision
     /// is a no-op and never closes a newer layer.
-    fn dismiss_surface_overlay(
+    pub(super) fn dismiss_surface_overlay(
         &mut self,
         revision: usize,
         window: &mut Window,
@@ -416,7 +385,15 @@ impl Block {
             Surface::AuthProviderAdd => self.cancel_auth_provider(cx),
             _ => {}
         }
-        if let Some(focus) = entry.return_focus {
+        if entry.kind.overlay() == Some(OverlayPresentation::Sheet) {
+            if !super::drawer::DrawerLayer::close(revision, None, window, cx) {
+                entry
+                    .return_focus
+                    .as_ref()
+                    .unwrap_or(&self.focus)
+                    .focus(window, cx);
+            }
+        } else if let Some(focus) = entry.return_focus {
             focus.focus(window, cx);
         }
         self.motion_dirty = true;
