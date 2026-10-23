@@ -635,7 +635,7 @@ async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_lo
         directory,
         BTreeMap::from([("BLOCK_TEST_RENDERER".into(), "software-test".into())]),
     )?;
-    assert_eq!(invocation.preview().cwd, game);
+    assert_eq!(invocation.preview().cwd.canonicalize()?, game);
     assert!(!format!("{invocation:?}").contains("synthetic-sensitive-access-token"));
     let lock_was_held = Arc::new(AtomicBool::new(false));
     let observed = lock_was_held.clone();
