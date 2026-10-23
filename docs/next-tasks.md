@@ -28,6 +28,10 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
 - Milestone III backlog: follow the ordered checklist below, including macOS system reduced motion, transition-frame audit and actual Settings/Accounts fit at 1280×720. Each platform has 142 native scenario images; the manifest pairs 60 stems with React references, explains 11 native-only stems and maps/explains 4 proto-only names. The remaining 30 board placeholders are explained and local links resolve, but this is structural coverage: three real-data captures show the wrong page, and some same-name pairs represent different tasks or states. Correct these before visual acceptance.
 - Git audit: all 14 Block worktrees are clean and all local branch commits are reachable from fetched remote refs. The screenshot directory is ignored and remains local; uploading source does not upload it. The user keeps Block-UI local without committing/uploading its capture-tool changes.
 
+## CI coverage (2026-10-23)
+
+CI update (2026-10-23): Windows ARM64 is included in the automatic push/PR matrix alongside Windows AMD64, Linux AMD64/ARM64 and macOS ARM64. Its native architecture guard, full verification script, 90-minute timeout and launcher artifact upload are retained. The separate manual Windows ARM64 workflow is removed; the main CI matrix is the single entry point. Each commit requires its own five-platform result; automated checks do not close the production desktop/visual checks in M04.
+
 ## v0 product intent and recovery policy (user decisions, 2026-10-23)
 
 These decisions refine the assessment backlog below; they are product requirements, not claims of implemented or verified behavior. On 2026-10-23 the user authorized a narrow production increment: remove OS titlebars (including macOS traffic lights), provide custom drag and necessary window controls, and validate the real app. GPT-6 Luna at high reasoning effort implemented that increment in the working tree; native verification is partial with the recorded boundaries. All other product changes remain planning work unless separately requested.

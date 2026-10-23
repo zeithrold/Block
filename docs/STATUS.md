@@ -2,6 +2,10 @@
 
 Updated: 2026-10-23. Built, native verification and user acceptance are separate gates.
 
+## Automatic CI coverage
+
+The cross-platform workflow includes Windows AMD64, Windows ARM64, Linux AMD64, Linux ARM64 and macOS ARM64 on every push and pull request. Windows ARM64 uses `windows-11-arm`, verifies the actual runner/Rust host architecture, runs formatting, checks, strict Clippy, workspace tests and a native launcher build, then uploads `block-windows-arm64`. Its job retains a 90-minute timeout; the other platforms retain 60 minutes. The separate manual Windows ARM64 workflow is removed; this platform uses the main CI matrix. Each commit requires its own five-platform CI result; historical results below retain their original scope. Native game rendering and visual acceptance remain separate gates.
+
 ## Development milestones
 
 User decision, 2026-10-23; full scope and ownership: [next-tasks.md](next-tasks.md).
@@ -208,7 +212,7 @@ Entries are Minecraft version, API or UI, and the tested commit. API includes CL
 - ARM64 hosts (Linux, Windows, macOS) keep LWJGL 2-era versions visible but disabled in the version picker with "official LWJGL 2 natives are x86/x64 only"; typed exact IDs are refused with the same reason (3e5a801, native Linux ARM64 proof). Linux ARM64 native 1.16.5/1.18.2 wizard→Play→menu→Stop passed at 851e23b with the Azul runtime-substitution lines and the title-screen game-log lines; captures in target/parity-shots/linux-arm64/.
 - Linux AMD64 native Device Code saved on 0f7e26b after the client ID was supplied at launch; the built binary refuses sign-in without it.
 - Windows native first-run flow passed on 1ac4564: pending identity discarded on quit, account and game saved together, real 1.20.6 download, Play, main menu and Stop.
-- CI covers Windows AMD64, Linux AMD64, Linux ARM64 and macOS ARM64, plus a manual Windows ARM64 workflow that builds, tests and uploads the native ARM64 launcher; a one-off Linux ARM64 session-help claim flake was bounded at 0/70 and a rerun was green; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
+- Automatic CI covers Windows AMD64/ARM64, Linux AMD64/ARM64 and macOS ARM64, including an uploaded native Windows ARM64 launcher. The separate manual Windows ARM64 workflow is removed; a one-off Linux ARM64 session-help claim flake was bounded at 0/70 and a rerun was green; remote hosts are separate evidence. sccache is installed on the macOS host and the Linux ARM64 VM for host rebuilds.
 - All four test hosts share a WireGuard overlay (Mac hub 10.77.0.1; Windows AMD64 10.77.0.11, Windows ARM64 10.77.0.12, Linux ARM64 10.77.0.21, Linux AMD64 10.77.0.22); the Mac forwards between peers and the fixed Mac LAN address is the endpoint. The Linux AMD64 VM must still be started detached from its Windows host, and its login keyring relocks after a reboot.
 - Linux ARM64 uses Xwayland :1 and Spectacle; Linux AMD64 uses X11 window capture.
 - Q9 D6 on Linux AMD64 (191bf24): 1366×768 fit-to-display clamps Home to 432×620 and fits management 960×600; in-app reduced motion removes transitions; upstream 460 ms sheet/page transitions observed; Tab/Enter/Escape, clipboard, search, scrolling and draft restore pass. Linux system reduced motion is read from GTK `gsettings`. Windows SPI on/off recordings and 800×600 captures were completed; see target/parity-shots/windows-amd64/q9-win-motion-analysis.txt and q9-win-*.png. Milestone III retains the macOS system-motion and detailed transition audit. Minor: opening a section dialog clears the inline field error and cancelling does not restore it (toast/draft stay; next Continue revalidates).
