@@ -11,6 +11,11 @@ use block_download::Store;
 use tokio_util::sync::CancellationToken;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink as symlink_dir;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir;
+
 use super::{
     MAX_ARCHIVE_ENTRIES, MAX_UNPACKED_BYTES, UnpackBudget, copy_immutable, extract,
     install_archive, materialize, relative_runtime_path, runtime_link,
@@ -438,40 +443,37 @@ fn runtime_aliases_cannot_escape_their_installation() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn even_empty_archives_cannot_create_directories_through_symlinks() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
-    std::os::unix::fs::symlink(outside.path(), root.join("linked"))?;
+    symlink_dir(outside.path(), root.join("linked"))?;
     let source = archive(&root, &[])?;
     assert!(extract(&root, &source, &root.join("linked/created"), &[]).is_err());
     assert!(!outside.path().join("created").exists());
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn runtime_aliases_cannot_resolve_through_an_external_symlink() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     fs::create_dir(directory.path().join("runtime"))?;
     fs::write(outside.path().join("java"), b"outside binary")?;
-    std::os::unix::fs::symlink(outside.path(), directory.path().join("runtime/escape"))?;
+    symlink_dir(outside.path(), directory.path().join("runtime/escape"))?;
     assert!(runtime_link(directory.path(), "runtime/java", "escape/java", "runtime").is_err());
     assert!(!directory.path().join("runtime/java").exists());
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn preparation_rejects_instance_symlinks_before_creating_a_lock() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     fs::create_dir(root.join("instances"))?;
-    std::os::unix::fs::symlink(outside.path(), root.join("instances/executor-test"))?;
+    symlink_dir(outside.path(), root.join("instances/executor-test"))?;
     let store = Store::new(root, true, Arc::new(|_| {}))?;
     let executor = super::Executor::new(store, Arc::new(|_| {}));
     let mut plan = plan(Vec::new());
@@ -486,7 +488,23 @@ async fn preparation_rejects_instance_symlinks_before_creating_a_lock() -> anyho
     Ok(())
 }
 
-#[cfg(unix)]
+fn native_java_fixture(root: &Path, mode: &str) -> anyhow::Result<PathBuf> {
+    let executable = root.join(format!("fake-java{}", std::env::consts::EXE_SUFFIX));
+    let output = std::process::Command::new("rustc")
+        .args(["--edition=2024", "--crate-name=executor_child"])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/executor_child.rs"))
+        .arg("-o")
+        .arg(&executable)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "fixture compiler failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(root.join("fixture-mode"), mode)?;
+    Ok(executable)
+}
+
 #[tokio::test]
 async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::Result<()> {
     use std::{sync::Mutex, time::Duration};
@@ -496,13 +514,9 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
     fs::create_dir(root.join("game"))?;
-    let executable = root.join("fake-java");
-    fs::write(
-        &executable,
-        "#!/bin/sh\nprintf '%s\\n' \"$1\" \"$2\"\nprintf '%s\\n' 'ready' >&2\nexec sleep 60\n",
-    )?;
-    super::set_executable(&executable, true)?;
+    let executable = native_java_fixture(&root, "cancel")?;
     let mut plan = plan(Vec::new());
+    plan.target = Target::host()?;
     plan.command.java = JavaExecutable::Local { path: executable };
     plan.command.game_args = vec!["one argument with spaces".into()];
     let prepared = super::PreparedInstance {
@@ -536,7 +550,7 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
         executor.launch(prepared, &session, &cancel),
     )
     .await??;
-    assert_eq!(code, None);
+    assert_ne!(code, Some(0));
     let logs = root.join("instances/executor-test/runs/cancel-test/logs");
     assert_eq!(
         fs::read_to_string(logs.join("stdout.log"))?,
@@ -553,8 +567,13 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
     );
     assert!(matches!(
         events.last(),
-        Some(super::ExecutionEvent::Exited { code: None })
+        Some(super::ExecutionEvent::Exited { code: actual }) if *actual == code
     ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        super::ExecutionEvent::Terminated { outcome }
+            if outcome.kind == crate::crash::ExitKind::Stopped
+    )));
     drop(events);
     Ok(())
 }
@@ -572,7 +591,6 @@ fn same_size_view_corruption_is_detected_without_changing_either_file() -> anyho
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_logs()
 -> anyhow::Result<()> {
@@ -589,13 +607,9 @@ async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_lo
     let root = store_directory.path().canonicalize()?;
     let mutable = tempfile::tempdir()?;
     let game = mutable.path().canonicalize()?;
-    let java = root.join("fake-java");
-    fs::write(
-        &java,
-        "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$BLOCK_TEST_RENDERER\" \"$2\"\nexit 0\n",
-    )?;
-    super::set_executable(&java, true)?;
+    let java = native_java_fixture(&root, "context")?;
     let mut plan = plan(Vec::new());
+    plan.target = Target::host()?;
     plan.command.java = JavaExecutable::Local { path: java };
     plan.command.game_args = vec!["${auth_access_token}".into()];
     let prepared = super::PreparedInstance {

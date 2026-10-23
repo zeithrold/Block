@@ -30,7 +30,7 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
 
 ## CI coverage (2026-10-23)
 
-CI update (2026-10-23): Windows ARM64 is included in the automatic push/PR matrix alongside Windows AMD64, Linux AMD64/ARM64 and macOS ARM64. Its native architecture guard, full verification script, 90-minute timeout and launcher artifact upload are retained. The separate manual Windows ARM64 workflow is removed; the main CI matrix is the single entry point. Each commit requires its own five-platform result; automated checks do not close the production desktop/visual checks in M04.
+CI update (2026-10-23): Windows ARM64 is included in the automatic push/PR matrix alongside Windows AMD64, Linux AMD64/ARM64 and macOS ARM64. All five platforms retain native architecture guards and the same full verification script, use a 60-minute timeout and upload their own verified `block-<platform>` executable. The separate manual Windows ARM64 workflow and the redundant macOS Metal compiler preparation step are removed. Windows shares the supervisor-death, native child-process cancellation/pipe capture, launch-context/redaction and symlink protection regressions, with an additional junction-isolation test. Unix permissions/signals and Windows file-sharing tests retain their necessary OS-specific assertions. Each commit requires its own five-platform result; automated checks do not close the production desktop/visual checks in M04.
 
 ## v0 product intent and recovery policy (user decisions, 2026-10-23)
 

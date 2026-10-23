@@ -85,6 +85,10 @@ def main():
     if any(build.get(key) != value for key, value in expected.items()):
         print(f"Built executable does not match {args.platform}", file=sys.stderr)
         return 1
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with open(output, "a", encoding="utf-8") as stream:
+            stream.write(f"executable={binary}\n")
     print(f"Native checks and desktop build passed: {args.platform}")
     return 0
 

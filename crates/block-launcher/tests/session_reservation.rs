@@ -102,10 +102,12 @@ fn malformed_or_oversized_marker_is_preserved_and_blocks_games() -> anyhow::Resu
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
-fn marker_is_private_and_symlinked_marker_is_never_removed() -> anyhow::Result<()> {
-    use std::os::unix::fs::{PermissionsExt as _, symlink};
+fn symlinked_marker_is_never_removed() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::{PermissionsExt as _, symlink as symlink_file};
+    #[cfg(windows)]
+    use std::os::windows::fs::symlink_file;
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     let (instance, profile) =
@@ -114,10 +116,11 @@ fn marker_is_private_and_symlinked_marker_is_never_removed() -> anyhow::Result<(
     let guard = GameDirectoryGuard::for_session(&instance, &profile, &run_id)?;
     let game = guard.directory().to_path_buf();
     let marker = game.join(".block-session.json");
+    #[cfg(unix)]
     assert_eq!(fs::metadata(&marker)?.permissions().mode() & 0o777, 0o600);
     let outside = root.path().join("outside-session.json");
     fs::rename(&marker, &outside)?;
-    symlink(&outside, &marker)?;
+    symlink_file(&outside, &marker)?;
     drop(guard);
     assert!(GameDirectoryGuard::acquire(&game).is_err());
     assert!(GameDirectoryGuard::clear_session_reservation(&game, &run_id).is_err());

@@ -1,6 +1,11 @@
 use block_launcher::catalog::{Catalog, DataPolicy, GameDirectoryGuard};
 use std::{fs, sync::Arc};
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink as symlink_dir;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir;
+
 #[test]
 fn explicit_loader_targets_survive_reopen_and_profile_selection() -> anyhow::Result<()> {
     use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
@@ -233,7 +238,6 @@ fn existing_installation_root_cannot_be_reused_by_another_instance() -> anyhow::
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn isolated_profile_cannot_alias_another_profile_with_a_symlink() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
@@ -249,7 +253,40 @@ fn isolated_profile_cannot_alias_another_profile_with_a_symlink() -> anyhow::Res
             .parent()
             .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
     )?;
-    std::os::unix::fs::symlink(&original, &alias)?;
+    symlink_dir(&original, &alias)?;
+    assert!(GameDirectoryGuard::for_profile(&instance, &second).is_err());
+    assert!(GameDirectoryGuard::for_profile(&instance, &first).is_ok());
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn isolated_profile_cannot_alias_another_profile_with_a_junction() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    catalog.separate_profiles()?;
+    let (instance, first) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+    let second = catalog.copy_profile(&first.id, "Other".into())?;
+    let original = first.game_directory(&instance)?;
+    fs::create_dir_all(&original)?;
+    let alias = second.game_directory(&instance)?;
+    fs::create_dir_all(
+        alias
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
+    )?;
+    let output = std::process::Command::new("cmd")
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(&alias)
+        .arg(&original)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "could not create the fixture junction: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(alias.canonicalize()?, original.canonicalize()?);
     assert!(GameDirectoryGuard::for_profile(&instance, &second).is_err());
     assert!(GameDirectoryGuard::for_profile(&instance, &first).is_ok());
     Ok(())

@@ -235,16 +235,19 @@ fn cancellation_preserves_corrupt_copy() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn symlinked_immutable_paths_never_modify_the_target() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::{symlink as symlink_dir, symlink as symlink_file};
+    #[cfg(windows)]
+    use std::os::windows::fs::{symlink_dir, symlink_file};
     let root = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     let store = store(root.path())?;
     let resource = resource(&store, b"good")?;
     fs::write(outside.path().join("tool.jar"), b"user")?;
     fs::create_dir_all(root.path().join("views"))?;
-    std::os::unix::fs::symlink(outside.path(), root.path().join("views/libraries"))?;
+    symlink_dir(outside.path(), root.path().join("views/libraries"))?;
     assert!(
         quarantine_corrupt_copies(
             &store,
@@ -255,9 +258,12 @@ fn symlinked_immutable_paths_never_modify_the_target() -> anyhow::Result<()> {
         .is_err()
     );
     assert_eq!(fs::read(outside.path().join("tool.jar"))?, b"user");
+    #[cfg(unix)]
     fs::remove_file(root.path().join("views/libraries"))?;
+    #[cfg(windows)]
+    fs::remove_dir(root.path().join("views/libraries"))?;
     fs::create_dir(root.path().join("views/libraries"))?;
-    std::os::unix::fs::symlink(
+    symlink_file(
         outside.path().join("tool.jar"),
         root.path().join("views/libraries/tool.jar"),
     )?;

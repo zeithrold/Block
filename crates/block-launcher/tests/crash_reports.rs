@@ -224,24 +224,26 @@ fn replacing_the_game_root_invalidates_the_baseline() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn symlinked_reports_directories_and_game_roots_are_rejected() -> anyhow::Result<()> {
-    use std::os::unix::fs::symlink;
+    #[cfg(unix)]
+    use std::os::unix::fs::{symlink as symlink_dir, symlink as symlink_file};
+    #[cfg(windows)]
+    use std::os::windows::fs::{symlink_dir, symlink_file};
     let directory = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     let secret = outside.path().join("private.txt");
     fs::write(&secret, b"private contents")?;
     let baseline = snapshot_reports(directory.path())?;
-    symlink(&secret, directory.path().join("hs_err_pid1.log"))?;
-    symlink(outside.path(), directory.path().join("crash-reports"))?;
+    symlink_file(&secret, directory.path().join("hs_err_pid1.log"))?;
+    symlink_dir(outside.path(), directory.path().join("crash-reports"))?;
     fs::write(
         outside.path().join("crash-outside.txt"),
         b"private contents",
     )?;
     assert!(collect_fresh_reports(directory.path(), &baseline, str::to_owned)?.is_empty());
     let linked_game = outside.path().join("linked-game");
-    symlink(directory.path(), &linked_game)?;
+    symlink_dir(directory.path(), &linked_game)?;
     assert!(snapshot_reports(&linked_game).is_err());
     assert!(collect_fresh_reports(&linked_game, &baseline, str::to_owned).is_err());
     Ok(())

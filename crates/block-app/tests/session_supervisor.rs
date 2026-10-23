@@ -521,6 +521,58 @@ async fn launch_report_write_failure_still_finalizes_the_known_terminal_session(
 }
 
 #[cfg(unix)]
+fn terminate_owned_supervisor(pid: u32) -> anyhow::Result<()> {
+    ensure!(
+        Command::new("/bin/kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()?
+            .success(),
+        "could not terminate the owned fixture supervisor"
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+fn terminate_owned_supervisor(pid: u32) -> anyhow::Result<()> {
+    // Deliberately omit /T: the test requires the owned Java child to survive.
+    let output = Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "could not terminate the owned fixture supervisor: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> anyhow::Result<bool> {
+    Ok(Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?
+        .success())
+}
+
+#[cfg(windows)]
+fn process_exists(pid: u32) -> anyhow::Result<bool> {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "could not query the owned fixture PID"
+    );
+    let expected = format!("\"{pid}\"");
+    // The PID is the second CSV field, independent of localized status messages.
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line.split(',').nth(1) == Some(expected.as_str())))
+}
+
 #[tokio::test]
 async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<()> {
     let fixture = Fixture::new("normal")?;
@@ -546,22 +598,11 @@ async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<(
             .supervisor_pid,
         Some(host)
     );
-    ensure!(
-        Command::new("/bin/kill")
-            .args(["-KILL", &host.to_string()])
-            .status()?
-            .success(),
-        "could not terminate the owned fixture supervisor"
-    );
+    terminate_owned_supervisor(host)?;
     wait_host_exit(&fixture.root, &id).await?;
     let interrupted = session_host::status(&fixture.root, &id).await?;
     assert_eq!(interrupted.state, RunState::MonitoringInterrupted);
-    assert!(
-        Command::new("/bin/kill")
-            .args(["-0", &java.to_string()])
-            .status()?
-            .success()
-    );
+    assert!(process_exists(java)?);
     assert!(fixture.game.join(".block-session.json").exists());
     assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_err());
     assert!(session_host::stop(&fixture.root, &id).await.is_err());
@@ -571,13 +612,7 @@ async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<(
         ensure!(Instant::now() < deadline, "orphaned fixture did not finish");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    while Command::new("/bin/kill")
-        .args(["-0", &java.to_string()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?
-        .success()
-    {
+    while process_exists(java)? {
         ensure!(Instant::now() < deadline, "orphaned fixture has not exited");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

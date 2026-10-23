@@ -12,7 +12,7 @@ jobs:
   native:
     name: Native / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.timeout || 60 }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +27,6 @@ jobs:
             platform: windows-amd64
           - os: windows-11-arm
             platform: windows-arm64
-            timeout: 90
           - os: macos-15
             platform: macos-arm64
     steps:
@@ -46,15 +45,12 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libfontconfig1-dev libfreetype6-dev libvulkan-dev libegl1-mesa-dev libgl1-mesa-dev
-      - name: Ensure macOS Metal compiler is available
-        if: runner.os == 'macOS'
-        run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Verify core, desktop, framework interactions, and session supervision
+        id: verify
         run: python scripts/verify-platform.py --platform ${{ matrix.platform }}
-      - name: Upload the native ARM64 launcher artifact
-        if: matrix.platform == 'windows-arm64'
+      - name: Upload the native launcher artifact
         uses: actions/upload-artifact@v4
         with:
-          name: block-windows-arm64
-          path: target/aarch64-pc-windows-msvc/debug/block.exe
+          name: block-${{ matrix.platform }}
+          path: ${{ steps.verify.outputs.executable }}
           if-no-files-found: error

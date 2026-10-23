@@ -828,7 +828,6 @@ dependencies = [
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",
- "gpui-pre-apple",
  "gpui-pre-platform",
  "minecraft-manifest",
  "objc2-app-kit 0.3.2",
