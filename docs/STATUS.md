@@ -1,6 +1,6 @@
 # Block Pilot Status
 
-Updated: 2026-10-23. Built, native verification and user acceptance are separate gates.
+Updated: 2026-10-24. Built, native verification and user acceptance are separate gates.
 
 ## Automatic CI coverage
 
@@ -67,6 +67,8 @@ Home primary-action follow-up: Create game, Repair and Download previously inher
 
 Shared scroll-viewport focus follow-up: clicking blank content previously applied a drop-shadow focus ring to a transparent viewport, tinting its whole interior gray. Home and Accounts reproduced the same issue; their common adapter also serves game/profile details, Settings, wizards, downloads, providers, About and game output. It now paints a transparent 2 px inside outline only for keyboard focus. Pointer focus, native scroll handles, item indices and layout are retained. Regressions cover both themes, caller-provided/default focus handles, pointer/keyboard switching, focus departure and Page Down/Home scrolling; broader native visual acceptance remains pending.
 
+Home/management frame increment (2026-10-24): preferred Home is now 360×720; management is 1152×720 with a fixed 360 px desktop sidebar and a shared 56 px title area. A coordinated Home/sidebar → width expansion → delayed detail sequence retains the top-left corner and current height, with a continuous reverse/interrupt path and immediate reduced-motion settling. The local gate passed 565 tests across 39 suites. A foreground macOS replay measured 602 paints, unchanged native origin/720 px height, 360–1152 px width, and staggered sidebar/detail starts. [Design, measurements and remaining review](home-management-frame.md) keep Windows/Linux physical geometry, short-screen/scaling review and user acceptance separate; Accepted remains Pending.
+
 - The P0 React snapshot and README define product content; explicit user decisions take precedence.
 - Windows is the primary native UI/E2E and visual-review platform (user decision, 2026-10-22); retain platform-specific macOS/Linux checks.
 - New catalogs use Bundled mode: one Instance and exactly one associated Profile; names and appearance match Home.
@@ -75,7 +77,7 @@ Shared scroll-viewport focus follow-up: clicking blank content previously applie
 - Version, release type and loader/build are fixed after creation. Other editable fields use local drafts until Save.
 - Section Done updates only the local draft; Cancel restores its checkpoint. Final creation saves the Instance/Profile pair atomically.
 - Late results update actual catalog/session state, but cannot complete or clear a newer draft, wizard or authentication attempt.
-- Home is 432×768; full management pages are 960×600; dialogs use content-appropriate fixed sizes. Fit to short displays at creation.
+- Home is 360×720; full management pages are 1152×720 with a fixed 360 px desktop sidebar and shared 56 px title area. Fit both heights together at creation; navigation retains the current height and top-left corner. Dialogs use content-appropriate fixed sizes. See [frame sizing and narrow-display limits](home-management-frame.md).
 - Current implementation (2026-10-23): product windows request no native titlebar and use custom drag/minimize/close controls through published GPUI APIs. macOS native traffic lights and their reserved gap are removed. The first production increment has passed the local automated gate; platform-specific native evidence and remaining boundaries are recorded in [window-chrome-implementation.md](window-chrome-implementation.md). Accepted remains Pending.
 - Native chrome feasibility (2026-10-23): isolated probes verified system-titlebar removal and core window/dialog interaction on Windows AMD64, XFCE X11/Linux AMD64 and KDE Wayland/Linux ARM64 using unmodified dependencies. GPT-6 Luna's [KDE Xwayland follow-up](xwayland-compatibility-investigation.md) also verified core actions after correcting CSD hit coordinates; drag moved +48/+32 with uinput, while the XTest request was inert. The production increment uses a minimal header without the default Linux TitleBar maximize/zoom actions. CSD content-size differences and strict X11 WM size constraints remain separate integration boundaries. See [window-chrome-feasibility.md](window-chrome-feasibility.md). These earlier probes remain capability evidence, separate from production validation and full game-lifecycle acceptance.
 - Dialogs, drawers, wizard sections and the account flow are in-window overlay components built on the gpui-kit/gpui-component Dialog and Sheet primitives: prototype-aligned scrim, background interaction blocked, Escape closes, focus stays inside the overlay and is restored afterwards. Anchored menus/selects/tooltips use upstream Base components.

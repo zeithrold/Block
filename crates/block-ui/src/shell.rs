@@ -151,12 +151,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let home = self.tab == Tab::Home && self.form.is_none();
-        let content = self.transition_content(
-            super::motion::Scope::Page,
-            self.render_page_body(window, cx),
-            window,
-            cx,
-        );
+        let content = self.render_frame_body(window, cx);
         let mut root = div()
             .id("block-shell")
             .debug_selector(|| "block-shell".into())
@@ -187,10 +182,14 @@ impl Block {
                 }
             }))
             .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
-                view.move_focus(false, window, cx);
+                if !view.motion.frame.active() {
+                    view.move_focus(false, window, cx);
+                }
             }))
             .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
-                view.move_focus(true, window, cx);
+                if !view.motion.frame.active() {
+                    view.move_focus(true, window, cx);
+                }
             }))
             .size_full()
             .relative()
@@ -291,23 +290,16 @@ impl Block {
 
     fn chrome(
         &self,
-        window: &Window,
+        _window: &Window,
         home: bool,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let authenticating = false;
         let first_run = self.tab == Tab::Onboarding;
-        let narrow = super::patterns::is_narrow(window.viewport_size());
         let title = if home { "" } else { self.navigation_title() };
         div()
             .id("window-chrome")
-            .h(px(if home {
-                52.
-            } else if narrow {
-                40.
-            } else {
-                56.
-            }))
+            .h(px(super::design::CHROME_HEIGHT))
             .border_b_1()
             .border_color(rgb(self.palette.border))
             .flex_shrink_0()
@@ -700,7 +692,8 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let palette = self.palette;
-        let avatar_size = ((f32::from(window.viewport_size().width) - 48.) * 0.45).clamp(96., 176.);
+        let avatar_size =
+            ((f32::from(self.page_viewport(window).width) - 48.) * 0.45).clamp(96., 176.);
         let (hover, hover_running) = self
             .shell
             .home

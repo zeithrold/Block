@@ -48,7 +48,7 @@ impl Drop for LoaderRequest {
 use super::{
     Block, Form, InstanceForm, Tab, UiAction,
     components::{self, BadgeVariant, ButtonVariant, ControlState, FieldOptions},
-    design::{BROWSER_FRACTION, Icon},
+    design::Icon,
     input, note, patterns,
     scroll_area::ScrollAreaExt as _,
     text_input::TextInput,
@@ -1641,7 +1641,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
-        let narrow = patterns::is_narrow(window.viewport_size());
+        let narrow = patterns::is_narrow(self.page_viewport(window));
         let body = self.game_wizard_body(form, window, cx);
         let body = div()
             .flex()
@@ -1744,7 +1744,7 @@ impl Block {
         body: gpui::AnyElement,
         footer: gpui::AnyElement,
     ) -> gpui::AnyElement {
-        let viewport = window.viewport_size();
+        let viewport = self.page_viewport(window);
         let rail = self.wizard_step_rail(steps, current, window);
         div()
             .id("wizard-frame")
@@ -1753,28 +1753,30 @@ impl Block {
             .flex()
             .child(rail)
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(div().flex_1().min_h_0().child(body))
-                    .child(
-                        patterns::management_footer(viewport, self.palette)
-                            .id("wizard-footer")
-                            .debug_selector(|| "wizard-footer".into())
-                            .child(
-                                div()
-                                    .w_full()
-                                    .max_w(px(608.))
-                                    .mx_auto()
-                                    .flex()
-                                    .flex_col()
-                                    .child(footer),
-                            ),
-                    ),
+                self.frame_detail(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .child(div().flex_1().min_h_0().child(body))
+                        .child(
+                            patterns::management_footer(viewport, self.palette)
+                                .id("wizard-footer")
+                                .debug_selector(|| "wizard-footer".into())
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .max_w(px(608.))
+                                        .mx_auto()
+                                        .flex()
+                                        .flex_col()
+                                        .child(footer),
+                                ),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -1785,7 +1787,7 @@ impl Block {
         current: usize,
         window: &Window,
     ) -> gpui::AnyElement {
-        let narrow = patterns::is_narrow(window.viewport_size());
+        let narrow = patterns::is_narrow(self.page_viewport(window));
         let mut rail = div()
             .id("wizard-rail")
             .debug_selector(|| "wizard-rail".into())
@@ -1800,50 +1802,52 @@ impl Block {
         if narrow {
             rail = rail.w(px(48.));
         } else {
-            rail = rail.w(gpui::relative(BROWSER_FRACTION));
+            rail = rail.w(px(super::design::SIDEBAR_WIDTH));
         }
-        rail.child(
-            div()
-                .id("wizard-steps")
-                .flex_1()
-                .min_h_0()
-                .scroll_area(
-                    &self.shell.wizard.rail_scroll,
-                    "Game setup steps",
-                    self.palette,
-                    false,
-                )
-                .px(px(if narrow { 9. } else { 24. }))
-                .py_6()
-                .flex()
-                .flex_col()
-                .gap_6()
-                .children((!narrow).then(|| note("Game setup")))
-                .child(components::stepper(
-                    "game-wizard-steps",
-                    "Create a game",
-                    &steps
-                        .iter()
-                        .enumerate()
-                        .map(|(index, (title, description))| components::StepperStep {
-                            title,
-                            description,
-                            complete: index < current,
-                        })
-                        .collect::<Vec<_>>(),
-                    current,
-                    narrow,
-                    self.palette,
-                )),
-        )
-        .child(
-            patterns::management_footer(window.viewport_size(), self.palette)
-                .px(px(if narrow { 8. } else { 24. }))
-                .child(note(if narrow {
-                    format!("{}/{}", current + 1, steps.len())
-                } else {
-                    format!("Step {} of {}", current + 1, steps.len())
-                })),
+        self.frame_sidebar(
+            rail.child(
+                div()
+                    .id("wizard-steps")
+                    .flex_1()
+                    .min_h_0()
+                    .scroll_area(
+                        &self.shell.wizard.rail_scroll,
+                        "Game setup steps",
+                        self.palette,
+                        false,
+                    )
+                    .px(px(if narrow { 9. } else { 24. }))
+                    .py_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .children((!narrow).then(|| note("Game setup")))
+                    .child(components::stepper(
+                        "game-wizard-steps",
+                        "Create a game",
+                        &steps
+                            .iter()
+                            .enumerate()
+                            .map(|(index, (title, description))| components::StepperStep {
+                                title,
+                                description,
+                                complete: index < current,
+                            })
+                            .collect::<Vec<_>>(),
+                        current,
+                        narrow,
+                        self.palette,
+                    )),
+            )
+            .child(
+                patterns::management_footer(self.page_viewport(window), self.palette)
+                    .px(px(if narrow { 8. } else { 24. }))
+                    .child(note(if narrow {
+                        format!("{}/{}", current + 1, steps.len())
+                    } else {
+                        format!("Step {} of {}", current + 1, steps.len())
+                    })),
+            ),
         )
         .into_any_element()
     }
@@ -2404,7 +2408,7 @@ impl Block {
                     .id("wizard-components")
                     .debug_selector(|| "wizard-components".into())
                     .grid()
-                    .grid_cols(if window.viewport_size().width < px(760.) {
+                    .grid_cols(if self.page_viewport(window).width < px(760.) {
                         2
                     } else {
                         4

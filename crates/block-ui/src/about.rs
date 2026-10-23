@@ -66,10 +66,10 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let narrow = patterns::is_narrow(window.viewport_size());
+        let narrow = patterns::is_narrow(self.page_viewport(window));
         let brand = self.about_brand(narrow);
         let body = self.about_body(narrow, cx);
-        let footer = patterns::management_footer(window.viewport_size(), self.palette)
+        let footer = patterns::management_footer(self.page_viewport(window), self.palette)
             .id("about-footer")
             .debug_selector(|| "about-footer".into())
             .justify_between()
@@ -91,29 +91,31 @@ impl Block {
             .min_w_0()
             .flex()
             .overflow_hidden()
-            .child(brand)
+            .child(self.frame_sidebar(brand))
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .child(body)
-                    .child(footer),
+                self.frame_detail(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(body)
+                        .child(footer),
+                ),
             )
     }
 
-    fn about_brand(&self, narrow: bool) -> impl IntoElement + use<> {
+    fn about_brand(&self, narrow: bool) -> gpui::Stateful<gpui::Div> {
         let info = self.build_info;
         div()
             .id("about-brand")
             .debug_selector(|| "about-brand".into())
-            .w(relative(if narrow {
-                0.24
+            .w(if narrow {
+                relative(0.24)
             } else {
-                super::design::BROWSER_FRACTION
-            }))
+                px(super::design::SIDEBAR_WIDTH).into()
+            })
             .min_w_0()
             .h_full()
             .flex_shrink_0()

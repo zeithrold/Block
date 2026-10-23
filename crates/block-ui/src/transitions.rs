@@ -26,6 +26,7 @@ impl Global for MotionPolicies {}
 
 #[derive(Debug)]
 pub(super) struct MotionState {
+    pub frame: super::frame_motion::FrameMotion,
     pub page: Scene,
     pub detail: Scene,
     pub wizard: Scene,
@@ -34,6 +35,7 @@ pub(super) struct MotionState {
 impl Default for MotionState {
     fn default() -> Self {
         Self {
+            frame: super::frame_motion::FrameMotion::default(),
             page: Scene::new(Scope::Page),
             detail: Scene::new(Scope::Detail),
             wizard: Scene::new(Scope::Wizard),
@@ -166,6 +168,11 @@ impl Block {
             }
             self.motion_dirty = false;
         }
+        if self.motion.frame.active() {
+            self.motion.page.settle();
+            self.motion.detail.settle();
+            self.motion.wizard.settle();
+        }
         let mut running = false;
         for (index, scene) in [
             &mut self.motion.page,
@@ -198,7 +205,7 @@ impl Block {
         _window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        if self.visual_only {
+        if self.visual_only || self.motion.frame.active() {
             return content;
         }
         let scene = self.motion.scene(scope);
@@ -221,7 +228,7 @@ impl Block {
             .into_any_element()
     }
 
-    fn visual_snapshot(&self, cx: &mut Context<'_, Self>) -> Self {
+    pub(super) fn visual_snapshot(&self, cx: &mut Context<'_, Self>) -> Self {
         let form = self.form.as_ref().map(|form| match form {
             Form::Instance(form) => Form::Instance(InstanceForm {
                 name: frozen_input(&form.name, cx),
@@ -252,7 +259,10 @@ impl Block {
         Self {
             build_info: self.build_info,
             shell: self.shell.snapshot(cx),
-            motion: MotionState::default(),
+            motion: MotionState {
+                frame: self.motion.frame.frozen(),
+                ..MotionState::default()
+            },
             motion_dirty: false,
             visual_only: true,
             pending_window_size: None,

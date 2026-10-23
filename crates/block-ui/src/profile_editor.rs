@@ -330,7 +330,7 @@ impl Block {
         if let Some((_, error)) = &self.shell.editor.error {
             body = body.child(note(error.clone()));
         }
-        let footer = patterns::management_footer(window.viewport_size(), self.palette)
+        let footer = patterns::management_footer(self.page_viewport(window), self.palette)
             .justify_end()
             .child(self.button(
                 if page.is_some() {

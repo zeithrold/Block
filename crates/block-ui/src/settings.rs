@@ -1156,7 +1156,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl gpui::IntoElement + use<> {
-        let viewport = window.viewport_size();
+        let viewport = self.page_viewport(window);
         let narrow = patterns::is_narrow(viewport);
         let Some(draft) = &self.settings_form else {
             return div().into_any_element();
@@ -1194,6 +1194,7 @@ impl Block {
                     sidebar: self.palette.background,
                     ..self.palette
                 },
+                self,
             )
             .id("settings-page")
             .into_any_element()
@@ -1208,7 +1209,7 @@ impl Block {
         self.settings_form.as_ref().map_or_else(
             || div().into_any_element(),
             |draft| {
-                self.settings_detail(draft, window.viewport_size(), cx)
+                self.settings_detail(draft, self.page_viewport(window), cx)
                     .into_any_element()
             },
         )

@@ -13,7 +13,7 @@ use block_auth::{Account, AccountProvider, SignInStage};
 use gpui::{
     AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, ScrollHandle, Size, StatefulInteractiveElement as _, Styled as _,
-    Window, div, point, px, relative, rgb,
+    Window, div, point, px, rgb,
 };
 
 use super::{
@@ -1333,7 +1333,7 @@ impl Block {
         self.shell.providers.visible = false;
         self.shell.accounts.detail_visible = false;
         self.tab = Tab::Accounts;
-        window.resize(super::window_geometry::management_size(window, cx));
+        self.request_frame_resize(window, cx);
         self.shell.surfaces.clear(window, &focus, cx);
         focus.focus(window, cx);
         cx.notify();
@@ -1685,7 +1685,7 @@ impl Block {
             return;
         };
         self.tab = state.return_tab;
-        window.resize(state.return_size);
+        self.request_frame_resize(window, cx);
         self.focus.focus(window, cx);
         cx.notify();
     }
@@ -1698,7 +1698,7 @@ impl Block {
         let Some(state) = &self.shell.auth else {
             return div();
         };
-        let viewport = window.viewport_size();
+        let viewport = self.page_viewport(window);
         let narrow = patterns::is_narrow(viewport);
         let content = div()
             .size_full()
@@ -1724,20 +1724,16 @@ impl Block {
                     .min_h_0()
                     .flex()
                     .children((!narrow).then(|| self.auth_rail(state)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .min_w_0()
-                            .child(self.transition_content(
-                                super::motion::Scope::Wizard,
-                                self.render_auth_transition_body(window, cx),
-                                window,
-                                cx,
-                            )),
-                    ),
+                    .child(self.frame_detail(div().flex_1().min_h_0().min_w_0().child(
+                        self.transition_content(
+                            super::motion::Scope::Wizard,
+                            self.render_auth_transition_body(window, cx),
+                            window,
+                            cx,
+                        ),
+                    ))),
             )
-            .child(self.auth_footer(state, viewport, cx));
+            .child(self.frame_detail(div().w_full().child(self.auth_footer(state, viewport, cx))));
         let mut root = div()
             .id("account-wizard")
             .debug_selector(|| "account-wizard".into())
@@ -1779,7 +1775,7 @@ impl Block {
                 self.palette,
                 false,
             )
-            .p(px(if patterns::is_narrow(window.viewport_size()) {
+            .p(px(if patterns::is_narrow(self.page_viewport(window)) {
                 16.
             } else {
                 32.
@@ -1794,7 +1790,7 @@ impl Block {
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
         let mut rail = div()
             .id("auth-rail")
-            .w(relative(super::design::BROWSER_FRACTION))
+            .w(px(super::design::SIDEBAR_WIDTH))
             .flex_shrink_0()
             .h_full()
             .min_h_0()
@@ -1860,8 +1856,10 @@ impl Block {
             false,
             self.palette,
         ));
-        rail.child(div().flex_1())
-            .child(note(format!("Step {} of 4", state.phase.step() + 1)))
+        self.frame_sidebar(
+            rail.child(div().flex_1())
+                .child(note(format!("Step {} of 4", state.phase.step() + 1))),
+        )
     }
 
     fn auth_body(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {

@@ -612,7 +612,7 @@ impl Block {
         ));
         if editor.window_custom {
             let mut dimensions = div().flex().gap_4();
-            if patterns::is_narrow(window.viewport_size()) {
+            if patterns::is_narrow(self.page_viewport(window)) {
                 dimensions = dimensions.flex_col();
             }
             body = body.child(
@@ -636,7 +636,7 @@ impl Block {
                 .child(note("This location is read-only. Move the installation from Settings → Storage.")))
             .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
             .children(editor.save_error.clone().map(note));
-        let footer = patterns::management_footer(window.viewport_size(), self.palette)
+        let footer = patterns::management_footer(self.page_viewport(window), self.palette)
             .id("instance-editor-footer")
             .debug_selector(|| "instance-editor-footer".into())
             .justify_end()

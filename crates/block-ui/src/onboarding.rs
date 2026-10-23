@@ -8,7 +8,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
-    ScrollHandle, Styled as _, Window, div, point, px, relative, rgb,
+    ScrollHandle, Styled as _, Window, div, point, px, rgb,
 };
 
 use super::game_wizard::{ProfileDraft, WizardField, WizardPage, WizardState};
@@ -18,7 +18,6 @@ use super::{
         self, AvatarState, BadgeVariant, ButtonSize, ButtonVariant, ControlState, FieldOptions,
         ProgressState,
     },
-    design::BROWSER_FRACTION,
     input, patterns,
     shell::Surface,
 };
@@ -105,7 +104,7 @@ impl Block {
     }
 
     pub(super) fn onboarding(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let compact = patterns::is_narrow(window.viewport_size());
+        let compact = patterns::is_narrow(self.page_viewport(window));
         div()
             .id("first-run")
             .debug_selector(|| "first-run".into())
@@ -118,17 +117,19 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .children((!compact).then(|| self.onboarding_brand(cx)))
-                    .child(div().flex_1().min_w_0().min_h_0().h_full().child(
-                        self.transition_content(
-                            super::motion::Scope::Wizard,
-                            self.render_onboarding_transition_body(window, cx),
-                            window,
-                            cx,
-                        ),
-                    )),
+                    .children((!compact).then(|| self.frame_sidebar(self.onboarding_brand(cx))))
+                    .child(
+                        self.frame_detail(div().flex_1().min_w_0().min_h_0().h_full().child(
+                            self.transition_content(
+                                super::motion::Scope::Wizard,
+                                self.render_onboarding_transition_body(window, cx),
+                                window,
+                                cx,
+                            ),
+                        )),
+                    ),
             )
-            .child(self.onboarding_footer(window, cx))
+            .child(self.frame_detail(div().w_full().child(self.onboarding_footer(window, cx))))
             .into_any_element()
     }
 
@@ -137,7 +138,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
-        let compact = patterns::is_narrow(window.viewport_size());
+        let compact = patterns::is_narrow(self.page_viewport(window));
         let step = self.shell.onboarding.step;
         let mut body = match (&self.form, step) {
             (Some(Form::Instance(form)), Step::Game) => self.onboarding_game(form, compact, cx),
@@ -218,7 +219,7 @@ impl Block {
             .into_any_element()
     }
 
-    fn onboarding_brand(&self, cx: &gpui::App) -> impl IntoElement + use<> {
+    fn onboarding_brand(&self, cx: &gpui::App) -> gpui::Div {
         let ready = [
             self.onboarding_game_ready(cx),
             self.shell.onboarding.account_decided || self.shell.onboarding.account.is_some(),
@@ -242,7 +243,7 @@ impl Block {
             },
         ];
         div()
-            .w(relative(BROWSER_FRACTION))
+            .w(px(super::design::SIDEBAR_WIDTH))
             .flex_shrink_0()
             .h_full()
             .min_h_0()
@@ -656,7 +657,7 @@ impl Block {
 
     fn onboarding_footer(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let step = self.shell.onboarding.step;
-        let compact = patterns::is_narrow(window.viewport_size());
+        let compact = patterns::is_narrow(self.page_viewport(window));
         let created = self.onboarding_progress == Progress::Created;
         // A verified identity kept in memory counts as the step-2 choice; it is
         // persisted only by the final setup commit.
@@ -679,7 +680,7 @@ impl Block {
         let skip_disabled = creating;
         let reason = self.onboarding_footer_reason(has_account, cx);
 
-        patterns::management_footer(window.viewport_size(), self.palette)
+        patterns::management_footer(self.page_viewport(window), self.palette)
             .id("onboarding-footer")
             .debug_selector(|| "onboarding-footer".into())
             .min_w_0()
@@ -1061,7 +1062,7 @@ impl Block {
                     })),
             )
             .child(
-                patterns::management_footer(window.viewport_size(), self.palette)
+                patterns::management_footer(self.page_viewport(window), self.palette)
                     .id("onboarding-section-footer")
                     .debug_selector(|| "onboarding-section-footer".into())
                     .justify_end()
@@ -1210,7 +1211,7 @@ impl Block {
         self.preferences = preferences;
         self.tab = Tab::Home;
         self.form = None;
-        self.pending_window_size = Some(gpui::size(px(432.), px(768.)));
+        self.pending_window_size = Some(super::preferred_management_size());
         self.shell.revision = self.shell.revision.wrapping_add(1);
         self.push_toast(
             "Setup saved · Continue on Home".into(),

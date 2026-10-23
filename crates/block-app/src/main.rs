@@ -9,8 +9,7 @@ use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
 use gpui::{
-    App, AppContext as _, Bounds, KeyBinding, WindowBounds, WindowDecorations, WindowOptions, px,
-    size,
+    App, AppContext as _, KeyBinding, WindowBounds, WindowDecorations, WindowOptions, px, size,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
@@ -148,7 +147,7 @@ fn configure_application(cx: &mut App) {
 }
 
 fn window_options(cx: &App) -> WindowOptions {
-    let bounds = Bounds::centered(None, size(px(960.0), px(600.0)), cx);
+    let bounds = block_ui::initial_window_bounds(cx);
     WindowOptions {
         // Product chrome is rendered by Block on every desktop platform.
         // Linux compositors may ignore client-side decoration requests; the

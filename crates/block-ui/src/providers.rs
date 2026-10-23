@@ -461,7 +461,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let state = &self.shell.providers;
-        let narrow = patterns::is_narrow(window.viewport_size());
+        let narrow = patterns::is_narrow(self.page_viewport(window));
         let query = state.query.as_ref().map_or_else(String::new, |field| {
             field.read(cx).value().trim().to_lowercase()
         });
@@ -552,11 +552,11 @@ impl Block {
             ));
         }
         let rail = div()
-            .w(relative(if narrow {
-                1.
+            .w(if narrow {
+                relative(1.)
             } else {
-                super::design::BROWSER_FRACTION
-            }))
+                px(super::design::SIDEBAR_WIDTH).into()
+            })
             .h_full()
             .min_h_0()
             .flex_shrink_0()
@@ -608,7 +608,7 @@ impl Block {
                     .child(rows),
             )
             .child(
-                patterns::management_footer(window.viewport_size(), self.palette).child(
+                patterns::management_footer(self.page_viewport(window), self.palette).child(
                     self.provider_button(
                         "providers-back",
                         "Back to accounts",
@@ -623,24 +623,22 @@ impl Block {
             .size_full()
             .min_h_0()
             .flex()
-            .children((!narrow || state.form.is_none()).then_some(rail))
+            .children((!narrow || state.form.is_none()).then_some(self.frame_sidebar(rail)))
             .children((!narrow || state.form.is_some()).then(|| {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .min_h_0()
-                    .child(self.transition_content(
+                self.frame_detail(div().flex_1().min_w_0().min_h_0().child(
+                    self.transition_content(
                         super::motion::Scope::Detail,
                         self.provider_editor(window, cx).into_any_element(),
                         window,
                         cx,
-                    ))
+                    ),
+                ))
             }))
     }
 
     fn provider_editor(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
         let mut content = div().p_8().flex().flex_col().gap_6();
-        if patterns::is_narrow(window.viewport_size()) {
+        if patterns::is_narrow(self.page_viewport(window)) {
             content = content.child(self.provider_button(
                 "provider-show-list",
                 "All providers",
@@ -651,7 +649,7 @@ impl Block {
             ));
         }
         let mut footer =
-            patterns::management_footer(window.viewport_size(), self.palette).justify_between();
+            patterns::management_footer(self.page_viewport(window), self.palette).justify_between();
         if let Some(form) = &self.shell.providers.form {
             let address = form.address.read(cx).value();
             let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);

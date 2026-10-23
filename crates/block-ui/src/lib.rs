@@ -15,6 +15,7 @@ mod drawer;
 mod drawer_gestures;
 mod engine;
 mod feedback;
+mod frame_motion;
 mod game_wizard;
 mod instance_editor;
 #[cfg(test)]
@@ -51,6 +52,7 @@ pub use design::{UiAssets, load_fonts};
 pub use gpui_base::Root as ProductRoot;
 #[cfg(debug_assertions)]
 pub use scenarios::{SCENARIOS, ScenarioOptions};
+pub use window_geometry::{initial_window_bounds, preferred_management_size};
 
 /// Register the shared unstyled foundation once before opening product windows.
 pub fn initialize(cx: &mut gpui::App) {
@@ -890,7 +892,7 @@ impl Block {
                 && self.shell.instance_editor.is_none()
             {
                 if self.tab == Tab::Home {
-                    self.pending_window_size = Some(gpui::size(px(960.), px(600.)));
+                    self.pending_window_size = Some(preferred_management_size());
                 }
                 self.tab = Tab::Instances;
             }
@@ -1316,7 +1318,7 @@ impl Block {
                     self.shell.guide_preview = Some((tab, window.viewport_size()));
                     self.tab = tab;
                     self.shell.surfaces.clear(window, &self.focus, cx);
-                    window.resize(window_geometry::management_size(window, cx));
+                    self.request_frame_resize(window, cx);
                     cx.notify();
                     return;
                 }
@@ -1335,11 +1337,7 @@ impl Block {
                     self.begin_onboarding(cx);
                 }
                 self.shell.surfaces.clear(window, &self.focus, cx);
-                if tab == Tab::Home {
-                    window.resize(window_geometry::home_size(window, cx));
-                } else if previous_page.0 == Tab::Home {
-                    window.resize(window_geometry::management_size(window, cx));
-                }
+                self.request_frame_resize(window, cx);
             }
             UiAction::DownloadFiles(group) => {
                 self.shell
@@ -1805,9 +1803,7 @@ impl Block {
             UiAction::LaunchRecipe => self.launch_recipe(cx),
         }
         if previous_page != (self.tab, self.form.is_some()) {
-            if self.form.is_some() && previous_page.0 == Tab::Home {
-                window.resize(window_geometry::management_size(window, cx));
-            }
+            self.request_frame_resize(window, cx);
             self.shell.backwards = self.tab == Tab::Home || self.form.is_none() && previous_page.1;
             self.shell.revision = self.shell.revision.wrapping_add(1);
         }
@@ -2417,12 +2413,9 @@ impl Render for Block {
             return div().size_full().child(help.clone()).into_any_element();
         }
         if self.pending_window_size.take().is_some() {
-            window.resize(if self.tab == Tab::Home {
-                window_geometry::home_size(window, cx)
-            } else {
-                window_geometry::management_size(window, cx)
-            });
+            self.request_frame_resize(window, cx);
         }
+        self.prepare_window_frame(window, cx);
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);

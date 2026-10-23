@@ -6,7 +6,8 @@
 
 use super::Palette;
 use gpui::{
-    AnyElement, Div, ParentElement as _, Pixels, Size, Styled as _, div, px, relative, rgb,
+    AnyElement, Div, InteractiveElement as _, ParentElement as _, Pixels, Size, Styled as _, div,
+    px, relative, rgb,
 };
 
 /// Reveal a newly invalid field after its actual layout, including a page that
@@ -68,6 +69,7 @@ pub(super) fn management_layout(
     detail: AnyElement,
     show_detail: bool,
     palette: Palette,
+    view: &super::Block,
 ) -> Div {
     let narrow = is_narrow(viewport);
     let mut row = div()
@@ -78,24 +80,39 @@ pub(super) fn management_layout(
         .overflow_hidden();
     if !narrow || !show_detail {
         row = row.child(
-            div()
-                .h_full()
-                .min_h_0()
-                .min_w_0()
-                .w(if narrow {
-                    relative(1.)
-                } else {
-                    relative(super::design::BROWSER_FRACTION)
-                })
-                .flex_shrink_0()
-                .bg(rgb(palette.sidebar))
-                .border_r_1()
-                .border_color(rgb(palette.border))
-                .child(browser),
+            view.frame_sidebar(
+                div()
+                    .id("management-sidebar")
+                    .debug_selector(|| "management-sidebar".into())
+                    .h_full()
+                    .min_h_0()
+                    .min_w_0()
+                    .w(if narrow {
+                        relative(1.)
+                    } else {
+                        px(super::design::SIDEBAR_WIDTH).into()
+                    })
+                    .flex_shrink_0()
+                    .bg(rgb(palette.sidebar))
+                    .border_r_1()
+                    .border_color(rgb(palette.border))
+                    .child(browser),
+            ),
         );
     }
     if !narrow || show_detail {
-        row = row.child(div().h_full().min_h_0().min_w_0().flex_1().child(detail));
+        row = row.child(
+            view.frame_detail(
+                div()
+                    .id("management-content")
+                    .debug_selector(|| "management-content".into())
+                    .h_full()
+                    .min_h_0()
+                    .min_w_0()
+                    .flex_1()
+                    .child(detail),
+            ),
+        );
     }
     row
 }

@@ -36,7 +36,8 @@ pub(super) const SMALL_FONT_SIZE: f32 = 12.;
 pub(super) const BODY_LINE_HEIGHT: f32 = 20.;
 pub(super) const MANAGEMENT_FOOTER: f32 = 72.;
 pub(super) const NARROW_FOOTER: f32 = 56.;
-pub(super) const BROWSER_FRACTION: f32 = 0.32;
+pub(super) const SIDEBAR_WIDTH: f32 = 360.;
+pub(super) const CHROME_HEIGHT: f32 = 56.;
 
 pub(super) fn focus_ring(color: u32) -> Vec<BoxShadow> {
     let mut color: Hsla = rgb(color).into();

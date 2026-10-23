@@ -121,7 +121,8 @@ impl Block {
         } else {
             Appearance::Light
         };
-        self.preferences.reduce_motion = !crate::drawer::motion_trace_enabled();
+        self.preferences.reduce_motion =
+            !(crate::drawer::motion_trace_enabled() || crate::frame_motion::trace::enabled());
         self.preferences.onboarding_complete = true;
         self.saved_preferences = self.preferences.clone();
         self.palette = self.preferences.palette(window.appearance());
@@ -475,6 +476,9 @@ impl Block {
         self.motion_dirty = true;
         if crate::drawer::motion_trace_enabled() {
             crate::drawer::start_motion_trace(cx.weak_entity(), window, cx);
+        }
+        if crate::frame_motion::trace::enabled() {
+            crate::frame_motion::trace::start(cx.weak_entity(), window, cx);
         }
         cx.notify();
         Ok(())

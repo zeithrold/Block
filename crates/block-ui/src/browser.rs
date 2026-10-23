@@ -463,7 +463,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let viewport = window.viewport_size();
+        let viewport = self.page_viewport(window);
         let kind = self.browser_kind();
         let state = self.collection();
         let records = self.browser_records(cx);
@@ -546,6 +546,7 @@ impl Block {
             detail,
             state.detail_visible || self.form.is_some(),
             self.palette,
+            self,
         )
     }
 
@@ -1017,7 +1018,7 @@ impl Block {
         if matches!(self.form, Some(Form::Profile(_))) {
             return self.render_profile_editor(window, cx);
         }
-        let viewport = window.viewport_size();
+        let viewport = self.page_viewport(window);
         let narrow = patterns::is_narrow(viewport);
         let mut body = div()
             .id("main-content")
@@ -1786,7 +1787,7 @@ impl Block {
             ));
         }
         let mut section = div().size_full().min_h_0().flex().flex_col();
-        if patterns::is_narrow(window.viewport_size()) {
+        if patterns::is_narrow(self.page_viewport(window)) {
             section = section.child(self.button(
                 "browser-back",
                 "Back to list",
@@ -1797,7 +1798,7 @@ impl Block {
         section
             .child(content)
             .child(patterns::management_footer(
-                window.viewport_size(),
+                self.page_viewport(window),
                 self.palette,
             ))
             .into_any_element()
