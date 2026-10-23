@@ -21,6 +21,9 @@ def analyze(records):
     actions = [(i, row) for i, row in enumerate(records) if row["type"] == "action"]
     if not paints or len(actions) != 10:
         raise ValueError("Expected native paints and all ten replay actions")
+    replay_paints = [row for row in records[actions[0][0]:] if row["type"] == "paint"]
+    if not all(row["active"] for row in replay_paints):
+        raise ValueError("The replay lost window activation; repeat in the foreground before comparing animation phases")
     origins = sorted({(row["native_x"], row["native_y"]) for row in paints})
     heights = sorted({row["native_height"] for row in paints})
     if len(origins) != 1 or len(heights) != 1:
@@ -53,7 +56,7 @@ def analyze(records):
         sequences.append(entry)
     return {
         "measurement": "native paint submission, not display presentation",
-        "paint_count": len(paints), "native_origins": origins, "native_heights": heights,
+        "paint_count": len(paints), "foreground_replay_paint_count": len(replay_paints), "native_origins": origins, "native_heights": heights,
         "native_width_range": [min(row["native_width"] for row in paints), max(row["native_width"] for row in paints)],
         "sidebar_inside_border_widths": sorted({row["width"] for row in records if row["type"] == "pane" and row["part"] == "sidebar"}),
         "sequences": sequences,
@@ -74,7 +77,7 @@ def report(result):
 <title>Home / management native frame measurements</title>
 <style>body{{font:15px system-ui;margin:32px;line-height:1.5;color:#181818}}table{{border-collapse:collapse}}th,td{{padding:8px 12px;border:1px solid #ddd;text-align:left}}img{{display:block;max-width:100%;border:1px solid #ddd;margin:12px 0 28px}}code{{background:#f5f5f5;padding:3px}}</style>
 <h1>Home / management frame</h1>
-<p>{result['paint_count']} foreground native paint submissions, ten navigation actions.
+<p>{result['paint_count']} native paint submissions; {result['foreground_replay_paint_count']} continuously active-window paints across ten navigation actions.
 Fixed native origin <code>{result['native_origins']}</code>; fixed height <code>{result['native_heights']}</code>;
 native width range <code>{result['native_width_range']}</code>.</p>
 <p>Times are milliseconds after the dispatched action. A dash means the track did not become visible before interruption, or the column does not describe that reverse track.
@@ -96,7 +99,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     (output / "measurement.json").write_text(json.dumps(result, indent=2) + "\n")
     (output / "report.html").write_text(report(result))
-    print(f"{result['paint_count']} paints: origin/height stable; completed forward tracks paint in order")
+    print(f"{result['paint_count']} paints ({result['foreground_replay_paint_count']} foreground replay paints): origin/height stable; completed forward tracks paint in order")
 
 
 if __name__ == "__main__":

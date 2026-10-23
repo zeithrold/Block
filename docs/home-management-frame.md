@@ -26,24 +26,25 @@ One monotonic clock drives four tracks with cubic Bézier `(0.22, 1, 0.36, 1)`:
 
 | Track | Home → management | Management → Home |
 | --- | --- | --- |
-| Home | 0–140 ms: fade out and move up 12 px | 420–620 ms: fade in and return from 12 px above |
-| Sidebar | 60–220 ms: fade in and rise 14 px | 380–540 ms: fade out and move down 14 px |
-| Native width | 220–540 ms: expand to the right | 160–480 ms: retract |
-| Detail | 340–620 ms: fade in and move left 24 px | 0–180 ms: fade out and move right 24 px |
+| Home | 0–85 ms: fade out and move up 12 px | 250–380 ms: fade in and return from 12 px above |
+| Sidebar | 30–130 ms: fade in and rise 14 px | 225–330 ms: fade out and move down 14 px |
+| Native width | 130–320 ms: expand to the right | 95–290 ms: retract |
+| Detail | 200–380 ms: fade in and move left 24 px | 0–110 ms: fade out and move right 24 px |
 
-Sidebar and detail starts differ by 280 ms. The sidebar finishes its entrance before expansion starts; content begins 120 ms into expansion. The management page is laid out at its final content width throughout, clipped by the real window, so the narrow-layout breakpoint and text wrapping do not change during expansion.
+The user requested a faster overall sequence after trying the initial 620 ms version. Both directions now take 380 ms (39% less time), retaining the curve and stage order. Sidebar and detail starts differ by 170 ms. The sidebar finishes its entrance before expansion starts; content begins 70 ms into expansion. The management page is laid out at its final content width throughout, clipped by the real window, so the narrow-layout breakpoint and text wrapping do not change during expansion.
 
-Reversal samples the current opacity, position and actual native width. A return before any expansion uses a shorter 220 ms sequence. Application or system reduced motion immediately settles width and panes, releases the outgoing visual data, and does not replay the sequence when motion is enabled again. Normal management-to-management and detail/wizard navigation retain their existing motion scope.
+Reversal samples the current opacity, position and actual native width. A return before any expansion uses a shorter 140 ms sequence. Application or system reduced motion immediately settles width and panes, releases the outgoing visual data, and does not replay the sequence when motion is enabled again. Normal management-to-management and detail/wizard navigation retain their existing motion scope.
 
 Only the outgoing page body is retained. Its snapshot owns no engine or credential URL. A shared cell contains only copyable presentation values; it does not retain the live view. Body input and tab traversal are suspended during the bounded morph, while the live title area/menu can reverse or retarget navigation. Frozen layers are discarded on completion or reduced motion.
 
 ## Verification
 
-- The final local macOS verification entry passed formatting, workspace all-target/all-feature checks, strict Clippy, **565 tests across 39 suites**, the native build and build-identity check. This is an automated result, not visual acceptance.
+- The final local macOS verification entry passed formatting, workspace all-target/all-feature checks, strict Clippy, **566 tests across 39 suites**, the native build and build-identity check. This is an automated result, not visual acceptance.
 - Regressions cover phase ordering, reversal continuity, actual pane outer width, unchanged height/origin, runtime reduced motion, outgoing-layer release, hidden incoming controls, compact Home actions, CSD insets, negative display origins and small-display startup bounds. TestWindow receives simulated native resize callbacks because its resize implementation only records OS bounds.
-- A foreground macOS disposable scenario replay submitted **602 measured frame paints** over ten navigation actions, including two interrupted returns. Every recorded native top-left was `(704, 344)` and every height was `720`; width ranged from `360` to `1152`. No production account or game operation was performed.
-- In the three completed forward runs (Accounts, Settings, About), the first visible sidebar paint occurred 67–74 ms after the action; the first native width change occurred 230–238 ms after it; the first visible detail paint occurred 349–353 ms after it. Complete sequences settled in 625–633 ms. These include event/render latency and differ from the timeline's logical start times.
+- A foreground macOS disposable scenario replay submitted **371 continuously foreground replay paints** over ten navigation actions (423 total paints including startup), including two interrupted returns. Every recorded native top-left was `(704, 344)` and every height was `720`; width ranged from `360` to `1152`. No production account or game operation was performed.
+- In the three completed forward runs (Accounts, Settings, About), the first visible sidebar paint occurred 41–44 ms after the action; the first native width change occurred 140–147 ms after it; the first visible detail paint occurred 205–213 ms after it. Complete sequences settled in 385–392 ms. These include event/render latency and differ from the timeline's logical start times.
 - Paint probes also record actual pane bounds, distinguishing the 360 px outer sidebar from its 359 px inside-border area. These are paint-submission measurements, not a video/compositor presentation timestamp.
+- The initial 620 ms trace is retained separately as `620ms-native.jsonl`. A faster replay that lost window activation is retained as `380ms-background-native.jsonl`; it is excluded from foreground phase conclusions. The analyzer rejects a replay that loses activation during its action sequence. CI also exposed that the original hidden-input test inherited the runner's system motion policy; animated tests now scope that input explicitly, and a separate regression verifies that system reduced motion settles immediately with the application preference off.
 - Local evidence: `target/frame-motion/native.jsonl`, `measurement.json`, `report.html`, `home-light.jpg`, `accounts-light.jpg`, `settings-light.jpg`, and `macos-verify.log`. Ignored artifacts are not uploaded by a source push.
 
 ## Remaining To-Do

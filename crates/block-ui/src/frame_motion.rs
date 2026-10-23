@@ -128,11 +128,11 @@ impl Run {
     fn sample(self, now: Instant) -> Presentation {
         let elapsed = now.saturating_duration_since(self.started);
         let (home, sidebar, width, detail, end) = if self.to_home && self.short_return {
-            ((40, 180), (0, 140), (0, 0), (0, 120), 220)
+            ((20, 120), (0, 90), (0, 0), (0, 80), 140)
         } else if self.to_home {
-            ((420, 200), (380, 160), (160, 320), (0, 180), 620)
+            ((250, 130), (225, 105), (95, 195), (0, 110), 380)
         } else {
-            ((0, 140), (60, 160), (220, 320), (340, 280), 620)
+            ((0, 85), (30, 100), (130, 190), (200, 180), 380)
         };
         Presentation {
             active: elapsed < Duration::from_millis(end),
@@ -448,31 +448,31 @@ mod tests {
     fn forward_sequence_staggers_sidebar_resize_and_detail() {
         let run = run(false);
         let sample = |ms| run.sample(run.started + Duration::from_millis(ms));
-        assert!(sample(40).home.opacity < 1.);
-        assert_eq!(sample(40).sidebar.opacity, 0.);
-        assert!(sample(140).sidebar.opacity > 0.);
-        assert_eq!(sample(219).outer_width, 360.);
-        assert_eq!(sample(339).detail.opacity, 0.);
-        assert!(sample(400).outer_width > 360.);
-        assert!(sample(400).detail.opacity > 0.);
-        assert_eq!(sample(620).outer_width, 1152.);
-        assert!(!sample(620).active);
+        assert!(sample(20).home.opacity < 1.);
+        assert_eq!(sample(20).sidebar.opacity, 0.);
+        assert!(sample(85).sidebar.opacity > 0.);
+        assert_eq!(sample(129).outer_width, 360.);
+        assert_eq!(sample(199).detail.opacity, 0.);
+        assert!(sample(260).outer_width > 360.);
+        assert!(sample(260).detail.opacity > 0.);
+        assert_eq!(sample(380).outer_width, 1152.);
+        assert!(!sample(380).active);
     }
     #[test]
     fn reverse_hides_content_before_retracting_then_restores_home() {
         let run = run(true);
         let sample = |ms| run.sample(run.started + Duration::from_millis(ms));
-        assert!(sample(100).detail.opacity < 1.);
-        assert_eq!(sample(159).outer_width, 1152.);
-        assert_eq!(sample(419).home.opacity, 0.);
-        assert!(sample(500).home.opacity > 0.);
-        assert_eq!(sample(620).outer_width, 360.);
-        assert_eq!(sample(620).home, Pose::VISIBLE);
+        assert!(sample(60).detail.opacity < 1.);
+        assert_eq!(sample(94).outer_width, 1152.);
+        assert_eq!(sample(249).home.opacity, 0.);
+        assert!(sample(300).home.opacity > 0.);
+        assert_eq!(sample(380).outer_width, 360.);
+        assert_eq!(sample(380).home, Pose::VISIBLE);
     }
     #[test]
     fn retarget_starts_from_the_current_presentation() {
         let forward = run(false);
-        let now = forward.started + Duration::from_millis(380);
+        let now = forward.started + Duration::from_millis(240);
         let painted = forward.sample(now);
         let reverse = Run {
             from: painted,
@@ -499,6 +499,7 @@ mod tests {
 
     #[gpui::test]
     fn native_width_and_real_sidebar_preserve_home_height_and_origin(cx: &mut TestAppContext) {
+        let _system_motion = crate::platform::test_system_motion(false);
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.tab = Tab::Home;
@@ -511,7 +512,7 @@ mod tests {
             view.handle(UiAction::Tab(Tab::Accounts), window, cx)
         });
         cx.run_until_parked();
-        for delta in [100, 140, 160, 220] {
+        for delta in [60, 90, 100, 130] {
             frame(cx, delta);
             cx.update(|window, _| {
                 assert_eq!(window.bounds().origin, origin);
@@ -528,7 +529,7 @@ mod tests {
         view.update_in(cx, |view, window, cx| {
             view.handle(UiAction::Tab(Tab::Home), window, cx)
         });
-        frame(cx, 620);
+        frame(cx, 380);
         assert_eq!(
             cx.update(|window, _| window.bounds()),
             gpui::Bounds::new(origin, size(px(360.), px(720.)))
@@ -538,6 +539,7 @@ mod tests {
 
     #[gpui::test]
     fn reversal_and_runtime_reduce_motion_release_frozen_layers(cx: &mut TestAppContext) {
+        let _system_motion = crate::platform::test_system_motion(false);
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.tab = Tab::Home;
@@ -552,7 +554,7 @@ mod tests {
         view.update_in(cx, |view, window, cx| {
             view.handle(UiAction::Tab(Tab::Home), window, cx)
         });
-        frame(cx, 220);
+        frame(cx, 140);
         assert!(!view.read_with(cx, |view, _| view.motion.frame.active()));
         assert_eq!(
             cx.update(|window, _| window.bounds().size),
@@ -561,7 +563,7 @@ mod tests {
         view.update_in(cx, |view, window, cx| {
             view.handle(UiAction::Tab(Tab::Accounts), window, cx)
         });
-        frame(cx, 380);
+        frame(cx, 240);
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             cx.notify();
@@ -577,6 +579,7 @@ mod tests {
 
     #[gpui::test]
     fn invisible_incoming_body_cannot_activate_an_account_action(cx: &mut TestAppContext) {
+        let _system_motion = crate::platform::test_system_motion(false);
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.tab = Tab::Home;
@@ -588,6 +591,7 @@ mod tests {
             view.handle(UiAction::Tab(Tab::Accounts), window, cx)
         });
         cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| view.motion.frame.active()));
         let add = cx.debug_bounds("sign-in");
         assert!(
             add.is_some(),
@@ -598,5 +602,36 @@ mod tests {
         }
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| view.shell.auth.is_none()));
+        frame(cx, 380);
+        if let Some(add) = cx.debug_bounds("sign-in") {
+            cx.simulate_click(add.center(), gpui::Modifiers::none());
+        }
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| view.shell.auth.is_some()));
+    }
+
+    #[gpui::test]
+    fn system_reduced_motion_settles_the_frame_with_application_motion_enabled(
+        cx: &mut TestAppContext,
+    ) {
+        let _system_motion = crate::platform::test_system_motion(true);
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.tab = Tab::Home;
+            view.preferences.reduce_motion = false;
+            view
+        });
+        cx.simulate_resize(size(px(360.), px(720.)));
+        cx.run_until_parked();
+        view.update_in(cx, |view, window, cx| {
+            view.handle(UiAction::Tab(Tab::Accounts), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|window, _| window.bounds().size),
+            size(px(1152.), px(720.))
+        );
+        assert!(view.read_with(cx, |view, _| !view.motion.frame.active()
+            && view.motion.frame.outgoing.is_none()));
     }
 }
