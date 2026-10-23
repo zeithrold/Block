@@ -105,6 +105,23 @@ adaptations are separate from the curve regression checks and desktop review.
   tiled Linux edges. The scrim uses the prototype's light tint; native backdrop
   blur and nested/snap-point drawers are not implemented in this increment.
 
+## Drawer entrance timing alignment
+
+The panel now uses the prototype's 450 ms `cubic-bezier(.22, 1, .36, 1)`;
+the backdrop has its own 450 ms `cubic-bezier(.32, .72, 0, 1)` track. The closed
+panel translation includes the prototype's 2 px border bleed. The earlier
+Native default `ease_out_cubic` and coupled backdrop did not reproduce these
+trajectories even though the total duration matched.
+
+Active macOS paint samples and the actual browser wrapper were compared at
+matched viewport/panel geometry, preserving both trigger-relative and observed
+animation clocks. Mean panel phase error decreased from 7.711% to 0.052%;
+mean backdrop phase error decreased from 6.260% to 0.035%. Initial browser
+mounting latency remains visible in the separate trigger-relative comparison.
+[Measurement method, findings and reproduction](drawer-motion-comparison.md)
+describe the limits and the local interactive report. This is curve evidence,
+not desktop visual acceptance or a GPU presentation benchmark.
+
 ## Verification and remaining To-Do
 
 The component regressions exercise physical pointer/key events, retained exit,
@@ -117,12 +134,14 @@ stack retargeting, interrupted expansion/collapse, swipe return, outward swipe,
 ordinary/back-layer removal, diagonal axis locking, re-grabbing during return
 and runtime system reduced motion.
 The local macOS native gate passed formatting, all-target/all-feature checking,
-strict Clippy, 554 tests across 39 suites (zero failures or ignored tests), and
+strict Clippy, 556 tests across 39 suites (zero failures or ignored tests), and
 the desktop executable build. Motion fixtures select both normal and system-reduced
 policies within each test thread; they do not change the host OS preference.
-This is automated native evidence; the disposable
-CLI preview could not be bound reliably by the desktop automation, so the new
-components' actual desktop gesture/visual verdict remains pending.
+Drawer timing regressions additionally sample actual panel bounds and painted
+backdrop alpha through the animation callbacks, without forced refresh, and
+verify settled entry under reduced motion. A foreground disposable desktop app
+supplied the Drawer paint measurements described above;
+the components' broader desktop gesture/visual verdict remains pending.
 Run the complete native gate with
 `python3 scripts/verify-platform.py --platform <platform>`; the automatic CI
 matrix applies it to all five native targets.

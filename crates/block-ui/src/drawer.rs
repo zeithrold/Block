@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui_base::{
     Root, RootPlugin, Sheet,
-    motion::{Presence, PresencePhase, Spring, Transition, spring},
+    motion::{Easing, Presence, PresencePhase, Spring, Transition, spring},
 };
 
 use super::{
@@ -22,6 +22,34 @@ use super::{
 use gpui_component::WindowExt as _;
 
 const DURATION: Duration = Duration::from_millis(450);
+const PANEL_EASING: Easing = Easing::CubicBezier {
+    x1: 0.22,
+    y1: 1.,
+    x2: 0.36,
+    y2: 1.,
+};
+const BACKDROP_EASING: Easing = Easing::CubicBezier {
+    x1: 0.32,
+    y1: 0.72,
+    x2: 0.,
+    y2: 1.,
+};
+
+#[cfg(debug_assertions)]
+#[path = "drawer_trace.rs"]
+mod drawer_trace;
+#[cfg(debug_assertions)]
+pub(super) fn motion_trace_enabled() -> bool {
+    drawer_trace::enabled()
+}
+#[cfg(debug_assertions)]
+pub(super) fn start_motion_trace(
+    owner: WeakEntity<Block>,
+    window: &mut Window,
+    cx: &mut Context<'_, Block>,
+) {
+    drawer_trace::start(owner, window, cx);
+}
 
 struct ActiveDrawer {
     owner: WeakEntity<Block>,
@@ -182,7 +210,13 @@ impl Render for DrawerLayer {
             ElementId::NamedInteger("block-drawer-presence".into(), revision as u64),
             !active.closing,
         )
-        .transition(Transition::new(DURATION))
+        .transition(Transition::new(DURATION).easing(PANEL_EASING))
+        .sample(window, cx);
+        let backdrop = Presence::new(
+            ElementId::NamedInteger("block-drawer-backdrop".into(), revision as u64),
+            !active.closing,
+        )
+        .transition(Transition::new(DURATION).easing(BACKDROP_EASING))
         .sample(window, cx);
         if presence.phase == PresencePhase::Absent {
             self.pending_return = self.active.take().and_then(|active| active.return_focus);
@@ -226,8 +260,11 @@ impl Render for DrawerLayer {
             window,
             cx,
         );
-        let translation = panel_height * (1. - presence.progress) + offset * presence.progress;
-        let scrim_opacity = presence.progress * (1. - offset / panel_height.max(1.)).clamp(0., 1.);
+        // Match the popup's closed transform, including its 2px border bleed.
+        // Backdrop opacity follows its own CSS timing channel.
+        let translation =
+            (panel_height + 2.) * (1. - presence.progress) + offset * presence.progress;
+        let scrim_opacity = backdrop.progress * (1. - offset / panel_height.max(1.)).clamp(0., 1.);
         let focus = active.focus.clone();
         let dismiss = active.owner.clone();
         let dismiss_button = active.owner.clone();
@@ -278,6 +315,18 @@ impl Render for DrawerLayer {
                     view.dismiss_surface_overlay(revision, window, cx)
                 });
             });
+        #[cfg(debug_assertions)]
+        let trace_sample = drawer_trace::sample(drawer_trace::FrameSample {
+            revision,
+            render_ms: 0.,
+            progress: presence.progress,
+            translation,
+            scrim: scrim_opacity,
+            height: panel_height,
+            offset,
+            closing,
+            reduced: cx.reduce_motion(),
+        });
         let surface = div()
             .id("block-drawer")
             .debug_selector(|| "block-drawer".into())
@@ -342,6 +391,18 @@ impl Render for DrawerLayer {
                     .flex_col()
                     .child(body),
             );
+        #[cfg(debug_assertions)]
+        let surface =
+            surface.children(trace_sample.map(|sample| drawer_trace::probe("panel", sample)));
+        let overlay = div()
+            .debug_selector(|| "block-drawer-backdrop".into())
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(gpui::hsla(0., 0., 0., 0.1 * scrim_opacity));
+        #[cfg(debug_assertions)]
+        let overlay =
+            overlay.children(trace_sample.map(|sample| drawer_trace::probe("backdrop", sample)));
         div()
             .absolute()
             .inset_0()
@@ -401,12 +462,7 @@ impl Render for DrawerLayer {
                     .w(width)
                     .h(height)
                     .overflow_hidden()
-                    .overlay(div().absolute().inset_0().occlude().bg(gpui::hsla(
-                        0.,
-                        0.,
-                        0.,
-                        0.1 * scrim_opacity,
-                    )))
+                    .overlay(overlay)
                     .surface(surface),
             )
             .into_any_element()

@@ -218,3 +218,86 @@ fn system_reduced_motion_closes_immediately_with_the_app_preference_off(cx: &mut
     assert!(crate::test_support::control_bounds(cx, "block-drawer").is_none());
     assert_eq!(cx.update(|window, cx| window.focused(cx)), invoking_focus);
 }
+
+/// Deliver the animation request itself, so this path cannot hide a missing
+/// invalidation behind a forced window.refresh().
+fn animation_frame(cx: &mut VisualTestContext, millis: u64) {
+    cx.executor().advance_clock(Duration::from_millis(millis));
+    cx.update(|window, app| {
+        assert!(
+            window.simulate_next_frame(app) > 0,
+            "motion requested another frame"
+        );
+    });
+    cx.run_until_parked();
+}
+
+fn scrim_alpha(cx: &mut VisualTestContext) -> f32 {
+    let bounds = bounds(cx, "block-drawer-backdrop");
+    cx.update(|window, _| {
+        let scale = window.scale_factor();
+        window
+            .painted_quads()
+            .into_iter()
+            .filter(|quad| {
+                (quad.bounds.size.width.0 - f32::from(bounds.size.width) * scale).abs() < 1.
+                    && (quad.bounds.size.height.0 - f32::from(bounds.size.height) * scale).abs()
+                        < 1.
+            })
+            .filter_map(|quad| quad.background.as_solid())
+            .filter(|color| color.l == 0. && color.a <= 0.1001)
+            .map(|color| color.a)
+            .fold(0., f32::max)
+    })
+}
+
+#[gpui::test]
+fn entrance_matches_browser_panel_and_backdrop_tracks_without_forced_refresh(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx, _system_motion) = fixture(cx, false);
+    act(&view, UiAction::Drawer(Some(Drawer::Accounts)), cx);
+    let start = bounds(cx, "block-drawer");
+    let mut samples = Vec::new();
+    let mut previous = 0;
+    // Independent browser cubic-bezier reference samples for each CSS track.
+    for (time, panel, scrim) in [
+        (45, 0.4010969, 0.2698207),
+        (90, 0.6739781, 0.6556943),
+        (135, 0.8321921, 0.8471536),
+        (225, 0.9613825, 0.9548094),
+        (315, 0.9941938, 0.9882384),
+        (450, 1., 1.),
+    ] {
+        animation_frame(cx, time - previous);
+        previous = time;
+        samples.push((bounds(cx, "block-drawer"), scrim_alpha(cx), panel, scrim));
+    }
+    let settled = bounds(cx, "block-drawer");
+    let travel = settled.size.height + px(2.);
+    assert!((start.origin.y - settled.origin.y - travel).abs() < px(0.6));
+    for (painted, alpha, panel, scrim) in samples {
+        let expected = settled.origin.y + travel * (1. - panel);
+        assert!(
+            (painted.origin.y - expected).abs() < px(0.6),
+            "{painted:?} vs {expected:?}"
+        );
+        assert!(
+            (alpha - 0.1 * scrim).abs() < 0.0001,
+            "{alpha} vs {}",
+            0.1 * scrim
+        );
+    }
+}
+
+#[gpui::test]
+fn reduced_motion_enters_with_settled_panel_and_backdrop(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    act(&view, UiAction::Drawer(Some(Drawer::Accounts)), cx);
+    let panel = bounds(cx, "block-drawer");
+    assert_eq!(
+        panel.origin.y,
+        bounds(cx, "block-drawer-backdrop").bottom() - panel.size.height
+    );
+    assert!((scrim_alpha(cx) - 0.1).abs() < 0.0001);
+}
