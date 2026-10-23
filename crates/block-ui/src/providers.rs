@@ -636,7 +636,7 @@ impl Block {
             }))
     }
 
-    fn provider_editor(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
+    pub(super) fn provider_editor(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
         let mut content = div().p_8().flex().flex_col().gap_6();
         if patterns::is_narrow(self.page_viewport(window)) {
             content = content.child(self.provider_button(

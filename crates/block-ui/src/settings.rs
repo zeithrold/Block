@@ -1175,14 +1175,16 @@ impl Block {
                 .min_h_0()
                 .flex()
                 .child(
-                    div()
-                        .w(px(56.))
-                        .flex_shrink_0()
-                        .border_r_1()
-                        .border_color(rgb(self.palette.border))
-                        .child(navigation),
+                    self.frame_sidebar(
+                        div()
+                            .w(px(56.))
+                            .flex_shrink_0()
+                            .border_r_1()
+                            .border_color(rgb(self.palette.border))
+                            .child(navigation),
+                    ),
                 )
-                .child(div().flex_1().min_w_0().min_h_0().child(detail))
+                .child(self.frame_detail(div().flex_1().min_w_0().min_h_0().child(detail)))
                 .into_any_element()
         } else {
             patterns::management_layout(

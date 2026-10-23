@@ -305,29 +305,43 @@ impl Block {
         }
     }
     pub(super) fn frame_sidebar<E: Styled + gpui::ParentElement>(&self, view: E) -> E {
+        let view = if !self.visual_only {
+            view.relative().children(self.motion.page.paint_probe())
+        } else {
+            view
+        };
         #[cfg(debug_assertions)]
         let view = if trace::enabled() {
-            view.relative().child(trace::part_probe("sidebar"))
+            view.relative().child(trace::part_probe(
+                "sidebar",
+                self.motion.outgoing_page.get(),
+            ))
         } else {
             view
         };
         if self.motion.frame.active() {
             self.motion.frame.presentation.get().sidebar.apply(view)
         } else {
-            view
+            self.page_pane_pose(true).apply(view)
         }
     }
     pub(super) fn frame_detail<E: Styled + gpui::ParentElement>(&self, view: E) -> E {
+        let view = if !self.visual_only {
+            view.relative().children(self.motion.page.paint_probe())
+        } else {
+            view
+        };
         #[cfg(debug_assertions)]
         let view = if trace::enabled() {
-            view.relative().child(trace::part_probe("detail"))
+            view.relative()
+                .child(trace::part_probe("detail", self.motion.outgoing_page.get()))
         } else {
             view
         };
         if self.motion.frame.active() {
             self.motion.frame.presentation.get().detail.apply(view)
         } else {
-            view
+            self.page_pane_pose(false).apply(view)
         }
     }
 
@@ -335,19 +349,18 @@ impl Block {
         let frame = &self.motion.frame;
         let value = frame.presentation.get();
         if !value.active {
-            let body = self.transition_content(
-                super::motion::Scope::Page,
-                self.render_page_body(window, cx),
-                window,
-                cx,
-            );
+            let body = self.render_navigation_body(window, cx);
             #[cfg(debug_assertions)]
             if trace::enabled() {
                 return div()
                     .size_full()
                     .relative()
                     .child(body)
-                    .child(trace::probe(value, self.is_home_frame()))
+                    .child(trace::probe(
+                        value,
+                        self.is_home_frame(),
+                        self.navigation_trace_sample(cx),
+                    ))
                     .into_any_element();
             }
             return body;
@@ -409,7 +422,7 @@ impl Block {
         }
         #[cfg(debug_assertions)]
         if trace::enabled() {
-            root = root.child(trace::probe(value, home));
+            root = root.child(trace::probe(value, home, self.navigation_trace_sample(cx)));
         }
         root.into_any_element()
     }

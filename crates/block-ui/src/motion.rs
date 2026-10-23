@@ -13,7 +13,7 @@ use std::{
 
 use gpui::{
     AnyElement, App, Context, Div, ElementId, InteractiveElement as _, ParentElement as _, Pixels,
-    Stateful, Styled as _, Window, div, px, relative,
+    Stateful, Styled as _, Window, div, px,
 };
 
 use gpui_base::motion::{Easing, Interpolate as _, Timing};
@@ -244,16 +244,24 @@ pub(super) struct Layer<K, T> {
     pub _snapshot: T,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub(super) struct Pose {
-    pub x_fraction: f32,
+    pub x: f32,
     pub opacity: f32,
 }
 impl Default for Pose {
     fn default() -> Self {
+        Self { x: 0., opacity: 1. }
+    }
+}
+impl Pose {
+    pub(super) fn apply<E: gpui::Styled>(self, element: E) -> E {
+        element.relative().left(px(self.x)).opacity(self.opacity)
+    }
+    fn mix(self, target: Self, progress: f32) -> Self {
         Self {
-            x_fraction: 0.,
-            opacity: 1.,
+            x: self.x.interpolate(&target.x, progress),
+            opacity: self.opacity.interpolate(&target.opacity, progress),
         }
     }
 }
@@ -262,7 +270,7 @@ pub(super) fn layer(id: impl Into<ElementId>, pose: Pose, content: AnyElement) -
     div()
         .id(id)
         .absolute()
-        .left(relative(pose.x_fraction))
+        .left(px(pose.x))
         .top_0()
         .size_full()
         .min_w_0()
@@ -271,9 +279,10 @@ pub(super) fn layer(id: impl Into<ElementId>, pose: Pose, content: AnyElement) -
         .child(content)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub(super) struct Frame {
     pub current: Option<Pose>,
+    pub outgoing: Option<Pose>,
     running: bool,
 }
 impl Frame {
@@ -285,15 +294,23 @@ impl Frame {
 #[derive(Clone, Debug)]
 pub(super) struct Transition<K, T> {
     current: Option<Layer<K, T>>,
+    outgoing: Option<Layer<K, T>>,
+    outgoing_from: [Pose; 2],
+    scope: Scope,
     direction: Direction,
     started: Option<Instant>,
+    painted: Rc<Cell<Option<Instant>>>,
 }
 impl<K: PartialEq, T> Transition<K, T> {
-    pub(super) const fn new(_: Scope) -> Self {
+    pub(super) fn new(scope: Scope) -> Self {
         Self {
             current: None,
+            outgoing: None,
+            outgoing_from: [Pose::default(); 2],
+            scope,
             direction: Direction::Forward,
             started: None,
+            painted: Rc::default(),
         }
     }
     pub(super) fn reconcile(
@@ -307,8 +324,35 @@ impl<K: PartialEq, T> Transition<K, T> {
         let changed =
             self.current.as_ref().map(|layer| &layer.key) != next.as_ref().map(|layer| &layer.key);
         if changed {
-            self.started =
-                (self.current.is_some() && next.is_some() && !preferences.reduced()).then_some(now);
+            let previous = [
+                self.sample(now, preferences),
+                self.sample_delayed(now, preferences, 40),
+            ];
+            let retain_outgoing = previous[0].outgoing.is_some_and(|outgoing| {
+                previous[0]
+                    .current
+                    .is_none_or(|current| outgoing.opacity > current.opacity)
+            });
+            self.outgoing_from = previous.map(|frame| {
+                if retain_outgoing {
+                    frame.outgoing.unwrap_or_default()
+                } else {
+                    frame.current.unwrap_or_default()
+                }
+            });
+            self.outgoing = if next.is_some() && !preferences.reduced() {
+                if retain_outgoing {
+                    self.outgoing.take()
+                } else {
+                    self.current.take()
+                }
+            } else {
+                None
+            };
+            self.started = self.outgoing.as_ref().map(|_| now);
+            // A stale paint callback from an interrupted run cannot start its
+            // replacement. Each run owns a fresh acknowledgement cell.
+            self.painted = Rc::default();
             self.direction = direction;
         }
         self.current = next;
@@ -317,13 +361,32 @@ impl<K: PartialEq, T> Transition<K, T> {
         }
     }
     pub(super) fn sample(&self, now: Instant, preferences: Preferences) -> Frame {
+        self.sample_delayed(now, preferences, 0)
+    }
+    pub(super) fn sample_delayed(
+        &self,
+        now: Instant,
+        preferences: Preferences,
+        delay_ms: u64,
+    ) -> Frame {
+        let duration = Duration::from_millis(if self.scope == Scope::Page { 200 } else { 180 });
+        let delay = Duration::from_millis(delay_ms);
+        let elapsed = self.started.filter(|_| !preferences.reduced()).map(|_| {
+            self.painted.get().map_or(Duration::ZERO, |painted| {
+                now.saturating_duration_since(painted)
+            })
+        });
         let progress = self
             .started
             .filter(|_| !preferences.reduced())
-            .map_or(1., |started| {
-                Timing::new(Duration::from_millis(460))
+            .map_or(1., |_| {
+                let elapsed = elapsed.unwrap_or_default();
+                if elapsed < delay {
+                    return 0.;
+                }
+                Timing::new(duration)
                     .ease(navigation_easing())
-                    .sample(now.saturating_duration_since(started))
+                    .sample(elapsed - delay)
                     .directed_progress
             });
         let sign = if self.direction == Direction::Forward {
@@ -333,10 +396,19 @@ impl<K: PartialEq, T> Transition<K, T> {
         };
         Frame {
             current: self.current.as_ref().map(|_| Pose {
-                x_fraction: (1. - progress) * sign,
+                x: (1. - progress) * sign * 12.,
                 opacity: progress,
             }),
-            running: progress < 1.,
+            outgoing: self.outgoing.as_ref().map(|_| {
+                self.outgoing_from[usize::from(delay_ms != 0)].mix(
+                    Pose {
+                        x: -sign * 12.,
+                        opacity: 0.,
+                    },
+                    progress,
+                )
+            }),
+            running: elapsed.is_some_and(|elapsed| elapsed < duration + delay),
         }
     }
     pub(super) fn frame_with_base(
@@ -346,7 +418,11 @@ impl<K: PartialEq, T> Transition<K, T> {
         _: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        let frame = self.sample(cx.background_executor().now(), preferences);
+        let frame = self.sample_delayed(
+            cx.background_executor().now(),
+            preferences,
+            if self.scope == Scope::Page { 40 } else { 0 },
+        );
         if !frame.running() {
             self.settle();
         }
@@ -355,8 +431,31 @@ impl<K: PartialEq, T> Transition<K, T> {
     pub(super) const fn current(&self) -> Option<&Layer<K, T>> {
         self.current.as_ref()
     }
+    pub(super) const fn outgoing(&self) -> Option<&Layer<K, T>> {
+        self.outgoing.as_ref()
+    }
+    pub(super) fn paint_probe(&self) -> Option<impl gpui::IntoElement + use<K, T>> {
+        if self.started.is_none() || self.painted.get().is_some() {
+            return None;
+        }
+        let painted = self.painted.clone();
+        Some(
+            gpui::canvas(
+                |_, _, _| {},
+                move |_, (), window, cx| {
+                    if painted.get().is_none() {
+                        painted.set(Some(cx.background_executor().now()));
+                        window.request_animation_frame();
+                    }
+                },
+            )
+            .absolute()
+            .inset_0(),
+        )
+    }
     pub(super) fn settle(&mut self) {
         self.started = None;
+        self.outgoing = None;
     }
 }
 
@@ -366,5 +465,82 @@ const fn navigation_easing() -> Easing {
         y1: 1.,
         x2: 0.3,
         y2: 1.,
+    }
+}
+
+#[cfg(test)]
+mod navigation_clock_tests {
+    use super::{Direction, Layer, MotionStyle, Preferences, Scope, Transition};
+    use std::time::{Duration, Instant};
+
+    fn page() -> (Transition<&'static str, ()>, Instant) {
+        let now = Instant::now();
+        let mut page = Transition::new(Scope::Page);
+        for key in ["a", "b"] {
+            page.reconcile(
+                Some(Layer { key, _snapshot: () }),
+                Direction::Forward,
+                MotionStyle::Navigation,
+                now,
+                Preferences::default(),
+            );
+        }
+        (page, now)
+    }
+
+    #[test]
+    fn a_slow_first_paint_does_not_consume_the_pane_start_delay() {
+        let (page, now) = page();
+        let first_paint = now + Duration::from_millis(500);
+        assert!(
+            page.sample(first_paint, Preferences::default())
+                .current
+                .is_some_and(|pose| pose.x == 12. && pose.opacity == 0.)
+        );
+        page.painted.set(Some(first_paint));
+        let sample = first_paint + Duration::from_millis(20);
+        assert!(
+            page.sample(sample, Preferences::default())
+                .current
+                .is_some_and(|pose| pose.x > 0. && pose.x < 12. && pose.opacity > 0.)
+        );
+        assert!(
+            page.sample_delayed(sample, Preferences::default(), 40)
+                .current
+                .is_some_and(|pose| pose.opacity == 0.)
+        );
+        assert!(
+            !page
+                .sample_delayed(
+                    first_paint + Duration::from_millis(240),
+                    Preferences::default(),
+                    40
+                )
+                .running()
+        );
+    }
+
+    #[test]
+    fn a_stale_paint_acknowledgement_cannot_start_a_retargeted_transition() {
+        let (mut page, now) = page();
+        let stale = page.painted.clone();
+        page.reconcile(
+            Some(Layer {
+                key: "c",
+                _snapshot: (),
+            }),
+            Direction::Forward,
+            MotionStyle::Navigation,
+            now,
+            Preferences::default(),
+        );
+        stale.set(Some(now));
+        let frame = page.sample(now + Duration::from_secs(1), Preferences::default());
+        assert!(
+            frame
+                .current
+                .is_some_and(|pose| pose.x == 12. && pose.opacity == 0.)
+        );
+        assert!(page.outgoing().is_some_and(|layer| layer.key == "a"));
     }
 }

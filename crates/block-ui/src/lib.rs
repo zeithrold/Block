@@ -1853,7 +1853,7 @@ impl Block {
     }
 
     fn move_focus(&mut self, backwards: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        base_overlay::advance_focus(backwards, window, cx);
+        self.advance_navigation_focus(backwards, window, cx);
     }
 
     fn focus_field(&self, backwards: bool, window: &mut Window, cx: &mut Context<'_, Self>) {

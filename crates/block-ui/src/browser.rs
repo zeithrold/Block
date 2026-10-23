@@ -512,33 +512,35 @@ impl Block {
                 .min_h_0()
                 .flex()
                 .child(
-                    div()
-                        .id("compact-browser")
-                        .debug_selector(|| "compact-browser".into())
-                        .w(px(56.))
-                        .h_full()
-                        .min_h_0()
-                        .flex_shrink_0()
-                        .border_r_1()
-                        .border_color(rgb(self.palette.border))
-                        .bg(rgb(self.palette.sidebar))
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .id("compact-list")
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_y_scroll()
-                                .children(
-                                    records
-                                        .iter()
-                                        .map(|record| self.browser_icon_row(record, cx)),
-                                ),
-                        )
-                        .child(patterns::management_footer(viewport, self.palette).px_0()),
+                    self.frame_sidebar(
+                        div()
+                            .id("compact-browser")
+                            .debug_selector(|| "compact-browser".into())
+                            .w(px(56.))
+                            .h_full()
+                            .min_h_0()
+                            .flex_shrink_0()
+                            .border_r_1()
+                            .border_color(rgb(self.palette.border))
+                            .bg(rgb(self.palette.sidebar))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .id("compact-list")
+                                    .flex_1()
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .children(
+                                        records
+                                            .iter()
+                                            .map(|record| self.browser_icon_row(record, cx)),
+                                    ),
+                            )
+                            .child(patterns::management_footer(viewport, self.palette).px_0()),
+                    ),
                 )
-                .child(div().flex_1().min_w_0().h_full().child(detail));
+                .child(self.frame_detail(div().flex_1().min_w_0().h_full().child(detail)));
         }
         patterns::management_layout(
             viewport,

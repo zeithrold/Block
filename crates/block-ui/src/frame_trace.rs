@@ -41,7 +41,7 @@ fn record(mut value: Value) {
         }
     }
 }
-pub(super) fn probe(value: Presentation, home: bool) -> impl IntoElement {
+pub(super) fn probe(value: Presentation, home: bool, navigation: Value) -> impl IntoElement {
     gpui::canvas(|_, _, _| {}, move |bounds, (), window, _| {
         let native = window.bounds();
         record(json!({"type":"paint","home":home,"running":value.active,
@@ -53,12 +53,17 @@ pub(super) fn probe(value: Presentation, home: bool) -> impl IntoElement {
             "sidebar_opacity":value.sidebar.opacity,"sidebar_y":value.sidebar.y,
             "detail_opacity":value.detail.opacity,"detail_x":value.detail.x,
             "requested_width":value.outer_width,"layout_width":value.manage_width,
-            "active":window.is_window_active(),"dpr":window.scale_factor()}));
+            "navigation":navigation,"active":window.is_window_active(),"dpr":window.scale_factor()}));
     }).absolute().inset_0()
 }
-pub(super) fn part_probe(part: &'static str) -> impl IntoElement {
+pub(super) fn part_probe(part: &'static str, outgoing: bool) -> impl IntoElement {
     gpui::canvas(|_, _, _| {}, move |bounds, (), _, _| {
-        record(json!({"type":"pane","part":part,"x":f32::from(bounds.origin.x),"y":f32::from(bounds.origin.y),"width":f32::from(bounds.size.width),"height":f32::from(bounds.size.height)}));
+        record(json!({"type":"pane","part":part,"outgoing":outgoing,"x":f32::from(bounds.origin.x),"y":f32::from(bounds.origin.y),"width":f32::from(bounds.size.width),"height":f32::from(bounds.size.height)}));
+    }).absolute().inset_0()
+}
+pub(crate) fn fragment_probe(scope: usize) -> impl IntoElement {
+    gpui::canvas(|_, _, _| {}, move |bounds, (), _, _| {
+        record(json!({"type":"fragment","scope":scope,"x":f32::from(bounds.origin.x),"y":f32::from(bounds.origin.y),"width":f32::from(bounds.size.width),"height":f32::from(bounds.size.height)}));
     }).absolute().inset_0()
 }
 pub(crate) fn start(owner: WeakEntity<Block>, window: &mut Window, cx: &mut Context<'_, Block>) {
@@ -85,26 +90,45 @@ pub(crate) fn start(owner: WeakEntity<Block>, window: &mut Window, cx: &mut Cont
                 .timer(Duration::from_millis(1500))
                 .await;
             let start = cx.background_executor().now();
-            for (at, tab) in [
-                (0, Tab::Accounts),
-                (1000, Tab::Home),
-                (2000, Tab::Settings),
-                (3000, Tab::Home),
-                (4000, Tab::Accounts),
-                (4100, Tab::Home),
-                (4600, Tab::Accounts),
-                (4900, Tab::Home),
-                (6000, Tab::About),
-                (7000, Tab::Home),
-            ] {
+            let actions = if std::env::var_os("BLOCK_PANE_MOTION_REPLAY").is_some() {
+                [
+                    (0, UiAction::Tab(Tab::Accounts)),
+                    (700, UiAction::Tab(Tab::Settings)),
+                    (1200, UiAction::SettingsPage(1)),
+                    (1550, UiAction::SettingsPage(3)),
+                    (1900, UiAction::Tab(Tab::Accounts)),
+                    (2300, UiAction::Tab(Tab::Settings)),
+                    (2400, UiAction::Tab(Tab::About)),
+                    (2900, UiAction::Tab(Tab::Instances)),
+                    (3400, UiAction::Tab(Tab::Home)),
+                    (4100, UiAction::Tab(Tab::Accounts)),
+                ]
+            } else {
+                [
+                    (0, UiAction::Tab(Tab::Accounts)),
+                    (1000, UiAction::Tab(Tab::Home)),
+                    (2000, UiAction::Tab(Tab::Settings)),
+                    (3000, UiAction::Tab(Tab::Home)),
+                    (4000, UiAction::Tab(Tab::Accounts)),
+                    (4100, UiAction::Tab(Tab::Home)),
+                    (4600, UiAction::Tab(Tab::Accounts)),
+                    (4900, UiAction::Tab(Tab::Home)),
+                    (6000, UiAction::Tab(Tab::About)),
+                    (7000, UiAction::Tab(Tab::Home)),
+                ]
+            };
+            for (at, action) in actions {
                 let delay = (start + Duration::from_millis(at))
                     .saturating_duration_since(cx.background_executor().now());
                 cx.background_executor().timer(delay).await;
                 if cx
                     .update(|window, cx| {
-                        record(json!({"type":"action","tab":format!("{tab:?}"),"scheduled_ms":at}));
-                        let _ = owner
-                            .update(cx, |view, cx| view.handle(UiAction::Tab(tab), window, cx));
+                        let label = match &action {
+                            UiAction::Tab(tab) => format!("{tab:?}"),
+                            action => format!("{action:?}"),
+                        };
+                        record(json!({"type":"action","tab":label,"scheduled_ms":at}));
+                        let _ = owner.update(cx, |view, cx| view.handle(action, window, cx));
                     })
                     .is_err()
                 {

@@ -10,12 +10,22 @@ use super::{
     shell::ShellState,
 };
 use gpui::{
-    AnyElement, Context, EntityId, Global, IntoElement as _, ParentElement as _, Styled as _,
-    WeakEntity, Window, div,
+    AnyElement, Context, EntityId, Global, InteractiveElement as _, IntoElement as _,
+    ParentElement as _, Styled as _, WeakEntity, Window, div,
 };
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 type Scene = Transition<String, Rc<Block>>;
+
+#[cfg(test)]
+#[path = "navigation_tests.rs"]
+mod navigation_tests;
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub(super) struct PageFrames {
+    pub sidebar: motion::Frame,
+    pub detail: motion::Frame,
+}
 
 /// Base's motion policy belongs to the App, so every live product window must
 /// contribute before applying it. Weak ownership permits a later render to
@@ -31,6 +41,10 @@ pub(super) struct MotionState {
     pub detail: Scene,
     pub wizard: Scene,
     pub direction: Direction,
+    pub page_frames: Rc<Cell<PageFrames>>,
+    pub outgoing_page: Cell<bool>,
+    pub moving: bool,
+    pub pending_focus: Vec<bool>,
 }
 impl Default for MotionState {
     fn default() -> Self {
@@ -40,6 +54,10 @@ impl Default for MotionState {
             detail: Scene::new(Scope::Detail),
             wizard: Scene::new(Scope::Wizard),
             direction: Direction::Forward,
+            page_frames: Rc::default(),
+            outgoing_page: Cell::new(false),
+            moving: false,
+            pending_focus: Vec::new(),
         }
     }
 }
@@ -72,6 +90,12 @@ impl MotionState {
 }
 
 impl Block {
+    #[cfg(debug_assertions)]
+    pub(super) fn navigation_trace_sample(&self, cx: &Context<'_, Self>) -> serde_json::Value {
+        let now = cx.background_executor().now();
+        let preferences = self.motion_preferences();
+        serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving})
+    }
     #[expect(
         clippy::too_many_lines,
         reason = "Reconcile all independent scopes from one frozen visual snapshot and advance them with one clock value."
@@ -130,6 +154,11 @@ impl Block {
                 .wizard
                 .current()
                 .is_some_and(|current| Some(&current.key) != wizard.as_ref());
+            let detail_changed = self
+                .motion
+                .detail
+                .current()
+                .is_some_and(|current| current.key != detail);
             self.motion.page.reconcile(
                 Some(Layer {
                     key: page,
@@ -140,6 +169,9 @@ impl Block {
                 now,
                 preferences,
             );
+            if let Some(outgoing) = self.motion.page.outgoing() {
+                outgoing._snapshot.motion.outgoing_page.set(true);
+            }
             self.motion.detail.reconcile(
                 Some(Layer {
                     key: detail,
@@ -166,6 +198,9 @@ impl Block {
             } else if wizard_changed {
                 self.motion.detail.settle();
             }
+            if !page_changed && (detail_changed || wizard_changed) {
+                self.motion.page.settle();
+            }
             self.motion_dirty = false;
         }
         if self.motion.frame.active() {
@@ -189,6 +224,11 @@ impl Block {
         if running {
             window.request_animation_frame();
         }
+        self.motion.moving = running || self.motion.frame.active();
+        self.motion.page_frames.set(PageFrames {
+            sidebar: self.motion.page.sample(now, preferences),
+            detail: self.motion.page.sample_delayed(now, preferences, 40),
+        });
     }
 
     pub(super) fn motion_preferences(&self) -> Preferences {
@@ -202,7 +242,7 @@ impl Block {
         &self,
         scope: Scope,
         content: AnyElement,
-        _window: &Window,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         if self.visual_only || self.motion.frame.active() {
@@ -213,19 +253,157 @@ impl Block {
         // prepare_motion has already settled elapsed transitions; the immutable
         // renderer samples the same frame without changing lifetime ownership.
         let frame = scene.sample(now, self.motion_preferences());
-        let viewport = div()
+        let mut viewport = div()
             .size_full()
             .min_w_0()
             .min_h_0()
             .relative()
             .overflow_hidden();
-        viewport
-            .child(motion::layer(
-                ("motion-current", scope as usize),
-                frame.current.unwrap_or_default(),
-                content,
-            ))
+        if frame.running() {
+            viewport = viewport.capture_any_mouse_down(|_, _, cx| cx.stop_propagation());
+        }
+        if let (Some(pose), Some(outgoing)) = (frame.outgoing, scene.outgoing()) {
+            viewport = viewport.child(motion::layer(
+                ("motion-outgoing", scope as usize),
+                pose,
+                div()
+                    .size_full()
+                    .capture_key_down(|_, _, cx| cx.stop_propagation())
+                    .capture_key_up(|_, _, cx| cx.stop_propagation())
+                    .child(outgoing._snapshot.render_scene_fragment(scope, window, cx))
+                    .into_any_element(),
+            ));
+        }
+        let current = motion::layer(
+            ("motion-current", scope as usize),
+            frame.current.unwrap_or_default(),
+            content,
+        )
+        .debug_selector(move || format!("navigation-current-{}", scope as usize))
+        .children(scene.paint_probe());
+        #[cfg(debug_assertions)]
+        let current = if super::frame_motion::trace::enabled() {
+            current.child(super::frame_motion::trace::fragment_probe(scope as usize))
+        } else {
+            current
+        };
+        viewport.child(current).into_any_element()
+    }
+
+    fn render_scene_fragment(
+        &self,
+        scope: Scope,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        match scope {
+            Scope::Page => self.render_page_body(window, cx),
+            Scope::Detail if self.tab == Tab::Settings => self.render_settings_detail(window, cx),
+            Scope::Detail if self.tab == Tab::Accounts && self.shell.providers.visible => {
+                self.provider_editor(window, cx).into_any_element()
+            }
+            Scope::Detail => self.browser_detail_content(window, cx),
+            Scope::Wizard if self.shell.auth.is_some() => {
+                self.render_auth_transition_body(window, cx)
+            }
+            Scope::Wizard if self.tab == Tab::Onboarding => {
+                self.render_onboarding_transition_body(window, cx)
+            }
+            Scope::Wizard => self.render_game_wizard_transition_body(window, cx),
+        }
+    }
+
+    pub(super) fn page_pane_pose(&self, sidebar: bool) -> motion::Pose {
+        let frames = self.motion.page_frames.get();
+        let frame = if sidebar {
+            frames.sidebar
+        } else {
+            frames.detail
+        };
+        if self.motion.outgoing_page.get() {
+            frame.outgoing.unwrap_or_default()
+        } else {
+            frame.current.unwrap_or_default()
+        }
+    }
+
+    pub(super) fn render_navigation_body(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let content = self.render_page_body(window, cx);
+        if self.is_home_frame() {
+            return self.transition_content(Scope::Page, content, window, cx);
+        }
+        let Some(outgoing) = self
+            .motion
+            .page
+            .outgoing()
+            .filter(|layer| !layer._snapshot.is_home_frame())
+        else {
+            return content;
+        };
+        div()
+            .id("management-navigation")
+            .debug_selector(|| "management-navigation".into())
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .id("management-outgoing")
+                    .absolute()
+                    .inset_0()
+                    .capture_key_down(|_, _, cx| cx.stop_propagation())
+                    .capture_key_up(|_, _, cx| cx.stop_propagation())
+                    .child(outgoing._snapshot.render_page_body(window, cx)),
+            )
+            .child(
+                div()
+                    .id("management-incoming")
+                    .absolute()
+                    .inset_0()
+                    .child(content),
+            )
             .into_any_element()
+    }
+
+    /// Remove visual copies before Base traverses the focus tree. Keep every
+    /// queued Tab in order; ordinary typing continues in the live editor.
+    pub(super) fn advance_navigation_focus(
+        &mut self,
+        backwards: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.motion.moving && self.motion.pending_focus.is_empty() {
+            super::base_overlay::advance_focus(backwards, window, cx);
+            return;
+        }
+        let schedule = self.motion.pending_focus.is_empty();
+        self.motion.pending_focus.push(backwards);
+        self.motion.page.settle();
+        self.motion.detail.settle();
+        self.motion.wizard.settle();
+        self.motion.page_frames.set(PageFrames::default());
+        self.motion.moving = false;
+        cx.notify();
+        if schedule {
+            let owner = cx.weak_entity();
+            // Next-frame callbacks precede painting. The second callback sees
+            // the dispatch tree painted without the outgoing controls.
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| {
+                    let _ = owner.update(cx, |view, cx| {
+                        for backwards in std::mem::take(&mut view.motion.pending_focus) {
+                            super::base_overlay::advance_focus(backwards, window, cx);
+                        }
+                    });
+                });
+            });
+        }
     }
 
     pub(super) fn visual_snapshot(&self, cx: &mut Context<'_, Self>) -> Self {
@@ -261,6 +439,7 @@ impl Block {
             shell: self.shell.snapshot(cx),
             motion: MotionState {
                 frame: self.motion.frame.frozen(),
+                page_frames: self.motion.page_frames.clone(),
                 ..MotionState::default()
             },
             motion_dirty: false,
