@@ -379,6 +379,7 @@ impl Block {
         };
         let entry = self.shell.surfaces.entries.remove(index);
         match entry.kind {
+            Surface::Drawer(Drawer::ImportGames) => self.import_games_closed(window, cx),
             Surface::OnboardingSection(_) | Surface::WizardSection(_) => {
                 self.cancel_component_draft(cx);
             }
@@ -416,6 +417,7 @@ impl Surface {
             Self::Drawer(Drawer::Accounts) => "Switch account",
             Self::Drawer(Drawer::Profiles) => "Switch game",
             Self::Drawer(Drawer::Downloads) => "Downloads",
+            Self::Drawer(Drawer::ImportGames) => "Import games",
             Self::DownloadFiles(group) => group.label(),
             Self::DeleteProfile(_) => "Delete profile",
             Self::RemoveAccount(_) => "Remove account",
@@ -439,9 +441,9 @@ impl Surface {
     pub(super) fn overlay(&self) -> Option<OverlayPresentation> {
         match self {
             Self::Drawer(Drawer::Menu) | Self::Select(_) => None,
-            Self::Drawer(Drawer::Accounts | Drawer::Profiles | Drawer::Downloads) => {
-                Some(OverlayPresentation::Sheet)
-            }
+            Self::Drawer(
+                Drawer::Accounts | Drawer::Profiles | Drawer::Downloads | Drawer::ImportGames,
+            ) => Some(OverlayPresentation::Sheet),
             Self::DownloadFiles(_)
             | Self::GamesHelp
             | Self::AuthProviderAdd

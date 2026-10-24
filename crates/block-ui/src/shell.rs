@@ -25,6 +25,7 @@ static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Drawer {
+    ImportGames,
     Menu,
     Accounts,
     Profiles,
@@ -56,6 +57,9 @@ pub(super) enum OverlayPresentation {
 
 #[derive(Debug, Default)]
 pub(super) struct ShellState {
+    pub wizard_entrance: super::wizard_entrance::WizardEntrance,
+    pub first_run: super::first_run::State,
+    pub import_games: super::import_games::State,
     pub surfaces: super::overlays::Overlays,
     pub connection: super::connection_test::State,
     pub storage: super::settings::StorageState,
@@ -145,6 +149,23 @@ pub(super) fn brand(size: f32) -> impl IntoElement {
 }
 
 impl Block {
+    pub(super) fn wizard_task_active(&self) -> bool {
+        if self.shell.guide_preview.is_some() {
+            return false;
+        }
+        self.shell.auth.is_some()
+            || matches!(self.form, Some(Form::Instance(_)))
+                && (self.tab != Tab::Onboarding
+                    || self.shell.first_run.enabled
+                        && self.shell.first_run.stage == super::first_run::Stage::GameWizard)
+            || self.setup_incomplete()
+                && self.shell.first_run.enabled
+                && matches!(
+                    self.shell.first_run.stage,
+                    super::first_run::Stage::GameChoice | super::first_run::Stage::Storage
+                )
+    }
+
     pub(super) fn render_shell(
         &self,
         window: &Window,
@@ -232,6 +253,15 @@ impl Block {
             Some(Form::Instance(_)) if self.tab != Tab::Onboarding => "Create a game",
             _ => match self.tab {
                 Tab::Home => "Block",
+                Tab::Onboarding if self.shell.first_run.enabled => match self.shell.first_run.stage
+                {
+                    super::first_run::Stage::Welcome | super::first_run::Stage::Overview => {
+                        "Set up Block"
+                    }
+                    super::first_run::Stage::GameChoice => "Set up a game",
+                    super::first_run::Stage::GameWizard => "Create a game",
+                    super::first_run::Stage::Storage => "Game storage",
+                },
                 Tab::Onboarding => "Welcome to Block",
                 Tab::Instances | Tab::Profiles => "Games",
                 Tab::Accounts => "Accounts",
@@ -241,62 +271,21 @@ impl Block {
         }
     }
 
-    fn contextual_back(&self) -> (&'static str, UiAction) {
-        if self.shell.auth.is_some() {
-            return ("Back", UiAction::AuthCancel);
-        }
-        if self.shell.guide_preview.is_some() {
-            return ("Back to setup", UiAction::Drawer(None));
-        }
-        if self.tab == Tab::Accounts && self.shell.providers.visible {
-            return ("Accounts", UiAction::ProvidersBack);
-        }
-        if self.shell.instance_editor.is_some() {
-            return (
-                if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
-                    "Back to game"
-                } else {
-                    "Back to Instance"
-                },
-                UiAction::CancelInstanceSettings,
-            );
-        }
-        if matches!(self.form, Some(Form::Profile(_))) {
-            return if self.shell.editor.page.is_some() {
-                ("Back to launch settings", UiAction::ProfilePageCancel)
-            } else {
-                (
-                    if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
-                        "Back to game"
-                    } else {
-                        "Back to Profile"
-                    },
-                    UiAction::CancelForm,
-                )
-            };
-        }
-        if matches!(self.form, Some(Form::Instance(_))) {
-            return (
-                if self.shell.wizard.page.is_some() {
-                    "Back to setup"
-                } else {
-                    "Back to games"
-                },
-                UiAction::CancelForm,
-            );
-        }
-        ("Home", UiAction::Tab(Tab::Home))
-    }
-
     fn chrome(
         &self,
         _window: &Window,
         home: bool,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let authenticating = false;
-        let first_run = self.tab == Tab::Onboarding;
-        let title = if home { "" } else { self.navigation_title() };
+        let first_run = self.setup_incomplete() && self.shell.first_run.enabled;
+        let task = self.wizard_task_active();
+        let title = if home
+            || first_run && self.shell.first_run.stage == super::first_run::Stage::Welcome
+        {
+            ""
+        } else {
+            self.navigation_title()
+        };
         div()
             .id("window-chrome")
             .h(px(super::design::CHROME_HEIGHT))
@@ -316,8 +305,23 @@ impl Block {
                     .h(px(1.))
                     .bg(rgb(self.palette.border)),
             )
-            .child(if authenticating {
-                div().text_sm().child("Block").into_any_element()
+            .child(if task {
+                let action = if self.shell.auth.is_some() {
+                    UiAction::AuthCancel
+                } else if first_run {
+                    UiAction::FirstRun(super::first_run::Action::Back)
+                } else {
+                    UiAction::CancelForm
+                };
+                super::tooltip::trigger(
+                    self.button("task-close", "", action, cx)
+                        .child(super::design::Icon::ChevronDown.render(18., self.palette.muted)),
+                    "Close setup",
+                    cx,
+                )
+                .into_any_element()
+            } else if first_run {
+                div().w(px(32.)).into_any_element()
             } else {
                 self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
                     .child(super::design::Icon::Menu.render(18., self.palette.muted))
@@ -355,7 +359,7 @@ impl Block {
                     )
                     .child(div().truncate().text_sm().child(title)),
             )
-            .children((!first_run && !authenticating).then(|| {
+            .children((!first_run).then(|| {
                 if home {
                     div()
                         .children((self.busy && self.downloads.is_some()).then(|| {
@@ -378,10 +382,7 @@ impl Block {
                         }))
                         .into_any_element()
                 } else {
-                    let (label, action) = self.contextual_back();
-                    self.button("back-home", label, action, cx)
-                        .child(super::design::Icon::ArrowLeft.render(16., self.palette.muted))
-                        .into_any_element()
+                    div().into_any_element()
                 }
             }))
             .child(
@@ -405,8 +406,48 @@ impl Block {
     }
 
     pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
+        let task = if self.shell.guide_preview.is_some() {
+            None
+        } else if self.shell.auth.is_some() {
+            Some(self.render_auth_wizard(window, cx).into_any_element())
+        } else if let Some(Form::Instance(form)) = &self.form {
+            (self.tab != Tab::Onboarding
+                || self.shell.first_run.enabled
+                    && self.shell.first_run.stage == super::first_run::Stage::GameWizard)
+                .then(|| self.render_game_wizard(form, window, cx).into_any_element())
+        } else {
+            None
+        };
+        if let Some(body) = task {
+            return self.shell.wizard_entrance.apply(
+                div()
+                    .size_full()
+                    .bg(rgb(self.palette.background))
+                    .child(body)
+                    .into_any_element(),
+                super::window_geometry::content_size(window).height
+                    - px(super::design::CHROME_HEIGHT),
+                window,
+                cx,
+            );
+        }
         if self.tab == Tab::Onboarding {
-            return self.onboarding(window, cx);
+            let body = self.onboarding(window, cx);
+            return if self.wizard_task_active() {
+                self.shell.wizard_entrance.apply(
+                    div()
+                        .size_full()
+                        .bg(rgb(self.palette.background))
+                        .child(body)
+                        .into_any_element(),
+                    super::window_geometry::content_size(window).height
+                        - px(super::design::CHROME_HEIGHT),
+                    window,
+                    cx,
+                )
+            } else {
+                body
+            };
         }
         if self.tab == Tab::Accounts && self.shell.auth.is_some() {
             return self.render_auth_wizard(window, cx).into_any_element();
@@ -1096,6 +1137,7 @@ impl Block {
     /// Desired content height; the presentation caps this to 80% of the client.
     pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
         match kind {
+            Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(),
             Surface::Drawer(Drawer::Profiles) => {
                 ("Switch Profile", "Choose how you want to play.", 540.)
             }
@@ -1118,6 +1160,7 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         match kind {
+            Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
             Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
                 .size_full()
                 .min_h_0()

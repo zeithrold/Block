@@ -196,7 +196,12 @@ impl FrameMotion {
 
 impl Block {
     pub(super) fn is_home_frame(&self) -> bool {
-        self.tab == Tab::Home && self.form.is_none() && self.shell.auth.is_none()
+        (self.tab == Tab::Home
+            || self.tab == Tab::Onboarding
+                && self.shell.first_run.enabled
+                && self.shell.first_run.stage == super::first_run::Stage::Welcome)
+            && self.form.is_none()
+            && self.shell.auth.is_none()
     }
 
     /// Navigation requests are explicit: scenario setup and manual resizing do

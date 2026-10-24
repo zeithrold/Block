@@ -104,6 +104,9 @@ impl Block {
     }
 
     pub(super) fn onboarding(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        if self.shell.first_run.enabled {
+            return self.first_run_page(window, cx);
+        }
         let compact = patterns::is_narrow(self.page_viewport(window));
         div()
             .id("first-run")
@@ -1211,7 +1214,11 @@ impl Block {
         self.preferences = preferences;
         self.tab = Tab::Home;
         self.form = None;
-        self.pending_window_size = Some(super::preferred_management_size());
+        if self.shell.first_run.enabled {
+            self.normalize_selection();
+        }
+        self.pending_window_size =
+            (!self.shell.first_run.enabled).then(super::preferred_management_size);
         self.shell.revision = self.shell.revision.wrapping_add(1);
         self.push_toast(
             "Setup saved · Continue on Home".into(),

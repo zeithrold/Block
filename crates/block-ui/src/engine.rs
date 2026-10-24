@@ -94,6 +94,18 @@ pub(crate) enum Message {
         request: uuid::Uuid,
         result: Result<Vec<block_launcher::install::fabric::LoaderVersion>, String>,
     },
+    GameDiscovery {
+        request: uuid::Uuid,
+        report: block_launcher::game_import::DiscoveryReport,
+    },
+    GameImported {
+        request: uuid::Uuid,
+        candidate: String,
+        result: Result<(String, String), String>,
+    },
+    GameImportFinished {
+        request: uuid::Uuid,
+    },
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
     AccountImages(Vec<(String, block_launcher::avatars::SkinImage)>),
@@ -266,6 +278,147 @@ impl Engine {
                     result.map_err(|error| format!("{error:#}")),
                 ))
                 .await;
+        });
+    }
+
+    /// Discover existing game directories from only the roots selected by the UI.
+    pub(super) fn discover_games(
+        &self,
+        request: uuid::Uuid,
+        roots: block_launcher::game_import::DiscoveryRoots,
+    ) {
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let report =
+                tokio::task::spawn_blocking(move || block_launcher::game_import::discover(&roots))
+                    .await
+                    .unwrap_or_default();
+            let _ = sender
+                .send(Message::GameDiscovery { request, report })
+                .await;
+        });
+    }
+
+    /// Copy and persist each selected game independently. One failure does not
+    /// prevent later candidates from being imported; cancellation stops the
+    /// remaining candidates while preserving already committed instances.
+    pub(super) fn import_games(
+        &self,
+        request: uuid::Uuid,
+        candidates: Vec<block_launcher::game_import::GameCandidate>,
+        parent: PathBuf,
+        defaults: GameDefaults,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            for candidate in candidates {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                let candidate_id = candidate.id.clone();
+                let task_root = root.clone();
+                let task_parent = parent.clone();
+                let task_defaults = defaults.clone();
+                let task_cancel = cancel.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    import_and_save_candidate(
+                        &task_root,
+                        candidate,
+                        &task_parent,
+                        task_defaults,
+                        &task_cancel,
+                    )
+                })
+                .await
+                .map_err(|error| format!("Import task failed: {error}"))
+                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                match result {
+                    Ok((instance, profile)) => {
+                        let _ = sender
+                            .send(Message::GameImported {
+                                request,
+                                candidate: candidate_id,
+                                result: Ok((instance.id, profile.id)),
+                            })
+                            .await;
+                        send_catalog(&root, &sender).await;
+                    }
+                    Err(error) => {
+                        let _ = sender
+                            .send(Message::GameImported {
+                                request,
+                                candidate: candidate_id,
+                                result: Err(error),
+                            })
+                            .await;
+                    }
+                }
+            }
+            let _ = sender.send(Message::GameImportFinished { request }).await;
+        });
+    }
+
+    /// Save a newly configured game without starting any installation or network work.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The setup-game commit passes explicit instance, target and profile boundaries."
+    )]
+    pub(super) fn save_setup_game(
+        &self,
+        name: String,
+        version: String,
+        directory: Option<PathBuf>,
+        loader: Option<(LoaderKind, String)>,
+        optifine: Option<block_launcher::install::optifine::OptiFineJar>,
+        mut values: ProfileDraftValues,
+        cancel: CancellationToken,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.clone();
+        self.runtime.spawn(async move {
+            let save_root = root.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                ensure!(
+                    !cancel.is_cancelled(),
+                    "Cancelled before the game was saved."
+                );
+                let _storage = block_launcher::storage::acquire(&save_root)?;
+                values.name = name.clone();
+                let mut configuration = values.configuration()?;
+                if let Some((kind, version)) = &loader {
+                    configuration.target_id = format!("{}-{version}", kind.name().to_lowercase());
+                }
+                let catalog = Catalog::open(save_root)?;
+                catalog.create_instance_with_components(
+                    name,
+                    version,
+                    directory,
+                    loader,
+                    optifine,
+                    configuration,
+                )
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result);
+            match result {
+                Ok((instance, profile)) => {
+                    let _ = sender
+                        .send(Message::Created {
+                            instance: instance.id,
+                            profile: profile.id,
+                        })
+                        .await;
+                    send_catalog(&root, &sender).await;
+                    finish(&sender, Ok("Game saved".into())).await;
+                }
+                Err(error) => {
+                    send_catalog(&root, &sender).await;
+                    finish(&sender, Err(error)).await;
+                }
+            }
         });
     }
 
@@ -1519,6 +1672,96 @@ async fn send_catalog(root: &Path, sender: &EventSender) {
         .await;
 }
 
+fn import_and_save_candidate(
+    root: &Path,
+    candidate: block_launcher::game_import::GameCandidate,
+    parent: &Path,
+    defaults: GameDefaults,
+    cancel: &CancellationToken,
+) -> anyhow::Result<(block_launcher::catalog::Instance, Profile)> {
+    ensure!(
+        candidate.importable,
+        "{}",
+        candidate
+            .unsupported_reason
+            .as_deref()
+            .unwrap_or("candidate is not importable")
+    );
+    let minecraft_version = candidate
+        .minecraft_version
+        .clone()
+        .context("Minecraft version could not be resolved from local metadata")?;
+    ensure!(parent.is_dir(), "game destination parent does not exist");
+    ensure!(!cancel.is_cancelled(), "Import cancelled");
+
+    let loader = match candidate.loader.clone() {
+        None
+        | Some(block_launcher::game_import::DetectedLoader {
+            kind: block_launcher::game_import::LoaderKind::Vanilla,
+            ..
+        }) => None,
+        Some(detected) => {
+            let kind = match detected.kind {
+                block_launcher::game_import::LoaderKind::Vanilla => LoaderKind::Vanilla,
+                block_launcher::game_import::LoaderKind::Fabric => LoaderKind::Fabric,
+                block_launcher::game_import::LoaderKind::Quilt => LoaderKind::Quilt,
+                block_launcher::game_import::LoaderKind::Forge => LoaderKind::Forge,
+                block_launcher::game_import::LoaderKind::NeoForge => LoaderKind::NeoForge,
+            };
+            let mut version = detected
+                .version
+                .context("Loader version could not be resolved from local metadata")?;
+            if kind == LoaderKind::Forge && !version.starts_with(&format!("{minecraft_version}-")) {
+                version = format!("{minecraft_version}-{version}");
+            } else if kind == LoaderKind::NeoForge
+                && minecraft_version == "1.20.1"
+                && !version.starts_with("1.20.1-")
+            {
+                version = format!("1.20.1-{version}");
+            }
+            Some((kind, version))
+        }
+    };
+    let values = ProfileDraftValues {
+        name: candidate.name.clone(),
+        defaults,
+        appearance: ProfileAppearance::default(),
+        target_id: None,
+        server: block_launcher::catalog::ServerPreferences::default(),
+    };
+    let mut configuration = values.configuration()?;
+    if let Some((kind, version)) = &loader {
+        configuration.target_id = format!("{}-{version}", kind.name().to_lowercase());
+    }
+    // Hold the shared storage lease from before copy publication through the
+    // catalog transaction so relocation cannot race the imported directory.
+    let _storage = block_launcher::storage::acquire(root)?;
+    ensure!(!cancel.is_cancelled(), "Import cancelled");
+    let destination = parent.join(uuid::Uuid::new_v4().to_string());
+    let copied = block_launcher::game_import::copy_candidate(&candidate, &destination, cancel)?;
+    if cancel.is_cancelled() {
+        let _ = std::fs::remove_dir_all(&copied.target_directory);
+        anyhow::bail!("Import cancelled");
+    }
+    let saved = (|| {
+        let catalog = Catalog::open(root)?;
+        catalog.create_instance_with_components(
+            candidate.name,
+            minecraft_version,
+            Some(copied.target_directory.clone()),
+            loader,
+            None,
+            configuration,
+        )
+    })();
+    if saved.is_err() {
+        // The target is a fresh UUID path published by this operation. Never
+        // remove an existing destination or any source data on rollback.
+        let _ = std::fs::remove_dir_all(&copied.target_directory);
+    }
+    saved
+}
+
 async fn send_storage_finished(
     root: PathBuf,
     request: super::settings::StorageRequest,
@@ -2544,5 +2787,174 @@ mod tests {
             );
             Ok::<_, anyhow::Error>(())
         })
+    }
+
+    fn fixture_engine(
+        root: &std::path::Path,
+    ) -> anyhow::Result<(
+        super::Engine,
+        std::sync::Arc<tokio::runtime::Runtime>,
+        tokio::sync::mpsc::Receiver<super::Message>,
+    )> {
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()?,
+        );
+        let (sender, receiver) = tokio::sync::mpsc::channel(64);
+        let engine = super::Engine {
+            runtime: runtime.clone(),
+            sender: sender.into(),
+            root: root.to_owned(),
+            prepared_sign_in: Default::default(),
+            pending_authlib: Default::default(),
+            prepared_authlib: Default::default(),
+        };
+        Ok((engine, runtime, receiver))
+    }
+
+    #[test]
+    fn imported_games_commit_independently_and_remain_pending() -> anyhow::Result<()> {
+        use block_launcher::game_import::{GameCandidate, SourceKind};
+        let root = tempfile::tempdir()?;
+        let destination_parent = root.path().join("imported");
+        std::fs::create_dir(&destination_parent)?;
+        let source_one = root.path().join("source-one");
+        let source_three = root.path().join("source-three");
+        std::fs::create_dir(&source_one)?;
+        std::fs::create_dir(&source_three)?;
+        std::fs::write(source_one.join("options.txt"), b"one")?;
+        std::fs::write(source_three.join("options.txt"), b"three")?;
+        let candidate =
+            |id: &str, name: &str, version: &str, path: &std::path::Path| GameCandidate {
+                id: id.into(),
+                source: SourceKind::AdjacentMinecraft,
+                source_root: path.to_owned(),
+                name: name.into(),
+                game_directory: path.to_owned(),
+                configured_version: Some(version.into()),
+                minecraft_version: Some(version.into()),
+                loader: None,
+                latest_release: None,
+                latest_snapshot: None,
+                importable: true,
+                unsupported_reason: None,
+                metadata_warning: None,
+            };
+        let first = candidate("one", "Imported One", "1.20.1", &source_one);
+        let mut failed = candidate("failed", "Missing", "1.20.1", &source_one);
+        failed.importable = false;
+        failed.unsupported_reason = Some("synthetic unsupported fixture".into());
+        let third = candidate("three", "Imported Three", "1.21.1", &source_three);
+        let (engine, runtime, mut receiver) = fixture_engine(root.path())?;
+        let request = uuid::Uuid::new_v4();
+        engine.import_games(
+            request,
+            vec![first, failed, third],
+            destination_parent,
+            super::GameDefaults::default(),
+            super::CancellationToken::new(),
+        );
+        let (successes, failures, finished) = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut successes = Vec::new();
+                let mut failures = Vec::new();
+                let mut finished = false;
+                while let Some(message) = receiver.recv().await {
+                    match message {
+                        super::Message::GameImported {
+                            request: got,
+                            candidate,
+                            result,
+                        } if got == request => match result {
+                            Ok((instance, profile)) => {
+                                successes.push((candidate, instance, profile))
+                            }
+                            Err(error) => failures.push((candidate, error)),
+                        },
+                        super::Message::GameImportFinished { request: got } if got == request => {
+                            finished = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok::<_, anyhow::Error>((successes, failures, finished))
+            })
+            .await
+        })??;
+        assert!(finished);
+        assert_eq!(successes.len(), 2);
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, "failed");
+        let state = super::Catalog::open(root.path())?.snapshot()?;
+        assert_eq!(state.instances.len(), 2);
+        for (_, instance_id, profile_id) in successes {
+            let instance = state
+                .instances
+                .iter()
+                .find(|entry| entry.id == instance_id)
+                .ok_or_else(|| anyhow::anyhow!("imported instance missing from catalog"))?;
+            assert!(instance.directory.join("options.txt").is_file());
+            assert!(instance.targets.iter().all(|target| matches!(
+                &target.status,
+                block_launcher::catalog::InstallStatus::Pending
+            )));
+            assert_eq!(state.selection(&profile_id)?.0.id, instance_id);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn setup_game_save_persists_pending_profile_without_network_install() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, runtime, mut receiver) = fixture_engine(root.path())?;
+        engine.save_setup_game(
+            "Setup Game".into(),
+            "1.21.1".into(),
+            None,
+            None,
+            None,
+            super::ProfileDraftValues {
+                name: "Draft name is replaced".into(),
+                defaults: super::GameDefaults::default(),
+                appearance: super::ProfileAppearance::default(),
+                target_id: None,
+                server: block_launcher::catalog::ServerPreferences::default(),
+            },
+            super::CancellationToken::new(),
+        );
+        let (created, catalog, finished) = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut created = false;
+                let mut catalog = false;
+                let mut finished = false;
+                while let Some(message) = receiver.recv().await {
+                    match message {
+                        super::Message::Created { .. } => created = true,
+                        super::Message::Catalog(Ok(_)) => catalog = true,
+                        super::Message::Finished(Ok(_)) => {
+                            finished = true;
+                            break;
+                        }
+                        super::Message::Finished(Err(error)) => anyhow::bail!("{error}"),
+                        _ => {}
+                    }
+                }
+                Ok::<_, anyhow::Error>((created, catalog, finished))
+            })
+            .await
+        })??;
+        assert!(created && catalog && finished);
+        let state = super::Catalog::open(root.path())?.snapshot()?;
+        assert_eq!(state.instances.len(), 1);
+        assert_eq!(state.instances[0].name, "Setup Game");
+        assert!(state.instances[0].targets.iter().all(|target| matches!(
+            &target.status,
+            block_launcher::catalog::InstallStatus::Pending
+        )));
+        assert!(!root.path().join("versions").exists());
+        Ok(())
     }
 }

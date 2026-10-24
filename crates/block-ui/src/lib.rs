@@ -15,8 +15,12 @@ mod drawer;
 mod drawer_gestures;
 mod engine;
 mod feedback;
+mod first_run;
+#[cfg(test)]
+mod first_run_tests;
 mod frame_motion;
 mod game_wizard;
+mod import_games;
 mod instance_editor;
 #[cfg(test)]
 mod interaction_tests;
@@ -37,6 +41,7 @@ mod scroll_area;
 mod search_selector;
 mod select;
 mod settings;
+mod setup_storage;
 mod shell;
 mod tasks;
 #[cfg(test)]
@@ -44,7 +49,9 @@ mod test_support;
 mod text_input;
 mod tooltip;
 mod transitions;
+mod welcome_button;
 mod window_geometry;
+mod wizard_entrance;
 
 pub use about::BuildInfo;
 pub use crash_view::CrashView;
@@ -133,6 +140,9 @@ enum Tab {
 
 #[derive(Clone, Debug)]
 enum UiAction {
+    FirstRun(first_run::Action),
+    ImportGames(import_games::Action),
+    AuthOtherOptions,
     Providers,
     ProvidersBack,
     ProviderAdd,
@@ -521,11 +531,7 @@ impl Block {
         } else {
             Tab::Onboarding
         };
-        if tab == Tab::Home {
-            window.resize(window_geometry::home_size(window, cx));
-        } else {
-            window.resize(window_geometry::management_size(window, cx));
-        }
+        window.resize(window_geometry::home_size(window, cx));
         let mut view = Self {
             build_info: options.build_info,
             motion: transitions::MotionState::default(),
@@ -598,8 +604,10 @@ impl Block {
         view.shell.profiles.load = load.clone();
         view.shell.accounts.load = load;
         if tab == Tab::Onboarding {
-            view.begin_onboarding(cx);
-            view.focus_field(false, window, cx);
+            view.begin_first_run(cx);
+            if view.shell.first_run.stage != first_run::Stage::Welcome {
+                window.resize(window_geometry::management_size(window, cx));
+            }
         }
         if let Some(path) = options.recipe {
             view.load_recipe(path, options.launch, cx);
@@ -665,6 +673,30 @@ impl Block {
                 message => message,
             };
             match message {
+                Message::GameDiscovery { request, report } => {
+                    let empty_start = self.shell.import_games.discovery == Some(request)
+                        && report.candidates.is_empty()
+                        && self.shell.first_run.stage == first_run::Stage::Welcome;
+                    self.receive_game_discovery(request, report);
+                    if empty_start && let Some(handle) = self.shell.import_games.window {
+                        let owner = cx.entity();
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                owner.update(cx, |view, cx| {
+                                    view.shell.surfaces.clear(window, &view.focus, cx);
+                                    view.first_run_overview(window, cx);
+                                    cx.notify();
+                                })
+                            });
+                        });
+                    }
+                }
+                Message::GameImported {
+                    request,
+                    candidate,
+                    result,
+                } => self.receive_game_import(request, candidate, result),
+                Message::GameImportFinished { request } => self.finish_game_import(request),
                 Message::ForOperation { .. } => {}
                 Message::Catalog(Ok(snapshot)) => {
                     self.apply_catalog(snapshot, cx);
@@ -698,6 +730,13 @@ impl Block {
                     self.shell.accounts.load = browser::CollectionLoad::Ready;
                     self.reconcile_account_browser(&accounts);
                     self.accounts = accounts;
+                    if self.shell.first_run.enabled
+                        && !self.preferences.onboarding_complete
+                        && self.selected_account.is_none()
+                    {
+                        self.selected_account = self.accounts.first().map(account_id);
+                        self.shell.onboarding.account = self.selected_account.clone();
+                    }
                     if self.tab != Tab::Onboarding
                         && !self
                             .accounts
@@ -1040,7 +1079,12 @@ impl Block {
         if owns_draft {
             if self.tab == Tab::Onboarding {
                 self.onboarding_progress = onboarding::Progress::Created;
-                self.complete_onboarding();
+                if self.shell.first_run.enabled {
+                    self.form = None;
+                    self.shell.first_run.stage = first_run::Stage::Overview;
+                } else {
+                    self.complete_onboarding();
+                }
             } else {
                 self.form = None;
                 if let Some(query) = &self.collection().query {
@@ -1119,13 +1163,21 @@ impl Block {
     /// Settings/About preview), so menu routes cannot bypass setup.
     fn setup_incomplete(&self) -> bool {
         !self.preferences.onboarding_complete
-            && (self.tab == Tab::Onboarding || self.shell.guide_preview.is_some())
+            && (self.shell.first_run.enabled
+                || self.tab == Tab::Onboarding
+                || self.shell.guide_preview.is_some())
     }
 
     fn report(&mut self, error: String) {
         self.push_toast(error.clone(), feedback::ToastKind::Error);
         if self.tab == Tab::Onboarding {
             self.shell.onboarding.error = Some(error.clone());
+            if self.shell.first_run.enabled {
+                self.shell.first_run.error = Some(error.clone());
+                if self.shell.first_run.stage == first_run::Stage::GameWizard {
+                    self.shell.wizard.error = Some(error.clone());
+                }
+            }
         }
         self.push_log(error.clone());
         self.status = error;
@@ -1245,6 +1297,9 @@ impl Block {
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
         let previous_page = (self.tab, self.form.is_some());
         match action {
+            UiAction::FirstRun(action) => self.handle_first_run(action, window, cx),
+            UiAction::ImportGames(action) => self.handle_import_games(action, window, cx),
+            UiAction::AuthOtherOptions => self.toggle_auth_other_options(cx),
             UiAction::WizardOptiFineFile => self.browse_optifine(cx),
             UiAction::WizardOptiFineRemove => {
                 if let Some(Form::Instance(form)) = &mut self.form {
@@ -1280,6 +1335,15 @@ impl Block {
                 self.complete_onboarding();
             }
             UiAction::Tab(tab) => {
+                if self.setup_incomplete() && self.shell.first_run.enabled && tab != Tab::Onboarding
+                {
+                    self.push_toast(
+                        "Finish setup or choose Skip setup to continue.".into(),
+                        feedback::ToastKind::Info,
+                    );
+                    cx.notify();
+                    return;
+                }
                 if self.shell.providers.visible {
                     self.close_providers(cx);
                 }
@@ -1345,6 +1409,12 @@ impl Block {
                     .open(shell::Surface::DownloadFiles(group), window, cx);
             }
             UiAction::Drawer(drawer) => {
+                if self.setup_incomplete()
+                    && self.shell.first_run.enabled
+                    && drawer.is_some_and(|drawer| drawer != Drawer::ImportGames)
+                {
+                    return;
+                }
                 if drawer == Some(Drawer::Menu) {
                     self.open_app_menu_at(None, window, cx);
                 } else if let Some(drawer) = drawer {
@@ -1529,7 +1599,13 @@ impl Block {
                 self.push_toast("Account selected".into(), feedback::ToastKind::Info);
                 self.shell.surfaces.clear(window, &self.focus, cx);
             }
-            UiAction::CreateInstance => self.begin_game_wizard(cx),
+            UiAction::CreateInstance => {
+                if self.setup_incomplete() && self.shell.first_run.enabled {
+                    self.handle_first_run(first_run::Action::Game, window, cx);
+                } else {
+                    self.begin_game_wizard(cx);
+                }
+            }
             UiAction::WizardKind(is_new) => self.wizard_kind(is_new, cx),
             UiAction::WizardInstance(id) => self.wizard_instance(id),
             UiAction::WizardProfileIcon(icon) => self.wizard_profile_icon(icon),
@@ -1592,7 +1668,7 @@ impl Block {
             }
             UiAction::WizardBack => self.back_game_wizard(cx),
             UiAction::WizardPage(page) => {
-                if self.tab == Tab::Onboarding {
+                if self.tab == Tab::Onboarding && !self.shell.first_run.enabled {
                     if let Some(page) = page {
                         self.open_onboarding_section(page, window, cx);
                     } else {
@@ -1646,7 +1722,11 @@ impl Block {
             UiAction::ProfilePageDone => self.finish_profile_page(false, window, cx),
             UiAction::ProfilePageCancel => self.finish_profile_page(true, window, cx),
             UiAction::CancelForm => {
-                if self.shell.editor.page.is_some() && matches!(self.form, Some(Form::Profile(_))) {
+                if self.tab == Tab::Onboarding && self.shell.first_run.enabled {
+                    self.first_run_overview(window, cx);
+                } else if self.shell.editor.page.is_some()
+                    && matches!(self.form, Some(Form::Profile(_)))
+                {
                     self.finish_profile_page(true, window, cx);
                 } else if matches!(self.form, Some(Form::Instance(_)))
                     && self.shell.wizard.page.is_some()
@@ -2208,7 +2288,10 @@ impl Block {
     ) -> components::Control {
         let disabled = self.busy && !self.can_activate(&action)
             || matches!(action, UiAction::SignIn) && self.busy && self.shell.auth.is_none()
-            || matches!(action, UiAction::Stop) && !self.can_stop();
+            || matches!(action, UiAction::Stop) && !self.can_stop()
+            || self.import_action_disabled(&action);
+        let disabled =
+            disabled || matches!(action, UiAction::AuthCancel) && self.auth_save_pending();
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
         let app_menu = matches!(action, UiAction::Drawer(Some(Drawer::Menu)));
@@ -3134,7 +3217,8 @@ mod tests {
         );
         click_selector(cx, "reduce-motion");
         assert!(view.read_with(cx, |view, _| view.preferences.reduce_motion));
-        click_selector(cx, "back-home");
+        click_selector(cx, "app-menu");
+        click_selector(cx, "menu-home");
         assert_eq!(
             view.read_with(cx, |view, _| view.preferences.clone()),
             super::Preferences::default()
@@ -3406,6 +3490,7 @@ mod tests {
     fn game_wizard_four_square_tiles_and_footer_fit_default_window(cx: &mut gpui::TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, test_view);
         cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
+        view.update(cx, |view, _| view.preferences.reduce_motion = true);
         cx.run_until_parked();
         assert!(cx.debug_bounds("nav-profiles").is_none());
         click_selector(cx, "create-instance");

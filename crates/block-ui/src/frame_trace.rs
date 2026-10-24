@@ -73,6 +73,10 @@ pub(crate) fn start(owner: WeakEntity<Block>, window: &mut Window, cx: &mut Cont
     record(
         json!({"type":"meta","clock":"native paint submission, not display presentation","schema":1}),
     );
+    // Pointer-driven task checks must not also dispatch the old page replay.
+    if std::env::var_os("BLOCK_FRAME_MOTION_MANUAL").is_some() {
+        return;
+    }
     window
         .spawn(cx, async move |cx| {
             loop {

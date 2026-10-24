@@ -247,8 +247,21 @@ impl Render for DrawerLayer {
         let viewport = window.viewport_size();
         let width = (viewport.width - insets.left - insets.right).max(px(0.));
         let height = (viewport.height - insets.top - insets.bottom).max(px(0.));
-        active.height = panel_height(f32::from(height), desired_height);
-        let panel_height = active.height;
+        let desired_panel_height = panel_height(f32::from(height), desired_height);
+        let reduced = owner.read(cx).motion_preferences().reduced();
+        let panel_height = spring(
+            ElementId::NamedInteger("block-drawer-height".into(), revision as u64),
+            desired_panel_height,
+            Spring::new(if reduced {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(260)
+            }),
+            window,
+            cx,
+        )
+        .clamp(0., f32::from(height) * 0.8);
+        active.height = panel_height;
         let offset = spring(
             ElementId::NamedInteger("block-drawer-offset".into(), revision as u64),
             active.offset,
@@ -315,6 +328,23 @@ impl Render for DrawerLayer {
                     view.dismiss_surface_overlay(revision, window, cx)
                 });
             });
+        let import_back =
+            matches!(kind, Surface::Drawer(super::shell::Drawer::ImportGames)).then(|| {
+                let visible =
+                    owner.read(cx).shell.import_games.page == super::import_games::Page::List;
+                let target = active.owner.clone();
+                div().w(px(28.)).flex_shrink_0().children(visible.then(|| {
+                    gpui_component::button::Button::new("import-header-back")
+                        .label("←")
+                        .w(px(28.))
+                        .h(px(28.))
+                        .p_0()
+                        .on_click(move |_, window, cx| {
+                            let _ =
+                                target.update(cx, |view, cx| view.import_header_back(window, cx));
+                        })
+                }))
+            });
         #[cfg(debug_assertions)]
         let trace_sample = drawer_trace::sample(drawer_trace::FrameSample {
             revision,
@@ -359,6 +389,7 @@ impl Render for DrawerLayer {
                     .flex()
                     .items_center()
                     .gap(px(12.))
+                    .children(import_back)
                     .child(
                         div()
                             .flex_1()

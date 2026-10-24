@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod command;
 pub mod crash;
 pub mod executor;
+pub mod game_import;
 pub mod install;
 pub mod launch;
 pub mod library;

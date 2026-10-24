@@ -1473,17 +1473,29 @@ impl Block {
             self.begin_cancellable("Creating your game and preparing verified downloads");
             self.mark_creation();
             if let Some(engine) = &self.engine {
-                engine.create_instance_with_profile(
-                    None,
-                    name,
-                    version,
-                    directory,
-                    loader,
-                    optifine,
-                    defaults,
-                    Some(values),
-                    self.cancel.clone(),
-                );
+                if self.tab == Tab::Onboarding && self.shell.first_run.enabled {
+                    engine.save_setup_game(
+                        name,
+                        version,
+                        directory,
+                        loader,
+                        optifine,
+                        values,
+                        self.cancel.clone(),
+                    );
+                } else {
+                    engine.create_instance_with_profile(
+                        None,
+                        name,
+                        version,
+                        directory,
+                        loader,
+                        optifine,
+                        defaults,
+                        Some(values),
+                        self.cancel.clone(),
+                    );
+                }
             }
         }
     }
@@ -1620,7 +1632,7 @@ impl Block {
             .debug_selector(|| "game-wizard".into())
             .size_full()
             .min_h_0()
-            .child(self.render_wizard_frame(window, &steps, current, body, footer))
+            .child(self.render_wizard_frame(window, &steps, current, body, footer, cx))
     }
 
     pub(super) fn render_game_wizard_transition_body(
@@ -1743,6 +1755,7 @@ impl Block {
         current: usize,
         body: gpui::AnyElement,
         footer: gpui::AnyElement,
+        cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let viewport = self.page_viewport(window);
         let rail = self.wizard_step_rail(steps, current, window);
@@ -1751,7 +1764,12 @@ impl Block {
             .size_full()
             .min_h_0()
             .flex()
-            .child(rail)
+            .child(self.shell.wizard_entrance.stagger(
+                rail.into_any_element(),
+                std::time::Duration::ZERO,
+                window,
+                cx,
+            ))
             .child(
                 self.frame_detail(
                     div()
@@ -1761,7 +1779,17 @@ impl Block {
                         .h_full()
                         .flex()
                         .flex_col()
-                        .child(div().flex_1().min_h_0().child(body))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .child(self.shell.wizard_entrance.stagger(
+                                    body,
+                                    std::time::Duration::from_millis(40),
+                                    window,
+                                    cx,
+                                )),
+                        )
                         .child(
                             patterns::management_footer(viewport, self.palette)
                                 .id("wizard-footer")
@@ -3371,8 +3399,8 @@ impl Block {
         );
         let automatic_connection = self.automatic_connection(&version);
         div().flex().flex_col().gap_4()
-            .child(div().text_xl().child("Ready for your next world?"))
-            .child(note(if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." }))
+            .child(div().text_xl().child(if existing { "Review profile setup" } else { "Review game setup" }))
+            .child(note(if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else if self.tab == Tab::Onboarding && self.shell.first_run.enabled { "Create game saves this setup. Finish setup to begin preparing game files." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." }))
             .child(components::card(self.palette)
                 .child(div().flex().items_center().gap_3().child(Icon::Blocks.render(24., self.palette.muted))
                     .child(div().flex_1().min_w_0().child(note(if existing { "EXISTING INSTANCE" } else if state.separated { "NEW INSTANCE" } else { "NEW GAME" }))

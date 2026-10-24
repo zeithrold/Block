@@ -153,6 +153,7 @@ pub(super) struct AuthWizard {
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     stage: Option<SignInStage>,
     revision: usize,
+    other_sign_in_options: bool,
     browser_url: Option<String>,
     prepared_account: Option<Account>,
     error: Option<String>,
@@ -316,6 +317,7 @@ impl AuthWizard {
             attempt: None,
             stage: self.stage,
             revision: self.revision,
+            other_sign_in_options: self.other_sign_in_options,
             browser_url: None,
             prepared_account: self.prepared_account.clone(),
             error: self.error.clone(),
@@ -356,6 +358,12 @@ impl AuthWizard {
 }
 
 impl Block {
+    pub(super) fn auth_save_pending(&self) -> bool {
+        self.shell
+            .auth
+            .as_ref()
+            .is_some_and(|auth| auth.phase == Phase::Saving)
+    }
     pub(super) fn open_auth_provider_add(
         &mut self,
         window: &mut Window,
@@ -1094,6 +1102,17 @@ impl Block {
         }
     }
 
+    pub(super) fn toggle_auth_other_options(&mut self, cx: &mut Context<'_, Self>) {
+        if let Some(state) = &mut self.shell.auth
+            && state.return_tab == Tab::Onboarding
+            && state.phase == Phase::Choose
+            && !self.busy
+        {
+            state.other_sign_in_options = !state.other_sign_in_options;
+            cx.notify();
+        }
+    }
+
     pub(super) fn auth_next(&mut self, cx: &mut Context<'_, Self>) {
         if let Some(state) = &mut self.shell.auth
             && state.phase == Phase::Choose
@@ -1324,6 +1343,11 @@ impl Block {
             return_size: window.viewport_size(),
             return_window: Some(window.window_handle()),
             focus: Some(focus.clone()),
+            provider: if self.tab == Tab::Onboarding {
+                AccountProvider::Microsoft
+            } else {
+                AccountProvider::default()
+            },
             ..AuthWizard::default()
         };
         self.shell.auth = Some(wizard);
@@ -1479,7 +1503,7 @@ impl Block {
         }
     }
 
-    /// Authentication is verified, but nothing is persisted until Finish.
+    /// Authentication is verified; Finish starts the durable save.
     pub(super) fn auth_prepared(&mut self, account: Account) {
         if let Some(state) = &mut self.shell.auth
             && state.provider == account.provider
@@ -1522,6 +1546,11 @@ impl Block {
     }
 
     pub(super) fn cancel_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.shell.auth.as_ref().is_some_and(|state| {
+            state.return_tab == Tab::Onboarding && state.phase == Phase::Saving
+        }) {
+            return;
+        }
         self.cancel_auth_provider(cx);
         if let Some(password) = self
             .shell
@@ -1548,7 +1577,7 @@ impl Block {
         }
     }
 
-    pub(super) fn finish_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn finish_auth(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;
         }
@@ -1561,28 +1590,6 @@ impl Block {
         let Some(account) = account else {
             return;
         };
-        if self
-            .shell
-            .auth
-            .as_ref()
-            .is_some_and(|state| state.return_tab == Tab::Onboarding)
-        {
-            // First run keeps the verified identity in memory. The final setup
-            // commit saves it together with the game, or leaves nothing behind.
-            if account.provider == AccountProvider::Offline
-                && let Some(engine) = &self.engine
-            {
-                // A previous Microsoft/Authlib preparation can no longer be
-                // committed once a local identity replaces it.
-                engine.discard_prepared_sign_in();
-            }
-            self.shell.onboarding.pending_identity = Some(account.clone());
-            self.shell.onboarding.account = Some(account_id(&account));
-            self.shell.onboarding.account_decided = true;
-            self.status = "Account verified · saved when you finish setup".into();
-            self.close_auth_context(window, cx);
-            return;
-        }
         if self.engine.is_none() {
             if let Some(state) = &mut self.shell.auth {
                 state.failed("Secure account saving is unavailable: engine unavailable");
@@ -1622,6 +1629,16 @@ impl Block {
         }
         state.prepared_account = Some(account);
         state.transition(Phase::Saved);
+        if state.return_tab == Tab::Onboarding
+            && let Some(account) = &state.prepared_account
+        {
+            let id = account_id(account);
+            self.shell.onboarding.account = Some(id.clone());
+            self.shell.onboarding.account_decided = true;
+            self.shell.onboarding.error = None;
+            self.selected_account = Some(id.clone());
+            self.shell.accounts.inspected = Some(id);
+        }
         let handle = self
             .shell
             .auth
@@ -1654,10 +1671,13 @@ impl Block {
             .as_ref()
             .is_some_and(|state| state.return_tab == Tab::Onboarding)
         {
-            self.choose_onboarding_account(id.clone());
+            self.shell.onboarding.account = Some(id.clone());
+            self.shell.onboarding.account_decided = true;
+            self.shell.onboarding.error = None;
         } else {
-            self.selected_account = Some(id.clone());
+            self.shell.accounts.inspected = Some(id.clone());
         }
+        self.selected_account = Some(id.clone());
         self.shell.accounts.inspected = Some(id);
         self.shell.accounts.detail_visible = true;
         self.status = format!("{} is saved and ready to use", account.player_name);
@@ -1723,11 +1743,23 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .children((!narrow).then(|| self.auth_rail(state)))
+                    .children((!narrow).then(|| {
+                        self.shell.wizard_entrance.stagger(
+                            self.auth_rail(state).into_any_element(),
+                            std::time::Duration::ZERO,
+                            window,
+                            cx,
+                        )
+                    }))
                     .child(self.frame_detail(div().flex_1().min_h_0().min_w_0().child(
-                        self.transition_content(
-                            super::motion::Scope::Wizard,
-                            self.render_auth_transition_body(window, cx),
+                        self.shell.wizard_entrance.stagger(
+                            self.transition_content(
+                                super::motion::Scope::Wizard,
+                                self.render_auth_transition_body(window, cx),
+                                window,
+                                cx,
+                            ),
+                            std::time::Duration::from_millis(40),
                             window,
                             cx,
                         ),
@@ -2020,14 +2052,31 @@ impl Block {
                 .child(components::radio("auth-microsoft", "Microsoft account", state.provider == AccountProvider::Microsoft, self.palette,
                     ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthProvider(AccountProvider::Microsoft), window, cx))))
                 .child(note("Sign in securely in your browser. Block never asks for your Microsoft password.")));
-        choices = choices.child(components::card(self.palette)
-            .child(components::radio("auth-authlib","Authlib-Injector",state.provider==AccountProvider::Authlib,self.palette,ControlState::default(),cx.listener(|view,(),window,cx|view.handle(UiAction::AuthProvider(AccountProvider::Authlib),window,cx))))
-            .child(note("A community authentication provider. Its account and password are separate from Microsoft.")));
-        choices.child(components::card(self.palette)
-            .child(components::radio("auth-offline", "Offline Mode", state.provider == AccountProvider::Offline, self.palette,
-                ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthProvider(AccountProvider::Offline), window, cx))))
-            .child(note("A local player identity. Does not grant access to authenticated online services.")))
-            .child(note("Only Finish saves the account on this device."))
+        if state.return_tab != Tab::Onboarding || state.other_sign_in_options {
+            choices = choices
+                .child(components::card(self.palette)
+                    .child(components::radio("auth-authlib","Authlib-Injector",state.provider==AccountProvider::Authlib,self.palette,ControlState::default(),cx.listener(|view,(),window,cx|view.handle(UiAction::AuthProvider(AccountProvider::Authlib),window,cx))))
+                    .child(note("A community authentication provider. Its account and password are separate from Microsoft.")))
+                .child(components::card(self.palette)
+                    .child(components::radio("auth-offline", "Offline Mode", state.provider == AccountProvider::Offline, self.palette,
+                        ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthProvider(AccountProvider::Offline), window, cx))))
+                    .child(note("A local player identity. Does not grant access to authenticated online services.")));
+        }
+        if state.return_tab == Tab::Onboarding {
+            choices = choices.child(self.auth_button(
+                "auth-other-options",
+                if state.other_sign_in_options {
+                    "Hide other sign-in options"
+                } else {
+                    "Other sign-in options"
+                },
+                UiAction::AuthOtherOptions,
+                ButtonVariant::Outline,
+                ControlState::default(),
+                cx,
+            ));
+        }
+        choices.child(note("Finish saves the account securely on this device."))
     }
 
     fn auth_information(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
@@ -2257,8 +2306,8 @@ impl Block {
             .child(div().text_xl().child(account.player_name.clone()))
             .child(components::badge(self.account_authority(account), self.palette, BadgeVariant::Secondary))
             .children(self.account_provider(account).map(|provider|note(provider.api_url.clone())))
-            .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else if state.return_tab == Tab::Onboarding { "Ready for setup" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
-            .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else if state.return_tab == Tab::Onboarding { "Finish keeps this account in memory; setup saves it together with your game. Closing now discards the preparation and saves nothing." } else { "Finish saves this account and selects it. Closing now discards the preparation and keeps previously saved accounts unchanged." }))
+            .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
+            .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else { "Finish saves this account securely and selects it. Closing now discards this sign-in." }))
     }
 
     fn auth_footer(
@@ -2284,7 +2333,11 @@ impl Block {
                     },
                     UiAction::AuthCancel,
                     ButtonVariant::Ghost,
-                    ControlState::default(),
+                    ControlState {
+                        disabled: state.return_tab == Tab::Onboarding
+                            && state.phase == Phase::Saving,
+                        ..ControlState::default()
+                    },
                     cx,
                 ))
                 .children(
@@ -2913,6 +2966,39 @@ mod tests {
     }
 
     #[gpui::test]
+    fn onboarding_account_choices_disclose_other_providers_on_request(cx: &mut TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.tab = Tab::Onboarding;
+                view.open_auth_wizard(window, cx);
+            });
+        });
+        cx.run_until_parked();
+        assert!(
+            view.read_with(cx, |view, _| view
+                .shell
+                .auth
+                .as_ref()
+                .is_some_and(|state| state.provider
+                    == block_auth::AccountProvider::Microsoft
+                    && !state.other_sign_in_options))
+        );
+        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
+        view.update(cx, |view, cx| view.toggle_auth_other_options(cx));
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
+                .auth
+                .as_ref()
+                .is_some_and(|state| state.other_sign_in_options)
+        }));
+        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
+    }
+
+    #[gpui::test]
     fn cancelling_waiting_sign_in_invalidates_late_results_without_removing_accounts(
         cx: &mut TestAppContext,
     ) {
@@ -2921,6 +3007,7 @@ mod tests {
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
+                    view.preferences.reduce_motion = true;
                     view.accounts = vec![account.clone()];
                     view.open_auth_wizard(window, cx);
                     simulate_started_attempt(view, Phase::Waiting);
@@ -3018,55 +3105,76 @@ mod tests {
     }
 
     #[gpui::test]
-    fn prepared_identity_waits_for_durable_confirmation_and_keeps_the_game_draft(
+    fn first_run_account_finish_saves_durably_and_cancel_after_save_keeps_it(
         cx: &mut TestAppContext,
     ) {
         let result = (|| -> anyhow::Result<()> {
-            let account = test_account()?;
+            let root = tempfile::tempdir()?;
+            let account = crate::engine::offline_account("Local_Player")?;
             let account_id = crate::account_id(&account);
-            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view
+            });
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
                     view.preferences.reduce_motion = true;
                     view.tab = Tab::Onboarding;
                     view.begin_onboarding(cx);
-                    if let Some(Form::Instance(form)) = &view.form {
-                        form.name
-                            .update(cx, |input, cx| input.set_value("Keep this game draft", cx));
-                    }
                     view.open_auth_wizard(window, cx);
-                    simulate_started_attempt(view, Phase::Waiting);
-                    // This is a synthetic unit event, not evidence of real OAuth.
-                    view.accounts.clear();
-                    view.auth_prepared(account.clone());
-                    view.auth_finished(&Ok("Identity prepared".into()));
-                    view.busy = false;
+                    if let Some(state) = &mut view.shell.auth {
+                        state.provider = block_auth::AccountProvider::Offline;
+                        state.prepared_account = Some(account.clone());
+                        state.transition(Phase::Complete);
+                    }
                     cx.notify();
                 });
+            });
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.finish_auth(window, cx));
             });
             assert!(view.read_with(cx, |view, _| {
                 view.shell
                     .auth
                     .as_ref()
-                    .is_some_and(|state| state.phase == Phase::Complete)
+                    .is_some_and(|state| state.phase == Phase::Saving)
             }));
-            assert!(view.read_with(cx, |view, _| view.accounts.is_empty()
-                && view.selected_account.is_none()));
-            // Model the authorized save's durable events, not a live OAuth pass.
-            view.update(cx, |view, cx| {
-                if let Some(state) = &mut view.shell.auth {
-                    state.transition(Phase::Saving);
-                }
-                view.accounts = vec![account.clone()];
-                view.auth_saved(account.clone(), cx);
-            });
-            cx.run_until_parked();
-            assert!(view.read_with(cx, |view, cx| {
-                view.shell.auth.is_none() && view.tab == Tab::Onboarding
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while view.read_with(cx, |view, _| view.shell.auth.is_some())
+                && std::time::Instant::now() < deadline
+            {
+                cx.update(|window, cx| {
+                    view.update(cx, |view, cx| {
+                        view.poll(cx);
+                        if view
+                            .shell
+                            .auth
+                            .as_ref()
+                            .is_some_and(|state| state.phase == Phase::Saved)
+                        {
+                            view.cancel_auth(window, cx);
+                        }
+                    });
+                });
+                cx.run_until_parked();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.is_none()
+                    && view.tab == Tab::Onboarding
                     && view.shell.onboarding.account.as_deref() == Some(account_id.as_str())
-                    && view.selected_account.is_none()
-                    && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Keep this game draft")
+                    && view.shell.onboarding.account_decided
+                    && view.selected_account.as_deref() == Some(account_id.as_str())
+                    && view
+                        .accounts
+                        .iter()
+                        .any(|saved| saved.identity_key() == account.identity_key())
+                    && view.shell.onboarding.pending_identity.is_none()
             }));
+            assert!(root.path().join("accounts.json").exists());
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");

@@ -236,6 +236,7 @@ impl Preferences {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MotionStyle {
     Navigation,
+    Wizard,
 }
 
 #[derive(Clone, Debug)]
@@ -293,6 +294,7 @@ impl Frame {
 
 #[derive(Clone, Debug)]
 pub(super) struct Transition<K, T> {
+    style: MotionStyle,
     current: Option<Layer<K, T>>,
     outgoing: Option<Layer<K, T>>,
     outgoing_from: [Pose; 2],
@@ -304,6 +306,7 @@ pub(super) struct Transition<K, T> {
 impl<K: PartialEq, T> Transition<K, T> {
     pub(super) fn new(scope: Scope) -> Self {
         Self {
+            style: MotionStyle::Navigation,
             current: None,
             outgoing: None,
             outgoing_from: [Pose::default(); 2],
@@ -317,7 +320,7 @@ impl<K: PartialEq, T> Transition<K, T> {
         &mut self,
         next: Option<Layer<K, T>>,
         direction: Direction,
-        _: MotionStyle,
+        style: MotionStyle,
         now: Instant,
         preferences: Preferences,
     ) {
@@ -354,6 +357,7 @@ impl<K: PartialEq, T> Transition<K, T> {
             // replacement. Each run owns a fresh acknowledgement cell.
             self.painted = Rc::default();
             self.direction = direction;
+            self.style = style;
         }
         self.current = next;
         if preferences.reduced() {
@@ -369,7 +373,13 @@ impl<K: PartialEq, T> Transition<K, T> {
         preferences: Preferences,
         delay_ms: u64,
     ) -> Frame {
-        let duration = Duration::from_millis(if self.scope == Scope::Page { 200 } else { 180 });
+        let duration = Duration::from_millis(if self.style == MotionStyle::Wizard {
+            300
+        } else if self.scope == Scope::Page {
+            200
+        } else {
+            180
+        });
         let delay = Duration::from_millis(delay_ms);
         let elapsed = self.started.filter(|_| !preferences.reduced()).map(|_| {
             self.painted.get().map_or(Duration::ZERO, |painted| {
@@ -396,7 +406,9 @@ impl<K: PartialEq, T> Transition<K, T> {
         };
         // The immediate page track belongs to the sidebar. Delayed page
         // content and in-page content share the slightly longer travel.
-        let distance = if self.scope == Scope::Page && delay_ms == 0 {
+        let distance = if self.style == MotionStyle::Wizard {
+            0.
+        } else if self.scope == Scope::Page && delay_ms == 0 {
             12.
         } else {
             20.
@@ -404,13 +416,21 @@ impl<K: PartialEq, T> Transition<K, T> {
         Frame {
             current: self.current.as_ref().map(|_| Pose {
                 x: (1. - progress) * sign * distance,
-                opacity: progress,
+                opacity: if self.style == MotionStyle::Wizard {
+                    1.
+                } else {
+                    progress
+                },
             }),
             outgoing: self.outgoing.as_ref().map(|_| {
                 self.outgoing_from[usize::from(delay_ms != 0)].mix(
                     Pose {
                         x: -sign * distance,
-                        opacity: 0.,
+                        opacity: if self.style == MotionStyle::Wizard {
+                            1.
+                        } else {
+                            0.
+                        },
                     },
                     progress,
                 )

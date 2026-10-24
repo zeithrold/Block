@@ -94,7 +94,7 @@ impl Block {
     pub(super) fn navigation_trace_sample(&self, cx: &Context<'_, Self>) -> serde_json::Value {
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
-        serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving})
+        serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving,"welcome":self.shell.first_run.welcome_button.trace_sample(now)})
     }
     #[expect(
         clippy::too_many_lines,
@@ -106,13 +106,16 @@ impl Block {
         }
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
+        self.shell
+            .wizard_entrance
+            .reconcile(self.wizard_task_active(), now, preferences);
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = format!(
                 "{:?}:{}:{}:{}",
                 self.tab,
                 self.shell.auth.is_some(),
-                matches!(self.form, Some(Form::Instance(_))) && self.tab != Tab::Onboarding,
+                self.wizard_task_active(),
                 self.shell.providers.visible
             );
             let detail = match self.tab {
@@ -134,7 +137,7 @@ impl Block {
             };
             let wizard = if let Some(auth) = &self.shell.auth {
                 Some(format!("auth:{}", auth.motion_key()))
-            } else if self.tab == Tab::Onboarding {
+            } else if self.tab == Tab::Onboarding && !self.shell.first_run.enabled {
                 Some(format!("setup:{:?}", self.shell.onboarding.step))
             } else if matches!(self.form, Some(Form::Instance(_))) {
                 Some(format!(
@@ -165,7 +168,17 @@ impl Block {
                     _snapshot: snapshot.clone(),
                 }),
                 self.motion.direction,
-                MotionStyle::Navigation,
+                if self.wizard_task_active()
+                    || self
+                        .motion
+                        .page
+                        .current()
+                        .is_some_and(|layer| layer._snapshot.wizard_task_active())
+                {
+                    MotionStyle::Wizard
+                } else {
+                    MotionStyle::Navigation
+                },
                 now,
                 preferences,
             );
@@ -307,7 +320,11 @@ impl Block {
                 self.render_auth_transition_body(window, cx)
             }
             Scope::Wizard if self.tab == Tab::Onboarding => {
-                self.render_onboarding_transition_body(window, cx)
+                if self.shell.first_run.enabled {
+                    self.render_game_wizard_transition_body(window, cx)
+                } else {
+                    self.render_onboarding_transition_body(window, cx)
+                }
             }
             Scope::Wizard => self.render_game_wizard_transition_body(window, cx),
         }
@@ -344,6 +361,23 @@ impl Block {
         else {
             return content;
         };
+        if outgoing._snapshot.wizard_task_active() && !self.wizard_task_active() {
+            return div()
+                .id("wizard-return")
+                .size_full()
+                .relative()
+                .overflow_hidden()
+                .child(content)
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+                        .child(outgoing._snapshot.render_page_body(window, cx)),
+                )
+                .children(self.motion.page.paint_probe())
+                .into_any_element();
+        }
         div()
             .id("management-navigation")
             .debug_selector(|| "management-navigation".into())
@@ -367,6 +401,7 @@ impl Block {
                     .inset_0()
                     .child(content),
             )
+            .children(self.motion.page.paint_probe())
             .into_any_element()
     }
 
@@ -528,6 +563,9 @@ impl ShellState {
             settings_page: self.settings_page,
             wizard: self.wizard.snapshot(cx),
             onboarding: self.onboarding.snapshot(cx),
+            wizard_entrance: self.wizard_entrance.clone(),
+            first_run: self.first_run.clone(),
+            import_games: self.import_games.clone(),
             chrome_dragging: false,
         }
     }

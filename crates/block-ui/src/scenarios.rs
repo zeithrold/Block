@@ -9,6 +9,7 @@ use block_launcher::{
         DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, ProfileColor,
         ProfileIcon, ProfileMode, Snapshot,
     },
+    game_import::{DetectedLoader, DiscoveryReport, GameCandidate, ImportSourceReport, SourceKind},
     recipe::{Compatibility, RuntimeSelection},
 };
 use gpui::{Context, Window};
@@ -17,8 +18,9 @@ use crate::{
     Block, Tab, UiAction, account_id,
     appearance::Appearance,
     browser::CollectionLoad,
+    first_run::{self, Stage as FirstRunStage},
     game_wizard::{WizardPage, WizardStep},
-    onboarding,
+    import_games, onboarding,
     shell::{Drawer, Surface},
     tasks::DownloadTracker,
 };
@@ -74,6 +76,17 @@ pub const SCENARIOS: &[&str] = &[
     "welcome-1",
     "welcome-2",
     "welcome-3",
+    // Historical component fixtures remain available; use setup-* for the
+    // current product-specific first-run pages.
+    "setup-welcome",
+    "setup-overview",
+    "setup-overview-ready",
+    "setup-game-choice",
+    "setup-storage",
+    "setup-import-sources",
+    "setup-import-list",
+    "setup-account",
+    "setup-game",
     "home-profile-drawer",
     "home-account-drawer",
     "home-downloads-drawer",
@@ -176,8 +189,15 @@ impl Block {
                     minecraft_manifest::model::VersionType::Release
                 },
                 url: "https://example.invalid/ui-scenario".into(),
-                time: String::new(),
-                release_time: String::new(),
+                // Synthetic timestamps must preserve the native-support
+                // boundary; empty timestamps classify every fixture as old.
+                time: "2024-01-01T00:00:00+00:00".into(),
+                release_time: if id == "1.12.2" {
+                    "2017-09-18T11:33:40+00:00"
+                } else {
+                    "2024-01-01T00:00:00+00:00"
+                }
+                .into(),
                 sha1: "0".repeat(40),
                 compliance_level: 1,
             })
@@ -188,7 +208,13 @@ impl Block {
         self.shell.accounts.load = CollectionLoad::Ready;
         self.tab = Tab::Home;
         let name = options.name.as_str();
-        let home = name.starts_with("home-") || name == "download-files" || toast_scenario;
+        let home = name.starts_with("home-")
+            || name == "download-files"
+            || toast_scenario
+            || matches!(
+                name,
+                "setup-welcome" | "setup-import-sources" | "setup-import-list"
+            );
         window.resize(if home {
             crate::window_geometry::home_size(window, cx)
         } else {
@@ -453,6 +479,81 @@ impl Block {
         if name == "about" {
             self.tab = Tab::About;
         }
+        if name.starts_with("setup-") {
+            self.preferences.onboarding_complete = false;
+            self.saved_preferences.onboarding_complete = false;
+            self.tab = Tab::Onboarding;
+            self.form = None;
+            self.shell.first_run = first_run::State::default();
+            self.shell.first_run.enabled = true;
+            self.shell.first_run.stage = match name {
+                "setup-welcome" | "setup-import-sources" | "setup-import-list" => {
+                    FirstRunStage::Welcome
+                }
+                "setup-game-choice" => FirstRunStage::GameChoice,
+                "setup-storage" => FirstRunStage::Storage,
+                "setup-game" => FirstRunStage::GameWizard,
+                _ => FirstRunStage::Overview,
+            };
+            self.shell.onboarding = onboarding::State::default();
+            self.shell.import_games = import_games::State::default();
+            self.shell.onboarding.account = None;
+            self.selected_account = None;
+            self.selected_profile = None;
+            self.selected_instance = None;
+            self.accounts.clear();
+            self.snapshot = Snapshot::default();
+            self.shell.first_run.game_parent =
+                Some(std::path::PathBuf::from("/scenario/Block/instances"));
+
+            match name {
+                "setup-overview-ready" => {
+                    self.accounts = scenario_accounts()?;
+                    self.selected_account = self.accounts.first().map(account_id);
+                    self.shell.onboarding.account = self.selected_account.clone();
+                    self.snapshot = library();
+                    self.selected_profile = Some("vanilla".into());
+                    self.selected_instance = Some("vanilla".into());
+                }
+                "setup-storage" => {
+                    let path = "/scenario/Block/new-games";
+                    self.shell.first_run.storage_input =
+                        Some(crate::input(path, "New game folder", cx));
+                }
+                "setup-import-sources" | "setup-import-list" => {
+                    let report = setup_import_report();
+                    let state = &mut self.shell.import_games;
+                    state.report = Some(report);
+                    state.selected = state
+                        .report
+                        .as_ref()
+                        .into_iter()
+                        .flat_map(|report| report.candidates.iter())
+                        .filter(|candidate| candidate.importable)
+                        .map(|candidate| candidate.id.clone())
+                        .collect();
+                    if name == "setup-import-list" {
+                        self.handle(
+                            UiAction::ImportGames(import_games::Action::View(
+                                SourceKind::OfficialLauncher,
+                            )),
+                            window,
+                            cx,
+                        );
+                    }
+                }
+                "setup-account" => {
+                    self.open_auth_wizard(window, cx);
+                    if let Some(auth) = &mut self.shell.auth {
+                        auth.scenario("auth-choose", None, cx);
+                    }
+                }
+                "setup-game" => {
+                    self.handle(UiAction::FirstRun(first_run::Action::Custom), window, cx);
+                }
+                _ => {}
+            }
+        }
         if name.starts_with("welcome-") {
             self.begin_onboarding(cx);
             self.shell.onboarding.step = match name {
@@ -487,6 +588,9 @@ impl Block {
                 Some(Surface::StorageCleanup(uuid::Uuid::from_u128(91)))
             }
             "games-help" => Some(Surface::GamesHelp),
+            "setup-import-sources" | "setup-import-list" => {
+                Some(Surface::Drawer(Drawer::ImportGames))
+            }
             _ => None,
         };
         if let Some(surface) = surface {
@@ -654,6 +758,121 @@ fn library() -> Snapshot {
         });
     }
     snapshot
+}
+
+fn setup_import_report() -> DiscoveryReport {
+    let adjacent_root = std::path::PathBuf::from("/scenario/.minecraft");
+    let launcher_root = std::path::PathBuf::from("/scenario/Minecraft Launcher");
+    let mut candidates = vec![setup_candidate(
+        "adjacent-scenario",
+        SourceKind::AdjacentMinecraft,
+        &adjacent_root,
+        "Adjacent Vanilla",
+        "1.20.6",
+        block_launcher::game_import::LoaderKind::Vanilla,
+    )];
+    for (id, name, version, loader) in [
+        (
+            "launcher-vanilla",
+            "Launcher Vanilla",
+            "1.21.1",
+            block_launcher::game_import::LoaderKind::Vanilla,
+        ),
+        (
+            "launcher-fabric",
+            "Fabric Builder",
+            "1.21.1",
+            block_launcher::game_import::LoaderKind::Fabric,
+        ),
+        (
+            "launcher-forge",
+            "Forge Workshop",
+            "1.20.1",
+            block_launcher::game_import::LoaderKind::Forge,
+        ),
+        (
+            "launcher-quilt",
+            "Quilt Garden",
+            "1.19.4",
+            block_launcher::game_import::LoaderKind::Quilt,
+        ),
+    ] {
+        candidates.push(setup_candidate(
+            id,
+            SourceKind::OfficialLauncher,
+            &launcher_root,
+            name,
+            version,
+            loader,
+        ));
+    }
+    DiscoveryReport {
+        sources: vec![
+            ImportSourceReport {
+                kind: SourceKind::AdjacentMinecraft,
+                root: adjacent_root,
+                candidates_found: 1,
+                warning: None,
+            },
+            ImportSourceReport {
+                kind: SourceKind::OfficialLauncher,
+                root: launcher_root,
+                candidates_found: 4,
+                warning: None,
+            },
+        ],
+        candidates,
+    }
+}
+
+fn setup_candidate(
+    id: &str,
+    source: SourceKind,
+    source_root: &std::path::Path,
+    name: &str,
+    version: &str,
+    loader: block_launcher::game_import::LoaderKind,
+) -> GameCandidate {
+    GameCandidate {
+        id: id.into(),
+        source,
+        source_root: source_root.to_path_buf(),
+        name: name.into(),
+        game_directory: source_root.join("instances").join(id),
+        configured_version: Some(version.into()),
+        minecraft_version: Some(version.into()),
+        loader: Some(DetectedLoader {
+            kind: loader,
+            version: (loader != block_launcher::game_import::LoaderKind::Vanilla)
+                .then(|| "0.16.14".into()),
+        }),
+        latest_release: Some("1.21.1".into()),
+        latest_snapshot: Some("24w14a".into()),
+        importable: true,
+        unsupported_reason: None,
+        metadata_warning: None,
+    }
+}
+
+fn scenario_accounts() -> anyhow::Result<Vec<Account>> {
+    let mut accounts = ["Zeithrold", "Nova", "Pixel"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            Ok(Account {
+                reference: AccountRef {
+                    player_id: format!("00000000-0000-4000-8000-{:012}", index + 1).parse()?,
+                },
+                provider: AccountProvider::Microsoft,
+                player_name: name.into(),
+                client_id: "ui-scenario-public-client".into(),
+                credential_ref: "ui-scenario-no-credentials".into(),
+                authlib: None,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    accounts[2] = crate::engine::offline_account("Pixel")?;
+    Ok(accounts)
 }
 
 #[cfg(test)]
