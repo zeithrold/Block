@@ -125,7 +125,7 @@ platform caveats: [motion-platform-verification.md](motion-platform-verification
 Interrupted drag, focus return, short-window content and system Reduce Motion
 remain open; this does not set Accepted.
 
-User review follow-up (2026-10-24): Windows ARM64 motion is Accepted; other platform reviews remain open. The later Toast lifecycle fixes and scoped acceptance are recorded in [motion-platform-fixes.md](motion-platform-fixes.md).
+User review follow-up (2026-10-24): the user manually looked at the Windows ARM64 motion behavior because the automated replay could not detect it; this is a scoped manual observation, not product acceptance. **No platform has passed acceptance**, and other platform/scenario reviews remain open. The later Toast lifecycle fixes and scoped manual observation are recorded in [motion-platform-fixes.md](motion-platform-fixes.md).
 
 ## Remaining To-Do
 

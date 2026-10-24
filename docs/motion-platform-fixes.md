@@ -1,6 +1,6 @@
 # Cross-platform motion fixes
 
-Date: 2026-10-24. Follow-up to [the native motion verification report](motion-platform-verification.md). The user accepted this motion increment on Windows ARM64 on 2026-10-24. Other platforms and broader Milestone III acceptance remain Pending.
+Date: 2026-10-24. Follow-up to [the native motion verification report](motion-platform-verification.md). The user manually observed the Windows ARM64 motion behavior on 2026-10-24 only because the automated foreground replay could not detect that motion increment; this is a scoped manual observation, not product acceptance. **No platform has passed full-product acceptance**; scenario-by-scenario review is ongoing and broader Milestone III acceptance remains Pending.
 
 ## Changes
 
@@ -34,7 +34,7 @@ Same-paint stage starts are explicitly `sampling-limited`, with the observation 
 
 ## Native verification
 
-The user reviewed the running Windows ARM64 debug build (`4105f6df…`, opened as a normal application) and accepted its motion behavior on 2026-10-24. This user acceptance does not change the automated frame replay's missing-paint result below, or establish acceptance for the other platforms.
+The user reviewed the running Windows ARM64 debug build (`4105f6df…`, opened as a normal application) and manually observed its motion behavior on 2026-10-24. The manual look was needed because the automated foreground replay could not detect the motion increment on that host. It is scoped to motion behavior: it does not establish product acceptance for Windows ARM64, any other platform, or Milestone III, and it does not change the automated frame replay's missing-paint result below.
 
 The final Rust sources are recorded in `target/motion-fixes/final-sources.json`. macOS passed the native verification script: formatting, checks, strict Clippy, 577 tests and the desktop build. All four Windows/Linux hosts passed native debug builds, strict Clippy and all 24 feedback tests; both Linux hosts also passed the three preference cache/parser tests. Native architecture and binary/source hashes are recorded with the platform receipts. These are debug checks, not release-profile performance results.
 
