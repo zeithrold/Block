@@ -273,6 +273,13 @@ acceptance complete from tests or screenshots.
 - The config migration that backs these screens is documented separately in
   [config storage](config-storage.md): `block-global.toml` plus `block.toml`,
   the new platform data root and the deliberate no-migration policy.
+- Welcome and the Account/Game overview now share the standard horizontal
+  slide/fade when the play button opens the overview and when the chrome back
+  button returns to Welcome. The page key includes the first-run stage, the
+  incoming overview slides while the window frame morphs, and leaving slides
+  the outgoing overview away instead of only clipping it with the shrinking
+  window. A navigation regression asserts both scene poses and the rendered
+  `navigation-current-0` / `navigation-outgoing-0` offsets.
 - Verification: `just check` (formatting, workspace check, strict Clippy,
   workspace tests) passes, including the new first-run regressions for the back
   action, single-row footer, read-only mutually exclusive storage cards and

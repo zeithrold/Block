@@ -210,3 +210,95 @@ fn early_tab_events_settle_navigation_and_forward_once_after_the_clean_focus_tre
             && !view.motion.moving)
     );
 }
+
+#[gpui::test]
+fn welcome_and_overview_slide_horizontally_in_both_directions(cx: &mut TestAppContext) {
+    use crate::first_run::{Action as FirstRunAction, Stage};
+
+    let _system = crate::platform::test_system_motion(false);
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_first_run(cx);
+        view
+    });
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.shell.first_run.stage == Stage::Welcome));
+
+    view.update_in(cx, |view, window, cx| view.first_run_overview(window, cx));
+    cx.run_until_parked();
+    frame(cx, 0);
+    frame(cx, 20);
+    view.read_with(cx, |view, cx| {
+        let page = view
+            .motion
+            .page
+            .sample(cx.background_executor().now(), view.motion_preferences());
+        assert!(
+            page.current.is_some_and(|pose| pose.x > 0.
+                && pose.x <= 12.
+                && pose.opacity > 0.
+                && pose.opacity < 1.),
+            "the overview must slide in from the right: {:?}",
+            page.current
+        );
+        assert!(
+            page.outgoing
+                .is_some_and(|pose| pose.x < 0. && pose.x >= -12. && pose.opacity > 0.),
+            "the Welcome page must slide out to the left: {:?}",
+            page.outgoing
+        );
+        assert!(
+            view.motion
+                .page
+                .outgoing()
+                .is_some_and(|layer| { layer._snapshot.shell.first_run.stage == Stage::Welcome })
+        );
+    });
+    let sliding = cx.debug_bounds("navigation-current-0");
+    assert!(
+        sliding.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
+        "the overview must render off its settled x while the frame morphs: {sliding:?}"
+    );
+    frame(cx, 240);
+    assert!(view.read_with(cx, |view, _| view.motion.page.outgoing().is_none()));
+
+    view.update_in(cx, |view, window, cx| {
+        view.handle(
+            UiAction::FirstRun(FirstRunAction::BackToWelcome),
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    frame(cx, 0);
+    frame(cx, 20);
+    view.read_with(cx, |view, cx| {
+        let page = view
+            .motion
+            .page
+            .sample(cx.background_executor().now(), view.motion_preferences());
+        assert!(
+            page.current
+                .is_some_and(|pose| pose.x < 0. && pose.x >= -12. && pose.opacity > 0.),
+            "returning to Welcome must slide in from the left: {:?}",
+            page.current
+        );
+        assert!(
+            page.outgoing
+                .is_some_and(|pose| pose.x > 0. && pose.x <= 12. && pose.opacity > 0.),
+            "the overview must slide out to the right: {:?}",
+            page.outgoing
+        );
+        assert!(
+            view.motion
+                .page
+                .outgoing()
+                .is_some_and(|layer| { layer._snapshot.shell.first_run.stage == Stage::Overview })
+        );
+    });
+    let sliding = cx.debug_bounds("navigation-outgoing-0");
+    assert!(
+        sliding.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
+        "the overview must render off its settled x while it slides away: {sliding:?}"
+    );
+}

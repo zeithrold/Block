@@ -398,6 +398,12 @@ impl Block {
             })
             .capture_key_up(|_, _, cx| cx.stop_propagation());
         if let Some(view) = manage_view {
+            let body = view.render_page_body(window, cx);
+            let body = if std::ptr::eq(view, self) {
+                self.transition_current(body, cx)
+            } else {
+                self.transition_outgoing(body, cx)
+            };
             root = root.child(
                 div()
                     .id("frame-manage")
@@ -406,7 +412,7 @@ impl Block {
                     .left_0()
                     .w(px(value.manage_width))
                     .h_full()
-                    .child(view.render_page_body(window, cx)),
+                    .child(body),
             );
         }
         if value.home.opacity > 0.001

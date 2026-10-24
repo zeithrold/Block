@@ -112,11 +112,16 @@ impl Block {
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = format!(
-                "{:?}:{}:{}:{}",
+                "{:?}:{}:{}:{}:{}",
                 self.tab,
                 self.shell.auth.is_some(),
                 self.wizard_task_active(),
-                self.shell.providers.visible
+                self.shell.providers.visible,
+                if self.shell.first_run.enabled {
+                    format!("{:?}", self.shell.first_run.stage)
+                } else {
+                    String::new()
+                }
             );
             let detail = match self.tab {
                 Tab::Accounts if self.shell.providers.visible => {
@@ -217,9 +222,14 @@ impl Block {
             self.motion_dirty = false;
         }
         if self.motion.frame.active() {
-            self.motion.page.settle();
+            // Welcome and Overview share a tab and task flag, so their stage
+            // change is the only page swap that still slides while the window
+            // frame animates. Other page motion keeps yielding to the frame.
             self.motion.detail.settle();
             self.motion.wizard.settle();
+            if !self.onboarding_stage_swap() {
+                self.motion.page.settle();
+            }
         }
         let mut running = false;
         for (index, scene) in [
@@ -251,6 +261,25 @@ impl Block {
         }
     }
 
+    /// True while a first-run stage swap between Welcome and the Account/Game
+    /// overview is sliding. Both pages share one tab and task flag, so the page
+    /// key would otherwise treat them as the same page.
+    pub(super) fn onboarding_stage_swap(&self) -> bool {
+        let (Some(current), Some(outgoing)) =
+            (self.motion.page.current(), self.motion.page.outgoing())
+        else {
+            return false;
+        };
+        let first_run_page = |snapshot: &Block| {
+            snapshot.shell.first_run.enabled
+                && snapshot.tab == Tab::Onboarding
+                && !snapshot.wizard_task_active()
+        };
+        first_run_page(&current._snapshot)
+            && first_run_page(&outgoing._snapshot)
+            && current._snapshot.shell.first_run.stage != outgoing._snapshot.shell.first_run.stage
+    }
+
     pub(super) fn transition_content(
         &self,
         scope: Scope,
@@ -258,7 +287,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        if self.visual_only || self.motion.frame.active() {
+        if self.visual_only || (self.motion.frame.active() && !self.onboarding_stage_swap()) {
             return content;
         }
         let scene = self.motion.scene(scope);
@@ -301,6 +330,74 @@ impl Block {
             current
         };
         viewport.child(current).into_any_element()
+    }
+
+    /// Render only the incoming page while the window frame morphs. The morph
+    /// paints the outgoing page itself, so a full page transition here would
+    /// duplicate it; this keeps the shared slide/fade on the incoming page.
+    pub(super) fn transition_current(
+        &self,
+        content: AnyElement,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        if self.visual_only || !self.onboarding_stage_swap() {
+            return content;
+        }
+        let now = cx.background_executor().now();
+        let frame = self.motion.page.sample(now, self.motion_preferences());
+        let viewport = div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .relative()
+            .overflow_hidden();
+        let viewport = if frame.running() {
+            viewport.capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+        } else {
+            viewport
+        };
+        viewport
+            .child(
+                motion::layer(
+                    ("motion-current", Scope::Page as usize),
+                    frame.current.unwrap_or_default(),
+                    content,
+                )
+                .debug_selector(|| "navigation-current-0".into())
+                .children(self.motion.page.paint_probe()),
+            )
+            .into_any_element()
+    }
+
+    /// Render only the outgoing page while the window frame morphs. The morph
+    /// paints the incoming page itself, so the slide/fade belongs to the page
+    /// that is leaving; without this it would only clip down with the window.
+    pub(super) fn transition_outgoing(
+        &self,
+        content: AnyElement,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        if self.visual_only || !self.onboarding_stage_swap() {
+            return content;
+        }
+        let now = cx.background_executor().now();
+        let frame = self.motion.page.sample(now, self.motion_preferences());
+        let Some(pose) = frame.outgoing else {
+            return content;
+        };
+        div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            .child(
+                motion::layer(("motion-outgoing", Scope::Page as usize), pose, content)
+                    .debug_selector(|| "navigation-outgoing-0".into()),
+            )
+            .children(self.motion.page.paint_probe())
+            .into_any_element()
     }
 
     fn render_scene_fragment(
@@ -350,7 +447,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let content = self.render_page_body(window, cx);
-        if self.is_home_frame() {
+        if self.is_home_frame() || self.onboarding_stage_swap() {
             return self.transition_content(Scope::Page, content, window, cx);
         }
         let Some(outgoing) = self

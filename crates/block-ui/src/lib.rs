@@ -1271,6 +1271,7 @@ impl Block {
                 | UiAction::ProfilePageCancel
                 | UiAction::ProfilePageDone
                 | UiAction::Tab(Tab::Home)
+                | UiAction::FirstRun(first_run::Action::BackToWelcome)
         ) {
             motion::Direction::Back
         } else {
