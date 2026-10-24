@@ -423,6 +423,16 @@ impl Block {
             self.open_settings(cx);
             self.select_settings_page(section as u8, window, cx);
         }
+        if name == "settings-storage" {
+            self.shell.storage.paths = Ok(crate::settings::StoragePaths {
+                library: std::path::PathBuf::from(
+                    "/scenario/Application Support/one.ztd.block/.minecraft",
+                ),
+                cache: std::path::PathBuf::from(
+                    "/scenario/Application Support/one.ztd.block/cache",
+                ),
+            });
+        }
         if name == "settings-socks5" {
             self.saved_preferences.downloads.proxy = block_launcher::ProxyMode::Socks5 {
                 url: "socks5h://127.0.0.1:1080".into(),
