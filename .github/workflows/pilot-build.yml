@@ -276,7 +276,7 @@ jobs:
       - name: Write checksums and unsigned notice
         run: |
           cd dist/linux
-          sha256sum Block-* > SHA256SUMS
+          sha256sum Block-*.tar.gz Block-*.deb Block-*.AppImage > SHA256SUMS
           printf 'Pilot build. Packages are not code-signed.\n' > UNSIGNED.txt
           cat SHA256SUMS
       - name: Upload Linux portable tar.gz
