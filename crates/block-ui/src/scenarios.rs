@@ -89,6 +89,7 @@ pub const SCENARIOS: &[&str] = &[
     "wizard-loader-loading",
     "wizard-loader-error",
     "wizard-loader-empty",
+    "wizard-loader-search-empty",
     "wizard-configuration",
     "welcome-version-picker",
     "remove-confirmation",
@@ -230,6 +231,11 @@ impl Block {
         }
         if name == "home-error" {
             self.status = "The download was interrupted. Check your connection and retry.".into();
+            fail_selected_target(
+                &mut self.snapshot,
+                "vanilla",
+                "The download was interrupted. Check your connection and retry.",
+            )?;
         }
         if name.starts_with("games-")
             || matches!(
@@ -266,7 +272,8 @@ impl Block {
                 | "wizard-forge-picker"
                 | "wizard-loader-loading"
                 | "wizard-loader-error"
-                | "wizard-loader-empty" => Some(WizardPage::Loader),
+                | "wizard-loader-empty"
+                | "wizard-loader-search-empty" => Some(WizardPage::Loader),
                 "wizard-configuration" => Some(WizardPage::Location),
                 _ => None,
             };
@@ -297,6 +304,7 @@ impl Block {
                     | "wizard-loader-loading"
                     | "wizard-loader-error"
                     | "wizard-loader-empty"
+                    | "wizard-loader-search-empty"
             ) {
                 let kind = if name == "wizard-forge-picker" {
                     LoaderKind::Forge
@@ -318,22 +326,24 @@ impl Block {
                 };
                 if let Some(super::Form::Instance(form)) = &mut self.form {
                     form.loader = kind.clone();
+                    let (builds, load, search_query) = loader_fixture_data(name, version);
                     form.loader_version = (!matches!(
                         name,
                         "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty"
                     ))
                     .then(|| version.into());
                     self.shell.wizard.loader_catalog = Some(super::game_wizard::LoaderCatalog {
-                        request: uuid::Uuid::new_v4(), minecraft: form.version.read(cx).value(), kind,
-                        builds: if matches!(name, "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty") { Vec::new() } else {
-                            vec![block_launcher::install::fabric::LoaderVersion {version: version.into(), stable: true}, block_launcher::install::fabric::LoaderVersion { version: if name == "wizard-forge-picker" {"1.21.1-52.1.2".into()} else if name == "wizard-neoforge-picker" {"21.1.1-beta".into()} else {"0.16.0-beta.1".into()}, stable: name == "wizard-forge-picker" }]
-                        },
-                        load: match name {
-                            "wizard-loader-loading" => CollectionLoad::Loading,
-                            "wizard-loader-error" => CollectionLoad::Failed("The official catalog could not be reached. Check your connection and retry.".into()),
-                            _ => CollectionLoad::Ready,
-                        },
+                        request: uuid::Uuid::new_v4(),
+                        minecraft: form.version.read(cx).value(),
+                        kind,
+                        builds,
+                        load,
                     });
+                    if let Some(query) = search_query
+                        && let Some(search) = &self.shell.wizard.loader_search
+                    {
+                        search.update(cx, |field, cx| field.set_value(query, cx));
+                    }
                 }
             }
         }
@@ -510,6 +520,77 @@ impl Block {
     }
 }
 
+fn fail_selected_target(
+    snapshot: &mut Snapshot,
+    profile_id: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    let profile = snapshot
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .ok_or_else(|| anyhow::anyhow!("scenario profile is missing: {profile_id}"))?;
+    let (instance_id, target_id) = (profile.instance_id.clone(), profile.target_id.clone());
+    let target = snapshot
+        .instances
+        .iter_mut()
+        .find(|instance| instance.id == instance_id)
+        .and_then(|instance| {
+            instance
+                .targets
+                .iter_mut()
+                .find(|target| target.id == target_id)
+        })
+        .ok_or_else(|| anyhow::anyhow!("scenario launch target is missing: {profile_id}"))?;
+    target.status = InstallStatus::Failed {
+        message: message.into(),
+    };
+    Ok(())
+}
+
+fn loader_fixture_data(
+    name: &str,
+    version: &str,
+) -> (
+    Vec<block_launcher::install::fabric::LoaderVersion>,
+    CollectionLoad,
+    Option<&'static str>,
+) {
+    let no_builds = matches!(
+        name,
+        "wizard-loader-loading" | "wizard-loader-error" | "wizard-loader-empty"
+    );
+    let builds = if no_builds {
+        Vec::new()
+    } else {
+        vec![
+            block_launcher::install::fabric::LoaderVersion {
+                version: version.into(),
+                stable: true,
+            },
+            block_launcher::install::fabric::LoaderVersion {
+                version: if name == "wizard-forge-picker" {
+                    "1.21.1-52.1.2".into()
+                } else if name == "wizard-neoforge-picker" {
+                    "21.1.1-beta".into()
+                } else {
+                    "0.16.0-beta.1".into()
+                },
+                stable: name == "wizard-forge-picker",
+            },
+        ]
+    };
+    let load = match name {
+        "wizard-loader-loading" => CollectionLoad::Loading,
+        "wizard-loader-error" => CollectionLoad::Failed(
+            "The official catalog could not be reached. Check your connection and retry.".into(),
+        ),
+        _ => CollectionLoad::Ready,
+    };
+    let search_query = (name == "wizard-loader-search-empty").then_some("no-matching-loader-build");
+    (builds, load, search_query)
+}
+
 fn library() -> Snapshot {
     let mut snapshot = Snapshot {
         profile_mode: ProfileMode::Bundled,
@@ -573,4 +654,58 @@ fn library() -> Snapshot {
         });
     }
     snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn home_error_fixture_fails_the_selected_profile_target_only() -> anyhow::Result<()> {
+        let mut snapshot = library();
+
+        fail_selected_target(
+            &mut snapshot,
+            "vanilla",
+            "The download was interrupted. Check your connection and retry.",
+        )?;
+
+        let (_, _, target) = snapshot.selection("vanilla")?;
+        assert!(matches!(
+            &target.status,
+            InstallStatus::Failed { message } if message.contains("download was interrupted")
+        ));
+        let (_, _, untouched) = snapshot.selection("neoforge")?;
+        assert_eq!(untouched.status, InstallStatus::Ready);
+        Ok(())
+    }
+
+    #[test]
+    fn loader_fixtures_keep_empty_catalog_separate_from_search_empty() -> anyhow::Result<()> {
+        let (empty_builds, empty_load, empty_search) =
+            loader_fixture_data("wizard-loader-empty", "0.16.14");
+        let (search_builds, search_load, search_query) =
+            loader_fixture_data("wizard-loader-search-empty", "0.16.14");
+        let (loading_builds, loading_load, _) =
+            loader_fixture_data("wizard-loader-loading", "0.16.14");
+        let (failed_builds, failed_load, _) = loader_fixture_data("wizard-loader-error", "0.16.14");
+
+        assert!(empty_builds.is_empty());
+        assert_eq!(empty_load, CollectionLoad::Ready);
+        assert_eq!(empty_search, None);
+        assert_eq!(search_builds.len(), 2);
+        assert_eq!(search_load, CollectionLoad::Ready);
+        assert_eq!(search_query, Some("no-matching-loader-build"));
+        let search_query = search_query.ok_or_else(|| anyhow::anyhow!("missing search query"))?;
+        assert!(
+            search_builds
+                .iter()
+                .all(|build| { !build.version.to_lowercase().contains(search_query) })
+        );
+        assert!(loading_builds.is_empty());
+        assert_eq!(loading_load, CollectionLoad::Loading);
+        assert!(failed_builds.is_empty());
+        assert!(matches!(failed_load, CollectionLoad::Failed(_)));
+        Ok(())
+    }
 }

@@ -1,0 +1,3455 @@
+{
+  "schema_version": 1,
+  "title": "Milestone II visual review semantic cases",
+  "description": "Exact filenames are candidate lookup only. Capture semantics and provenance are reviewed independently. Unknown archive fields are intentionally null/unknown.",
+  "capture_receipt_schema": {
+    "schema_version": 1,
+    "sidecar_path": "<image>.capture.json (either <stem>.capture.json or <stem>.png.capture.json)",
+    "fields": [
+      "schema_version",
+      "kind",
+      "platform",
+      "theme",
+      "source.commit",
+      "source.dirty",
+      "source.tracked_source_diff_sha256",
+      "binary_sha256",
+      "data_state",
+      "method",
+      "focus",
+      "scroll",
+      "reduced_motion",
+      "window.title",
+      "window.width",
+      "window.height",
+      "assertions.title",
+      "assertions.logical_viewport",
+      "assertions.pixel_size",
+      "assertions.dpr",
+      "assertions.required_text",
+      "assertions.observations",
+      "assertions.passed",
+      "viewport.width",
+      "viewport.height",
+      "viewport.dpr",
+      "captured_at",
+      "artifact",
+      "sha256",
+      "replaced_original"
+    ],
+    "unknown_archive_fields": "Do not infer missing commit, focus, or scroll values from PNG appearance."
+  },
+  "cases": [
+    {
+      "case_id": "home-empty",
+      "native_stems": [
+        "home-empty"
+      ],
+      "reference_candidates": [
+        "home-empty"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "launcher empty-state",
+        "identity": "no saved account/game selected"
+      },
+      "trigger": {
+        "value": "Debug scenario clears game snapshot, accounts, and all selections at startup.",
+        "source": "crates/block-ui/src/scenarios.rs:143-203"
+      },
+      "data": {
+        "value": "Native has no seeded games/accounts for this case; React recipe deletes all accounts, retains seeded game/profile state, then returns Home.",
+        "source": "crates/block-ui/src/scenarios.rs:143-203"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:143-203",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:185-196; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/game-state.ts:6-15",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "empty_launcher_layout_only",
+      "rationale": "Both arrive at an empty-looking launcher task, but the empty object set differs; source confirms React does not clear game data.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:185-196; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/game-state.ts:6-15",
+        "trigger": "Route Home; delete every account via UI; navigate Home and assert the empty-launcher heading.",
+        "data": "React seeded library remains; only account collection is emptied. Browser viewport is 480×816 for home-empty; app card expected 432×768.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-empty-state"
+    },
+    {
+      "case_id": "home-ready",
+      "native_stems": [
+        "home-ready"
+      ],
+      "reference_candidates": [
+        "home-ready"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher ready-state",
+        "identity": "selected profile can launch"
+      },
+      "trigger": {
+        "value": "Direct Home scenario with the synthetic vanilla profile selected.",
+        "source": "crates/block-ui/src/scenarios.rs:142-188,594-654"
+      },
+      "data": {
+        "value": "Native selected profile Vanilla, Minecraft 1.20.1, account Zeithrold; ready target from synthetic library.",
+        "source": "crates/block-ui/src/scenarios.rs:142-188,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-188,594-654",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:198; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "launcher_action_layout_only",
+      "rationale": "Both expose the ready launch action for a selected game/profile; they use separate synthetic stores and do not prove account/session equivalence.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:198; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "trigger": "Route Home and assert a Launch button is visible.",
+        "data": "React uses seeded Vanilla 1.20.1 profile and Zeithrold selected account; separate local preview fixture.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-ready-state"
+    },
+    {
+      "case_id": "home-downloading",
+      "native_stems": [
+        "home-downloading"
+      ],
+      "reference_candidates": [
+        "home-downloading"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "installation progress",
+        "identity": "Minecraft resource download"
+      },
+      "trigger": {
+        "value": "Direct scenario starts a synthetic install tracker.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230"
+      },
+      "data": {
+        "value": "Eight resources of 4 MiB each; first two complete and one marked cached; operation Install.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:204-230",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:199-202",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "progress_component_layout_only",
+      "rationale": "Same install-progress task at a broad UI level; progress totals, cache state, and operation semantics differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:199-202",
+        "trigger": "Click Launch and wait for “Downloading files”.",
+        "data": "React triggers the local interface-preview launch simulation; no real game install/network is exercised.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "installation-progress"
+    },
+    {
+      "case_id": "home-error",
+      "native_stems": [
+        "home-error"
+      ],
+      "reference_candidates": [
+        "home-error"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "installation failure",
+        "identity": "failed vanilla launch target"
+      },
+      "trigger": {
+        "value": "Scenario marks the selected vanilla target Failed with an interrupted-download message.",
+        "source": "crates/block-ui/src/scenarios.rs:232-239,523-548"
+      },
+      "data": {
+        "value": "Native target is Failed and supports the recovery UI; not merely status text.",
+        "source": "crates/block-ui/src/scenarios.rs:232-239,523-548"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:232-239,523-548",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,176-202",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No source-defined React failure fixture exists in this capture workflow; compare with a future failed-target capture only.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,176-202",
+        "trigger": "No home-error scenario or failure injection in current snap-proto requested list/recipe.",
+        "data": "React Home route only has ready/download simulation in this capture script.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "installation-failure"
+    },
+    {
+      "case_id": "games-bundled",
+      "native_stems": [
+        "games-bundled"
+      ],
+      "reference_candidates": [
+        "games-bundled"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "bundled library",
+        "identity": "selected game/profile and detail pane"
+      },
+      "trigger": {
+        "value": "games-bundled opens Instances tab; games-detail additionally inspects vanilla.",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654"
+      },
+      "data": {
+        "value": "Native synthetic library contains three profiles/Instances; vanilla selected. These two native captures are byte-identical.",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:215-219; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "bundled_library_layout_only",
+      "rationale": "Same bundled game/profile library task. List/detail are not independent states here: detail exists beside the list and archived images are byte-identical within each implementation.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:215-219; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "trigger": "games-bundled asserts Bundled; games-detail clicks first View game row, selecting Vanilla.",
+        "data": "React seed has seven Profiles across six game setups; first Vanilla profile is selected; both screenshots include list and detail pane.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "bundled-library"
+    },
+    {
+      "case_id": "games-separated",
+      "native_stems": [
+        "games-separated"
+      ],
+      "reference_candidates": [
+        "games-separated"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "profile mode",
+        "identity": "Separated mode library"
+      },
+      "trigger": {
+        "value": "Scenario directly changes snapshot profile_mode to Separated.",
+        "source": "crates/block-ui/src/scenarios.rs:234-249,594-654"
+      },
+      "data": {
+        "value": "Native synthetic three-profile library; direct fixture mutation, not an interactive conversion.",
+        "source": "crates/block-ui/src/scenarios.rs:234-249,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:234-249,594-654",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:203-213; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/game-state.ts:6-15,44-47",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "profile_mode_task_flow",
+      "rationale": "Same resulting mode and conversion task, but native capture skips the conversion trigger/dialog and the fixture inventories differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:203-213; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/game-state.ts:6-15,44-47",
+        "trigger": "Navigate Settings → Profile mode; choose Switch to Separated Profile; confirm Convert to Separated; navigate Games.",
+        "data": "React seven-profile/five-or-more-Instance seed performs actual preview conversion.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "profile-mode"
+    },
+    {
+      "case_id": "games-detail",
+      "native_stems": [
+        "games-detail"
+      ],
+      "reference_candidates": [
+        "games-detail"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "bundled library",
+        "identity": "selected game/profile and detail pane"
+      },
+      "trigger": {
+        "value": "games-bundled opens Instances tab; games-detail additionally inspects vanilla.",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654"
+      },
+      "data": {
+        "value": "Native synthetic library contains three profiles/Instances; vanilla selected. These two native captures are byte-identical.",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-162,234-255,594-654",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:215-219; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "bundled_library_layout_only",
+      "rationale": "Same bundled game/profile library task. List/detail are not independent states here: detail exists beside the list and archived images are byte-identical within each implementation.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:215-219; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:28-51",
+        "trigger": "games-bundled asserts Bundled; games-detail clicks first View game row, selecting Vanilla.",
+        "data": "React seed has seven Profiles across six game setups; first Vanilla profile is selected; both screenshots include list and detail pane.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "bundled-library"
+    },
+    {
+      "case_id": "games-instance-settings",
+      "native_stems": [
+        "games-instance-settings"
+      ],
+      "reference_candidates": [
+        "games-instance-settings"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "game Instance settings",
+        "identity": "Vanilla setup settings editor"
+      },
+      "trigger": {
+        "value": "Scenario inspects vanilla then dispatches EditInstance.",
+        "source": "crates/block-ui/src/scenarios.rs:244-255,594-654"
+      },
+      "data": {
+        "value": "Native selected vanilla Instance, Minecraft 1.20.1.",
+        "source": "crates/block-ui/src/scenarios.rs:244-255,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:244-255,594-654",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:216-222; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:22-30",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "instance_settings_editor_layout_only",
+      "rationale": "Same editor task for first Vanilla setup; settings data stores and edit navigation differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:216-222; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/profiles.ts:22-30",
+        "trigger": "Click first View game (Vanilla) then Edit Instance settings.",
+        "data": "React first seeded Vanilla game/profile; settings are local defaults.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "game-Instance-settings"
+    },
+    {
+      "case_id": "wizard-setup",
+      "native_stems": [
+        "wizard-setup"
+      ],
+      "reference_candidates": [
+        "wizard-setup"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "new game Instance wizard",
+        "identity": "setup and review workflow"
+      },
+      "trigger": {
+        "value": "wizard-setup opens new Instance wizard; wizard-review directly sets Review step; wizard-configuration selects Location page.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "data": {
+        "value": "Native scenario seeds default My Minecraft name, first synthetic available version and Vanilla loader.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:13-20,224-227,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/games_.new.tsx:1-7",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "wizard_task_shell_and_review_step",
+      "rationale": "The setup/review task is shared, but direct fixture selection versus interactive step transition and location-page state are not equivalent. Location has no current screenshot recipe.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:13-20,224-227,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/games_.new.tsx:1-7",
+        "trigger": "wizard-setup reaches /games/new and checks heading; wizard-review clicks Continue once and checks review heading. wizard-configuration is not requested.",
+        "data": "React new Instance wizard uses its own default catalog/settings; current recipe has no explicit configuration/location-step interaction.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-Instance-wizard"
+    },
+    {
+      "case_id": "wizard-review",
+      "native_stems": [
+        "wizard-review"
+      ],
+      "reference_candidates": [
+        "wizard-review"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "new game Instance wizard",
+        "identity": "setup and review workflow"
+      },
+      "trigger": {
+        "value": "wizard-setup opens new Instance wizard; wizard-review directly sets Review step; wizard-configuration selects Location page.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "data": {
+        "value": "Native scenario seeds default My Minecraft name, first synthetic available version and Vanilla loader.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:13-20,224-227,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/games_.new.tsx:1-7",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "wizard_task_shell_and_review_step",
+      "rationale": "The setup/review task is shared, but direct fixture selection versus interactive step transition and location-page state are not equivalent. Location has no current screenshot recipe.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:13-20,224-227,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/games_.new.tsx:1-7",
+        "trigger": "wizard-setup reaches /games/new and checks heading; wizard-review clicks Continue once and checks review heading. wizard-configuration is not requested.",
+        "data": "React new Instance wizard uses its own default catalog/settings; current recipe has no explicit configuration/location-step interaction.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-Instance-wizard"
+    },
+    {
+      "case_id": "wizard-optifine",
+      "native_stems": [
+        "wizard-optifine"
+      ],
+      "reference_candidates": [
+        "wizard-optifine"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game wizard OptiFine selection",
+        "identity": "unselected or selected OptiFine catalog result"
+      },
+      "trigger": {
+        "value": "Direct scenario selects OptiFine page; selected variant injects a synthetic OptiFine jar.",
+        "source": "crates/block-ui/src/scenarios.rs:256-296"
+      },
+      "data": {
+        "value": "Native fixture uses Minecraft 1.21.1 and sample OptiFine/Forge values; selected resource URL is scenario-only.",
+        "source": "crates/block-ui/src/scenarios.rs:256-296"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:256-296",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No current React capture recipe for OptiFine states.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "trigger": "Current snap-proto requested list has no OptiFine scenario/interaction.",
+        "data": "No captured React OptiFine setup or selected-result case in this script.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-wizard-OptiFine-selection"
+    },
+    {
+      "case_id": "wizard-optifine-selected",
+      "native_stems": [
+        "wizard-optifine-selected"
+      ],
+      "reference_candidates": [
+        "wizard-optifine-selected"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game wizard OptiFine selection",
+        "identity": "unselected or selected OptiFine catalog result"
+      },
+      "trigger": {
+        "value": "Direct scenario selects OptiFine page; selected variant injects a synthetic OptiFine jar.",
+        "source": "crates/block-ui/src/scenarios.rs:256-296"
+      },
+      "data": {
+        "value": "Native fixture uses Minecraft 1.21.1 and sample OptiFine/Forge values; selected resource URL is scenario-only.",
+        "source": "crates/block-ui/src/scenarios.rs:256-296"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:256-296",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No current React capture recipe for OptiFine states.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "trigger": "Current snap-proto requested list has no OptiFine scenario/interaction.",
+        "data": "No captured React OptiFine setup or selected-result case in this script.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-wizard-OptiFine-selection"
+    },
+    {
+      "case_id": "accounts-list",
+      "native_stems": [
+        "accounts-list"
+      ],
+      "reference_candidates": [
+        "accounts-list"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "account management",
+        "identity": "saved accounts list with first account inspected"
+      },
+      "trigger": {
+        "value": "Native opens Accounts; accounts-detail explicitly inspects selected first account.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,340-362"
+      },
+      "data": {
+        "value": "Native fixture has Zeithrold/Nova Microsoft accounts and Pixel offline account; accounts-list/detail PNGs are byte-identical.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,340-362"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-163,340-362",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts.tsx:10-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "account_list_and_detail_layout_only",
+      "rationale": "Same account management task; data volume and identities differ. List/detail captures share the same visible two-pane composition and exact bytes, so they are not independent coverage.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts.tsx:10-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "trigger": "Open /accounts; accounts-detail asserts the details pane without an extra selection click.",
+        "data": "React seed has eight accounts and starts inspected on selected Zeithrold; details pane and list render together.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "account-management"
+    },
+    {
+      "case_id": "accounts-detail",
+      "native_stems": [
+        "accounts-detail"
+      ],
+      "reference_candidates": [
+        "accounts-detail"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "account management",
+        "identity": "saved accounts list with first account inspected"
+      },
+      "trigger": {
+        "value": "Native opens Accounts; accounts-detail explicitly inspects selected first account.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,340-362"
+      },
+      "data": {
+        "value": "Native fixture has Zeithrold/Nova Microsoft accounts and Pixel offline account; accounts-list/detail PNGs are byte-identical.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,340-362"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-163,340-362",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts.tsx:10-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "account_list_and_detail_layout_only",
+      "rationale": "Same account management task; data volume and identities differ. List/detail captures share the same visible two-pane composition and exact bytes, so they are not independent coverage.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts.tsx:10-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "trigger": "Open /accounts; accounts-detail asserts the details pane without an extra selection click.",
+        "data": "React seed has eight accounts and starts inspected on selected Zeithrold; details pane and list render together.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "account-management"
+    },
+    {
+      "case_id": "accounts-offline-detail",
+      "native_stems": [
+        "accounts-offline-detail"
+      ],
+      "reference_candidates": [
+        "accounts-offline-detail"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "offline account details",
+        "identity": "Pixel account"
+      },
+      "trigger": {
+        "value": "Native selects third fixture account Pixel (offline).",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,350-362"
+      },
+      "data": {
+        "value": "Pixel synthetic Offline account.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,350-362"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-163,350-362",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "account_detail_component_only",
+      "rationale": "The account-detail task is present, but the paired default is Microsoft Zeithrold; there is no reviewed matching offline-account capture.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "trigger": "Current script has only accounts-detail, whose default inspected account is Zeithrold; no offline row selection recipe.",
+        "data": "React seeds offline Steve/Ender, but no screenshot selects them.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "offline-account-details"
+    },
+    {
+      "case_id": "accounts-providers",
+      "native_stems": [
+        "accounts-providers"
+      ],
+      "reference_candidates": [
+        "accounts-providers"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Authlib provider management",
+        "identity": "existing provider selected with editor"
+      },
+      "trigger": {
+        "value": "Native provider_scenario opens providers and edits fixture provider id 1.",
+        "source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128"
+      },
+      "data": {
+        "value": "Native has two provider fixtures and existing-provider editor.",
+        "source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts_.providers.tsx:9-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/authlib-providers.ts:1-6",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "provider_list_and_existing_editor_layout",
+      "rationale": "Same management task and existing-provider editor state, but source fixture/provider content differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts_.providers.tsx:9-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/authlib-providers.ts:1-6",
+        "trigger": "Navigate /accounts/providers.",
+        "data": "React route selects initialProviders[0] by default and renders ProviderEditor for it; provider fixtures differ.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-provider-management"
+    },
+    {
+      "case_id": "provider-add",
+      "native_stems": [
+        "provider-add"
+      ],
+      "reference_candidates": [
+        "provider-add"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "Authlib provider editor",
+        "identity": "native: new unsaved provider; React archive: existing Sakura provider"
+      },
+      "trigger": {
+        "value": "Native edit_provider(None); current React /accounts/providers route initializes selectedId to providers[0] and does not click Add provider.",
+        "source": "crates/block-ui/src/providers.rs:103-128; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts_.providers.tsx:9-20; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:228-230"
+      },
+      "data": {
+        "value": "Native editor is empty; archive screenshot visibly says Provider details, fills Sakura URL, shows 1 linked account, and Save changes.",
+        "source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/providers/provider-editor.tsx:15-45; archived target/parity-shots/proto/provider-add-light.png"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "provider_editor_form_layout_only",
+      "rationale": "Source and archive show create vs edit mismatch. React initial route selects first existing provider; the current mustSee(Display name) assertion does not trigger Add. Shared form layout only; do not count the archived candidate as provider creation.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture_but-existing-provider-edit",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:50-52,228-230; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/accounts_.providers.tsx:9-20",
+        "trigger": "Direct route; selectedId starts as initialProviders[0]?.id; script only asserts Display name.",
+        "data": "Archive visually shows Sakura existing-provider details, HTTPS endpoint, 1 linked account, Save changes. Screenshot commit unknown.",
+        "archive_state_note": "Visible archive scene is edit-existing; target/parity-shots/proto/provider-add-light.png is byte-identical to accounts-providers-light.png."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-provider-editor"
+    },
+    {
+      "case_id": "provider-http-warning",
+      "native_stems": [
+        "provider-http-warning"
+      ],
+      "reference_candidates": [
+        "provider-http-warning"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "provider security consent",
+        "identity": "new HTTP provider"
+      },
+      "trigger": {
+        "value": "Native provider scenario opens create editor prefilled Local community and insecure URL.",
+        "source": "crates/block-ui/src/providers.rs:103-128"
+      },
+      "data": {
+        "value": "Native address community.example.test API; HTTP warning in provider editor.",
+        "source": "crates/block-ui/src/providers.rs:103-128"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/providers.rs:103-128",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:99-106; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/provider-fields.tsx:10-15",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "http_warning_component_only",
+      "rationale": "Same HTTP risk consent component/idea, but React flow creates an account-auth provider in a dialog while native row is management provider editing; object and trigger differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "related_scripted_state_different_flow",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:99-106; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/provider-fields.tsx:10-15",
+        "trigger": "Current script covers HTTP warning only through auth-authlib-http-warning: add authentication provider in account wizard, fill local URL and submit.",
+        "data": "React uses 127.0.0.1:8765 API and warning during account-auth provider creation.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "provider-security-consent"
+    },
+    {
+      "case_id": "remove-provider-confirmation",
+      "native_stems": [
+        "remove-provider-confirmation"
+      ],
+      "reference_candidates": [
+        "remove-provider-confirmation"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "Authlib provider",
+        "identity": "existing provider removal"
+      },
+      "trigger": {
+        "value": "Native directly requests removal confirmation for fixture provider UUID 1.",
+        "source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128"
+      },
+      "data": {
+        "value": "Native fixture provider; associated account/link state is synthetic.",
+        "source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:388-395; crates/block-ui/src/providers.rs:103-128",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/providers/provider-editor.tsx:22-23,51-54; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No current compatible removable-provider fixture or capture recipe.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/providers/provider-editor.tsx:22-23,51-54; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/lib/accounts.ts:13-21",
+        "trigger": "Current script has no provider-removal flow; seeded first/second providers each have linked accounts and editor disables removal when linked.",
+        "data": "React ProviderEditor removal button is disabled for linkedCount > 0.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-provider"
+    },
+    {
+      "case_id": "auth-choose",
+      "native_stems": [
+        "auth-choose"
+      ],
+      "reference_candidates": [
+        "auth-choose"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "account sign-in",
+        "identity": "provider selection or provider information"
+      },
+      "trigger": {
+        "value": "Native opens auth wizard at Choose or Information phase.",
+        "source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205"
+      },
+      "data": {
+        "value": "Native fixture Microsoft/Offline/Authlib branches; synthetic identities, no credential exchange.",
+        "source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-92,176-179",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "sign_in_step_layout_only",
+      "rationale": "Same sign-in workflow steps, but source capture is a local interface preview and not a real authorization flow.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-92,176-179",
+        "trigger": "Open /accounts/new; auth-choose stops at provider choice; auth-information chooses default Microsoft and clicks Continue.",
+        "data": "React local sign-in preview uses same broad provider choice/information task and local fixtures.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "account-sign-in"
+    },
+    {
+      "case_id": "auth-information",
+      "native_stems": [
+        "auth-information"
+      ],
+      "reference_candidates": [
+        "auth-information"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "account sign-in",
+        "identity": "provider selection or provider information"
+      },
+      "trigger": {
+        "value": "Native opens auth wizard at Choose or Information phase.",
+        "source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205"
+      },
+      "data": {
+        "value": "Native fixture Microsoft/Offline/Authlib branches; synthetic identities, no credential exchange.",
+        "source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:350-385; crates/block-ui/src/authentication.rs:181-205",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-92,176-179",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "sign_in_step_layout_only",
+      "rationale": "Same sign-in workflow steps, but source capture is a local interface preview and not a real authorization flow.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-92,176-179",
+        "trigger": "Open /accounts/new; auth-choose stops at provider choice; auth-information chooses default Microsoft and clicks Continue.",
+        "data": "React local sign-in preview uses same broad provider choice/information task and local fixtures.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "account-sign-in"
+    },
+    {
+      "case_id": "auth-authlib-information",
+      "native_stems": [
+        "auth-authlib-information"
+      ],
+      "reference_candidates": [
+        "auth-authlib-information"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Authlib account sign-in",
+        "identity": "provider information step"
+      },
+      "trigger": {
+        "value": "Native selects Authlib and opens Information phase.",
+        "source": "crates/block-ui/src/authentication.rs:187-249; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "data": {
+        "value": "Native fixture uses community.example.test HTTPS provider and player@example.test login.",
+        "source": "crates/block-ui/src/authentication.rs:187-249; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-249; crates/block-ui/src/scenarios.rs:363-385",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-117",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authlib_information_layout_only",
+      "rationale": "Same task step; fixture provider details and execution mode are synthetic and differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-117",
+        "trigger": "Choose Authlib-Injector and Continue.",
+        "data": "React Authlib wizard information page; local seeded providers; no server request.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-account-sign-in"
+    },
+    {
+      "case_id": "auth-authlib-http-warning",
+      "native_stems": [
+        "auth-authlib-http-warning"
+      ],
+      "reference_candidates": [
+        "auth-authlib-http-warning"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "Authlib provider HTTP consent",
+        "identity": "insecure authentication endpoint"
+      },
+      "trigger": {
+        "value": "Native Authlib Information phase is seeded with existing HTTP community provider.",
+        "source": "crates/block-ui/src/authentication.rs:187-245,772-804"
+      },
+      "data": {
+        "value": "Native endpoint community.example.test/api; consent state tied to provider API.",
+        "source": "crates/block-ui/src/authentication.rs:187-245,772-804"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-245,772-804",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:99-106",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "http_consent_component_only",
+      "rationale": "Same warning/control purpose, but existing-provider auth selection vs new-provider creation are different data and tasks.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:99-106",
+        "trigger": "Authlib sign-in → Add authentication provider; create provider using 127.0.0.1 HTTP API; submit.",
+        "data": "React warning appears during adding a new provider, with a different local endpoint.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-provider-HTTP-consent"
+    },
+    {
+      "case_id": "auth-authlib-characters",
+      "native_stems": [
+        "auth-authlib-characters"
+      ],
+      "reference_candidates": [
+        "auth-authlib-characters"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "Authlib account character selection",
+        "identity": "selected game character"
+      },
+      "trigger": {
+        "value": "Native Authlib wizard enters Characters phase and selects Builder.",
+        "source": "crates/block-ui/src/authentication.rs:187-194,250-262"
+      },
+      "data": {
+        "value": "Synthetic Explorer/Builder character choices.",
+        "source": "crates/block-ui/src/authentication.rs:187-194,250-262"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-194,250-262",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:108-115",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No corresponding prototype step exists; old mapping correctly has no prototype equivalent.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_unavailable",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:108-115",
+        "trigger": "Requested recipe explicitly throws before sign-in because Authlib prototype has no character-selection screen.",
+        "data": "Current prototype flow jumps from sign-in to completion.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-account-character-selection"
+    },
+    {
+      "case_id": "auth-authlib-complete",
+      "native_stems": [
+        "auth-authlib-complete"
+      ],
+      "reference_candidates": [
+        "auth-authlib-complete"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Authlib account sign-in",
+        "identity": "completed local account result"
+      },
+      "trigger": {
+        "value": "Native Authlib wizard enters Complete with fixture account result.",
+        "source": "crates/block-ui/src/authentication.rs:187-194,263-274"
+      },
+      "data": {
+        "value": "Synthetic Authlib account provider id 1 and player@example.test; credential reference is synthetic.",
+        "source": "crates/block-ui/src/authentication.rs:187-194,263-274"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-194,263-274",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:108-117",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "completion_state_layout_only",
+      "rationale": "Same completion step; account identity, auth result, and persistence semantics are not equivalent.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:108-117",
+        "trigger": "Fill preview username/password and Sign in; local preview goes to “You’re all set”.",
+        "data": "React local flow uses fixture@example.invalid/test-only-password and simulated completion; no credentials or network.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-account-sign-in"
+    },
+    {
+      "case_id": "auth-authlib-provider-add",
+      "native_stems": [
+        "auth-authlib-provider-add"
+      ],
+      "reference_candidates": [
+        "auth-authlib-provider-add"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Authlib provider registration",
+        "identity": "add provider from account wizard"
+      },
+      "trigger": {
+        "value": "Native opens provider-add surface while Authlib wizard is on Information phase.",
+        "source": "crates/block-ui/src/scenarios.rs:363-385; /Users/zeithrold/Documents/Develop/Native/Block/crates/block-ui/src/providers.rs:105-128"
+      },
+      "data": {
+        "value": "Two synthetic providers in fixture; add surface native is separate OS window.",
+        "source": "crates/block-ui/src/scenarios.rs:363-385; /Users/zeithrold/Documents/Develop/Native/Block/crates/block-ui/src/providers.rs:105-128"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:363-385; /Users/zeithrold/Documents/Develop/Native/Block/crates/block-ui/src/providers.rs:105-128",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:93-98,32-35",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "provider_add_form_layout_only",
+      "rationale": "Same subtask/form fields, but native separate window and React dialog are different presentation containers.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:93-98,32-35",
+        "trigger": "In Authlib wizard click Add authentication provider and inspect add-provider dialog.",
+        "data": "React captures local provider-add dialog and quick-link drop target.",
+        "archive_state_note": "React captures an in-window dialog; native is an extra OS window. The capture script explicitly maps the React dialog for this scenario."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Authlib-provider-registration"
+    },
+    {
+      "case_id": "auth-offline-information",
+      "native_stems": [
+        "auth-offline-information"
+      ],
+      "reference_candidates": [
+        "auth-offline-information"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "offline account sign-in",
+        "identity": "player name entry, validation, or completion"
+      },
+      "trigger": {
+        "value": "Native selects Offline branch and enters Information, Failed, or Complete phase.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "data": {
+        "value": "Pixel valid name and “bad name” invalid fixture; native complete account is Pixel.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "offline_sign_in_step_layout_only",
+      "rationale": "Same workflow steps and username validation task, but exact user strings and resulting account identity differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "trigger": "Choose Offline Mode; error case submits invalid name; complete case submits ProtoPlayer.",
+        "data": "React validation and completion use separate fixture names; local preview only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "offline-account-sign-in"
+    },
+    {
+      "case_id": "auth-offline-error",
+      "native_stems": [
+        "auth-offline-error"
+      ],
+      "reference_candidates": [
+        "auth-offline-error"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "offline account sign-in",
+        "identity": "player name entry, validation, or completion"
+      },
+      "trigger": {
+        "value": "Native selects Offline branch and enters Information, Failed, or Complete phase.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "data": {
+        "value": "Pixel valid name and “bad name” invalid fixture; native complete account is Pixel.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "offline_sign_in_step_layout_only",
+      "rationale": "Same workflow steps and username validation task, but exact user strings and resulting account identity differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "trigger": "Choose Offline Mode; error case submits invalid name; complete case submits ProtoPlayer.",
+        "data": "React validation and completion use separate fixture names; local preview only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "offline-account-sign-in"
+    },
+    {
+      "case_id": "auth-offline-complete",
+      "native_stems": [
+        "auth-offline-complete"
+      ],
+      "reference_candidates": [
+        "auth-offline-complete"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "offline account sign-in",
+        "identity": "player name entry, validation, or completion"
+      },
+      "trigger": {
+        "value": "Native selects Offline branch and enters Information, Failed, or Complete phase.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "data": {
+        "value": "Pixel valid name and “bad name” invalid fixture; native complete account is Pixel.",
+        "source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-228; crates/block-ui/src/scenarios.rs:363-385",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "offline_sign_in_step_layout_only",
+      "rationale": "Same workflow steps and username validation task, but exact user strings and resulting account identity differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:80-90,119-129",
+        "trigger": "Choose Offline Mode; error case submits invalid name; complete case submits ProtoPlayer.",
+        "data": "React validation and completion use separate fixture names; local preview only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "offline-account-sign-in"
+    },
+    {
+      "case_id": "auth-device-preparing",
+      "native_stems": [
+        "auth-device-preparing"
+      ],
+      "reference_candidates": [
+        "auth-device-preparing"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Microsoft authorization workflow",
+        "identity": "device preparation, browser wait, verify, or completion"
+      },
+      "trigger": {
+        "value": "Native seeds named phase; device waiting includes TEST-CODE and link; PKCE waiting retains browser URL.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "data": {
+        "value": "Native states are synthetic and do not call Microsoft; device code expires in 900 seconds.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-204,276-291",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authorization_step_and_surface_layout_only",
+      "rationale": "Same broad authorization workflow stages, but React local preview and native fixtures are not real provider behavior; popup/window geometry also differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "trigger": "Current recipes switch to device code, open a local authorization preview, observe waiting, approve NewPlayer, then observe verify/complete.",
+        "data": "React popup is local simulator; no live Microsoft identity or authorization.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-workflow"
+    },
+    {
+      "case_id": "auth-device-waiting",
+      "native_stems": [
+        "auth-device-waiting"
+      ],
+      "reference_candidates": [
+        "auth-device-waiting"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Microsoft authorization workflow",
+        "identity": "device preparation, browser wait, verify, or completion"
+      },
+      "trigger": {
+        "value": "Native seeds named phase; device waiting includes TEST-CODE and link; PKCE waiting retains browser URL.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "data": {
+        "value": "Native states are synthetic and do not call Microsoft; device code expires in 900 seconds.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-204,276-291",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authorization_step_and_surface_layout_only",
+      "rationale": "Same broad authorization workflow stages, but React local preview and native fixtures are not real provider behavior; popup/window geometry also differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "trigger": "Current recipes switch to device code, open a local authorization preview, observe waiting, approve NewPlayer, then observe verify/complete.",
+        "data": "React device waiting state opens a local authorization-preview popup and shows a waiting message; native displays synthetic TEST-CODE and URL. The preview popup itself is separately captured.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-workflow"
+    },
+    {
+      "case_id": "auth-waiting",
+      "native_stems": [
+        "auth-waiting"
+      ],
+      "reference_candidates": [
+        "auth-waiting"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Microsoft authorization workflow",
+        "identity": "device preparation, browser wait, verify, or completion"
+      },
+      "trigger": {
+        "value": "Native seeds named phase; device waiting includes TEST-CODE and link; PKCE waiting retains browser URL.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "data": {
+        "value": "Native states are synthetic and do not call Microsoft; device code expires in 900 seconds.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-204,276-291",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authorization_step_and_surface_layout_only",
+      "rationale": "Same broad authorization workflow stages, but React local preview and native fixtures are not real provider behavior; popup/window geometry also differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "trigger": "Current recipes switch to device code, open a local authorization preview, observe waiting, approve NewPlayer, then observe verify/complete.",
+        "data": "React popup is local simulator; no live Microsoft identity or authorization.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-workflow"
+    },
+    {
+      "case_id": "auth-verifying",
+      "native_stems": [
+        "auth-verifying"
+      ],
+      "reference_candidates": [
+        "auth-verifying"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Microsoft authorization workflow",
+        "identity": "device preparation, browser wait, verify, or completion"
+      },
+      "trigger": {
+        "value": "Native seeds named phase; device waiting includes TEST-CODE and link; PKCE waiting retains browser URL.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "data": {
+        "value": "Native states are synthetic and do not call Microsoft; device code expires in 900 seconds.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-204,276-291",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authorization_step_and_surface_layout_only",
+      "rationale": "Same broad authorization workflow stages, but React local preview and native fixtures are not real provider behavior; popup/window geometry also differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "trigger": "Current recipes switch to device code, open a local authorization preview, observe waiting, approve NewPlayer, then observe verify/complete.",
+        "data": "React popup is local simulator; no live Microsoft identity or authorization.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-workflow"
+    },
+    {
+      "case_id": "auth-complete",
+      "native_stems": [
+        "auth-complete"
+      ],
+      "reference_candidates": [
+        "auth-complete"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Microsoft authorization workflow",
+        "identity": "device preparation, browser wait, verify, or completion"
+      },
+      "trigger": {
+        "value": "Native seeds named phase; device waiting includes TEST-CODE and link; PKCE waiting retains browser URL.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "data": {
+        "value": "Native states are synthetic and do not call Microsoft; device code expires in 900 seconds.",
+        "source": "crates/block-ui/src/authentication.rs:187-204,276-291"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-204,276-291",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "authorization_step_and_surface_layout_only",
+      "rationale": "Same broad authorization workflow stages, but React local preview and native fixtures are not real provider behavior; popup/window geometry also differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:131-169",
+        "trigger": "Current recipes switch to device code, open a local authorization preview, observe waiting, approve NewPlayer, then observe verify/complete.",
+        "data": "React popup is local simulator; no live Microsoft identity or authorization.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-workflow"
+    },
+    {
+      "case_id": "auth-saving",
+      "native_stems": [
+        "auth-saving"
+      ],
+      "reference_candidates": [
+        "auth-saving"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "Microsoft sign-in save step",
+        "identity": "prepared identity persistence"
+      },
+      "trigger": {
+        "value": "Native auth wizard enters Saving phase after successful authorization.",
+        "source": "crates/block-ui/src/authentication.rs:187-210"
+      },
+      "data": {
+        "value": "Synthetic prepared account; no credential persistence operation is exercised.",
+        "source": "crates/block-ui/src/authentication.rs:187-210"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/authentication.rs:187-210",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:147-170",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "Prototype has no observable saving step.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_unavailable",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:147-170",
+        "trigger": "Current requested recipe throws because preview Finish adds account immediately without observable saving state.",
+        "data": "No React saving screen.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-sign-in-save-step"
+    },
+    {
+      "case_id": "auth-error",
+      "native_stems": [
+        "auth-error"
+      ],
+      "reference_candidates": [
+        "auth-error"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "Microsoft authorization attempt",
+        "identity": "expired request"
+      },
+      "trigger": {
+        "value": "scenario enters failed phase with expiry message",
+        "source": "crates/block-ui/src/authentication.rs:187-204,292-294"
+      },
+      "data": {
+        "value": "synthetic Microsoft auth; expired request error",
+        "source": "crates/block-ui/src/scenarios.rs:142-162; crates/block-ui/src/authentication.rs:292-294"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Prototype auth-error closes a local authorization popup and shows closed-window error; expiration and user closure are distinct outcomes.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current snap-proto includes this scenario key and an interaction recipe; see source line references in the case provenance.",
+        "data": "React static interface-preview fixture; exact per-screen seed only when cited in the case data.",
+        "archive_state_note": "No capture receipt means archived source commit, focus, and scroll remain unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Microsoft-authorization-attempt"
+    },
+    {
+      "case_id": "settings-general",
+      "native_stems": [
+        "settings-general"
+      ],
+      "reference_candidates": [
+        "settings-general"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher settings category",
+        "identity": "selected category and editable defaults"
+      },
+      "trigger": {
+        "value": "Native opens Settings then directly selects named category.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "data": {
+        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "settings_category_layout_only",
+      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
+        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-settings-category"
+    },
+    {
+      "case_id": "settings-game",
+      "native_stems": [
+        "settings-game"
+      ],
+      "reference_candidates": [
+        "settings-game"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher settings category",
+        "identity": "selected category and editable defaults"
+      },
+      "trigger": {
+        "value": "Native opens Settings then directly selects named category.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "data": {
+        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "settings_category_layout_only",
+      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
+        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-settings-category"
+    },
+    {
+      "case_id": "settings-profiles",
+      "native_stems": [
+        "settings-profiles"
+      ],
+      "reference_candidates": [
+        "settings-profiles"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher settings category",
+        "identity": "selected category and editable defaults"
+      },
+      "trigger": {
+        "value": "Native opens Settings then directly selects named category.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "data": {
+        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "settings_category_layout_only",
+      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
+        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-settings-category"
+    },
+    {
+      "case_id": "settings-downloads",
+      "native_stems": [
+        "settings-downloads"
+      ],
+      "reference_candidates": [
+        "settings-downloads"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher settings category",
+        "identity": "selected category and editable defaults"
+      },
+      "trigger": {
+        "value": "Native opens Settings then directly selects named category.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "data": {
+        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "settings_category_layout_only",
+      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
+        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-settings-category"
+    },
+    {
+      "case_id": "settings-socks5",
+      "native_stems": [
+        "settings-socks5"
+      ],
+      "reference_candidates": [
+        "settings-socks5"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "download proxy settings",
+        "identity": "SOCKS5 proxy configuration"
+      },
+      "trigger": {
+        "value": "Native scenario injects SOCKS5H proxy URL then opens Downloads settings.",
+        "source": "crates/block-ui/src/scenarios.rs:405-413"
+      },
+      "data": {
+        "value": "socks5h://127.0.0.1:1080 synthetic proxy.",
+        "source": "crates/block-ui/src/scenarios.rs:405-413"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:405-413",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-fields.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "download_settings_category_layout_only",
+      "rationale": "Related settings category, but SOCKS5 data state is not captured by the current React recipe.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-fields.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "trigger": "No settings-socks5 scenario requested; settings-downloads opens generic Downloads & network category.",
+        "data": "React source supports connection preferences but no script injects the SOCKS5 value.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "download-proxy-settings"
+    },
+    {
+      "case_id": "settings-storage",
+      "native_stems": [
+        "settings-storage"
+      ],
+      "reference_candidates": [
+        "settings-storage"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher settings category",
+        "identity": "selected category and editable defaults"
+      },
+      "trigger": {
+        "value": "Native opens Settings then directly selects named category.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "data": {
+        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
+        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "settings_category_layout_only",
+      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
+        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
+        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-settings-category"
+    },
+    {
+      "case_id": "settings-storage-moving",
+      "native_stems": [
+        "settings-storage-moving"
+      ],
+      "reference_candidates": [
+        "settings-storage-moving"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "managed storage migration",
+        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
+      },
+      "trigger": {
+        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "data": {
+        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "storage_settings_shell_only",
+      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
+        "data": "Static path preview only; no migration lifecycle data.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "managed-storage-migration"
+    },
+    {
+      "case_id": "settings-storage-retained",
+      "native_stems": [
+        "settings-storage-retained"
+      ],
+      "reference_candidates": [
+        "settings-storage-retained"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "managed storage migration",
+        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
+      },
+      "trigger": {
+        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "data": {
+        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "storage_settings_shell_only",
+      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
+        "data": "Static path preview only; no migration lifecycle data.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "managed-storage-migration"
+    },
+    {
+      "case_id": "settings-storage-interrupted",
+      "native_stems": [
+        "settings-storage-interrupted"
+      ],
+      "reference_candidates": [
+        "settings-storage-interrupted"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "managed storage migration",
+        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
+      },
+      "trigger": {
+        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "data": {
+        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "storage_settings_shell_only",
+      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
+        "data": "Static path preview only; no migration lifecycle data.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "managed-storage-migration"
+    },
+    {
+      "case_id": "storage-cleanup-confirmation",
+      "native_stems": [
+        "storage-cleanup-confirmation"
+      ],
+      "reference_candidates": [
+        "storage-cleanup-confirmation"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "managed storage migration",
+        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
+      },
+      "trigger": {
+        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "data": {
+        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
+        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "storage_settings_shell_only",
+      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
+        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
+        "data": "Static path preview only; no migration lifecycle data.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "managed-storage-migration"
+    },
+    {
+      "case_id": "about",
+      "native_stems": [
+        "about"
+      ],
+      "reference_candidates": [
+        "about"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "About information",
+        "identity": "product/build information page"
+      },
+      "trigger": {
+        "value": "Native selects About tab.",
+        "source": "crates/block-ui/src/scenarios.rs:453-455"
+      },
+      "data": {
+        "value": "Native current product metadata.",
+        "source": "crates/block-ui/src/scenarios.rs:453-455"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:453-455",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:51-52,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/about.tsx",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "about_page_layout_only",
+      "rationale": "Same informational page task; build metadata and revision values belong to separate artifacts.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:51-52,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/about.tsx",
+        "trigger": "Navigate directly to /about and assert About heading.",
+        "data": "React static Interface preview product/build metadata.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "About-information"
+    },
+    {
+      "case_id": "welcome-1",
+      "native_stems": [
+        "welcome-1"
+      ],
+      "reference_candidates": [
+        "welcome-1"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "onboarding workflow",
+        "identity": "native staged Game step"
+      },
+      "trigger": {
+        "value": "debug scenario directly sets onboarding step Game",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture with selected Zeithrold account",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "onboarding_strategy_and_shared_setup_components",
+      "rationale": "Native Welcome step 1 is a staged Game task with a selected synthetic account in state; React presents Instance and Account setup together, with account initially unset. Compare onboarding strategy and shared setup components only.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture_combined_setup_strategy",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-46,230-234; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/onboarding/welcome-guide.tsx:24-75",
+        "trigger": "Navigate /welcome and assert guide heading.",
+        "data": "React shows Instance setup and Account setup together; new Instance default, account initially null. Native step 1 is Game only and has preselected synthetic Zeithrold account.",
+        "archive_state_note": "Different onboarding task strategy, not a same-stage screenshot pair."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "onboarding-workflow"
+    },
+    {
+      "case_id": "welcome-2",
+      "native_stems": [
+        "welcome-2"
+      ],
+      "reference_candidates": [
+        "welcome-2"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "onboarding workflow",
+        "identity": "native staged Account step"
+      },
+      "trigger": {
+        "value": "debug scenario directly sets onboarding step Account",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture with selected Zeithrold account",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Prototype Welcome is one combined game+account task; step 2/3 are unavailable in current snap-proto interaction. Compare as task strategies, not same-name screen parity.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_unavailable",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:230-234",
+        "trigger": "The recipe throws because combined Welcome has no separate step 2 or 3.",
+        "data": "One React page handles Instance and Account setup; no separate account/review stage.",
+        "archive_state_note": "No current screenshot is created by this failing recipe."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "onboarding-workflow"
+    },
+    {
+      "case_id": "welcome-3",
+      "native_stems": [
+        "welcome-3"
+      ],
+      "reference_candidates": [
+        "welcome-3"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "onboarding workflow",
+        "identity": "native staged Review step"
+      },
+      "trigger": {
+        "value": "debug scenario directly sets onboarding step Review",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture with selected Zeithrold account",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Prototype Welcome is one combined game+account task; step 2/3 are unavailable in current snap-proto interaction. Compare as task strategies, not same-name screen parity.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_unavailable",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:230-234",
+        "trigger": "The recipe throws because combined Welcome has no separate step 2 or 3.",
+        "data": "One React page handles Instance and Account setup; no separate account/review stage.",
+        "archive_state_note": "No current screenshot is created by this failing recipe."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "onboarding-workflow"
+    },
+    {
+      "case_id": "home-profile-drawer",
+      "native_stems": [
+        "home-profile-drawer"
+      ],
+      "reference_candidates": [
+        "home-profile-drawer"
+      ],
+      "review_status": "source_audited_difference",
+      "object": {
+        "type": "launcher game/profile switcher",
+        "identity": "profile selection sheet"
+      },
+      "trigger": {
+        "value": "Native opens Drawer::Profiles from Home.",
+        "source": "crates/block-ui/src/scenarios.rs:474-496"
+      },
+      "data": {
+        "value": "Native drawer is labeled around switching game/profile in current UI.",
+        "source": "crates/block-ui/src/scenarios.rs:474-496"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:474-496",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:235-238",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "selection_drawer_layout_only",
+      "rationale": "Related selection task, but prototype says Switch Profile while native drawer exposes Switch Game; object vocabulary and inventory differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:235-238",
+        "trigger": "Click Switch Profile on React Home and inspect dialog.",
+        "data": "React dialog label and selected profile are seeded preview state.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-game/profile-switcher"
+    },
+    {
+      "case_id": "home-account-drawer",
+      "native_stems": [
+        "home-account-drawer"
+      ],
+      "reference_candidates": [
+        "home-account-drawer"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher account switcher",
+        "identity": "choose active account"
+      },
+      "trigger": {
+        "value": "Native opens account drawer from Home.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,474-496"
+      },
+      "data": {
+        "value": "Native synthetic accounts Zeithrold/Nova/Pixel.",
+        "source": "crates/block-ui/src/scenarios.rs:142-163,474-496"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:142-163,474-496",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/home/account-switcher.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "account_switcher_component_task_only",
+      "rationale": "Same account-selection task exists in prototype sources, but no script recipe/candidate is declared for this native stem.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/home/account-switcher.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20",
+        "trigger": "No account-switcher drawer capture interaction in current snap-proto script.",
+        "data": "React has seeded account data and account components, but this path is not captured in current script.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-account-switcher"
+    },
+    {
+      "case_id": "home-downloads-drawer",
+      "native_stems": [
+        "home-downloads-drawer"
+      ],
+      "reference_candidates": [
+        "home-downloads-drawer"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "launcher active downloads",
+        "identity": "open active download list from Home"
+      },
+      "trigger": {
+        "value": "Native seeds active tracker and directly opens Downloads drawer.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230,474-480"
+      },
+      "data": {
+        "value": "Eight synthetic resources; two complete, one cached.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230,474-480"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:204-230,474-480",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:239-244,32-35",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "active_downloads_drawer_layout_only",
+      "rationale": "Same open-active-downloads task, but task origin/state source differs; native uses deterministic file tracker and React uses simulated launch.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:239-244,32-35",
+        "trigger": "Click Launch; wait for preview “Downloading files”; click View downloads.",
+        "data": "Local preview launch simulation; no real download; React capture also separately captures the Downloads dialog.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "launcher-active-downloads"
+    },
+    {
+      "case_id": "toast-motion",
+      "native_stems": [
+        "toast-motion"
+      ],
+      "reference_candidates": [],
+      "review_status": "native_only",
+      "object": {
+        "type": "toast feedback",
+        "identity": "motion trace fixture"
+      },
+      "trigger": {
+        "value": "debug scenario requests toast-motion state",
+        "source": "crates/block-ui/src/scenarios.rs:126-138"
+      },
+      "data": {
+        "value": "synthetic toast fixtures; reduced-motion preference differs by scenario",
+        "source": "crates/block-ui/src/scenarios.rs:126-138"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "native_capture_script": "scripts/snap-native or scripts/snap-native-windows (platform dependent)",
+        "native_image_commit": "unknown for archived images",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "No prototype reference is declared for these scenarios.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No scenario key in current snap-proto requested list; any same-stem PNG is an archive candidate with unknown source revision.",
+        "data": "React static interface-preview fixture; exact per-screen seed only when cited in the case data.",
+        "archive_state_note": "No capture receipt means archived source commit, focus, and scroll remain unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "toast-feedback"
+    },
+    {
+      "case_id": "toast-motion-reduced",
+      "native_stems": [
+        "toast-motion-reduced"
+      ],
+      "reference_candidates": [],
+      "review_status": "native_only",
+      "object": {
+        "type": "toast feedback",
+        "identity": "motion trace fixture"
+      },
+      "trigger": {
+        "value": "debug scenario requests toast-motion state",
+        "source": "crates/block-ui/src/scenarios.rs:126-138"
+      },
+      "data": {
+        "value": "synthetic toast fixtures; reduced-motion preference differs by scenario",
+        "source": "crates/block-ui/src/scenarios.rs:126-138"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "native_capture_script": "scripts/snap-native or scripts/snap-native-windows (platform dependent)",
+        "native_image_commit": "unknown for archived images",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "No prototype reference is declared for these scenarios.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No scenario key in current snap-proto requested list; any same-stem PNG is an archive candidate with unknown source revision.",
+        "data": "React static interface-preview fixture; exact per-screen seed only when cited in the case data.",
+        "archive_state_note": "No capture receipt means archived source commit, focus, and scroll remain unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "toast-feedback"
+    },
+    {
+      "case_id": "download-files",
+      "native_stems": [
+        "download-files"
+      ],
+      "reference_candidates": [
+        "download-files"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "download file details",
+        "identity": "active download group files"
+      },
+      "trigger": {
+        "value": "Native opens DownloadFiles(Active) surface.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230,478-480"
+      },
+      "data": {
+        "value": "Synthetic active resource tracker with 8 resource entries.",
+        "source": "crates/block-ui/src/scenarios.rs:204-230,478-480"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:204-230,478-480",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:239-244",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "none",
+      "rationale": "No current prototype equivalent for the native file detail view.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:239-244",
+        "trigger": "No standalone file-detail/download-files route or click in current snap-proto recipe.",
+        "data": "React captures only launcher active downloads dialog, not a file detail view.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "download-file-details"
+    },
+    {
+      "case_id": "wizard-version-picker",
+      "native_stems": [
+        "wizard-version-picker"
+      ],
+      "reference_candidates": [
+        "wizard-version-picker"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "new game version selection",
+        "identity": "Minecraft version picker subpage"
+      },
+      "trigger": {
+        "value": "Native opens Version page in game wizard.",
+        "source": "crates/block-ui/src/scenarios.rs:163-184,265-281"
+      },
+      "data": {
+        "value": "Native synthetic versions 1.21.1, 1.20.6, 1.20.1, 1.16.5, 1.12.2, snapshot 24w14a.",
+        "source": "crates/block-ui/src/scenarios.rs:163-184,265-281"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:163-184,265-281",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:245-248; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/instance-setup.tsx:35-42",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "version_picker_component_layout_only",
+      "rationale": "Same version-selection task/component; no extra native dialog/window equivalent and catalog data differs.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:245-248; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/instance-setup.tsx:35-42",
+        "trigger": "On /games/new click Configure Version and inspect Version page.",
+        "data": "React static gameVersions catalog; selection is in-page configuration, not a separate native picker window.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-version-selection"
+    },
+    {
+      "case_id": "wizard-loader-picker",
+      "native_stems": [
+        "wizard-loader-picker"
+      ],
+      "reference_candidates": [
+        "wizard-loader-picker"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "new game loader picker",
+        "identity": "native fixture: Vanilla selected; archived React image: Fabric selected"
+      },
+      "trigger": {
+        "value": "Native generic key opens Loader page without changing default form.loader=Vanilla.",
+        "source": "crates/block-ui/src/scenarios.rs:257-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "data": {
+        "value": "Native selected Vanilla with no loader version. React archive visibly selects Fabric 0.15.11, shows six Fabric builds for Minecraft 1.20.1; source commit unknown.",
+        "source": "crates/block-ui/src/game_wizard.rs:786-793,3028-3058; target/parity-shots/proto/wizard-loader-picker-light.png"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "loader_picker_component_layout_only",
+      "rationale": "Native generic wizard-loader-picker leaves default Vanilla selected; archived React candidate visibly selects Fabric. It is a real state mismatch. The React source revision/capture route is unknown, so only the loader-picker component frame can be compared.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested_and_no_current_route_recipe",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No route mapping or interaction recipe for wizard-loader-picker in current script.",
+        "data": "Archive visibly shows Fabric selected, 6 builds, Minecraft 1.20.1, selected build 0.15.11; provenance unknown.",
+        "archive_state_note": "Archived PNG wizard-loader-picker-light.png is byte-identical to wizard-fabric-picker-light.png; visual state is Fabric, not Vanilla.",
+        "archive_visual_observation": "Fabric selected; heading Fabric versions; build count 6; Minecraft 1.20.1; selected version 0.15.11.",
+        "observation_method": "Direct visual inspection of the archived PNG. This establishes displayed content, not source commit or capture route."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-loader-picker"
+    },
+    {
+      "case_id": "wizard-fabric-picker",
+      "native_stems": [
+        "wizard-fabric-picker"
+      ],
+      "reference_candidates": [
+        "wizard-fabric-picker"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "new game Instance loader selection",
+        "identity": "Fabric selected"
+      },
+      "trigger": {
+        "value": "scenario selects Fabric and opens Loader step",
+        "source": "crates/block-ui/src/scenarios.rs:298-317,327-341"
+      },
+      "data": {
+        "value": "Native synthetic Fabric 0.16.14 plus beta 0.16.0-beta.1 for the new wizard version; archive image shows Fabric 0.15.11 and six builds for Minecraft 1.20.1.",
+        "source": "crates/block-ui/src/scenarios.rs:318-345"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "loader_picker_component_layout_only",
+      "rationale": "Both displayed states select Fabric in the same picker task. Catalog/version/build datasets differ, and the archived reference commit is unknown; do not claim state or pixel equivalence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested_and_no_current_route_recipe",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No current recipe for wizard-fabric-picker.",
+        "data": "Archive visibly shows Fabric selected and 6 builds; this is a matching nominal loader but no capture revision receipt exists.",
+        "archive_state_note": "Byte-identical to archived wizard-loader-picker image; cannot claim separate independent capture.",
+        "archive_visual_observation": "Fabric selected; heading Fabric versions; build count 6; Minecraft 1.20.1; selected version 0.15.11.",
+        "observation_method": "Direct visual inspection of the archived PNG. This establishes displayed content, not source commit or capture route."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-Instance-loader-selection"
+    },
+    {
+      "case_id": "wizard-quilt-picker",
+      "native_stems": [
+        "wizard-quilt-picker"
+      ],
+      "reference_candidates": [
+        "wizard-quilt-picker"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game mod-loader catalog",
+        "identity": "loader-specific picker, loading, or fetch-failure state"
+      },
+      "trigger": {
+        "value": "Native opens Loader page and selects named loader or catalog lifecycle fixture.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "data": {
+        "value": "Synthetic Quilt/NeoForge/Forge builds or explicit loading/failure collection state.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:265-341,551-591",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "loader_picker_component_shell_only",
+      "rationale": "Shared broad mod-loader selection task may exist, but this capture source has no matching named state or catalog lifecycle. Do not count as state correspondence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current script does not request these stems or provide routeFor/interactions; React catalog is local synchronous sample data.",
+        "data": "No prototype loading/fetch-failure state; static game-options catalog only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-mod-loader-catalog"
+    },
+    {
+      "case_id": "wizard-neoforge-picker",
+      "native_stems": [
+        "wizard-neoforge-picker"
+      ],
+      "reference_candidates": [
+        "wizard-neoforge-picker"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game mod-loader catalog",
+        "identity": "loader-specific picker, loading, or fetch-failure state"
+      },
+      "trigger": {
+        "value": "Native opens Loader page and selects named loader or catalog lifecycle fixture.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "data": {
+        "value": "Synthetic Quilt/NeoForge/Forge builds or explicit loading/failure collection state.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:265-341,551-591",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "loader_picker_component_shell_only",
+      "rationale": "Shared broad mod-loader selection task may exist, but this capture source has no matching named state or catalog lifecycle. Do not count as state correspondence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current script does not request these stems or provide routeFor/interactions; React catalog is local synchronous sample data.",
+        "data": "No prototype loading/fetch-failure state; static game-options catalog only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-mod-loader-catalog"
+    },
+    {
+      "case_id": "wizard-forge-picker",
+      "native_stems": [
+        "wizard-forge-picker"
+      ],
+      "reference_candidates": [
+        "wizard-forge-picker"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game mod-loader catalog",
+        "identity": "loader-specific picker, loading, or fetch-failure state"
+      },
+      "trigger": {
+        "value": "Native opens Loader page and selects named loader or catalog lifecycle fixture.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "data": {
+        "value": "Synthetic Quilt/NeoForge/Forge builds or explicit loading/failure collection state.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:265-341,551-591",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "loader_picker_component_shell_only",
+      "rationale": "Shared broad mod-loader selection task may exist, but this capture source has no matching named state or catalog lifecycle. Do not count as state correspondence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current script does not request these stems or provide routeFor/interactions; React catalog is local synchronous sample data.",
+        "data": "No prototype loading/fetch-failure state; static game-options catalog only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-mod-loader-catalog"
+    },
+    {
+      "case_id": "wizard-loader-loading",
+      "native_stems": [
+        "wizard-loader-loading"
+      ],
+      "reference_candidates": [
+        "wizard-loader-loading"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game mod-loader catalog",
+        "identity": "loader-specific picker, loading, or fetch-failure state"
+      },
+      "trigger": {
+        "value": "Native opens Loader page and selects named loader or catalog lifecycle fixture.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "data": {
+        "value": "Synthetic Quilt/NeoForge/Forge builds or explicit loading/failure collection state.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:265-341,551-591",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "loader_picker_component_shell_only",
+      "rationale": "Shared broad mod-loader selection task may exist, but this capture source has no matching named state or catalog lifecycle. Do not count as state correspondence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current script does not request these stems or provide routeFor/interactions; React catalog is local synchronous sample data.",
+        "data": "No prototype loading/fetch-failure state; static game-options catalog only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-mod-loader-catalog"
+    },
+    {
+      "case_id": "wizard-loader-error",
+      "native_stems": [
+        "wizard-loader-error"
+      ],
+      "reference_candidates": [
+        "wizard-loader-error"
+      ],
+      "review_status": "native_only",
+      "object": {
+        "type": "new game mod-loader catalog",
+        "identity": "loader-specific picker, loading, or fetch-failure state"
+      },
+      "trigger": {
+        "value": "Native opens Loader page and selects named loader or catalog lifecycle fixture.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "data": {
+        "value": "Synthetic Quilt/NeoForge/Forge builds or explicit loading/failure collection state.",
+        "source": "crates/block-ui/src/scenarios.rs:265-341,551-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:265-341,551-591",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "loader_picker_component_shell_only",
+      "rationale": "Shared broad mod-loader selection task may exist, but this capture source has no matching named state or catalog lifecycle. Do not count as state correspondence.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:6-38; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current script does not request these stems or provide routeFor/interactions; React catalog is local synchronous sample data.",
+        "data": "No prototype loading/fetch-failure state; static game-options catalog only.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-mod-loader-catalog"
+    },
+    {
+      "case_id": "wizard-loader-empty",
+      "native_stems": [
+        "wizard-loader-empty"
+      ],
+      "reference_candidates": [
+        "wizard-loader-empty"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "loader build catalog",
+        "identity": "Fabric catalog ready with zero compatible builds"
+      },
+      "trigger": {
+        "value": "scenario sets Fabric catalog ready and empty",
+        "source": "crates/block-ui/src/scenarios.rs:298-341; loader_fixture_data:583-591"
+      },
+      "data": {
+        "value": "Native: Ready Fabric catalog with zero builds and no search query. React archive visibly has six catalog builds plus query “zzzz” and message “No matching versions”.",
+        "source": "crates/block-ui/src/scenarios.rs:329-345,583-591"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "loader_picker_component_layout_only",
+      "rationale": "Native has no compatible builds after a Ready catalog fetch; archived React image shows a nonmatching search over six existing builds. Different empty-state cause, data, and recovery message.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested_and_no_current_route_recipe",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No current recipe for wizard-loader-empty.",
+        "data": "Archive visibly shows Fabric selected, six builds, query zzzz, and No matching versions; the archive key is misleading for its displayed state.",
+        "archive_visual_observation": "Fabric selected with six builds and nonmatching search query zzzz; result message is No matching versions.",
+        "observation_method": "Direct visual inspection of archived target/parity-shots/proto/wizard-loader-empty-light.png.",
+        "archive_state_note": "This is search-no-results, not no-compatible-builds. Source commit and capture route unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "loader-build-catalog"
+    },
+    {
+      "case_id": "wizard-loader-search-empty",
+      "native_stems": [
+        "wizard-loader-search-empty"
+      ],
+      "reference_candidates": [
+        "wizard-loader-empty"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "loader build catalog",
+        "identity": "Fabric catalog has builds but active query filters all out"
+      },
+      "trigger": {
+        "value": "scenario seeds nonmatching loader search query",
+        "source": "crates/block-ui/src/scenarios.rs:329-345,590-591"
+      },
+      "data": {
+        "value": "Native Ready Fabric catalog has two sample builds and active query no-matching-loader-build; archived React candidate (keyed wizard-loader-empty) has six builds and query zzzz.",
+        "source": "crates/block-ui/src/scenarios.rs:590-591,687-705"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "loader_search_empty_component_layout",
+      "rationale": "Both are search-filter-empty states by their displayed/source-defined cause, unlike native wizard-loader-empty. Compare the search-empty component layout only; data and archive provenance differ.",
+      "reference_audit": {
+        "current_snap_proto_status": "archived_visual_candidate_not_currently_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/mod-loader-picker.tsx:10-14,34-38",
+        "trigger": "Archived React capture has a nonmatching search query; it is not generated by current snap-proto script.",
+        "data": "React archive has six Fabric builds and query zzzz; native fixture has two builds and query no-matching-loader-build.",
+        "archive_visual_observation": "No matching versions appears after filtering existing builds.",
+        "observation_method": "Direct visual inspection of archived target/parity-shots/proto/wizard-loader-empty-light.png.",
+        "archive_state_note": "Cross-name semantic candidate; different build count/query and unknown archive source revision."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "loader-build-catalog"
+    },
+    {
+      "case_id": "wizard-configuration",
+      "native_stems": [
+        "wizard-configuration"
+      ],
+      "reference_candidates": [
+        "wizard-configuration"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "new game Instance wizard",
+        "identity": "setup and review workflow"
+      },
+      "trigger": {
+        "value": "wizard-setup opens new Instance wizard; wizard-review directly sets Review step; wizard-configuration selects Location page.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "data": {
+        "value": "Native scenario seeds default My Minecraft name, first synthetic available version and Vanilla loader.",
+        "source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:251-281; crates/block-ui/src/game_wizard.rs:764-793",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:13-20,224-227,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/app/routes/games_.new.tsx:1-7",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "wizard_task_shell_only",
+      "rationale": "Same overall create-game wizard family only; this specific native Location/configuration page has no React route or capture recipe in current snap-proto.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested_and_no_route_mapping",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No routeFor entry and no scenario interaction recipe for wizard-configuration.",
+        "data": "React wizard setup/review are captured, but no location/configuration page is reached.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "new-game-Instance-wizard"
+    },
+    {
+      "case_id": "welcome-version-picker",
+      "native_stems": [
+        "welcome-version-picker"
+      ],
+      "reference_candidates": [
+        "welcome-version-picker"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "navigation task",
+        "identity": "native onboarding flow with in-flow version picker"
+      },
+      "trigger": {
+        "value": "scenario initializes onboarding, then navigates to destination",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Native initializes Welcome then navigates to Version picker. Current snap-proto routes every welcome-* to /welcome; reach() only checks the guide heading and performs no destination navigation. Archived matching filename is not proof of Version picker state.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested; if manually invoked, reach() remains at Welcome",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-46,230-234",
+        "trigger": "No current script request; if invoked manually, routeFor sends /welcome and reach() only asserts the generic guide heading. No destination action follows.",
+        "data": "The React page is WelcomeGuide; native changes tab/opens version section after begin_onboarding.",
+        "archive_state_note": "welcome-about archive is byte-identical to about for the current PNG set, but source revision is unknown; no current capture recipe creates it."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "navigation-task"
+    },
+    {
+      "case_id": "remove-confirmation",
+      "native_stems": [
+        "remove-confirmation"
+      ],
+      "reference_candidates": [
+        "remove-confirmation",
+        "remove-account-confirmation"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "profile",
+        "identity": "vanilla profile/game target"
+      },
+      "trigger": {
+        "value": "scenario directly opens delete-profile confirmation; user has not triggered it",
+        "source": "crates/block-ui/src/scenarios.rs:234-239,464-475"
+      },
+      "data": {
+        "value": "synthetic library() fixture; selected profile id vanilla",
+        "source": "crates/block-ui/src/scenarios.rs:160-162,594-654"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "React script opens account deletion from /accounts. Different object and consequence; not comparable.",
+      "reference_audit": {
+        "current_snap_proto_status": "scripted_capture",
+        "requested_by_current_script": true,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "Current snap-proto includes this scenario key and an interaction recipe; see source line references in the case provenance.",
+        "data": "React static interface-preview fixture; exact per-screen seed only when cited in the case data.",
+        "archive_state_note": "No capture receipt means archived source commit, focus, and scroll remain unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "profile"
+    },
+    {
+      "case_id": "remove-account-confirmation",
+      "native_stems": [
+        "remove-account-confirmation"
+      ],
+      "reference_candidates": [
+        "remove-account-confirmation"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "account",
+        "identity": "selected synthetic account (Zeithrold)"
+      },
+      "trigger": {
+        "value": "scenario directly opens account-removal confirmation",
+        "source": "crates/block-ui/src/scenarios.rs:350-352,472-474"
+      },
+      "data": {
+        "value": "synthetic Microsoft account Zeithrold; account fixture",
+        "source": "crates/block-ui/src/scenarios.rs:142-162"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "The archived same-name prototype candidate has unknown provenance; its current capture script does not request this key. Do not assert a valid pair.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:12-20,43-53",
+        "trigger": "No scenario key in current snap-proto requested list; any same-stem PNG is an archive candidate with unknown source revision.",
+        "data": "React static interface-preview fixture; exact per-screen seed only when cited in the case data.",
+        "archive_state_note": "No capture receipt means archived source commit, focus, and scroll remain unknown."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "account"
+    },
+    {
+      "case_id": "separate-confirmation",
+      "native_stems": [
+        "separate-confirmation"
+      ],
+      "reference_candidates": [
+        "separate-confirmation"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "profile mode conversion confirmation",
+        "identity": "Bundled to Separated conversion"
+      },
+      "trigger": {
+        "value": "Native directly opens SeparateProfiles confirmation surface.",
+        "source": "crates/block-ui/src/scenarios.rs:234-249,485-496"
+      },
+      "data": {
+        "value": "Native synthetic bundled profiles.",
+        "source": "crates/block-ui/src/scenarios.rs:234-249,485-496"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:234-249,485-496",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:203-213",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "conversion_task_flow_only",
+      "rationale": "Same conversion task exists in React recipe, but captured frame is post-confirmation rather than confirmation dialog.",
+      "reference_audit": {
+        "current_snap_proto_status": "related_scripted_state_different_stage",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:203-213",
+        "trigger": "React games-separated flow opens confirmation, clicks Convert to Separated, and captures final Games page; dialog itself is not captured.",
+        "data": "React preview converts seeded game state to separated mode.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "profile-mode-conversion-confirmation"
+    },
+    {
+      "case_id": "games-help",
+      "native_stems": [
+        "games-help"
+      ],
+      "reference_candidates": [
+        "games-help"
+      ],
+      "review_status": "source_audited_correspondence",
+      "object": {
+        "type": "Games terminology help",
+        "identity": "explain Instance/Profile relationship"
+      },
+      "trigger": {
+        "value": "Native opens GamesHelp surface.",
+        "source": "crates/block-ui/src/scenarios.rs:240-245,489-496"
+      },
+      "data": {
+        "value": "Static domain guidance; no user record data.",
+        "source": "crates/block-ui/src/scenarios.rs:240-245,489-496"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs:240-245,489-496",
+        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/games-help.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/bundled-games-browser.tsx:22-23",
+        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
+        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
+      },
+      "comparable_scope": "help_content_component_only",
+      "rationale": "Same help task is implemented, but no reference screenshot is produced by the current recipe.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/games-help.tsx; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/games/bundled-games-browser.tsx:22-23",
+        "trigger": "Current recipe does not click Games help; GamesBrowser includes a help affordance.",
+        "data": "React GamesHelp component is static explanatory content.",
+        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "Games-terminology-help"
+    },
+    {
+      "case_id": "welcome-settings",
+      "native_stems": [
+        "welcome-settings"
+      ],
+      "reference_candidates": [
+        "welcome-settings"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "navigation task",
+        "identity": "native onboarding flow followed by Settings tab"
+      },
+      "trigger": {
+        "value": "scenario initializes onboarding, then navigates to destination",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Native initializes Welcome then navigates to Settings. Current snap-proto routes every welcome-* to /welcome; reach() only checks the guide heading and performs no destination navigation. Archived matching filename is not proof of Settings state.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested; if manually invoked, reach() remains at Welcome",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-46,230-234",
+        "trigger": "No current script request; if invoked manually, routeFor sends /welcome and reach() only asserts the generic guide heading. No destination action follows.",
+        "data": "The React page is WelcomeGuide; native changes tab/opens version section after begin_onboarding.",
+        "archive_state_note": "welcome-about archive is byte-identical to about for the current PNG set, but source revision is unknown; no current capture recipe creates it."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "navigation-task"
+    },
+    {
+      "case_id": "welcome-about",
+      "native_stems": [
+        "welcome-about"
+      ],
+      "reference_candidates": [
+        "welcome-about"
+      ],
+      "review_status": "semantic_mismatch",
+      "object": {
+        "type": "navigation task",
+        "identity": "native onboarding flow followed by About tab"
+      },
+      "trigger": {
+        "value": "scenario initializes onboarding, then navigates to destination",
+        "source": "crates/block-ui/src/scenarios.rs:446-460"
+      },
+      "data": {
+        "value": "synthetic onboarding fixture",
+        "source": "crates/block-ui/src/scenarios.rs:142-162,446-460"
+      },
+      "viewport": {
+        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
+        "react": "unknown unless capture receipt is present"
+      },
+      "focus": "unknown",
+      "scroll": "unknown",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/scenarios.rs",
+        "react_capture_script": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto",
+        "native_image_commit": "unknown for archived images",
+        "react_image_commit": "unknown for archived images"
+      },
+      "comparable_scope": "none",
+      "rationale": "Native initializes Welcome then navigates to About. Current snap-proto routes every welcome-* to /welcome; reach() only checks the guide heading and performs no destination navigation. Archived matching filename is not proof of About state.",
+      "reference_audit": {
+        "current_snap_proto_status": "not_requested; if manually invoked, reach() remains at Welcome",
+        "requested_by_current_script": false,
+        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-46,230-234",
+        "trigger": "No current script request; if invoked manually, routeFor sends /welcome and reach() only asserts the generic guide heading. No destination action follows.",
+        "data": "The React page is WelcomeGuide; native changes tab/opens version section after begin_onboarding.",
+        "archive_state_note": "welcome-about archive is byte-identical to about for the current PNG set, but source revision is unknown; no current capture recipe creates it."
+      },
+      "coverage_counts_as_independent": false,
+      "semantic_group": "navigation-task"
+    }
+  ]
+}

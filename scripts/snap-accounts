@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Capture real persisted offline Accounts pages on macOS; assert content before replacement.
+
+The disposable store uses the ordinary application path, never --scenario. Originals
+and per-image receipts are retained under target/parity-shots. No live login occurs.
+"""
+import argparse
+import hashlib
+import json
+import subprocess
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+from capture_assertions import ROOT, mac_helper, ocr, publish, sha256, source_state, validate
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, default=ROOT / "target/debug/block")
+    parser.add_argument("--theme", action="append", choices=["light", "dark"])
+    parser.add_argument("--viewport", nargs=2, type=int, default=[1152, 720])
+    args = parser.parse_args()
+    binary = args.binary.resolve()
+    helper = mac_helper()
+    provenance = source_state()
+    def command(*arguments):
+        return subprocess.check_output([str(helper), *map(str, arguments)], text=True)
+    with tempfile.TemporaryDirectory(prefix="block-e01-accounts-") as temp:
+        directory = Path(temp)
+        # Same public offline-account algorithm used by OfflineSession::identity.
+        player_id = str(uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:PageSeed").digest(), version=3))
+        (directory / "accounts.json").write_text(json.dumps([{
+            "reference": {"player_id": player_id}, "provider": "offline", "player_name": "PageSeed",
+            "client_id": "", "credential_ref": ""
+        }]))
+        for theme in args.theme or ["light", "dark"]:
+            (directory / "preferences.json").write_text(json.dumps({
+                "appearance": theme.title(), "onboarding_complete": True, "reduce_motion": True
+            }))
+            with (directory / "app.log").open("wb") as log:
+                app = subprocess.Popen([str(binary), "--data-dir", str(directory)], cwd=ROOT, stdout=log, stderr=log)
+                try:
+                    window = None
+                    for _ in range(60):
+                        if app.poll() is not None:
+                            raise RuntimeError("Test app exited: " + (directory / "app.log").read_text())
+                        windows = json.loads(command("list", app.pid))
+                        if len(windows) == 1 and windows[0]["title"] == "Block":
+                            window = windows[0]
+                            break
+                        time.sleep(.15)
+                    if window is None:
+                        raise RuntimeError("Home did not become ready")
+                    command("activate", app.pid)
+                    time.sleep(.3)
+                    subprocess.run(["screencapture", "-x", "-o", "-l", str(window["id"]), str(ROOT / "target/evidence-tools/accounts-before.png")], check=True)
+                    command("click", app.pid, 32, 24)
+                    time.sleep(.4)
+                    subprocess.run(["screencapture", "-x", "-o", "-l", str(window["id"]), str(ROOT / "target/evidence-tools/accounts-menu.png")], check=True)
+                    command("click", app.pid, 80, 170)  # Accounts item in the app menu.
+                    for _ in range(60):
+                        windows = json.loads(command("list", app.pid))
+                        if len(windows) == 1 and windows[0]["title"] == "Block · Accounts" and [round(windows[0]["width"]), round(windows[0]["height"])] == args.viewport:
+                            window = windows[0]
+                            break
+                        time.sleep(.15)
+                    else:
+                        raise RuntimeError("Accounts navigation/viewport did not settle: " + repr(windows))
+                    time.sleep(.4)
+                    candidate = directory / "candidate.png"
+                    subprocess.run(["screencapture", "-x", "-o", "-l", str(window["id"]), str(candidate)], check=True)
+                    assertions = validate(candidate, window, title="Block · Accounts", viewport=args.viewport,
+                                          required=["Accounts", "PageSeed", "Account details", "Offline Mode", "Local identity; no online authorization"], observations=ocr(candidate))
+                    receipt = {
+                        "kind": "real-data", "platform": "macos-arm64", "theme": theme,
+                        "source": provenance, "binary_sha256": sha256(binary), "window": window,
+                        "method": "screencapture -l owned CGWindowID; Vision OCR assertions before publication",
+                        "data_state": "Ordinary persisted accounts.json: one valid offline PageSeed identity; empty game catalog; disposable --data-dir; no --scenario or live credentials.",
+                        "reduced_motion": True,
+                        "focus": "Accounts menu item clicked; exact resulting focus handle not exported (unknown)",
+                        "scroll": "Fresh Accounts page; no scroll input; top Account details content asserted",
+                        "reuse_group": f"macos-real-accounts-{theme}", "independent_coverage": False,
+                        "trigger": "Home app menu → Accounts menu item"
+                    }
+                    for stem in ("accounts", "account-offline-detail"):
+                        destination = ROOT / f"target/parity-shots/macos-arm64/pages/{stem}-{theme}.png"
+                        publish(candidate, destination, dict(receipt, case=stem, shared_visual_evidence=f"accounts-{theme}.png"), assertions)
+                        print(destination.relative_to(ROOT), "asserted", flush=True)
+                finally:
+                    log.flush()
+                    (ROOT / "target/evidence-tools/accounts-last.log").write_bytes((directory / "app.log").read_bytes())
+                    command("quit", app.pid)
+                    try:
+                        app.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        app.terminate()
+                        app.wait(timeout=3)
+
+
+if __name__ == "__main__":
+    main()

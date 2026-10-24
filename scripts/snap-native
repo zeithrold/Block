@@ -1,113 +1,90 @@
 #!/usr/bin/env python3
-"""Capture disposable, network-free debug scenarios on macOS."""
-
+"""Capture disposable native scenarios on macOS, validating semantics before saving."""
 import argparse
+import json
+import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parent.parent
-SWIFT = r'''
-import AppKit
-import CoreGraphics
-import Foundation
-guard CGPreflightScreenCaptureAccess() else {
-    fputs("Screen Recording permission is required for native screenshots.\n", stderr)
-    exit(3)
-}
-let pid = pid_t(CommandLine.arguments[1])!
-if CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "--terminate" {
-    NSRunningApplication(processIdentifier: pid)?.terminate()
-    exit(0)
-}
-// Floating panels can be hidden when another application is active. Window-ID
-// capture still returns their rendered content; retain this process's panels.
-let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-for info in windows {
-    guard info[kCGWindowOwnerPID as String] as? Int == Int(pid),
-          let id = info[kCGWindowNumber as String] as? Int,
-          let windowTitle = info[kCGWindowName as String] as? String,
-          !windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-          let raw = info[kCGWindowBounds as String] as? [String: Any],
-          let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary),
-          bounds.width > 100, bounds.height > 100 else { continue }
-    let title = windowTitle.replacingOccurrences(of: "\t", with: " ")
-    print("\(id)\t\(Int(bounds.width))\t\(Int(bounds.height))\t\(title)")
-}
-'''
+from capture_assertions import ROOT, mac_helper, ocr, publish, sha256, source_state, validate
+from scenario_contracts import contract
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", action="append", help="Capture selected scenarios only")
-    parser.add_argument("--theme", choices=["light", "dark"], action="append")
-    parser.add_argument("--no-build", action="store_true")
+    parser.add_argument('--scenario', action='append')
+    parser.add_argument('--theme', choices=['light', 'dark'], action='append')
+    parser.add_argument('--no-build', action='store_true')
+    parser.add_argument('--no-board', action='store_true')
     args = parser.parse_args()
-    if sys.platform != "darwin":
-        parser.error("Native CGWindowID capture requires macOS")
+    if sys.platform != 'darwin':
+        parser.error('Native CGWindowID capture requires macOS')
     if not args.no_build:
-        subprocess.run(["cargo", "build", "--locked", "-p", "block-app", "--bin", "block"], cwd=ROOT, check=True)
-    binary = ROOT / "target/debug/block"
-    available = subprocess.check_output([binary, "--list-scenarios"], text=True).splitlines()
+        subprocess.run(['cargo', 'build', '--locked', '-p', 'block-app', '--bin', 'block'], cwd=ROOT, check=True)
+    binary = ROOT / 'target/debug/block'
+    available = subprocess.check_output([binary, '--list-scenarios'], text=True).splitlines()
     scenarios = args.scenario or available
     if any(name not in available for name in scenarios):
-        parser.error("Unknown scenario; use target/debug/block --list-scenarios")
-    output = ROOT / "target/parity-shots/native"
+        parser.error('Unknown scenario; use target/debug/block --list-scenarios')
+    # Validate the contract before starting a GUI process.
+    contracts = {name: contract(name) for name in scenarios}
+    helper = mac_helper()
+    provenance = source_state()
+    binary_hash = sha256(binary)
+    env = {key: value for key, value in os.environ.items() if not key.startswith(('BLOCK_FRAME_MOTION_', 'BLOCK_PANE_MOTION_', 'BLOCK_DRAWER_MOTION_', 'BLOCK_TOAST_MOTION_'))}
+    output = ROOT / 'target/parity-shots/native'
     output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="block-snap-") as directory:
+    with tempfile.TemporaryDirectory(prefix='block-snap-') as directory:
         temporary = Path(directory)
-        source = temporary / "windows.swift"
-        source.write_text(SWIFT)
-        helper = temporary / "windows"
-        subprocess.run(["swiftc", source, "-o", helper], check=True)
         for name in scenarios:
-            for theme in args.theme or ["light", "dark"]:
-                with (temporary / "app.log").open("wb") as log:
-                    app = subprocess.Popen([binary, "--scenario", name, "--theme", theme], cwd=ROOT, stdout=log, stderr=log)
+            expected = contracts[name]
+            for theme in args.theme or ['light', 'dark']:
+                with (temporary / 'app.log').open('wb') as log:
+                    app = subprocess.Popen([binary, '--scenario', name, '--theme', theme], cwd=ROOT, env=env, stdout=log, stderr=log)
                     try:
-                        windows = []
-                        # Overlays render inside the product window, so a
-                        # scenario is always one window capture.
-                        required = 1
-                        deadline = time.monotonic() + 12
-                        last = None
-                        stable = time.monotonic()
+                        stable, last, window = time.monotonic(), None, None
+                        deadline = time.monotonic() + 15
                         while time.monotonic() < deadline:
                             if app.poll() is not None:
                                 raise RuntimeError(f"{name} exited before capture: {(temporary / 'app.log').read_text()}")
-                            result = subprocess.run([helper, str(app.pid)], text=True, capture_output=True)
-                            if result.returncode:
-                                raise RuntimeError(result.stderr.strip())
-                            windows = sorted([line.split("\t", 3) for line in result.stdout.splitlines()], key=lambda row: int(row[0]))
+                            windows = json.loads(subprocess.check_output([helper, 'list', str(app.pid)], text=True))
                             if windows != last:
                                 last, stable = windows, time.monotonic()
-                            if len(windows) >= required and time.monotonic() - stable >= 1:
+                            if len(windows) == 1 and windows[0]['title'] == expected['title'] and time.monotonic() - stable >= 1:
+                                window = windows[0]
                                 break
-                            time.sleep(0.15)
-                        if len(windows) < required:
-                            raise RuntimeError(f"{name} did not open its {required} expected windows")
-                        for index, (window, width, height, title) in enumerate(windows):
-                            purpose = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "dialog"
-                            suffix = "" if index == 0 else f"-{purpose}-{index}"
-                            path = output / f"{name}{suffix}-{theme}.png"
-                            subprocess.run(["screencapture", "-x", "-o", "-l", window, path], check=True)
-                            print(f"{path.relative_to(ROOT)} ({width}×{height} logical pixels)", flush=True)
+                            time.sleep(.15)
+                        if window is None:
+                            raise RuntimeError(f'{name}: expected page never settled: {last}')
+                        candidate = temporary / 'candidate.png'
+                        subprocess.run(['screencapture', '-x', '-o', '-l', str(window['id']), str(candidate)], check=True)
+                        assertions = validate(candidate, window, **expected, observations=ocr(candidate))
+                        destination = output / f'{name}-{theme}.png'
+                        receipt = {
+                            'kind': 'scenario', 'scenario': name, 'platform': 'macos-arm64', 'theme': theme,
+                            'source': provenance, 'binary_sha256': binary_hash, 'window': window,
+                            'method': 'screencapture -l owned CGWindowID; Vision OCR assertions before publication',
+                            'data_state': 'Network-free disposable scenario store; synthetic Zeithrold/Nova/Pixel identities and initials. See scenarios.rs for exact fixture; no live sign-in or avatar claim.',
+                            'reduced_motion': True,
+                            'focus': 'Scenario fixture initialization; exact focus handle not exported (unknown)',
+                            'scroll': 'Fresh scenario; no scroll input; required content asserted',
+                            'trigger': f'--scenario {name} --theme {theme}',
+                        }
+                        publish(candidate, destination, receipt, assertions)
+                        print(f'{destination.relative_to(ROOT)} ({window["width"]}×{window["height"]}, title/content asserted)', flush=True)
                     finally:
-                        # Request normal app termination so its scenario TempDir is removed.
-                        subprocess.run([helper, str(app.pid), "--terminate"], capture_output=True)
+                        subprocess.run([helper, str('quit'), str(app.pid)], capture_output=True)
                         try:
                             app.wait(timeout=3)
                         except subprocess.TimeoutExpired:
                             app.terminate()
                             app.wait(timeout=5)
-    subprocess.run(
-        [sys.executable, ROOT / "scripts/parity-board", "--platform", "macos-arm64"],
-        check=True,
-    )
+    if not args.no_board:
+        subprocess.run([sys.executable, ROOT / 'scripts/parity-board', '--platform', 'macos-arm64'], check=True)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -1,75 +1,7 @@
 #!/usr/bin/env python3
-"""Build a local visual review board; screenshots remain ignored under target/."""
+"""Compatibility entry point for the semantic visual-review board."""
 
-import argparse
-from html import escape
-from pathlib import Path
-import struct
-
-ROOT = Path(__file__).resolve().parent.parent
-OUTPUT = ROOT / "target/parity-shots"
-
-
-def shots(folder):
-    return {path.stem: path for path in (OUTPUT / folder).glob("*.png")}
-
-
-def image(path, logical=None):
-    if path is None:
-        return '<p class="missing">Screenshot pending</p>'
-    style = f' style="--logical:{logical}px"' if logical else ""
-    return f'<a href="{escape(str(path.relative_to(OUTPUT)))}"><img{style} loading="lazy" src="{escape(str(path.relative_to(OUTPUT)))}" alt="{escape(path.stem)}"></a>'
-
-
-def width(path):
-    with path.open("rb") as stream:
-        header = stream.read(24)
-    return struct.unpack(">I", header[16:20])[0]
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=["windows-amd64", "macos-arm64", "linux-amd64", "linux-arm64"], default="windows-amd64")
-    args = parser.parse_args()
-    folder = "native" if args.platform == "macos-arm64" else f"{args.platform}/scenarios"
-    native, prototype = shots(folder), shots("proto")
-    paired = dict(native)
-    keys = sorted(set(native) | set(prototype))
-    cards = []
-    for key in keys:
-        home = key.startswith("home-")
-        logical = 432 if home else 960
-        if key in paired:
-            roots = [root for root in paired if key.startswith(root.rsplit("-", 1)[0] + "-") and root.endswith(key.rsplit("-", 1)[-1])]
-            if roots:
-                root = min(roots, key=len)
-                scale = width(paired[root]) / (432 if root.startswith("home-") else 960)
-                logical = round(width(paired[key]) / scale)
-        cards.append(f'''<section style="--logical:{432 if home else 960}px"><h2>{escape(key)}</h2>
-        <div class="pair"><article><h3>React reference</h3>{image(prototype.get(key))}</article>
-        <article><h3>Native GPUI · {escape(args.platform)}</h3>{image(paired.get(key), logical)}</article></div></section>''')
-    remote = []
-    for folder in ["linux-arm64", "windows-amd64", "linux-amd64"]:
-        for path in sorted((OUTPUT / folder).glob("*.png")):
-            remote.append(f'<section><h2>{escape(folder)} · {escape(path.stem)}</h2>{image(path)}</section>')
-    html = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Block visual review</title><style>
-    *{box-sizing:border-box}body{margin:0;padding:32px;background:#f1f2f4;color:#171717;font:15px system-ui}
-    h1{margin:0 0 12px}h2{font-size:17px}h3{font-size:13px;font-weight:500;color:#555}
-    header{max-width:1000px;line-height:1.6;margin-bottom:32px}section{padding:20px;margin-bottom:24px;background:white;border:1px solid #ddd;border-radius:12px;overflow:auto}
-    .pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}article{min-width:0}
-    img{display:block;width:min(100%,var(--logical,960px));height:auto;border:1px solid #ddd}
-    .missing{padding:30px;border:1px dashed #bbb;color:#777}.remote img{max-width:960px}
-    @media(max-width:700px){body{padding:12px}.pair{grid-template-columns:1fr}}
-    </style><header><h1>Block visual review</h1>
-    <p>Debug UI scenarios use synthetic fixtures and make no network requests. They do not verify sign-in, installation or game launch. Missing screenshots remain explicit.</p>
-    <p>Compare content at equal logical scale. Native titlebars and in-window overlay chrome are intended differences. The React screenshot task has not completed until the reference images are present.</p></header>'''
-    html += f'<p>Primary comparison: <strong>{escape(args.platform)}</strong>. <a href="index.html">Windows</a> · <a href="macos-arm64.html">macOS</a>. Missing platform captures remain pending.</p>'
-    html += "".join(cards) + '<div class="remote"><h1>Actual remote UI smoke</h1>' + "".join(remote) + '</div></html>'
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT / ("index.html" if args.platform == "windows-amd64" else f"{args.platform}.html")
-    path.write_text(html)
-    print(path)
+from review_cases import main
 
 
 if __name__ == "__main__":

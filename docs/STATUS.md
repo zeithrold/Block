@@ -21,6 +21,8 @@ The inventory's Built / Native E2E columns provide Milestone II functional evide
 
 ## Milestone II screenshot deliverables (user decision, 2026-10-23)
 
+2026-10-24 correction: the table below is the historical Milestone II handoff, not proof of semantic equivalence. E01–E03 are complete: six asserted Accounts captures replace the three incorrect light images and refresh both themes; 74 source-defined cases have audited task/state scopes; twenty macOS/Windows AMD64 failure/loader-state captures use the corrected fixtures. Windows's source-stamped native build verifies 1,251 source hashes and passes the same two fixture tests as macOS. Current native matrices contain 144 images per platform; original images and intermediate receipts are archived. See [evidence-calibration.md](evidence-calibration.md) for provenance and explicit visual/motion/identity limits. No Accepted marker changes.
+
 Milestone II must leave a complete screenshot evidence set for Milestone III review; visual/interaction acceptance itself still belongs to Milestone III. All items below are **prepared artifacts**, not acceptance.
 
 | Deliverable | Current state |
