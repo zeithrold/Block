@@ -286,6 +286,6 @@ Report Milestone II usability, Milestone III interaction acceptance, Milestone I
 ## v0: first public unstable release
 
 - Validate the agreed novice path: account sign-in → Quick start → stable-release Vanilla with reuse-first automatic Java → Play, plus understandable recovery and one-click diagnostic export. Keep Home restrained. These are requirements pending assessment/implementation/native acceptance, not new completion claims.
-- Prepare release packaging, signing and distribution, and define the public compatibility/known-issues statement.
+- Prepare release packaging, signing and distribution, and define the public compatibility/known-issues statement. Pilot packaging exists as a manual GitHub Actions workflow producing unsigned per-platform artifacts (`dmg`/`zip`/`msi`/`tar.gz`/`deb`/`AppImage`) without publishing; signing, installers acceptance and the public compatibility statement remain open. See [pilot builds](pilot-builds.md).
 - Publication requires a separate release action; the stage definition does not publish anything.
 - Modpack import (local file first), end-to-end OptiFine acquisition, accessibility and mirror download sources (BMCLAPI) remain deferred without a scheduled milestone. Existing official user-supplied OptiFine JAR support remains within its recorded compatibility limits.

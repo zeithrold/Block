@@ -65,3 +65,11 @@ todo = "deny"
 unimplemented = "deny"
 unwrap_used = "deny"
 wildcard_imports = "deny"
+
+# Pilot release packages: drop symbols and use one LTO unit so the distributed
+# binary stays small. `panic = "abort"` and `opt-level = "s"` are deliberately
+# not set: crash reporting and animation quality outrank the extra bytes.
+[profile.release]
+strip = "symbols"
+lto = "fat"
+codegen-units = 1

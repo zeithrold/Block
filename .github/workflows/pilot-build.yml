@@ -1,0 +1,208 @@
+name: Pilot packages
+
+# Manual pilot builds: every run produces unsigned release packages for all
+# supported platforms as downloadable workflow artifacts. Nothing is published
+# to GitHub Releases, and no package is code-signed or notarized.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  stamp:
+    name: Stamp source
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.stamp.outputs.commit }}
+      sha256: ${{ steps.stamp.outputs.sha256 }}
+      epoch: ${{ steps.stamp.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: stamp
+        run: |
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(git archive --format=tar HEAD | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
+
+  macos-universal:
+    name: macOS universal
+    runs-on: macos-15
+    needs: stamp
+    timeout-minutes: 120
+    env:
+      BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
+      BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
+      SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+      - name: Build both macOS architectures
+        run: |
+          cargo build --locked --release -p block-app --bin block --target aarch64-apple-darwin
+          cargo build --locked --release -p block-app --bin block --target x86_64-apple-darwin
+          mkdir -p target/macos-universal
+          lipo -create \
+            target/aarch64-apple-darwin/release/block \
+            target/x86_64-apple-darwin/release/block \
+            -output target/macos-universal/block
+          lipo -info target/macos-universal/block
+          target/macos-universal/block --build-info
+      - name: Package .app, .zip and .dmg
+        run: |
+          python3 scripts/package-desktop.py \
+            --binary target/macos-universal/block \
+            --output-dir dist/macos \
+            --platform macos --arch universal
+      - name: Write checksums and unsigned notice
+        run: |
+          cd dist/macos
+          shasum -a 256 Block-* > SHA256SUMS
+          printf 'Pilot build. Packages are not code-signed or notarized.\nmacOS will require right-click > Open on first launch.\n' > UNSIGNED.txt
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: block-macos-universal
+          path: dist/macos
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    needs: stamp
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            arch: amd64
+            msi_arch: x64
+          - os: windows-11-arm
+            arch: arm64
+            msi_arch: arm64
+    env:
+      BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
+      BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
+      SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release launcher
+        run: cargo build --locked --release -p block-app --bin block
+      - name: Package portable ZIP
+        shell: bash
+        run: |
+          python scripts/package-desktop.py \
+            --binary target/release/block.exe \
+            --output-dir dist/windows \
+            --platform windows --arch ${{ matrix.arch }}
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.6
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])"
+          $msiVersion = ($version -split '[-+]')[0]
+          $out = "dist/windows/Block-$version-windows-${{ matrix.arch }}.msi"
+          wix build -arch ${{ matrix.msi_arch }} `
+            -d Version=$msiVersion `
+            -d Binary=target/release/block.exe `
+            -d Icon=packaging/windows/Block.ico `
+            -d License=LICENSE `
+            -d Notices=packaging/THIRD_PARTY_NOTICES.txt `
+            -o $out `
+            packaging/windows/block.wxs
+      - name: Write checksums and unsigned notice
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist/windows -File | Where-Object { $_.Name -ne 'SHA256SUMS' }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content dist/windows/SHA256SUMS
+          "Pilot build. Packages are not code-signed. Windows SmartScreen will warn on first run." | Set-Content dist/windows/UNSIGNED.txt
+          Get-Content dist/windows/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: block-windows-${{ matrix.arch }}
+          path: dist/windows
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    needs: stamp
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    env:
+      BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
+      BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
+      SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libfontconfig1-dev libfreetype6-dev libvulkan-dev libegl1-mesa-dev libgl1-mesa-dev
+      - name: Build release launcher
+        run: cargo build --locked --release -p block-app --bin block
+      - name: Fetch appimagetool
+        run: |
+          case "${{ matrix.arch }}" in
+            amd64) tool_arch=x86_64 ;;
+            arm64) tool_arch=aarch64 ;;
+          esac
+          curl -fsSL -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${tool_arch}.AppImage"
+          chmod +x appimagetool
+      - name: Package tar.gz, .deb and .AppImage
+        run: |
+          python3 scripts/package-desktop.py \
+            --binary target/release/block \
+            --output-dir dist/linux \
+            --platform linux --arch ${{ matrix.arch }} \
+            --appimage-tool ./appimagetool
+      - name: Write checksums and unsigned notice
+        run: |
+          cd dist/linux
+          sha256sum Block-* > SHA256SUMS
+          printf 'Pilot build. Packages are not code-signed.\n' > UNSIGNED.txt
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: block-linux-${{ matrix.arch }}
+          path: dist/linux
+          if-no-files-found: error
+          retention-days: 14

@@ -29,6 +29,8 @@ jobs:
             platform: windows-arm64
           - os: macos-15
             platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-amd64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

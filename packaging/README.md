@@ -5,6 +5,24 @@
 launches, or changes application source. Product identity is maintained in
 `product.json`: **one.ztd.block**, [block.ztd.one](https://block.ztd.one).
 
+The packaging output includes portable archives and native installers:
+
+| Platform | Artifacts |
+| --- | --- |
+| macOS (universal only) | `Block.app`, `.zip`, `.dmg` |
+| Windows | portable `.zip`, `.msi` (built by the pilot workflow with WiX) |
+| Linux | portable `.tar.gz`, `.deb`, `.AppImage` |
+
+Pilot packages are deliberately **unsigned**: macOS Gatekeeper requires
+right-click → Open on first launch, Windows SmartScreen warns, and Linux
+packages rely on checksums only. The manifest records that no signing or
+notarization was performed.
+
+The pilot workflow `.github/workflows/pilot-build.yml` is manual
+(`workflow_dispatch`) and produces one artifact set per run for every supported
+platform. It publishes nothing to GitHub Releases. See
+[pilot builds](../docs/pilot-builds.md).
+
 Build the executable first, then choose a new output directory:
 
 ```sh
@@ -15,19 +33,23 @@ python3 scripts/package-desktop.py --binary target/release/block --output-dir /p
 The default binary is `target/debug/block` (`block.exe` on Windows). The
 script reads the target and architecture from the executable header rather
 than relabeling the host binary. `--platform` and `--arch` can assert the
-expected target. Version defaults to `workspace.package.version` in Cargo.toml.
+expected target; a universal macOS binary is detected as `--arch universal`.
+Version defaults to `workspace.package.version` in Cargo.toml.
 Existing output artifacts are never overwritten. Use a fresh output directory
 for each run.
 
 The generated manifest records the binary hash and each packaged file's hash,
-mode and size. Archives use sorted members, fixed modes and fixed timestamps;
-the default timestamp is zero, overridable with `SOURCE_DATE_EPOCH`. Identical
-binary, metadata, icon-conversion tools and epoch produce identical archives.
-This does not make separately compiled binaries reproducible.
+mode and size, plus every installer's hash. Archives use sorted members, fixed
+modes and fixed timestamps; the default timestamp is zero, overridable with
+`SOURCE_DATE_EPOCH`. Identical binary, metadata, icon-conversion tools and epoch
+produce identical archives. This does not make separately compiled binaries
+reproducible.
 
 ## macOS
 
-Produces `Block.app` and `Block-<version>-macos-<arch>.zip`. `Info.plist` includes
+Produces `Block.app`, `Block-<version>-macos-<arch>.zip` and
+`Block-<version>-macos-<arch>.dmg`. The DMG contains the app bundle plus an
+`/Applications` link and requires native `hdiutil`. `Info.plist` includes
 the bundle identifier, executable, version, games category and website metadata.
 The original 1024 px PNG from Block-Icon (`icon-v4-1024.png`, copied unchanged
 to `crates/block-ui/assets/block-1024.png`) is converted to an ICNS with Apple's
@@ -63,6 +85,18 @@ Shared-library dependencies must already be present on the target host.
 `StartupWMClass` declares the intended identity; runtime Wayland/X11 identity
 still depends on the application and compositor.
 
+A `.deb` is also produced without dpkg tooling: deterministic `ar`, gzip and
+tar members, `one.ztd.block` package name, section `games`, and runtime
+`Depends` for the X11/Wayland/fontconfig/Vulkan/ALSA libraries. It installs
+`/usr/bin/block`, the desktop entry, hicolor icons and notices under
+`/usr/share/doc/one.ztd.block`.
+
+Pass `--appimage-tool <appimagetool>` to build an AppImage from a generated
+AppDir (binary, `AppRun`, desktop entry and icon at the root). The pilot
+workflow downloads the official continuous `appimagetool` for the runner
+architecture. AppImages rely on the host's shared libraries like the portable
+tree and are unsigned.
+
 ## Windows
 
 Produces a portable directory and ZIP with `block.exe`, `Block.ico`, website
@@ -74,12 +108,17 @@ compilation errors fail the build. Non-Windows targets skip resource compilation
 Windows builds require the Windows SDK resource compiler; native MSVC builds
 use the SDK installed with the C++ build tools.
 
+The pilot workflow additionally builds a per-machine MSI with WiX v4
+(`packaging/windows/block.wxs`): `Program Files\Block`, Start Menu shortcut,
+license and notices, uninstall entry and the Block icon in Programs and
+Features. MSI file names use the numeric version and architecture. No
+Authenticode signature is applied.
+
 The ICO contains unchanged 16, 32, 64, 128 and 256 px PNG representations from
 Block-Icon's v4 assets. Their source hashes and the ICO hash are recorded in
 `windows/icon-provenance.json`, included in the package. The separate ICO and
 embedded PE icon use the same asset. Packaging copies the existing executable
 byte for byte and does not rewrite its resources.
-The package is not an installer and does not provide an Authenticode signature.
 
 Native verification (2026-10-24): Windows AMD64 debug and Windows ARM64 release
 builds passed strict Clippy and the `--build-info` startup check. Reading the
