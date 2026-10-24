@@ -345,6 +345,9 @@ def linux_appdir(appdir, binary, product):
 def appimage(appdir, destination, tool, arch):
     if not tool.is_file():
         raise ValueError(f"AppImage tool not found: {tool}")
+    # Resolve relative paths: executing a bare filename such as "appimagetool"
+    # makes the OS search PATH instead of the current directory.
+    tool = tool.resolve(strict=True)
     environment = dict(
         os.environ,
         ARCH={"amd64": "x86_64", "arm64": "aarch64"}[arch],

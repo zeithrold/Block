@@ -1,7 +1,7 @@
 # Pilot release packages
 
-Updated: 2026-10-24. Status: pilot (unsigned, manually dispatched). Nothing is
-published to GitHub Releases.
+Updated: 2026-10-24. Status: pilot (unsigned, built after checks or on
+dispatch). Nothing is published to GitHub Releases.
 
 ## Workflow
 
@@ -9,21 +9,22 @@ published to GitHub Releases.
 **Cross-platform checks** workflow succeeds for a push to `main` (via
 `workflow_run`), and on manual dispatch. A manual dispatch also requires a
 successful completed check run for the dispatched commit; a `gate` job fails
-the workflow otherwise, so failing checks can never produce packages. Each run
-produces one downloadable artifact set per platform; a newer push cancels an
+the workflow otherwise, so failing checks can never produce packages. Each package type is uploaded as its own artifact; a newer push cancels an
 in-flight run for the same ref:
 
 | Job | Runner | Artifacts |
 | --- | --- | --- |
-| macOS universal | `macos-15` | `.app`, `.zip`, `.dmg` (arm64 + x86_64 via `lipo`) |
-| Windows amd64 | `windows-2022` | portable `.zip`, `.msi` |
-| Windows arm64 | `windows-11-arm` | portable `.zip`, `.msi` |
-| Linux amd64 | `ubuntu-24.04` | `.tar.gz`, `.deb`, `.AppImage` |
-| Linux arm64 | `ubuntu-24.04-arm` | `.tar.gz`, `.deb`, `.AppImage` |
+| macOS universal | `macos-15` | `block-macos-universal-dmg`, `-zip` (arm64 + x86_64 via `lipo`) |
+| Windows amd64 | `windows-2022` | `block-windows-amd64-zip`, `-msi` |
+| Windows arm64 | `windows-11-arm` | `block-windows-arm64-zip`, `-msi` |
+| Linux amd64 | `ubuntu-24.04` | `block-linux-amd64-tar-gz`, `-deb`, `-appimage` |
+| Linux arm64 | `ubuntu-24.04-arm` | `block-linux-arm64-tar-gz`, `-deb`, `-appimage` |
 
-Each job writes `SHA256SUMS` and `UNSIGNED.txt` next to the packages and
-uploads them with `actions/upload-artifact` (14-day retention). There is no
-release job: the pilot stage deliberately keeps every run independent.
+Each job also uploads a `-metadata` artifact with the package manifest,
+`SHA256SUMS` and `UNSIGNED.txt` (14-day retention). Artifacts are deliberately
+separated by package type, so downloading the MSI does not pull in the portable
+ZIP, DEB, AppImage or metadata. There is no release job: the pilot stage keeps
+every run independent.
 
 The macOS artifact is **universal only**. The workflow builds both Apple
 architectures and combines them with `lipo`; no per-architecture macOS package

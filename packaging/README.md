@@ -20,9 +20,11 @@ notarization was performed.
 
 The pilot workflow `.github/workflows/pilot-build.yml` runs only after
 **Cross-platform checks** succeeds for a push to `main` (manual dispatch also
-requires a successful check run for the same commit), then produces one
-artifact set for every supported platform. It publishes nothing to GitHub
-Releases. See
+requires a successful check run for the same commit), then builds every
+supported platform. Each package type is uploaded as its own workflow artifact
+(for example a separate MSI artifact and portable ZIP artifact), plus a
+metadata artifact with the manifest and checksums. It publishes nothing to
+GitHub Releases. See
 [pilot builds](../docs/pilot-builds.md).
 
 Build the executable first, then choose a new output directory:

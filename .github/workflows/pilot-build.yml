@@ -108,10 +108,28 @@ jobs:
           shasum -a 256 Block-* > SHA256SUMS
           printf 'Pilot build. Packages are not code-signed or notarized.\nmacOS will require right-click > Open on first launch.\n' > UNSIGNED.txt
           cat SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
         with:
-          name: block-macos-universal
-          path: dist/macos
+          name: block-macos-universal-dmg
+          path: dist/macos/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload macOS ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-macos-universal-zip
+          path: dist/macos/*.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload macOS manifest and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-macos-universal-metadata
+          path: |
+            dist/macos/*.manifest.json
+            dist/macos/SHA256SUMS
+            dist/macos/UNSIGNED.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -182,10 +200,28 @@ jobs:
           $lines | Set-Content dist/windows/SHA256SUMS
           "Pilot build. Packages are not code-signed. Windows SmartScreen will warn on first run." | Set-Content dist/windows/UNSIGNED.txt
           Get-Content dist/windows/SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows portable ZIP
+        uses: actions/upload-artifact@v4
         with:
-          name: block-windows-${{ matrix.arch }}
-          path: dist/windows
+          name: block-windows-${{ matrix.arch }}-zip
+          path: dist/windows/*.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Windows MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-windows-${{ matrix.arch }}-msi
+          path: dist/windows/*.msi
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Windows manifest and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-windows-${{ matrix.arch }}-metadata
+          path: |
+            dist/windows/*.manifest.json
+            dist/windows/SHA256SUMS
+            dist/windows/UNSIGNED.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -243,9 +279,34 @@ jobs:
           sha256sum Block-* > SHA256SUMS
           printf 'Pilot build. Packages are not code-signed.\n' > UNSIGNED.txt
           cat SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - name: Upload Linux portable tar.gz
+        uses: actions/upload-artifact@v4
         with:
-          name: block-linux-${{ matrix.arch }}
-          path: dist/linux
+          name: block-linux-${{ matrix.arch }}-tar-gz
+          path: dist/linux/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Linux DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-linux-${{ matrix.arch }}-deb
+          path: dist/linux/*.deb
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-linux-${{ matrix.arch }}-appimage
+          path: dist/linux/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Linux manifest and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-linux-${{ matrix.arch }}-metadata
+          path: |
+            dist/linux/*.manifest.json
+            dist/linux/SHA256SUMS
+            dist/linux/UNSIGNED.txt
           if-no-files-found: error
           retention-days: 14
