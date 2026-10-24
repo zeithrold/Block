@@ -212,7 +212,7 @@ fn early_tab_events_settle_navigation_and_forward_once_after_the_clean_focus_tre
 }
 
 #[gpui::test]
-fn welcome_and_overview_slide_horizontally_in_both_directions(cx: &mut TestAppContext) {
+fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppContext) {
     use crate::first_run::{Action as FirstRunAction, Stage};
 
     let _system = crate::platform::test_system_motion(false);
@@ -224,44 +224,36 @@ fn welcome_and_overview_slide_horizontally_in_both_directions(cx: &mut TestAppCo
     cx.run_until_parked();
     assert!(view.read_with(cx, |view, _| view.shell.first_run.stage == Stage::Welcome));
 
+    // Welcome slides left; no resize is requested yet.
     view.update_in(cx, |view, window, cx| view.first_run_overview(window, cx));
     cx.run_until_parked();
-    frame(cx, 0);
     frame(cx, 20);
-    view.read_with(cx, |view, cx| {
-        let page = view
-            .motion
-            .page
-            .sample(cx.background_executor().now(), view.motion_preferences());
-        assert!(
-            page.current.is_some_and(|pose| pose.x > 0.
-                && pose.x <= 12.
-                && pose.opacity > 0.
-                && pose.opacity < 1.),
-            "the overview must slide in from the right: {:?}",
-            page.current
-        );
-        assert!(
-            page.outgoing
-                .is_some_and(|pose| pose.x < 0. && pose.x >= -12. && pose.opacity > 0.),
-            "the Welcome page must slide out to the left: {:?}",
-            page.outgoing
-        );
-        assert!(
-            view.motion
-                .page
-                .outgoing()
-                .is_some_and(|layer| { layer._snapshot.shell.first_run.stage == Stage::Welcome })
-        );
-    });
-    let sliding = cx.debug_bounds("navigation-current-0");
+    assert!(view.read_with(cx, |view, _| {
+        view.motion.first_run_switch.is_some() && !view.motion.frame.active()
+    }));
+    let outgoing = cx.debug_bounds("first-run-switch-outgoing");
     assert!(
-        sliding.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
-        "the overview must render off its settled x while the frame morphs: {sliding:?}"
+        outgoing.is_some_and(|bounds| bounds.left() < px(0.)),
+        "Welcome must slide away before the frame resizes: {outgoing:?}"
     );
-    frame(cx, 240);
-    assert!(view.read_with(cx, |view, _| view.motion.page.outgoing().is_none()));
 
+    // The frame widens with the content hidden, then Overview slides in.
+    frame(cx, 200);
+    assert!(
+        view.read_with(cx, |view, _| view.motion.frame.active()),
+        "the frame resize must follow the slide"
+    );
+    frame(cx, 500);
+    frame(cx, 30);
+    let incoming = cx.debug_bounds("first-run-switch-incoming");
+    assert!(
+        incoming.is_some_and(|bounds| bounds.left() > px(0.)),
+        "Overview must slide in only after the resize: {incoming:?}"
+    );
+    frame(cx, 260);
+    assert!(view.read_with(cx, |view, _| view.motion.first_run_switch.is_none()));
+
+    // The same sequence runs backwards when returning to Welcome.
     view.update_in(cx, |view, window, cx| {
         view.handle(
             UiAction::FirstRun(FirstRunAction::BackToWelcome),
@@ -270,35 +262,23 @@ fn welcome_and_overview_slide_horizontally_in_both_directions(cx: &mut TestAppCo
         )
     });
     cx.run_until_parked();
-    frame(cx, 0);
     frame(cx, 20);
-    view.read_with(cx, |view, cx| {
-        let page = view
-            .motion
-            .page
-            .sample(cx.background_executor().now(), view.motion_preferences());
-        assert!(
-            page.current
-                .is_some_and(|pose| pose.x < 0. && pose.x >= -12. && pose.opacity > 0.),
-            "returning to Welcome must slide in from the left: {:?}",
-            page.current
-        );
-        assert!(
-            page.outgoing
-                .is_some_and(|pose| pose.x > 0. && pose.x <= 12. && pose.opacity > 0.),
-            "the overview must slide out to the right: {:?}",
-            page.outgoing
-        );
-        assert!(
-            view.motion
-                .page
-                .outgoing()
-                .is_some_and(|layer| { layer._snapshot.shell.first_run.stage == Stage::Overview })
-        );
-    });
-    let sliding = cx.debug_bounds("navigation-outgoing-0");
+    let outgoing = cx.debug_bounds("first-run-switch-outgoing");
     assert!(
-        sliding.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
-        "the overview must render off its settled x while it slides away: {sliding:?}"
+        outgoing.is_some_and(|bounds| bounds.left() > px(0.)),
+        "Overview must slide away before the frame shrinks: {outgoing:?}"
     );
+    frame(cx, 200);
+    assert!(view.read_with(cx, |view, _| view.motion.frame.active()));
+    frame(cx, 500);
+    frame(cx, 30);
+    let incoming = cx.debug_bounds("first-run-switch-incoming");
+    assert!(
+        incoming.is_some_and(|bounds| bounds.left() < px(0.)),
+        "Welcome must slide back in from the left: {incoming:?}"
+    );
+    frame(cx, 260);
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.first_run.stage == Stage::Welcome && view.motion.first_run_switch.is_none()
+    }));
 }

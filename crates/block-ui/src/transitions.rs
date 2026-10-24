@@ -11,11 +11,51 @@ use super::{
 };
 use gpui::{
     AnyElement, Context, EntityId, Global, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, Styled as _, WeakEntity, Window, div,
+    ParentElement as _, Styled as _, WeakEntity, Window, div, rgb,
 };
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use gpui_base::motion::Timing;
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 type Scene = Transition<String, Rc<Block>>;
+
+/// The outgoing page has slid away and the window frame starts resizing.
+const FIRST_RUN_OUT: Duration = Duration::from_millis(170);
+/// The incoming page slides in once the window frame has settled.
+const FIRST_RUN_IN: Duration = Duration::from_millis(190);
+/// Horizontal travel of the sequential first-run page swap.
+const FIRST_RUN_TRAVEL: f32 = 24.;
+
+/// A sequenced Welcome ↔ Overview swap: the leaving page slides away, the
+/// window resizes with its content hidden, then the arriving page slides in.
+/// The generic page scene cannot express this order, and the frame morph
+/// suppresses page motion, so this short sequence owns its own clock.
+#[derive(Debug)]
+pub(super) struct FirstRunSwitch {
+    direction: Direction,
+    started: Instant,
+    outgoing: Rc<Block>,
+    resize_requested: bool,
+    reveal_started: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FirstRunPhase {
+    Out(f32),
+    Resize,
+    In(f32),
+}
+
+fn switch_progress(now: Instant, started: Instant, total: Duration) -> f32 {
+    Timing::new(total)
+        .ease(motion::navigation_easing())
+        .sample(now.saturating_duration_since(started))
+        .directed_progress
+}
 
 #[cfg(test)]
 #[path = "navigation_tests.rs"]
@@ -45,6 +85,8 @@ pub(super) struct MotionState {
     pub outgoing_page: Cell<bool>,
     pub moving: bool,
     pub pending_focus: Vec<bool>,
+    /// Sequential Welcome ↔ Overview swap, when one is running.
+    pub first_run_switch: Option<FirstRunSwitch>,
 }
 impl Default for MotionState {
     fn default() -> Self {
@@ -58,6 +100,7 @@ impl Default for MotionState {
             outgoing_page: Cell::new(false),
             moving: false,
             pending_focus: Vec::new(),
+            first_run_switch: None,
         }
     }
 }
@@ -104,6 +147,7 @@ impl Block {
         if self.visual_only {
             return;
         }
+        self.advance_first_run_switch(window, cx);
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
         self.shell
@@ -112,16 +156,11 @@ impl Block {
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = format!(
-                "{:?}:{}:{}:{}:{}",
+                "{:?}:{}:{}:{}",
                 self.tab,
                 self.shell.auth.is_some(),
                 self.wizard_task_active(),
-                self.shell.providers.visible,
-                if self.shell.first_run.enabled {
-                    format!("{:?}", self.shell.first_run.stage)
-                } else {
-                    String::new()
-                }
+                self.shell.providers.visible
             );
             let detail = match self.tab {
                 Tab::Accounts if self.shell.providers.visible => {
@@ -222,14 +261,9 @@ impl Block {
             self.motion_dirty = false;
         }
         if self.motion.frame.active() {
-            // Welcome and Overview share a tab and task flag, so their stage
-            // change is the only page swap that still slides while the window
-            // frame animates. Other page motion keeps yielding to the frame.
+            self.motion.page.settle();
             self.motion.detail.settle();
             self.motion.wizard.settle();
-            if !self.onboarding_stage_swap() {
-                self.motion.page.settle();
-            }
         }
         let mut running = false;
         for (index, scene) in [
@@ -254,30 +288,139 @@ impl Block {
         });
     }
 
+    /// Begin the sequenced Welcome ↔ Overview swap. The caller freezes the
+    /// outgoing page before changing the first-run stage.
+    pub(super) fn start_first_run_switch(
+        &mut self,
+        direction: Direction,
+        outgoing: Rc<Block>,
+        now: Instant,
+    ) {
+        self.motion.first_run_switch = Some(FirstRunSwitch {
+            direction,
+            started: now,
+            outgoing,
+            resize_requested: false,
+            reveal_started: None,
+        });
+    }
+
+    fn first_run_phase(&self, now: Instant) -> Option<FirstRunPhase> {
+        let switch = self.motion.first_run_switch.as_ref()?;
+        if !switch.resize_requested {
+            return Some(FirstRunPhase::Out(switch_progress(
+                now,
+                switch.started,
+                FIRST_RUN_OUT,
+            )));
+        }
+        match switch.reveal_started {
+            None => Some(FirstRunPhase::Resize),
+            Some(started) => Some(FirstRunPhase::In(switch_progress(
+                now,
+                started,
+                FIRST_RUN_IN,
+            ))),
+        }
+    }
+
+    fn advance_first_run_switch(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let now = cx.background_executor().now();
+        let Some(switch) = self.motion.first_run_switch.as_ref() else {
+            return;
+        };
+        if !switch.resize_requested
+            && now.saturating_duration_since(switch.started) >= FIRST_RUN_OUT
+        {
+            let forward = switch.direction == Direction::Forward;
+            if let Some(switch) = self.motion.first_run_switch.as_mut() {
+                switch.resize_requested = true;
+            }
+            // The stage already changed, so tell the frame motion which pose
+            // this resize starts from; otherwise it sees only the target.
+            self.motion.frame.set_observed_home(forward);
+            self.request_frame_resize(window, cx);
+        } else if switch.resize_requested
+            && switch.reveal_started.is_none()
+            && !self.motion.frame.active()
+            && let Some(switch) = self.motion.first_run_switch.as_mut()
+        {
+            switch.reveal_started = Some(now);
+        }
+        let finished = self.motion.first_run_switch.as_ref().is_some_and(|switch| {
+            switch
+                .reveal_started
+                .is_some_and(|started| now.saturating_duration_since(started) >= FIRST_RUN_IN)
+        });
+        if finished {
+            self.motion.first_run_switch = None;
+            self.motion_dirty = true;
+            cx.notify();
+        } else {
+            window.request_animation_frame();
+        }
+    }
+
+    /// Render the current phase of the sequential first-run swap, if one is
+    /// running. The frame-morph body is skipped while this returns.
+    pub(super) fn first_run_switch_body(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
+        let switch = self.motion.first_run_switch.as_ref()?;
+        let now = cx.background_executor().now();
+        let sign = match switch.direction {
+            Direction::Forward => 1.,
+            Direction::Back => -1.,
+        };
+        Some(match self.first_run_phase(now)? {
+            FirstRunPhase::Out(progress) => self.first_run_layer(
+                "first-run-switch-outgoing",
+                motion::Pose {
+                    x: -sign * FIRST_RUN_TRAVEL * progress,
+                    opacity: 1. - progress,
+                },
+                switch.outgoing.render_page_body(window, cx),
+            ),
+            FirstRunPhase::Resize => div()
+                .size_full()
+                .min_h_0()
+                .bg(rgb(self.palette.background))
+                .into_any_element(),
+            FirstRunPhase::In(progress) => self.first_run_layer(
+                "first-run-switch-incoming",
+                motion::Pose {
+                    x: (1. - progress) * sign * FIRST_RUN_TRAVEL,
+                    opacity: progress,
+                },
+                self.render_page_body(window, cx),
+            ),
+        })
+    }
+
+    fn first_run_layer(
+        &self,
+        id: &'static str,
+        pose: motion::Pose,
+        content: AnyElement,
+    ) -> AnyElement {
+        div()
+            .size_full()
+            .min_w_0()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            .child(motion::layer(id, pose, content).debug_selector(move || id.into()))
+            .into_any_element()
+    }
+
     pub(super) fn motion_preferences(&self) -> Preferences {
         Preferences {
             app_reduced: self.visual_only || self.preferences.reduce_motion,
             system_reduced: super::platform::reduce_motion(false),
         }
-    }
-
-    /// True while a first-run stage swap between Welcome and the Account/Game
-    /// overview is sliding. Both pages share one tab and task flag, so the page
-    /// key would otherwise treat them as the same page.
-    pub(super) fn onboarding_stage_swap(&self) -> bool {
-        let (Some(current), Some(outgoing)) =
-            (self.motion.page.current(), self.motion.page.outgoing())
-        else {
-            return false;
-        };
-        let first_run_page = |snapshot: &Block| {
-            snapshot.shell.first_run.enabled
-                && snapshot.tab == Tab::Onboarding
-                && !snapshot.wizard_task_active()
-        };
-        first_run_page(&current._snapshot)
-            && first_run_page(&outgoing._snapshot)
-            && current._snapshot.shell.first_run.stage != outgoing._snapshot.shell.first_run.stage
     }
 
     pub(super) fn transition_content(
@@ -287,7 +430,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        if self.visual_only || (self.motion.frame.active() && !self.onboarding_stage_swap()) {
+        if self.visual_only || self.motion.frame.active() {
             return content;
         }
         let scene = self.motion.scene(scope);
@@ -330,74 +473,6 @@ impl Block {
             current
         };
         viewport.child(current).into_any_element()
-    }
-
-    /// Render only the incoming page while the window frame morphs. The morph
-    /// paints the outgoing page itself, so a full page transition here would
-    /// duplicate it; this keeps the shared slide/fade on the incoming page.
-    pub(super) fn transition_current(
-        &self,
-        content: AnyElement,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        if self.visual_only || !self.onboarding_stage_swap() {
-            return content;
-        }
-        let now = cx.background_executor().now();
-        let frame = self.motion.page.sample(now, self.motion_preferences());
-        let viewport = div()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .relative()
-            .overflow_hidden();
-        let viewport = if frame.running() {
-            viewport.capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
-        } else {
-            viewport
-        };
-        viewport
-            .child(
-                motion::layer(
-                    ("motion-current", Scope::Page as usize),
-                    frame.current.unwrap_or_default(),
-                    content,
-                )
-                .debug_selector(|| "navigation-current-0".into())
-                .children(self.motion.page.paint_probe()),
-            )
-            .into_any_element()
-    }
-
-    /// Render only the outgoing page while the window frame morphs. The morph
-    /// paints the incoming page itself, so the slide/fade belongs to the page
-    /// that is leaving; without this it would only clip down with the window.
-    pub(super) fn transition_outgoing(
-        &self,
-        content: AnyElement,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        if self.visual_only || !self.onboarding_stage_swap() {
-            return content;
-        }
-        let now = cx.background_executor().now();
-        let frame = self.motion.page.sample(now, self.motion_preferences());
-        let Some(pose) = frame.outgoing else {
-            return content;
-        };
-        div()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .relative()
-            .overflow_hidden()
-            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
-            .child(
-                motion::layer(("motion-outgoing", Scope::Page as usize), pose, content)
-                    .debug_selector(|| "navigation-outgoing-0".into()),
-            )
-            .children(self.motion.page.paint_probe())
-            .into_any_element()
     }
 
     fn render_scene_fragment(
@@ -447,7 +522,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let content = self.render_page_body(window, cx);
-        if self.is_home_frame() || self.onboarding_stage_swap() {
+        if self.is_home_frame() {
             return self.transition_content(Scope::Page, content, window, cx);
         }
         let Some(outgoing) = self

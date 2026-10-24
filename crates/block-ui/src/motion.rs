@@ -486,7 +486,7 @@ impl<K: PartialEq, T> Transition<K, T> {
     }
 }
 
-const fn navigation_easing() -> Easing {
+pub(super) const fn navigation_easing() -> Easing {
     Easing::CubicBezier {
         x1: 0.16,
         y1: 1.,

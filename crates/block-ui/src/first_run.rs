@@ -210,10 +210,23 @@ impl Block {
 
     pub(super) fn first_run_overview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.shell.wizard.cancel_loader_request();
+        let leaving_welcome = self.shell.first_run.stage == Stage::Welcome;
+        // Freeze the leaving Welcome page before the stage changes.
+        let outgoing = leaving_welcome.then(|| std::rc::Rc::new(self.visual_snapshot(cx)));
         self.shell.first_run.stage = Stage::Overview;
         self.shell.first_run.entered = None;
         self.motion_dirty = true;
-        self.request_frame_resize(window, cx);
+        if let Some(outgoing) = outgoing.filter(|_| !self.motion_preferences().reduced()) {
+            // Sequence: slide Welcome away, resize the frame, slide Overview in.
+            self.start_first_run_switch(
+                super::motion::Direction::Forward,
+                outgoing,
+                cx.background_executor().now(),
+            );
+            cx.notify();
+        } else {
+            self.request_frame_resize(window, cx);
+        }
     }
 
     pub(super) fn handle_first_run(
@@ -307,10 +320,22 @@ impl Block {
             Action::BackToWelcome => {
                 // Returning to Welcome is navigation, not a reset: `setup-started`
                 // and the saved game parent keep the draft resumable.
+                let outgoing = std::rc::Rc::new(self.visual_snapshot(cx));
                 self.shell.first_run.stage = Stage::Welcome;
                 self.shell.first_run.entered = None;
                 self.motion_dirty = true;
-                self.request_frame_resize(window, cx);
+                if self.motion_preferences().reduced() {
+                    self.request_frame_resize(window, cx);
+                } else {
+                    // Sequence: slide Overview away, shrink the frame, slide
+                    // Welcome back in from the left.
+                    self.start_first_run_switch(
+                        super::motion::Direction::Back,
+                        outgoing,
+                        cx.background_executor().now(),
+                    );
+                    cx.notify();
+                }
             }
             Action::MoreOptions => {
                 let current = self.first_run_game_parent();
