@@ -11,7 +11,7 @@ use super::{
 };
 use gpui::{
     AnyElement, Context, EntityId, Global, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, Styled as _, WeakEntity, Window, div, rgb,
+    ParentElement as _, Styled as _, WeakEntity, Window, div,
 };
 use gpui_base::motion::Timing;
 use std::{
@@ -23,7 +23,7 @@ use std::{
 
 type Scene = Transition<String, Rc<Block>>;
 
-/// The outgoing page has slid away and the window frame starts resizing.
+/// The outgoing page slides away before the window frame snaps to its size.
 const FIRST_RUN_OUT: Duration = Duration::from_millis(170);
 /// The incoming page slides in once the window frame has settled.
 const FIRST_RUN_IN: Duration = Duration::from_millis(190);
@@ -31,9 +31,9 @@ const FIRST_RUN_IN: Duration = Duration::from_millis(190);
 const FIRST_RUN_TRAVEL: f32 = 24.;
 
 /// A sequenced Welcome ↔ Overview swap: the leaving page slides away, the
-/// window resizes with its content hidden, then the arriving page slides in.
-/// The generic page scene cannot express this order, and the frame morph
-/// suppresses page motion, so this short sequence owns its own clock.
+/// window frame snaps to its new size in one step, then the arriving page
+/// slides in. The generic page scene cannot express this order, and the frame
+/// morph suppresses page motion, so this short sequence owns its own clock.
 #[derive(Debug)]
 pub(super) struct FirstRunSwitch {
     direction: Direction,
@@ -46,7 +46,6 @@ pub(super) struct FirstRunSwitch {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FirstRunPhase {
     Out(f32),
-    Resize,
     In(f32),
 }
 
@@ -314,14 +313,9 @@ impl Block {
                 FIRST_RUN_OUT,
             )));
         }
-        match switch.reveal_started {
-            None => Some(FirstRunPhase::Resize),
-            Some(started) => Some(FirstRunPhase::In(switch_progress(
-                now,
-                started,
-                FIRST_RUN_IN,
-            ))),
-        }
+        switch
+            .reveal_started
+            .map(|started| FirstRunPhase::In(switch_progress(now, started, FIRST_RUN_IN)))
     }
 
     fn advance_first_run_switch(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -332,20 +326,12 @@ impl Block {
         if !switch.resize_requested
             && now.saturating_duration_since(switch.started) >= FIRST_RUN_OUT
         {
-            let forward = switch.direction == Direction::Forward;
+            // The frame changes size in one step; only the content slides.
             if let Some(switch) = self.motion.first_run_switch.as_mut() {
                 switch.resize_requested = true;
+                switch.reveal_started = Some(now);
             }
-            // The stage already changed, so tell the frame motion which pose
-            // this resize starts from; otherwise it sees only the target.
-            self.motion.frame.set_observed_home(forward);
-            self.request_frame_resize(window, cx);
-        } else if switch.resize_requested
-            && switch.reveal_started.is_none()
-            && !self.motion.frame.active()
-            && let Some(switch) = self.motion.first_run_switch.as_mut()
-        {
-            switch.reveal_started = Some(now);
+            self.resize_frame_now(window, cx);
         }
         let finished = self.motion.first_run_switch.as_ref().is_some_and(|switch| {
             switch
@@ -383,11 +369,6 @@ impl Block {
                 },
                 switch.outgoing.render_page_body(window, cx),
             ),
-            FirstRunPhase::Resize => div()
-                .size_full()
-                .min_h_0()
-                .bg(rgb(self.palette.background))
-                .into_any_element(),
             FirstRunPhase::In(progress) => self.first_run_layer(
                 "first-run-switch-incoming",
                 motion::Pose {

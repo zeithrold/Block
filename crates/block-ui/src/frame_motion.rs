@@ -123,16 +123,11 @@ struct Run {
     // A reversal during the first stage has no width to retract. It can return
     // directly instead of waiting through an empty window-resize stage.
     short_return: bool,
-    // The sequenced first-run swap hides the page content while the window
-    // resizes, so its resize uses a shorter, width-only schedule.
-    first_run_swap: bool,
 }
 impl Run {
     fn sample(self, now: Instant) -> Presentation {
         let elapsed = now.saturating_duration_since(self.started);
-        let (home, sidebar, width, detail, end) = if self.first_run_swap {
-            ((0, 60), (0, 60), (45, 150), (0, 60), 220)
-        } else if self.to_home && self.short_return {
+        let (home, sidebar, width, detail, end) = if self.to_home && self.short_return {
             ((20, 120), (0, 90), (0, 0), (0, 80), 140)
         } else if self.to_home {
             ((250, 130), (225, 105), (95, 195), (0, 110), 380)
@@ -188,13 +183,6 @@ pub(super) struct FrameMotion {
     presentation: Rc<Cell<Presentation>>,
 }
 impl FrameMotion {
-    /// Record the frame pose the next resize starts from. A sequenced
-    /// first-run swap changes the stage before it asks for the resize, so the
-    /// automatic observation already reflects the destination pose.
-    pub(super) fn set_observed_home(&mut self, home: bool) {
-        self.observed_home = Some(home);
-    }
-
     pub(super) fn frozen(&self) -> Self {
         Self {
             presentation: self.presentation.clone(),
@@ -214,6 +202,23 @@ impl Block {
                 && self.shell.first_run.stage == super::first_run::Stage::Welcome)
             && self.form.is_none()
             && self.shell.auth.is_none()
+    }
+
+    /// Apply the navigation frame size immediately, without animating the
+    /// width. The sequenced first-run swap changes size between its slide-out
+    /// and slide-in halves, so a moving window during that phase would fight
+    /// the content motion.
+    pub(super) fn resize_frame_now(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let home = self.is_home_frame();
+        let (home_size, manage_size) = window_geometry::navigation_sizes(window, cx);
+        let target = Presentation::settled(home, home_size, manage_size, window);
+        let frame = &mut self.motion.frame;
+        frame.run = None;
+        frame.outgoing = None;
+        frame.observed_home = Some(home);
+        frame.presentation.set(target);
+        window.resize(size(px(target.outer_width), window.viewport_size().height));
+        cx.notify();
     }
 
     /// Navigation requests are explicit: scenario setup and manual resizing do
@@ -264,7 +269,6 @@ impl Block {
                 to: target,
                 to_home: home,
                 short_return: home && (from.outer_width - target.outer_width).abs() < 1.,
-                first_run_swap: self.motion.first_run_switch.is_some(),
             };
             frame.presentation.set(run.sample(now));
             frame.run = Some(run);
@@ -472,7 +476,6 @@ mod tests {
         };
         Run {
             started: Instant::now(),
-            first_run_swap: false,
             from: if to_home { manage } else { home },
             to: if to_home { home } else { manage },
             to_home,

@@ -237,18 +237,21 @@ fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppCo
         "Welcome must slide away before the frame resizes: {outgoing:?}"
     );
 
-    // The frame widens with the content hidden, then Overview slides in.
+    // The frame snaps to its new size in one step, then Overview slides in.
     frame(cx, 200);
     assert!(
-        view.read_with(cx, |view, _| view.motion.frame.active()),
-        "the frame resize must follow the slide"
+        !view.read_with(cx, |view, _| view.motion.frame.active()),
+        "the frame must resize in one step instead of animating"
     );
-    frame(cx, 500);
+    assert!(
+        cx.debug_bounds("first-run-switch-outgoing").is_none(),
+        "the outgoing page must be gone before the reveal"
+    );
     frame(cx, 30);
     let incoming = cx.debug_bounds("first-run-switch-incoming");
     assert!(
         incoming.is_some_and(|bounds| bounds.left() > px(0.)),
-        "Overview must slide in only after the resize: {incoming:?}"
+        "Overview must slide in after the instant resize: {incoming:?}"
     );
     frame(cx, 260);
     assert!(view.read_with(cx, |view, _| view.motion.first_run_switch.is_none()));
@@ -269,8 +272,11 @@ fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppCo
         "Overview must slide away before the frame shrinks: {outgoing:?}"
     );
     frame(cx, 200);
-    assert!(view.read_with(cx, |view, _| view.motion.frame.active()));
-    frame(cx, 500);
+    assert!(
+        !view.read_with(cx, |view, _| view.motion.frame.active()),
+        "the frame must shrink in one step instead of animating"
+    );
+    assert!(cx.debug_bounds("first-run-switch-outgoing").is_none());
     frame(cx, 30);
     let incoming = cx.debug_bounds("first-run-switch-incoming");
     assert!(

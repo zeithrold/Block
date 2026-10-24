@@ -275,13 +275,13 @@ acceptance complete from tests or screenshots.
   the new platform data root and the deliberate no-migration policy.
 - Welcome and the Account/Game overview use a sequenced horizontal swap on the
   play button and the chrome back button: the leaving page slides away first
-  (about 170 ms) with the window still at its old size, the window then resizes
-  with its content hidden (a shortened width-only 220 ms frame), and finally
-  the arriving page slides in (about 190 ms). The shared frame-morph page path
-  is bypassed for this sequence so content cannot flash or be replayed while
-  the frame settles. A navigation regression covers both directions and asserts
-  the rendered `first-run-switch-outgoing` / `first-run-switch-incoming`
-  offsets as well as the resize phase.
+  (about 170 ms) at the current window size, the window then snaps to its new
+  size in one step with its content hidden, and finally the arriving page
+  slides in (about 190 ms). The shared frame-morph page path is bypassed for
+  this sequence so content cannot flash, be clipped or be replayed, and the
+  window width never animates during it. A navigation regression covers both
+  directions and asserts the rendered `first-run-switch-outgoing` /
+  `first-run-switch-incoming` offsets and the absence of an animated resize.
 - Verification: `just check` (formatting, workspace check, strict Clippy,
   workspace tests) passes, including the new first-run regressions for the back
   action, single-row footer, read-only mutually exclusive storage cards and
