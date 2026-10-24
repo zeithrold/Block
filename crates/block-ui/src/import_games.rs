@@ -124,6 +124,17 @@ pub(super) enum Outcome {
     Cancelled,
 }
 
+/// What a discovery started from Welcome should do once its report arrives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DeferredDiscovery {
+    /// Nothing to present: the report was stale or belonged to an explicit import.
+    Ignored,
+    /// Show the source drawer because games can be imported.
+    OpenDrawer,
+    /// Skip the empty drawer and continue to the Account/Game overview.
+    ContinueToOverview,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct State {
     pub window: Option<gpui::AnyWindowHandle>,
@@ -137,6 +148,9 @@ pub(super) struct State {
     pub outcomes: BTreeMap<String, Outcome>,
     pub cancel: CancellationToken,
     pub running: bool,
+    /// The Welcome start button scans first and shows the drawer only when the
+    /// report contains games, so an empty scan cannot flash the drawer.
+    pub deferred_open: bool,
     pub scroll: ScrollHandle,
     pub source_scroll: ScrollHandle,
     pub list_scroll: ScrollHandle,
@@ -158,6 +172,7 @@ impl Default for State {
             outcomes: BTreeMap::new(),
             cancel: CancellationToken::new(),
             running: false,
+            deferred_open: false,
             scroll: ScrollHandle::new(),
             source_scroll: ScrollHandle::new(),
             list_scroll: ScrollHandle::new(),
@@ -343,6 +358,22 @@ impl Block {
         }
     }
     pub(super) fn open_import_games(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.begin_import_discovery(window, cx, false);
+    }
+
+    /// Start searching for importable games from Welcome without showing the
+    /// drawer yet. The resolved report decides whether the drawer is worth a
+    /// detour: games open it, an empty scan continues to the overview.
+    pub(super) fn start_welcome_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.begin_import_discovery(window, cx, true);
+    }
+
+    fn begin_import_discovery(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+        deferred: bool,
+    ) {
         self.shell.import_games.window = Some(window.window_handle());
         if self.shell.import_games.running {
             return;
@@ -350,14 +381,21 @@ impl Block {
         let request = uuid::Uuid::new_v4();
         self.shell.import_games.discovery = Some(request);
         self.shell.import_games.page = Page::Sources;
+        self.shell.import_games.deferred_open = false;
         self.shell
             .import_games
             .motion
             .borrow_mut()
             .settle(Page::Sources);
         self.shell.import_games.error = None;
+        // Without an engine no report will ever resolve a deferred scan, so
+        // keep the drawer immediate there to surface the error.
         if let Some(engine) = &self.engine {
             engine.discover_games(request, discovery_roots());
+            if deferred {
+                self.shell.import_games.deferred_open = true;
+                return;
+            }
         } else {
             self.shell.import_games.discovery = None;
             self.shell.import_games.error = Some("Block's data directory is unavailable.".into());
@@ -365,6 +403,52 @@ impl Block {
         self.shell
             .surfaces
             .open(Surface::Drawer(Drawer::ImportGames), window, cx);
+    }
+
+    /// Resolve a discovery report, deciding whether a deferred Welcome scan
+    /// should open the drawer or continue past it. The caller applies the
+    /// window work with [`Self::apply_deferred_discovery`].
+    pub(super) fn resolve_game_discovery(
+        &mut self,
+        request: uuid::Uuid,
+        report: DiscoveryReport,
+    ) -> DeferredDiscovery {
+        if self.shell.import_games.discovery != Some(request) {
+            return DeferredDiscovery::Ignored;
+        }
+        let deferred = self.shell.import_games.deferred_open
+            && self.shell.first_run.enabled
+            && self.shell.first_run.stage == Stage::Welcome;
+        let empty = report.candidates.is_empty();
+        self.shell.import_games.deferred_open = false;
+        self.receive_game_discovery(request, report);
+        if !deferred {
+            DeferredDiscovery::Ignored
+        } else if empty {
+            DeferredDiscovery::ContinueToOverview
+        } else {
+            DeferredDiscovery::OpenDrawer
+        }
+    }
+
+    pub(super) fn apply_deferred_discovery(
+        &mut self,
+        decision: DeferredDiscovery,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.shell.first_run.enabled || self.shell.first_run.stage != Stage::Welcome {
+            return;
+        }
+        match decision {
+            DeferredDiscovery::Ignored => {}
+            DeferredDiscovery::OpenDrawer => {
+                self.shell
+                    .surfaces
+                    .open(Surface::Drawer(Drawer::ImportGames), window, cx);
+            }
+            DeferredDiscovery::ContinueToOverview => self.first_run_overview(window, cx),
+        }
     }
 
     pub(super) fn receive_game_discovery(&mut self, request: uuid::Uuid, report: DiscoveryReport) {

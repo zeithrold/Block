@@ -165,7 +165,7 @@ impl Block {
                 if !self.mark_first_run_started() {
                     return;
                 }
-                self.open_import_games(window, cx);
+                self.start_welcome_import(window, cx);
             }
             Action::Continue => {
                 if !self.first_run_account_ready() {

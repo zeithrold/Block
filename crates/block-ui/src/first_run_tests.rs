@@ -4,7 +4,7 @@ use super::{
     Tab, UiAction,
     engine::Engine,
     first_run::{Action as FirstRunAction, Stage},
-    import_games::Action as ImportAction,
+    import_games::{Action as ImportAction, DeferredDiscovery},
 };
 use block_launcher::game_import::{
     DiscoveryReport, GameCandidate, ImportSourceReport, LoaderKind, SourceKind,
@@ -102,6 +102,129 @@ fn begin_first_run_starts_welcome_at_home_size_and_resumes_after_setup_started(
         assert!(view.read_with(cx, |view, _| {
             view.tab == Tab::Onboarding && view.shell.first_run.stage == Stage::Overview
         }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn welcome_start_defers_the_drawer_and_empty_discovery_continues_to_the_overview(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        let request = cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.begin_first_run(cx);
+                view.handle_first_run(FirstRunAction::Start, window, cx);
+                assert!(
+                    view.shell.import_games.deferred_open,
+                    "a Welcome start must scan before showing the drawer"
+                );
+                assert!(
+                    !view.shell.surfaces.is_open(),
+                    "the drawer must not flash before the scan resolves"
+                );
+                let request = view.shell.import_games.discovery;
+                assert!(
+                    request.is_some(),
+                    "Welcome start begins a discovery request"
+                );
+                request.unwrap_or_else(uuid::Uuid::nil)
+            })
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let decision = view.resolve_game_discovery(request, DiscoveryReport::default());
+                assert_eq!(decision, DeferredDiscovery::ContinueToOverview);
+                assert!(!view.shell.surfaces.is_open());
+                view.apply_deferred_discovery(decision, window, cx);
+            });
+        });
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.stage == Stage::Overview && !view.shell.surfaces.is_open()
+        }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn welcome_start_opens_the_drawer_only_when_games_are_found(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        let request = cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.begin_first_run(cx);
+                view.handle_first_run(FirstRunAction::Start, window, cx);
+                let request = view.shell.import_games.discovery;
+                assert!(
+                    request.is_some(),
+                    "Welcome start begins a discovery request"
+                );
+                request.unwrap_or_else(uuid::Uuid::nil)
+            })
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let decision = view.resolve_game_discovery(request, discovery_report());
+                assert_eq!(decision, DeferredDiscovery::OpenDrawer);
+                view.apply_deferred_discovery(decision, window, cx);
+            });
+        });
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.stage == Stage::Welcome
+                && view.shell.import_games.report.is_some()
+                && view.shell.surfaces.top().is_some_and(|layer| {
+                    matches!(
+                        &layer.kind,
+                        crate::shell::Surface::Drawer(crate::shell::Drawer::ImportGames)
+                    )
+                })
+        }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn explicit_import_from_the_overview_opens_the_drawer_immediately(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        fs::write(root.path().join("setup-started"), b"1")?;
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.begin_first_run(cx);
+                assert_eq!(view.shell.first_run.stage, Stage::Overview);
+                view.handle_first_run(FirstRunAction::Import, window, cx);
+                assert!(
+                    !view.shell.import_games.deferred_open,
+                    "an explicit import must show its drawer without scanning first"
+                );
+                assert!(view.shell.surfaces.is_open());
+            });
+        });
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");

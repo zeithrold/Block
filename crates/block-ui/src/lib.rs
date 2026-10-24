@@ -674,17 +674,18 @@ impl Block {
             };
             match message {
                 Message::GameDiscovery { request, report } => {
-                    let empty_start = self.shell.import_games.discovery == Some(request)
-                        && report.candidates.is_empty()
-                        && self.shell.first_run.stage == first_run::Stage::Welcome;
-                    self.receive_game_discovery(request, report);
-                    if empty_start && let Some(handle) = self.shell.import_games.window {
+                    let decision = self.resolve_game_discovery(request, report);
+                    let deferred = matches!(
+                        decision,
+                        import_games::DeferredDiscovery::OpenDrawer
+                            | import_games::DeferredDiscovery::ContinueToOverview
+                    );
+                    if deferred && let Some(handle) = self.shell.import_games.window {
                         let owner = cx.entity();
                         cx.defer(move |cx| {
                             let _ = handle.update(cx, |_, window, cx| {
                                 owner.update(cx, |view, cx| {
-                                    view.shell.surfaces.clear(window, &view.focus, cx);
-                                    view.first_run_overview(window, cx);
+                                    view.apply_deferred_discovery(decision, window, cx);
                                     cx.notify();
                                 })
                             });

@@ -215,3 +215,37 @@ acceptance complete from tests or screenshots.
 - Temporary Mac activity inhibition has ended; the updated normal desktop
   preview remains available with isolated review data. Visual acceptance and the
   subsequent detailed account/game Wizard polish remain pending.
+
+## Welcome icon and hover refinement after user review — 2026-10-24
+
+- Replace the hand-drawn Play triangle with the solid Lucide `play` glyph from
+  the bundled 24 × 24 outline. The glyph is sampled into one convex polygon so
+  the inverted hover reveal keeps a single, identical silhouette.
+- Raise the hover growth from 5% to 8% of the 160 px circle and the hover shadow
+  opacity from 0.12 to 0.22. The fixed hit area, the 48 px icon scale and the
+  continuous inversion/reversal behavior are unchanged.
+- Eleven focused Welcome regressions and strict block-ui Clippy pass, and the
+  native binary rebuilds. Isolated 360 × 720 light/dark captures measure the
+  resting circle at 160 px, the hover disc at 171 px (5% growth previously
+  measured 166 px), a 32 × 36 px solid glyph whose rest and inverted silhouettes
+  match, a deeper hover shadow and an exact pixel restore after the pointer
+  leaves. Evidence is in
+  `target/onboarding-validation/welcome-lucide-hover/`.
+- Visual and user acceptance remain pending; no other page changed.
+
+## Welcome start without an empty import flash — 2026-10-24
+
+- The Welcome start button now scans for importable games before presenting the
+  source Drawer. The Drawer opens only when the report contains games; an empty
+  report continues straight to the Account/Game overview. Explicit imports from
+  the overview still open the Drawer immediately, and a missing data directory
+  still surfaces its error in the Drawer.
+- On a host without an adjacent `.minecraft` or an official launcher folder the
+  empty scan previously flashed the Drawer for about 150 ms before the overview.
+  The recorded replacement shows no Drawer frame: the normal Welcome → overview
+  page transition begins after the report resolves.
+- Three focused regressions cover the deferred empty scan, the deferred populated
+  scan and the immediate explicit import. All 314 block-ui tests, strict block-ui
+  Clippy, formatting and the native rebuild pass. Frame evidence is in
+  `target/onboarding-validation/welcome-lucide-hover/repro-frames-fixed/`.
+- User confirmation of the revised flow remains pending.

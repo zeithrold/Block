@@ -1,4 +1,6 @@
-//! Circular Play control used by first-run Welcome.
+//! Circular Play control used by first-run Welcome. The solid glyph follows
+//! the bundled Lucide `play` path; the hover reveal inverts it as one filled
+//! polygon.
 
 #![expect(
     clippy::redundant_pub_crate,
@@ -21,7 +23,16 @@ use crate::{appearance::Palette, motion::Preferences};
 
 pub(super) const DIAMETER: f32 = 160.;
 const ICON_SIZE: f32 = 48.;
+/// Extra circle diameter at full hover, as a fraction of the resting size.
+const HOVER_GROWTH: f32 = 0.08;
+/// Shadow opacity at full hover.
+const HOVER_SHADOW_ALPHA: f32 = 0.22;
 const DURATION: Duration = Duration::from_millis(180);
+
+/// Number of line segments used to sample each rounded corner of the Lucide
+/// `play` outline. Ten segments over the widest (about 120°) corner keep the
+/// chord error far below a display pixel at the rendered icon size.
+const CORNER_SEGMENTS: usize = 10;
 
 #[derive(Clone, Copy, Debug)]
 struct Run {
@@ -145,7 +156,7 @@ fn circle_crossing(from: Point<f32>, to: Point<f32>, entering: bool) -> Option<P
 fn sample_visual(animation: &mut Animation, now: Instant, preferences: Preferences) -> Visual {
     let phase = animation.run.map_or(1., |run| progress(run, now).0);
     let fraction = sample(animation, now, preferences);
-    let radius = DIAMETER * 0.5 * (1. + fraction * 0.05);
+    let radius = DIAMETER * 0.5 * (1. + fraction * HOVER_GROWTH);
     let zero = point(0., 0.);
     let running = animation.run.is_some();
     let masks = if !running {
@@ -257,7 +268,7 @@ pub(super) fn render<T: 'static>(
     let hover_state = state.clone();
     let move_state = state.clone();
     let root_bounds = state.bounds.clone();
-    let visual_diameter = DIAMETER * (1. + fraction * 0.05);
+    let visual_diameter = DIAMETER * (1. + fraction * HOVER_GROWTH);
     let inner = div()
         .id("welcome-play-visual")
         .relative()
@@ -273,7 +284,7 @@ pub(super) fn render<T: 'static>(
             inset: false,
             color: {
                 let mut color: gpui::Hsla = rgb(palette.foreground).into();
-                color.a = 0.12 * fraction;
+                color.a = HOVER_SHADOW_ALPHA * fraction;
                 color
             },
             offset: point(px(0.), px(3.)),
@@ -341,14 +352,9 @@ fn button_face(fraction: f32, masks: Vec<Vec<Point<f32>>>, palette: Palette) -> 
                 layout_bounds.center().x / px(1.),
                 layout_bounds.center().y / px(1.),
             );
-            let scale = ICON_SIZE / 24.;
-            let triangle = [
-                icon_center + point(-6. * scale, -9. * scale),
-                icon_center + point(-6. * scale, 9. * scale),
-                icon_center + point(12. * scale, 0.),
-            ];
-            paint_polygon(&triangle, palette.foreground, window);
-            let model_radius = DIAMETER * 0.5 * (1. + fraction * 0.05);
+            let glyph = play_glyph(icon_center, ICON_SIZE / 24.);
+            paint_polygon(&glyph, palette.foreground, window);
+            let model_radius = DIAMETER * 0.5 * (1. + fraction * HOVER_GROWTH);
             let actual_radius = layout_bounds.size.width.min(layout_bounds.size.height) / px(2.);
             let masks = masks
                 .iter()
@@ -364,17 +370,51 @@ fn button_face(fraction: f32, masks: Vec<Vec<Point<f32>>>, palette: Palette) -> 
                 paint_polygon(mask, palette.foreground, window);
             }
             for mask in masks {
-                paint_polygon(
-                    &clip_to_triangle(mask, &triangle),
-                    palette.background,
-                    window,
-                );
+                paint_polygon(&clip_to_convex(mask, &glyph), palette.background, window);
             }
         },
     )
     .absolute()
     .inset_0()
     .size_full()
+}
+
+/// The solid Lucide `play` glyph sampled into a convex polygon. The outline is
+/// the bundled `assets/icons/play.svg` path in its 24 × 24 viewBox: a triangle
+/// with 2-unit rounded corners, right-pointing tip and a right optical shift.
+/// A polygon keeps the inverted reveal identical to the painted glyph.
+fn play_glyph(center: Point<f32>, scale: f32) -> Vec<Point<f32>> {
+    let mut outline = vec![point(5., 5.)];
+    append_corner(&mut outline, point(7., 5.), point(8.008, 3.272));
+    outline.push(point(20.005, 10.27));
+    append_corner(&mut outline, point(19., 12.), point(20.008, 13.728));
+    outline.push(point(8.008, 20.728));
+    append_corner(&mut outline, point(7., 19.), point(5., 19.));
+    outline
+        .into_iter()
+        .map(|p| center + point((p.x - 12.) * scale, (p.y - 12.) * scale))
+        .collect()
+}
+
+/// Append one 2-unit rounded corner of the Lucide outline, ending at the
+/// corner's `to` point. The SVG arc sweeps clockwise from the previous point.
+fn append_corner(outline: &mut Vec<Point<f32>>, center: Point<f32>, to: Point<f32>) {
+    let Some(&from) = outline.last() else {
+        return;
+    };
+    let radius = 2.;
+    let start_angle = (from.y - center.y).atan2(from.x - center.x);
+    let mut sweep = (to.y - center.y).atan2(to.x - center.x) - start_angle;
+    while sweep < 0. {
+        sweep += std::f32::consts::TAU;
+    }
+    for index in 1..=CORNER_SEGMENTS {
+        let angle = start_angle + sweep * index as f32 / CORNER_SEGMENTS as f32;
+        outline.push(point(
+            center.x + radius * angle.cos(),
+            center.y + radius * angle.sin(),
+        ));
+    }
 }
 
 fn reveal_outline(
@@ -460,10 +500,6 @@ fn paint_polygon(polygon: &[Point<f32>], color: u32, window: &mut Window) {
     }
 }
 
-fn clip_to_triangle(polygon: Vec<Point<f32>>, triangle: &[Point<f32>; 3]) -> Vec<Point<f32>> {
-    clip_to_convex(polygon, triangle)
-}
-
 fn clip_to_convex(mut polygon: Vec<Point<f32>>, clip: &[Point<f32>]) -> Vec<Point<f32>> {
     if clip.len() < 3 {
         return Vec::new();
@@ -521,11 +557,28 @@ fn clip_to_convex(mut polygon: Vec<Point<f32>>, clip: &[Point<f32>]) -> Vec<Poin
 #[cfg(test)]
 mod tests {
     use super::{
-        Animation, DIAMETER, Preferences, Run, WelcomeButton, circle_crossing, clip_to_triangle,
-        entry_point_on_circle, reveal_outline, sample, sample_visual,
+        Animation, DIAMETER, Preferences, Run, WelcomeButton, circle_crossing, clip_to_convex,
+        entry_point_on_circle, play_glyph, reveal_outline, sample, sample_visual,
     };
-    use gpui::{point, px};
+    use gpui::{Point, point, px};
     use std::time::{Duration, Instant};
+
+    fn inside_convex(target: Point<f32>, polygon: &[Point<f32>]) -> bool {
+        let signed_area = (0..polygon.len())
+            .map(|index| {
+                let a = polygon[index];
+                let b = polygon[(index + 1) % polygon.len()];
+                a.x * b.y - a.y * b.x
+            })
+            .sum::<f32>();
+        let winding = signed_area.signum();
+        (0..polygon.len()).all(|index| {
+            let a = polygon[index];
+            let b = polygon[(index + 1) % polygon.len()];
+            let side = (b.x - a.x) * (target.y - a.y) - (b.y - a.y) * (target.x - a.x);
+            side * winding >= -0.01
+        })
+    }
 
     #[test]
     fn reveal_fill_stays_inside_both_circles_and_covers_the_button_when_finished() {
@@ -703,7 +756,7 @@ mod tests {
         let before = sample_visual(&mut state.animation.borrow_mut(), now, preferences);
         state.pointer_moved(point(px(DIAMETER + 12.), px(r)), true, now, preferences);
         let after = sample_visual(&mut state.animation.borrow_mut(), now, preferences);
-        let area = |masks: &[Vec<gpui::Point<f32>>]| {
+        let area = |masks: &[Vec<Point<f32>>]| {
             masks
                 .iter()
                 .map(|mask| {
@@ -786,15 +839,46 @@ mod tests {
     }
 
     #[test]
-    fn reveal_clips_the_solid_play_to_the_circular_front() {
-        let triangle = [point(-6., -8.), point(-6., 8.), point(10., 0.)];
+    fn solid_lucide_play_glyph_matches_the_bundled_icon_box() {
+        let glyph = play_glyph(point(0., 0.), 2.);
+        assert!(glyph.len() >= 30);
+        let min_x = glyph.iter().map(|p| p.x).fold(f32::MAX, f32::min);
+        let max_x = glyph.iter().map(|p| p.x).fold(f32::MIN, f32::max);
+        let min_y = glyph.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        let max_y = glyph.iter().map(|p| p.y).fold(f32::MIN, f32::max);
+        // The 24-unit Lucide outline spans x 5..21 and y 3..21: at 48 px the
+        // solid glyph is 32 px wide and 36 px tall, optically right of centre.
+        assert!((min_x + 14.).abs() < 0.02, "left edge was {min_x}");
+        assert!((max_x - 18.).abs() < 0.02, "tip ended at {max_x}");
+        assert!((min_y + 18.).abs() < 0.1, "top edge was {min_y}");
+        assert!((max_y - 18.).abs() < 0.1, "bottom edge was {max_y}");
+        // The reveal clips the glyph as one convex polygon.
+        let signed_area = (0..glyph.len())
+            .map(|index| {
+                let a = glyph[index];
+                let b = glyph[(index + 1) % glyph.len()];
+                a.x * b.y - a.y * b.x
+            })
+            .sum::<f32>();
+        let winding = signed_area.signum();
+        for index in 0..glyph.len() {
+            let a = glyph[index];
+            let b = glyph[(index + 1) % glyph.len()];
+            let c = glyph[(index + 2) % glyph.len()];
+            let turn = ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) * winding;
+            assert!(turn >= -0.01, "glyph is not convex near vertex {index}");
+        }
+    }
+
+    #[test]
+    fn reveal_clips_the_solid_play_glyph_to_the_circular_front() {
+        let glyph = play_glyph(point(0., 0.), 2.);
         let mask = reveal_outline(point(0., 0.), 20., point(-8., 0.), 8.);
-        let clipped = clip_to_triangle(mask, &triangle);
+        let clipped = clip_to_convex(mask, &glyph);
         assert!(clipped.len() >= 3);
         for p in clipped {
-            assert!(p.x <= 0.01);
+            assert!(inside_convex(p, &glyph), "{p:?} left the solid glyph");
             assert!((p.x + 8.).hypot(p.y) <= 8.01);
-            assert!(p.x >= -6.01 && p.y.abs() <= 8.01);
         }
     }
 }
