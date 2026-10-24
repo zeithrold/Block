@@ -16,8 +16,10 @@ ignored entirely; the launcher starts from defaults on the new files.
 
 `BLOCK_DATA_DIR` still overrides the data root for the desktop app, and the
 CLI's `--data-dir` option selects an external root. The platform application
-folder is shared with the first-run Global storage card
-(`crates/block-ui/src/setup_storage.rs::global_application_directory`).
+folder holds the automatic global game library
+(`crates/block-ui/src/setup_storage.rs::global_application_directory`),
+used by installed builds; portable/writable builds keep `.minecraft` beside the
+application instead. Neither location is user-selectable.
 
 ## Files
 

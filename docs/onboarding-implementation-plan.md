@@ -53,11 +53,12 @@ automated validation, native review and user acceptance remain separate.
   cancels the current task and returns to its invoking page. Remove global
   Back to Home buttons; retain step Back. Disable the task exit only during a
   short noninterruptible save; keep normal waits cancellable.
-- Installed/system/unwritable/temporary application locations default to the
-  platform user-data directory. A writable portable distribution may default to
-  adjacent `.minecraft`. Expose the actual game destination under More options,
-  using the shared task container without a Step rail. Default location changes
-  do not move existing games. Keep account secrets in the existing secure store.
+- Storage is chosen automatically from the running install shape: installed
+  system/unwritable/temporary or macOS `.app` locations use the platform
+  app-data `.minecraft`, while writable portable distributions use adjacent
+  `.minecraft` (an explicit `portable.marker` keeps portable precedence). There
+  is no first-run storage choice and no More options page. Existing games are
+  never moved; keep account secrets in the existing secure store.
 - Use literal task copy without slogans. Detailed account/game Wizard editorial
   refinements remain a subsequent pass after this onboarding increment.
 
@@ -73,8 +74,9 @@ automated validation, native review and user acceptance remain separate.
   cancellation and results with the UI engine and current catalog.
 - [x] Implement the reusable Wizard presentation/title-area controls and motion,
   and the circular welcome button interaction.
-- [x] Integrate storage defaults and More options, preserve existing settings
-  and account/game operations, and update obsolete tests and documentation.
+- [x] Integrate automatic storage defaults (portable → adjacent, installed →
+  global) and remove the More options storage page, preserving existing
+  account/game operations, and update the affected tests and documentation.
 - [x] Run focused meaningful regressions, then the repository verification gate.
 - [x] Build and inspect native Welcome, import, overview and Wizard states in
   both themes; record what was actually exercised and remaining platform limits.
@@ -133,8 +135,8 @@ acceptance complete from tests or screenshots.
   reduced-motion screenshots remain separate from animated captures.
 - Native input checks cover source/list navigation, changing four selections to
   three and retaining them on return/reopen; Wizard cancellation and subsequent
-  Continue; Microsoft-first secondary-option disclosure; More options entry and
-  cancellation; Custom setup, Review and Back with the draft retained; and quick
+  Continue; Microsoft-first secondary-option disclosure; Custom setup, Review
+  and Back with the draft retained; and quick
   welcome hover reversal/reentry from different sides. Window position and size
   remain unchanged during each run, all post-warmup paints are active, and page
   motion settles without retaining an outgoing input barrier.
@@ -259,17 +261,17 @@ acceptance complete from tests or screenshots.
   titles are larger and bold with a 6 px gap to their descriptions. Cards are
   auto-height with `p_6` padding, two equal halves of the same 620 px column as
   the heading, and equal height with top-aligned content.
-- The Overview footer is one row: More options left, Continue/Finish right. The
-  `Next: …` hint and the Overview Skip setup button are removed (Welcome's
-  bottom Skip setup remains). A chrome back button returns to the Home-sized
+- The Overview footer has a single right-aligned Continue/Finish action. The
+  `Next: …` hint, the More options storage entry and the Overview Skip setup
+  button are removed (Welcome's bottom Skip setup remains). A chrome back button returns to the Home-sized
   Welcome page without deleting saved setup progress; the existing top-left
   close-setup chevron now shares the Ghost window-control style (no border,
   32×32, 16 px muted icon) with minimize/close.
-- Game storage (More options) is two mutually exclusive read-only cards:
-  Global storage (fixed app-data `.minecraft`, no folder picker) and Local
-  storage (executable-adjacent `.minecraft`, path display plus Choose Folder).
-  Save is the primary action in the pinned footer and persists only the game
-  library path through the new `block.toml` `[storage]` section.
+- Storage is automatic and has no first-run page: a writable portable run
+  keeps games beside the application, while an installed build (including any
+  macOS `.app` without `portable.marker`) uses the global app-data `.minecraft`.
+  The resolved library is persisted in `block.toml` `[storage]`; Settings →
+  Storage is a read-only information page and existing games are never moved.
 - The config migration that backs these screens is documented separately in
   [config storage](config-storage.md): `block-global.toml` plus `block.toml`,
   the new platform data root and the deliberate no-migration policy.
@@ -283,9 +285,9 @@ acceptance complete from tests or screenshots.
   directions and asserts the rendered `first-run-switch-outgoing` /
   `first-run-switch-incoming` offsets and the absence of an animated resize.
 - Verification: `just check` (formatting, workspace check, strict Clippy,
-  workspace tests) passes, including the new first-run regressions for the back
-  action, single-row footer, read-only mutually exclusive storage cards and
-  `Locations::save`. Native captures of the Overview (light/dark), Game storage
-  and Create game screens are in
-  `target/onboarding-validation/ui-refinement/`. User acceptance remains
-  pending.
+  workspace tests) passes, including the first-run regressions for the back
+  action, the single-row footer and the automatic install-shaped storage parent,
+  plus the read-only Settings storage page. Native captures of the Overview
+  (light/dark) and Create game screens are in
+  `target/onboarding-validation/ui-refinement/`. No platform or page has passed
+  acceptance yet.

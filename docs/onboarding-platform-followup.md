@@ -136,9 +136,11 @@ three synthetic launcher games, then copies all three launcher games through
 the real UI. The result reports 3/3 Imported and the source hashes remain
 unchanged. These are separate from the four-game scenario fixture. The imported
 Game task routes Continue into the still-unfinished Account Wizard. Secondary
-sign-in disclosure, cancellation/reentry, Custom setup Review/Back with a typed
-draft, and More options entry/cancel pass; a synthetic storage preference is
-saved and verified in its isolated `storage.json`. No external sign-in starts.
+sign-in disclosure, cancellation/reentry, and Custom setup Review/Back with a
+typed draft pass. That historical run exercised the earlier More options storage
+choice page and saved a synthetic preference; the page was later removed when
+storage became automatic (2026-10-24), so those steps no longer describe the
+current flow. No external sign-in starts.
 In another empty isolated data directory, the three-game launcher list changes
 from three selected to two; returning to Sources and reopening the list retains
 the exact deselection and `Import 2 games`. This second list is not copied.

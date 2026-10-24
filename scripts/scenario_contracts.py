@@ -114,12 +114,16 @@ _add("settings-game", "Game defaults", "Defaults apply to new Instances and Prof
 _add("settings-profiles", "Profile mode", "Separated Profile")
 _add("settings-downloads", "Downloads & network", "Parallel downloads")
 _add("settings-socks5", "Downloads & network", "socks5h://127.0.0.1:1080")
-_add("settings-storage", "Storage", "Move existing managed games")
-_add("settings-storage-moving", "Storage", "Copying")
-_add("settings-storage-retained", "Storage", "Review retained copy…")
-_add("settings-storage-interrupted", "Storage", "The interrupted move was rolled back.")
-_add("storage-cleanup-confirmation", "Remove this retained copy?", "Keep copy")
+_add("settings-storage", "Storage", "Game storage", "Download cache")
 _add("about", "MINECRAFT: JAVA EDITION LAUNCHER", "Made for your next world.")
+_add("setup-welcome", "Welcome to Block", "Game setup")
+_add("setup-overview", "Two steps and you're ready", "Account", "Game")
+_add("setup-overview-ready", "Two steps and you're ready", "Finish")
+_add("setup-game-choice", "Set up a game", "Recommended setup", "Custom setup")
+_add("setup-account", "Account", "Microsoft")
+_add("setup-game", "Create a game", "Minecraft")
+_add("setup-import-sources", "Import existing games", "Choose a folder")
+_add("setup-import-list", "Import existing games", "Import")
 
 _add("welcome-1", "Welcome to Block", "Game setup")
 _add("welcome-2", "Welcome to Block", "Account")
@@ -139,11 +143,11 @@ def _window_title(name: str) -> str:
         page = "Instance settings"
     elif name.startswith("wizard-"):
         page = "Create a game"
-    elif name.startswith("settings-") or name == "storage-cleanup-confirmation" or name == "welcome-settings":
+    elif name.startswith("settings-") or name == "welcome-settings":
         page = "Settings"
     elif name in {"about", "welcome-about"}:
         page = "About Block"
-    elif name.startswith("welcome-"):
+    elif name.startswith("welcome-") or name.startswith("setup-"):
         page = "Welcome to Block"
     elif name.startswith("accounts-") or name == "remove-account-confirmation":
         page = "Accounts"

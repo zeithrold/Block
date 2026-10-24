@@ -127,8 +127,6 @@ pub(super) enum SettingsField {
     Retries,
     Rate,
     ProxyUrl,
-    Library,
-    Cache,
 }
 
 impl SettingsField {
@@ -136,7 +134,6 @@ impl SettingsField {
         match self {
             Self::Memory | Self::Java | Self::Jvm | Self::Width | Self::Height => 1,
             Self::Concurrent | Self::Retries | Self::Rate | Self::ProxyUrl => 3,
-            Self::Library | Self::Cache => 4,
         }
     }
 }
@@ -164,43 +161,24 @@ impl fmt::Display for SettingsError {
 
 impl std::error::Error for SettingsError {}
 
-#[derive(Clone, Debug)]
-pub(super) struct StorageRequest {
-    pub id: uuid::Uuid,
-    pub operation: u64,
-    pub draft: u64,
-    pub library: String,
-    pub cache: String,
-    pub preferences: Preferences,
-}
-
+/// Effective on-disk locations shown by the read-only Storage page.
 #[derive(Clone, Debug)]
 pub(super) struct StorageState {
-    pub locations: Result<block_launcher::storage::Locations, String>,
-    pub cleanup: Option<block_launcher::storage::Cleanup>,
-    pub error: Option<String>,
-    pub pending: Option<StorageRequest>,
-    pub progress: Option<block_launcher::storage::Progress>,
+    pub paths: Result<StoragePaths, String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct StoragePaths {
+    pub library: PathBuf,
+    pub cache: PathBuf,
 }
 
 impl Default for StorageState {
     fn default() -> Self {
         Self {
-            locations: Ok(Default::default()),
-            cleanup: None,
-            error: None,
-            pending: None,
-            progress: None,
+            paths: Ok(StoragePaths::default()),
         }
     }
-}
-
-pub(super) struct StorageFinished {
-    pub request: StorageRequest,
-    pub result: Result<String, String>,
-    pub locations: Result<block_launcher::storage::Locations, String>,
-    pub cleanup: Result<Option<block_launcher::storage::Cleanup>, String>,
-    pub preferences: Result<Preferences, String>,
 }
 
 #[expect(
@@ -219,8 +197,6 @@ pub(super) struct SettingsDraft {
     pub retries: Entity<TextInput>,
     pub rate: Entity<TextInput>,
     pub proxy_url: Entity<TextInput>,
-    pub library: Entity<TextInput>,
-    pub cache: Entity<TextInput>,
     pub proxy_mode: u8,
     pub fullscreen: bool,
     pub show_snapshots: bool,
@@ -265,8 +241,6 @@ impl SettingsDraft {
             retries: super::frozen_input(&self.retries, cx),
             rate: super::frozen_input(&self.rate, cx),
             proxy_url: super::frozen_input(&self.proxy_url, cx),
-            library: super::frozen_input(&self.library, cx),
-            cache: super::frozen_input(&self.cache, cx),
             proxy_mode: self.proxy_mode,
             fullscreen: self.fullscreen,
             show_snapshots: self.show_snapshots,
@@ -307,8 +281,6 @@ impl SettingsDraft {
                 cx,
             ),
             proxy_url: input(proxy_url, "http://127.0.0.1:8080", cx),
-            library: input("", "Managed by Block", cx),
-            cache: input("", "Managed by Block", cx),
             proxy_mode,
             fullscreen: game.fullscreen,
             show_snapshots: game.show_snapshots,
@@ -339,8 +311,6 @@ impl SettingsDraft {
             SettingsField::Retries,
             SettingsField::Rate,
             SettingsField::ProxyUrl,
-            SettingsField::Library,
-            SettingsField::Cache,
         ] {
             cx.observe(self.input(field), move |view, observed, cx| {
                 if let Some(draft) = &mut view.settings_form
@@ -372,8 +342,6 @@ impl SettingsDraft {
             SettingsField::Retries => &self.retries,
             SettingsField::Rate => &self.rate,
             SettingsField::ProxyUrl => &self.proxy_url,
-            SettingsField::Library => &self.library,
-            SettingsField::Cache => &self.cache,
         }
     }
 
@@ -401,48 +369,12 @@ impl SettingsDraft {
                 }
                 fields
             }
-            4 => vec![self.library.clone(), self.cache.clone()],
             _ => Vec::new(),
         }
     }
 
     pub(super) fn is_dirty(&self, saved: &Preferences, cx: &gpui::App) -> bool {
         !self.parse(saved, cx).is_ok_and(|value| value == *saved)
-    }
-
-    fn storage_paths(
-        &self,
-        cx: &gpui::App,
-    ) -> Result<block_launcher::storage::Locations, SettingsError> {
-        let path = |field| {
-            let value = self.input(field).read(cx).value();
-            let value = value.trim();
-            if value.is_empty() {
-                return Ok(None);
-            }
-            let path = PathBuf::from(value);
-            if !path.is_absolute() || value.contains('\0') {
-                return Err(SettingsError::at(
-                    field,
-                    "Choose an absolute folder path, or leave it empty",
-                ));
-            }
-            Ok(Some(path))
-        };
-        Ok(block_launcher::storage::Locations {
-            library: path(SettingsField::Library)?,
-            cache: path(SettingsField::Cache)?,
-            ..Default::default()
-        })
-    }
-
-    fn set_storage(&self, value: &block_launcher::storage::Locations, cx: &mut Context<'_, Block>) {
-        for (input, path) in [(&self.library, &value.library), (&self.cache, &value.cache)] {
-            let value = path
-                .as_ref()
-                .map_or_else(String::new, |path| path.display().to_string());
-            input.update(cx, |input, cx| input.set_value(&value, cx));
-        }
     }
 
     pub(super) fn parse(
@@ -609,7 +541,6 @@ impl SettingsDraft {
                 }
                 self.proxy_mode = 0;
             }
-            4 => self.set_storage(&block_launcher::storage::Locations::default(), cx),
             _ => return,
         }
         self.error = None;
@@ -737,21 +668,21 @@ impl Block {
     }
 
     pub(super) fn open_settings(&mut self, cx: &mut Context<'_, Self>) {
-        if self.shell.storage.pending.is_none()
-            && let Some(engine) = &self.engine
-        {
-            self.shell.storage.locations = block_launcher::storage::Locations::load(&engine.root)
-                .and_then(|value| value.validate(&engine.root))
-                .map_err(|error| format!("{error:#}"));
-            match block_launcher::storage::cleanup_status(&engine.root) {
-                Ok(cleanup) => self.shell.storage.cleanup = cleanup,
-                Err(error) => self.shell.storage.error = Some(format!("{error:#}")),
-            }
-        }
+        self.shell.storage.paths = self.engine.as_ref().map_or_else(
+            || Err("Storage locations are unavailable until Block finishes starting.".into()),
+            |engine| {
+                block_launcher::storage::Locations::load(&engine.root)
+                    .and_then(|locations| {
+                        let validated = locations.validate(&engine.root)?;
+                        Ok(StoragePaths {
+                            library: validated.library(&engine.root),
+                            cache: validated.cache(&engine.root),
+                        })
+                    })
+                    .map_err(|error| format!("{error:#}"))
+            },
+        );
         let mut draft = SettingsDraft::new(&self.saved_preferences, cx);
-        if let Ok(locations) = &self.shell.storage.locations {
-            draft.set_storage(locations, cx);
-        }
         draft.page = self.shell.settings_page.min(4);
         self.settings_form = Some(draft);
     }
@@ -797,15 +728,6 @@ impl Block {
     }
 
     pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.shell.storage.pending.is_some() {
-            self.status = "Storage is busy. Wait for relocation or cancel it before saving.".into();
-            return;
-        }
-        let storage_dirty = self.storage_dirty(cx);
-        if storage_dirty {
-            self.apply_storage(false, window, cx);
-            return;
-        }
         let parsed = self
             .settings_form
             .as_ref()
@@ -849,274 +771,6 @@ impl Block {
             }
             Err(error) => self.settings_failure(error, window, cx),
         }
-    }
-
-    fn storage_dirty(&self, cx: &gpui::App) -> bool {
-        self.settings_form.as_ref().is_some_and(|draft| {
-            match (&self.shell.storage.locations, draft.storage_paths(cx)) {
-                (Ok(saved), Ok(value)) => {
-                    saved.library != value.library || saved.cache != value.cache
-                }
-                (Err(_), _) => {
-                    draft.page == 4
-                        || !draft.library.read(cx).value().is_empty()
-                        || !draft.cache.read(cx).value().is_empty()
-                }
-                _ => true,
-            }
-        })
-    }
-
-    pub(super) fn move_storage_games(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.storage_dirty(cx) {
-            self.report("Save the destination folders before moving existing games.".into());
-            return;
-        }
-        self.apply_storage(true, window, cx);
-    }
-
-    fn apply_storage(&mut self, move_games: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy || self.shell.storage.pending.is_some() {
-            return;
-        }
-        let Some(draft) = &self.settings_form else {
-            return;
-        };
-        if draft
-            .fields()
-            .iter()
-            .any(|field| field.read(cx).is_composing())
-        {
-            return;
-        }
-        if let Err(error) = &self.shell.storage.locations {
-            self.settings_failure(
-                SettingsError {
-                    field: Some(SettingsField::Library),
-                    message: error.clone(),
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        let parsed = draft.storage_paths(cx).and_then(|locations| {
-            draft
-                .parse(&self.saved_preferences, cx)
-                .map(|preferences| (locations, preferences))
-        });
-        let (locations, preferences) = match parsed {
-            Ok(value) => value,
-            Err(error) => {
-                self.settings_failure(error, window, cx);
-                return;
-            }
-        };
-        let validation = self
-            .engine
-            .as_ref()
-            .context("Storage engine is unavailable")
-            .and_then(|engine| locations.validate(&engine.root));
-        if let Err(error) = validation {
-            self.settings_failure(
-                SettingsError {
-                    field: Some(SettingsField::Library),
-                    message: error.to_string(),
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        if self.shell.storage.cleanup.is_some() {
-            self.report("Keep or remove the retained copy before another storage change.".into());
-            return;
-        }
-        let request = StorageRequest {
-            id: uuid::Uuid::new_v4(),
-            operation: 0,
-            draft: draft.library.entity_id().as_u64(),
-            library: draft.library.read(cx).value(),
-            cache: draft.cache.read(cx).value(),
-            preferences: preferences.clone(),
-        };
-        let saved = self
-            .engine
-            .as_ref()
-            .context("Storage engine is unavailable")
-            .and_then(|engine| preferences.save(&engine.root));
-        if let Err(error) = saved {
-            self.settings_failure(
-                SettingsError {
-                    field: None,
-                    message: error.to_string(),
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        self.preferences.clone_from(&preferences);
-        self.saved_preferences = preferences;
-        self.begin_cancellable("Preparing storage relocation");
-        let mut request = request;
-        request.operation = self.operation_revision;
-        self.shell.storage.pending = Some(request.clone());
-        self.shell.storage.error = None;
-        self.shell.storage.progress = Some(block_launcher::storage::Progress {
-            phase: "Preparing",
-            completed_bytes: 0,
-            total_bytes: 0,
-        });
-        if let Some(engine) = &self.engine {
-            engine.relocate_storage(request, locations, move_games, self.cancel.clone());
-        }
-        cx.notify();
-    }
-
-    pub(super) fn clean_storage(
-        &mut self,
-        id: uuid::Uuid,
-        remove: bool,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if self.busy
-            || self
-                .shell
-                .storage
-                .cleanup
-                .as_ref()
-                .is_none_or(|state| state.id != id)
-        {
-            return;
-        }
-        let request = StorageRequest {
-            id: uuid::Uuid::new_v4(),
-            operation: 0,
-            draft: 0,
-            library: String::new(),
-            cache: String::new(),
-            preferences: self.saved_preferences.clone(),
-        };
-        if matches!(
-            self.shell.surfaces.top().map(|entry| &entry.kind),
-            Some(super::shell::Surface::StorageCleanup(_))
-        ) {
-            self.shell.surfaces.close(window, &self.focus, cx);
-        }
-        self.begin(if remove {
-            "Removing the confirmed retained copy"
-        } else {
-            "Keeping the retained copy"
-        });
-        let mut request = request;
-        request.operation = self.operation_revision;
-        self.shell.storage.pending = Some(request.clone());
-        self.shell.storage.error = None;
-        self.shell.storage.progress = Some(block_launcher::storage::Progress {
-            phase: if remove {
-                "Removing retained copy"
-            } else {
-                "Keeping retained copy"
-            },
-            completed_bytes: 0,
-            total_bytes: 0,
-        });
-        if let Some(engine) = &self.engine {
-            engine.cleanup_storage(request, id, remove);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn storage_progress(
-        &mut self,
-        id: uuid::Uuid,
-        progress: block_launcher::storage::Progress,
-    ) {
-        if self
-            .shell
-            .storage
-            .pending
-            .as_ref()
-            .is_some_and(|request| request.id == id)
-        {
-            self.status = format!("{} storage", progress.phase);
-            self.shell.storage.progress = Some(progress);
-        }
-    }
-
-    pub(super) fn storage_finished(
-        &mut self,
-        finished: StorageFinished,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let request = &finished.request;
-        if self
-            .shell
-            .storage
-            .pending
-            .as_ref()
-            .is_none_or(|pending| pending.id != request.id)
-        {
-            return;
-        }
-        let result = finished.result.and_then(|message| {
-            for state in [
-                finished.locations.as_ref().map(|_| ()),
-                finished.cleanup.as_ref().map(|_| ()),
-                finished.preferences.as_ref().map(|_| ()),
-            ] {
-                if let Err(error) = state {
-                    return Err(format!(
-                        "Storage operation ended, but its saved state could not be read: {error}"
-                    ));
-                }
-            }
-            Ok(message)
-        });
-        let unchanged = self.settings_form.as_ref().is_some_and(|draft| {
-            draft.library.entity_id().as_u64() == request.draft
-                && draft.library.read(cx).value() == request.library
-                && draft.cache.read(cx).value() == request.cache
-                && draft
-                    .parse(&request.preferences, cx)
-                    .is_ok_and(|value| value == request.preferences)
-        });
-        self.shell.storage.pending = None;
-        self.shell.storage.progress = None;
-        self.shell.storage.locations = finished.locations;
-        match finished.cleanup {
-            Ok(cleanup) => self.shell.storage.cleanup = cleanup,
-            Err(error) => self.shell.storage.error = Some(error),
-        }
-        if let Ok(preferences) = finished.preferences {
-            self.saved_preferences = preferences;
-        }
-        if self.operation_revision == request.operation {
-            self.busy = self.active_run.is_some();
-            self.operation_cancellable = false;
-        }
-        match result {
-            Ok(message) => {
-                if unchanged {
-                    let page = self.settings_form.as_ref().map_or(4, |draft| draft.page);
-                    self.preferences.clone_from(&self.saved_preferences);
-                    self.open_settings(cx);
-                    if let Some(draft) = &mut self.settings_form {
-                        draft.page = page;
-                        draft.notice = Some(message.clone());
-                    }
-                }
-                self.status = message.clone();
-                self.push_toast(message, super::feedback::ToastKind::Success);
-            }
-            Err(error) => {
-                self.shell.storage.error = Some(error.clone());
-                self.report(format!("Storage change failed: {error}. Saved preferences were kept; review the retained-copy status."));
-            }
-        }
-        cx.notify();
     }
 
     pub(super) fn settings_failure(
@@ -1225,7 +879,7 @@ impl Block {
     ) -> gpui::Div {
         let narrow = patterns::is_narrow(viewport);
         let page = draft.page;
-        let dirty = draft.is_dirty(&self.saved_preferences, cx) || self.storage_dirty(cx);
+        let dirty = draft.is_dirty(&self.saved_preferences, cx);
         let categories = [
             (0, "general", "General", Icon::System),
             (1, "game", "Game defaults", Icon::Settings),
@@ -1336,7 +990,10 @@ impl Block {
                 "Downloads & network",
                 "Control download limits and connection preferences.",
             ),
-            4 => ("Storage", "Files managed by this Block installation."),
+            4 => (
+                "Storage",
+                "Block chooses where games and downloads live automatically.",
+            ),
             _ => ("General", "Make Block feel at home."),
         };
         let feedback = draft
@@ -1397,7 +1054,7 @@ impl Block {
             1 => self.settings_fields(draft, narrow, cx),
             2 => self.settings_profile_mode(narrow, cx),
             3 => self.settings_downloads(draft, narrow, cx),
-            4 => self.settings_storage(draft, cx),
+            4 => self.settings_storage(),
             _ => self.settings_appearance(draft, cx),
         }
         .into_any_element()
@@ -1411,8 +1068,18 @@ impl Block {
     ) -> gpui::Div {
         let narrow = patterns::is_narrow(viewport);
         let page = draft.page;
-        let dirty = draft.is_dirty(&self.saved_preferences, cx) || self.storage_dirty(cx);
+        let dirty = draft.is_dirty(&self.saved_preferences, cx);
+        let close = if self.tab == Tab::Onboarding || self.shell.guide_preview.is_some() {
+            UiAction::Drawer(None)
+        } else {
+            UiAction::Tab(Tab::Home)
+        };
         let mut footer = patterns::management_footer(viewport, self.palette).justify_between();
+        if page == 4 {
+            return footer
+                .child(note("Locations are managed automatically.").flex_1())
+                .child(self.button("cancel-preferences", "Close", close, cx));
+        }
         if page == 2 {
             footer = footer.child(
                 note(if narrow {
@@ -1438,26 +1105,15 @@ impl Block {
             div()
                 .flex()
                 .gap_2()
-                .child(self.button(
-                    "cancel-preferences",
-                    "Cancel",
-                    if self.tab == Tab::Onboarding || self.shell.guide_preview.is_some() {
-                        UiAction::Drawer(None)
-                    } else {
-                        UiAction::Tab(Tab::Home)
-                    },
-                    cx,
-                ))
+                .child(self.button("cancel-preferences", "Cancel", close, cx))
                 .child(components::button(
                     "save-preferences",
                     "Save changes",
                     self.palette,
                     components::ButtonVariant::Primary,
                     ControlState {
-                        disabled: !dirty
-                            || self.shell.storage.pending.is_some()
-                            || (self.busy && self.storage_dirty(cx)),
-                        busy: self.shell.storage.pending.is_some(),
+                        disabled: !dirty,
+                        busy: false,
                         invalid: false,
                     },
                     cx.listener(|view, (): &(), window, cx| {
@@ -1696,114 +1352,66 @@ impl Block {
             .child(self.render_connection_test(cx))
     }
 
-    fn settings_storage(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let state = &self.shell.storage;
-        let mut content = div().flex().flex_col().gap_5();
-        if let Some(progress) = &state.progress {
-            content = content.child(
-                components::card(self.palette)
-                    .child(div().text_sm().child(format!("{} storage", progress.phase)))
-                    .child(components::progress(
-                        if progress.total_bytes == 0 {
-                            components::ProgressState::Indeterminate
-                        } else {
-                            components::ProgressState::Measured {
-                                completed: progress.completed_bytes,
-                                total: progress.total_bytes,
-                            }
-                        },
-                        self.palette,
+    fn settings_storage(&self) -> gpui::Div {
+        let mut content = div().flex().flex_col().gap_5().child(note(
+            "Portable builds keep games beside the app; installed builds use the global app-data folder. These locations are chosen automatically and cannot be changed here.",
+        ));
+        match &self.shell.storage.paths {
+            Ok(paths) => {
+                content = content
+                    .child(self.storage_location_row(
+                        "settings-storage-library",
+                        "Game storage",
+                        &paths.library,
                     ))
-                    .children((progress.total_bytes > 0).then(|| {
-                        note(format!(
-                            "{} / {} bytes",
-                            progress.completed_bytes, progress.total_bytes
-                        ))
-                    }))
-                    .children(self.operation_cancellable.then(|| {
-                        self.button("storage-cancel", "Cancel relocation", UiAction::Stop, cx)
-                    })),
-            );
-        }
-        if let Some(error) = state.error.as_ref().or(state.locations.as_ref().err()) {
-            content = content.child(note(error.clone()).text_color(rgb(self.palette.destructive)));
-        }
-        content = content
-            .child(self.settings_field(draft, SettingsField::Library, "Default library folder", Some("New Instances get their own subfolder here. Existing game folders are kept in place.")))
-            .child(self.settings_field(draft, SettingsField::Cache, "Download cache folder", Some("Reusable downloads are copied and verified before this location changes.")))
-            .child(note("Leave paths empty to use folders managed by Block. Previous copies stay on disk until you review them."));
-        if self.busy && state.pending.is_none() {
-            content = content.child(note(
-                "Finish downloads and stop games before changing storage.",
-            ));
-        }
-        if let Some(cleanup) = &state.cleanup {
-            content = content.child(components::card(self.palette)
-                .child(div().text_sm().child(if cleanup.interrupted { "Incomplete destination copy retained" } else { "Previous copy retained" }))
-                .child(note(if cleanup.interrupted { "The move was rolled back. Original files are still in use. Review the incomplete copy before removing it." }
-                    else { "The new locations are in use. Review the previous copy before removing it, or keep it." }))
-                .child(self.button("storage-review-cleanup", "Review retained copy…", UiAction::StorageReviewCleanup, cx))
-                .child(self.button("storage-keep-copy", "Keep copy", UiAction::StorageCleanup(cleanup.id, false), cx)));
-        } else if state.pending.is_none() {
-            let movable = self
-                .engine
-                .as_ref()
-                .zip(state.locations.as_ref().ok())
-                .is_some_and(|(engine, locations)| {
-                    self.snapshot.instances.iter().any(|instance| {
-                        instance
-                            .directory
-                            .file_name()
-                            .is_some_and(|name| name == instance.id.as_str())
-                            && instance.directory
-                                != locations.library(&engine.root).join(&instance.id)
-                    })
-                });
-            if movable {
-                content = content.child(note("Saving the default library does not move existing games. This separate action moves managed games to the saved library; custom folders stay in place."))
-                    .child(self.button("storage-move-games", "Move existing managed games", UiAction::StorageMoveGames, cx));
+                    .child(self.storage_location_row(
+                        "settings-storage-cache",
+                        "Download cache",
+                        &paths.cache,
+                    ));
+            }
+            Err(error) => {
+                content = content.child(
+                    note(error.clone())
+                        .id("settings-storage-error")
+                        .debug_selector(|| "settings-storage-error".into())
+                        .text_color(rgb(self.palette.destructive)),
+                );
             }
         }
         content
     }
 
-    /// The retained-copy review text shared by the in-window confirmation
-    /// dialog and its legacy surface fallback.
-    pub(super) fn storage_cleanup_notes(&self, id: uuid::Uuid) -> Vec<String> {
-        let Some(cleanup) = self
-            .shell
-            .storage
-            .cleanup
-            .as_ref()
-            .filter(|state| state.id == id)
-        else {
-            return vec![
-                "The retained copy changed. Close this dialog and review the current storage state."
-                    .to_owned(),
-            ];
-        };
-        let mut notes = vec![if cleanup.interrupted {
-            "Only the incomplete destination folders listed below will be removed. The original locations remain in use.".to_owned()
-        } else {
-            "Only the previous managed folders listed below will be removed. The verified new copy remains in use.".to_owned()
-        }];
-        notes.extend(
-            cleanup
-                .previous_folders
-                .iter()
-                .map(|path| path.display().to_string()),
-        );
-        if cleanup.cleanup_started {
-            notes.push(
-                "An earlier cleanup stopped partway through. Confirm again to remove its remaining files."
-                    .to_owned(),
-            );
-        }
-        notes.push(
-            "Keep the copy if you want to inspect it first. Edited previous copies are preserved and require manual review."
-                .to_owned(),
-        );
-        notes
+    /// A read-only path row on the Storage information page.
+    fn storage_location_row(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        path: &std::path::Path,
+    ) -> gpui::Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(label),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .debug_selector(move || id.into())
+                    .w_full()
+                    .p_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(self.palette.border))
+                    .bg(rgb(self.palette.secondary))
+                    .text_sm()
+                    .child(path.display().to_string()),
+            )
     }
 
     fn settings_profile_mode(&self, narrow: bool, cx: &Context<'_, Self>) -> gpui::Div {

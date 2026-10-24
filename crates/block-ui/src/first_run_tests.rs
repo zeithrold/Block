@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, fs};
 use super::{
     Tab, UiAction,
     engine::Engine,
-    first_run::{Action as FirstRunAction, Stage, StorageChoice},
+    first_run::{Action as FirstRunAction, Stage},
     import_games::{Action as ImportAction, DeferredDiscovery},
 };
 use block_launcher::game_import::{
@@ -16,43 +16,6 @@ fn bounds(
 ) -> anyhow::Result<gpui::Bounds<gpui::Pixels>> {
     crate::test_support::control_bounds(cx, selector)
         .ok_or_else(|| anyhow::anyhow!("missing rendered control: {selector}"))
-}
-
-/// Let the page-transition motion finish so its mouse barrier releases before a
-/// test clicks a first-run control.
-fn settle_transition(cx: &mut gpui::VisualTestContext) {
-    cx.executor()
-        .advance_clock(std::time::Duration::from_millis(400));
-    cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-}
-
-/// Open Stage::Storage with a deterministic Local path, exactly like the
-/// Overview's More options action does.
-fn open_storage_page<'a>(
-    cx: &'a mut gpui::TestAppContext,
-    root: &std::path::Path,
-    local: std::path::PathBuf,
-) -> anyhow::Result<(gpui::Entity<super::Block>, &'a mut gpui::VisualTestContext)> {
-    fs::write(root.join("setup-started"), b"1")?;
-    let (engine, messages) = Engine::with_root(root.to_owned())?;
-    let (view, cx) = crate::test_support::window(cx, move |window, cx| {
-        let mut view = crate::tests::test_view(window, cx);
-        view.preferences.reduce_motion = true;
-        view.engine = Some(engine);
-        view.messages = Some(messages);
-        view
-    });
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.begin_first_run(cx);
-            view.shell.first_run.game_parent = Some(local);
-            view.handle_first_run(FirstRunAction::MoreOptions, window, cx);
-        });
-    });
-    cx.run_until_parked();
-    settle_transition(cx);
-    Ok((view, cx))
 }
 
 fn candidate(id: &str, source: SourceKind, importable: bool) -> GameCandidate {
@@ -530,7 +493,39 @@ fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAp
 }
 
 #[gpui::test]
-fn overview_footer_keeps_a_single_more_options_and_continue_row(cx: &mut gpui::TestAppContext) {
+fn first_run_keeps_an_existing_saved_library(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let saved = root.path().join("saved-games");
+        fs::create_dir_all(&saved)?;
+        block_launcher::storage::Locations {
+            library: Some(saved.clone()),
+            cache: None,
+            generation: None,
+        }
+        .save(root.path())?;
+        fs::write(root.path().join("setup-started"), b"1")?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        view.update(cx, |view, cx| view.begin_first_run(cx));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.first_run_game_parent()),
+            saved,
+            "automatic selection must not override an existing library"
+        );
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn overview_footer_keeps_a_single_continue_row(cx: &mut gpui::TestAppContext) {
     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.tab = Tab::Onboarding;
@@ -540,25 +535,49 @@ fn overview_footer_keeps_a_single_more_options_and_continue_row(cx: &mut gpui::T
     });
     cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
     cx.run_until_parked();
-    let more = crate::test_support::control_bounds(cx, "setup-more-options");
     let finish = crate::test_support::control_bounds(cx, "setup-continue");
-    assert!(more.is_some(), "More options must stay in the footer");
     assert!(finish.is_some(), "Continue must stay in the footer");
+    assert!(
+        crate::test_support::control_bounds(cx, "setup-more-options").is_none(),
+        "storage is automatic, so the footer must not offer More options"
+    );
     assert!(
         crate::test_support::control_bounds(cx, "setup-overview-skip").is_none(),
         "the Overview footer must not offer Skip setup"
     );
-    if let (Some(more), Some(finish)) = (more, finish) {
+}
+
+#[gpui::test]
+fn first_run_defaults_to_the_install_shaped_storage_parent(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        fs::write(root.path().join("setup-started"), b"1")?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        view.update(cx, |view, cx| view.begin_first_run(cx));
+        let expected = std::env::current_exe()
+            .ok()
+            .and_then(|executable| crate::setup_storage::automatic_game_parent(&executable));
+        let Some(expected) = expected else {
+            anyhow::bail!("the test host must classify its own install");
+        };
         assert_eq!(
-            more.center().y,
-            finish.center().y,
-            "More options and Continue must share one footer row"
+            view.read_with(cx, |view, _| view.first_run_game_parent()),
+            expected
         );
         assert!(
-            more.right() <= finish.left(),
-            "More options stays left of Continue"
+            !root.path().join("block.toml").exists(),
+            "opening the Overview must not write a storage choice"
         );
-    }
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
@@ -807,157 +826,6 @@ fn restart_reconstructs_account_and_game_completion_from_saved_data(cx: &mut gpu
             view.shell.first_run.stage == Stage::Overview
                 && view.first_run_account_ready()
                 && view.first_run_game_ready()
-        }));
-        Ok(())
-    })();
-    assert!(result.is_ok(), "{result:?}");
-}
-
-#[test]
-fn storage_choice_prefers_global_only_when_the_saved_parent_matches() {
-    let global = std::path::Path::new("/scenario/Application Support/one.ztd.block/.minecraft");
-    assert_eq!(
-        StorageChoice::infer(global, Some(global)),
-        StorageChoice::Global
-    );
-    assert_eq!(StorageChoice::infer(global, None), StorageChoice::Local);
-    assert_eq!(
-        StorageChoice::infer(
-            std::path::Path::new("/scenario/Block/.minecraft"),
-            Some(global)
-        ),
-        StorageChoice::Local
-    );
-}
-
-#[gpui::test]
-fn storage_cards_are_read_only_mutually_exclusive_and_only_local_browses(
-    cx: &mut gpui::TestAppContext,
-) {
-    let result = (|| -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let local = root.path().join("local-games");
-        fs::create_dir_all(&local)?;
-        let (view, cx) = open_storage_page(cx, root.path(), local.clone())?;
-        cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
-        cx.run_until_parked();
-        settle_transition(cx);
-        let global = root.path().join("app-data/one.ztd.block/.minecraft");
-        cx.update(|_, cx| {
-            view.update(cx, |view, cx| {
-                view.shell.first_run.storage_global = Some(global.clone());
-                assert_eq!(view.shell.first_run.storage_choice, StorageChoice::Local);
-                assert_eq!(
-                    view.shell.first_run.storage_local.as_deref(),
-                    Some(local.as_path())
-                );
-                assert_eq!(view.shell.first_run.stage, Stage::Storage);
-                cx.notify();
-            });
-        });
-        cx.run_until_parked();
-
-        // Both cards render a read-only path box and the Save action sits below
-        // them; only the Local card has a folder picker.
-        let global_card = bounds(cx, "setup-storage-global-card")?;
-        let local_card = bounds(cx, "setup-storage-local-card")?;
-        let global_path = bounds(cx, "setup-storage-global-path")?;
-        let local_path = bounds(cx, "setup-storage-local-path")?;
-        let choose = bounds(cx, "setup-storage-choose-folder")?;
-        let save = bounds(cx, "setup-save-storage")?;
-        assert!(global_card.contains(&global_path.center()));
-        assert!(local_card.contains(&local_path.center()));
-        assert!(local_card.contains(&choose.center()));
-        assert!(
-            !global_card.contains(&choose.center()),
-            "Global storage is read-only and must not browse"
-        );
-        assert!(
-            global_card.bottom() <= local_card.top(),
-            "the storage cards are stacked"
-        );
-        assert!(
-            save.top() >= local_card.bottom(),
-            "the primary Save action sits at the bottom of the page"
-        );
-
-        // Selecting a card is exclusive: each click leaves exactly one choice.
-        cx.simulate_click(global_card.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.storage_choice == StorageChoice::Global
-                && view.shell.first_run.storage_local.as_deref() == Some(local.as_path())
-        }));
-
-        cx.simulate_click(local_path.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.storage_choice == StorageChoice::Local
-        }));
-
-        cx.simulate_click(global_path.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.storage_choice == StorageChoice::Global
-        }));
-        Ok(())
-    })();
-    assert!(result.is_ok(), "{result:?}");
-}
-
-#[gpui::test]
-fn storage_save_persists_the_selected_card_path(cx: &mut gpui::TestAppContext) {
-    let result = (|| -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let local = root.path().join("local-games");
-        fs::create_dir_all(&local)?;
-        let (view, cx) = open_storage_page(cx, root.path(), local.clone())?;
-        cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
-        cx.run_until_parked();
-        settle_transition(cx);
-
-        let save = bounds(cx, "setup-save-storage")?;
-        cx.simulate_click(save.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.stage == Stage::Overview
-                && view.shell.first_run.game_parent.as_deref() == Some(local.as_path())
-        }));
-        assert_eq!(
-            block_launcher::storage::Locations::load(root.path())?
-                .library
-                .as_deref(),
-            Some(fs::canonicalize(&local)?.as_path())
-        );
-
-        // The Global card persists the fixed app-data library instead.
-        let global = root.path().join("app-data/one.ztd.block/.minecraft");
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.handle_first_run(FirstRunAction::MoreOptions, window, cx);
-                view.shell.first_run.storage_global = Some(global);
-                view.handle_first_run(
-                    FirstRunAction::SelectStorage(StorageChoice::Global),
-                    window,
-                    cx,
-                );
-            });
-        });
-        cx.run_until_parked();
-        settle_transition(cx);
-        let save = bounds(cx, "setup-save-storage")?;
-        cx.simulate_click(save.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        let expected_global =
-            fs::canonicalize(root.path())?.join("app-data/one.ztd.block/.minecraft");
-        assert_eq!(
-            block_launcher::storage::Locations::load(root.path())?
-                .library
-                .as_deref(),
-            Some(expected_global.as_path())
-        );
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.stage == Stage::Overview
         }));
         Ok(())
     })();

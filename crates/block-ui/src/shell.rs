@@ -40,7 +40,6 @@ pub(super) enum Surface {
     RemoveAccount(String),
     RemoveProvider(String),
     SeparateProfiles,
-    StorageCleanup(uuid::Uuid),
     GamesHelp,
     OnboardingSection(super::WizardPage),
     WizardSection(super::WizardPage),
@@ -134,7 +133,6 @@ impl ShellState {
             | Surface::RemoveAccount(_)
             | Surface::RemoveProvider(_)
             | Surface::SeparateProfiles
-            | Surface::StorageCleanup(_)
             | Surface::GamesHelp
             | Surface::OnboardingSection(_)
             | Surface::WizardSection(_)
@@ -162,7 +160,7 @@ impl Block {
                 && self.shell.first_run.enabled
                 && matches!(
                     self.shell.first_run.stage,
-                    super::first_run::Stage::GameChoice | super::first_run::Stage::Storage
+                    super::first_run::Stage::GameChoice
                 )
     }
 
@@ -260,7 +258,6 @@ impl Block {
                     }
                     super::first_run::Stage::GameChoice => "Set up a game",
                     super::first_run::Stage::GameWizard => "Create a game",
-                    super::first_run::Stage::Storage => "Game storage",
                 },
                 Tab::Onboarding => "Welcome to Block",
                 Tab::Instances | Tab::Profiles => "Games",
@@ -1235,7 +1232,6 @@ impl Block {
                 ),
             Surface::RemoveProvider(_) => "Remove this provider?".to_owned(),
             Surface::SeparateProfiles => "Enable separated profiles?".to_owned(),
-            Surface::StorageCleanup(_) => "Remove this retained copy?".to_owned(),
             _ => kind.title().to_owned(),
         }
     }
@@ -1260,7 +1256,6 @@ impl Block {
             Surface::SeparateProfiles => vec![
                 "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.".to_owned(),
             ],
-            Surface::StorageCleanup(id) => self.storage_cleanup_notes(*id),
             _ => Vec::new(),
         }
     }
@@ -1336,17 +1331,6 @@ impl Block {
                     "Enable separated profiles",
                     UiAction::SeparateProfiles,
                     SurfaceDialogTone::Primary,
-                )),
-            ),
-            Surface::StorageCleanup(id) => (
-                "storage-confirm-keep",
-                "Keep copy",
-                Some(UiAction::StorageCleanup(*id, false)),
-                Some((
-                    "storage-confirm-remove",
-                    "Remove retained copy",
-                    UiAction::StorageCleanup(*id, true),
-                    SurfaceDialogTone::Destructive,
                 )),
             ),
             Surface::DownloadFiles(_) => ("downloads-back", "Back", None, None),

@@ -423,7 +423,6 @@ impl Surface {
             Self::RemoveAccount(_) => "Remove account",
             Self::RemoveProvider(_) => "Remove provider",
             Self::SeparateProfiles => "Enable separated profiles",
-            Self::StorageCleanup(_) => "Remove retained storage copy",
             Self::GamesHelp => "Instances and Profiles",
             Self::OnboardingSection(page) | Self::WizardSection(page) => match page {
                 super::WizardPage::Version => "Minecraft version",
@@ -451,7 +450,6 @@ impl Surface {
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)
             | Self::SeparateProfiles
-            | Self::StorageCleanup(_)
             | Self::OnboardingSection(_)
             | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
         }

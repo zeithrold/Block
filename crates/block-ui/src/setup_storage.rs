@@ -38,25 +38,43 @@ fn global_game_parent_in(app_data: &Path) -> PathBuf {
         .join(GAME_FOLDER_NAME)
 }
 
-/// The executable-adjacent game library offered by the Local storage card:
+/// The executable-adjacent game library used by portable runs:
 /// `<application directory>/.minecraft`. On macOS the application directory is
 /// the parent of the `.app` bundle, so this never writes inside the bundle.
+#[cfg(test)]
 pub(super) fn adjacent_game_parent(executable: &Path) -> PathBuf {
     application_directory(executable).join(GAME_FOLDER_NAME)
 }
 
-/// Select the default game-library directory without writing to protected or
-/// temporary install locations. Portable installs keep their game data beside
-/// the application under `.minecraft`.
-pub(super) fn default_game_parent(executable: &Path, user_library: &Path) -> PathBuf {
+/// The game library for this run, chosen automatically from the install shape:
+/// portable/writable installs keep `.minecraft` beside the application, while
+/// installed (protected or bundled) versions use the global app-data folder.
+///
+/// Returns `None` only when the global folder is needed but the platform
+/// app-data directory is unavailable; callers keep their previous fallback.
+pub(super) fn automatic_game_parent(executable: &Path) -> Option<PathBuf> {
     let application = application_directory(executable);
-    parent_for_location(
+    automatic_game_parent_in(
         &application,
-        user_library,
         classify_install(executable, &application),
+        global_game_parent().as_deref(),
     )
 }
 
+fn automatic_game_parent_in(
+    application: &Path,
+    location: InstallLocation,
+    global: Option<&Path>,
+) -> Option<PathBuf> {
+    match location {
+        InstallLocation::Portable | InstallLocation::Writable => {
+            Some(application.join(GAME_FOLDER_NAME))
+        }
+        InstallLocation::Protected | InstallLocation::Unwritable => global.map(Path::to_path_buf),
+    }
+}
+
+#[cfg(test)]
 fn parent_for_location(
     application: &Path,
     user_library: &Path,
@@ -121,11 +139,27 @@ enum InstallLocation {
 }
 
 fn classify_install(executable: &Path, application: &Path) -> InstallLocation {
+    let portable = portable_install(executable, application);
+    // A macOS application bundle is an installed application even when its
+    // parent folder happens to be writable (e.g. a DMG dragged to Desktop).
+    // Explicit portable markers keep portable precedence.
+    if !portable && bundled_application(executable) {
+        return InstallLocation::Protected;
+    }
     classify_install_state(
         protected_location(application),
         writable_directory(application),
-        portable_install(executable, application),
+        portable,
     )
+}
+
+/// Whether the executable lives inside a macOS `.app` bundle.
+fn bundled_application(executable: &Path) -> bool {
+    executable.ancestors().any(|ancestor| {
+        ancestor
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+    })
 }
 
 fn classify_install_state(protected: bool, writable: bool, portable: bool) -> InstallLocation {
@@ -320,6 +354,81 @@ mod tests {
             parent_for_location(portable, user_library, InstallLocation::Writable),
             portable.join(".minecraft")
         );
+    }
+
+    #[test]
+    fn automatic_parent_uses_adjacent_for_portable_and_global_for_installed() {
+        let application = Path::new("/Users/user/Apps");
+        let global = Path::new("/Users/user/Library/Application Support/Block/.minecraft");
+        assert_eq!(
+            automatic_game_parent_in(application, InstallLocation::Portable, Some(global)),
+            Some(application.join(".minecraft"))
+        );
+        assert_eq!(
+            automatic_game_parent_in(application, InstallLocation::Writable, Some(global)),
+            Some(application.join(".minecraft"))
+        );
+        assert_eq!(
+            automatic_game_parent_in(application, InstallLocation::Protected, Some(global)),
+            Some(global.to_owned())
+        );
+        assert_eq!(
+            automatic_game_parent_in(application, InstallLocation::Unwritable, Some(global)),
+            Some(global.to_owned())
+        );
+        assert_eq!(
+            automatic_game_parent_in(application, InstallLocation::Protected, None),
+            None
+        );
+    }
+
+    #[test]
+    fn bundled_application_is_treated_as_installed_even_in_a_writable_folder() -> anyhow::Result<()>
+    {
+        assert!(bundled_application(Path::new(
+            "/Applications/Block.app/Contents/MacOS/Block"
+        )));
+        assert!(bundled_application(Path::new(
+            "/Users/user/Desktop/Block.app/Contents/MacOS/Block"
+        )));
+        assert!(!bundled_application(Path::new("/opt/block/bin/block")));
+
+        let temp = tempfile::tempdir()?;
+        let global = temp.path().join("global/.minecraft");
+        fs::create_dir_all(temp.path().join("Block.app/Contents/MacOS"))?;
+        let executable = temp.path().join("Block.app/Contents/MacOS/Block");
+        let application = application_directory(&executable);
+        assert_eq!(
+            automatic_game_parent_in(
+                &application,
+                classify_install(&executable, &application),
+                Some(&global)
+            ),
+            Some(global),
+            "a writable .app bundle must still use the installed global folder"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn portable_marker_wins_over_the_bundle_install_rule() -> anyhow::Result<()> {
+        // Use a workspace directory rather than a tempdir: macOS tempdirs match
+        // the protected "/var/folders/…/t/" rule, which would mask the bundle
+        // rule being tested.
+        let base = std::env::current_dir()?
+            .join("target")
+            .join(format!("storage-marker-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(base.join("Block.app/Contents/MacOS"))?;
+        fs::write(base.join("portable.marker"), "")?;
+        let executable = base.join("Block.app/Contents/MacOS/Block");
+        let application = application_directory(&executable);
+        assert_eq!(application, base);
+        assert_eq!(
+            classify_install(&executable, &application),
+            InstallLocation::Portable
+        );
+        fs::remove_dir_all(&base)?;
+        Ok(())
     }
 
     #[test]

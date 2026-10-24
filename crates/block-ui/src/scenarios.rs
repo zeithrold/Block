@@ -68,10 +68,6 @@ pub const SCENARIOS: &[&str] = &[
     "settings-downloads",
     "settings-socks5",
     "settings-storage",
-    "settings-storage-moving",
-    "settings-storage-retained",
-    "settings-storage-interrupted",
-    "storage-cleanup-confirmation",
     "about",
     "welcome-1",
     "welcome-2",
@@ -82,7 +78,6 @@ pub const SCENARIOS: &[&str] = &[
     "setup-overview",
     "setup-overview-ready",
     "setup-game-choice",
-    "setup-storage",
     "setup-import-sources",
     "setup-import-list",
     "setup-account",
@@ -437,45 +432,6 @@ impl Block {
             self.open_settings(cx);
             self.select_settings_page(3, window, cx);
         }
-        if name.starts_with("settings-storage-") || name == "storage-cleanup-confirmation" {
-            self.tab = Tab::Settings;
-            self.open_settings(cx);
-            self.select_settings_page(4, window, cx);
-            let id = uuid::Uuid::from_u128(91);
-            if name == "settings-storage-moving" {
-                self.busy = true;
-                self.operation_cancellable = true;
-                self.shell.storage.progress = Some(block_launcher::storage::Progress {
-                    phase: "Copying",
-                    completed_bytes: 26_214_400,
-                    total_bytes: 104_857_600,
-                });
-                self.shell.storage.pending = Some(crate::settings::StorageRequest {
-                    id,
-                    operation: self.operation_revision,
-                    draft: 0,
-                    library: String::new(),
-                    cache: String::new(),
-                    preferences: self.saved_preferences.clone(),
-                });
-            } else {
-                self.shell.storage.cleanup = Some(block_launcher::storage::Cleanup {
-                    id,
-                    previous_folders: vec![
-                        std::path::PathBuf::from("/Volumes/Previous/Block/objects"),
-                        std::path::PathBuf::from("/Volumes/Previous/Block/runtimes"),
-                    ],
-                    interrupted: name == "settings-storage-interrupted",
-                    cleanup_started: false,
-                });
-                if name == "settings-storage-interrupted" {
-                    self.shell.storage.error = Some(
-                        "The interrupted move was rolled back. Original locations remain in use."
-                            .into(),
-                    );
-                }
-            }
-        }
         if name == "about" {
             self.tab = Tab::About;
         }
@@ -491,7 +447,6 @@ impl Block {
                     FirstRunStage::Welcome
                 }
                 "setup-game-choice" => FirstRunStage::GameChoice,
-                "setup-storage" => FirstRunStage::Storage,
                 "setup-game" => FirstRunStage::GameWizard,
                 _ => FirstRunStage::Overview,
             };
@@ -514,14 +469,6 @@ impl Block {
                     self.snapshot = library();
                     self.selected_profile = Some("vanilla".into());
                     self.selected_instance = Some("vanilla".into());
-                }
-                "setup-storage" => {
-                    self.shell.first_run.storage_choice = first_run::StorageChoice::Local;
-                    self.shell.first_run.storage_global = Some(std::path::PathBuf::from(
-                        "/scenario/Application Support/one.ztd.block/.minecraft",
-                    ));
-                    self.shell.first_run.storage_local =
-                        Some(std::path::PathBuf::from("/scenario/Block/.minecraft"));
                 }
                 "setup-import-sources" | "setup-import-list" => {
                     let report = setup_import_report();
@@ -587,9 +534,6 @@ impl Block {
                 self.selected_account.clone().map(Surface::RemoveAccount)
             }
             "separate-confirmation" => Some(Surface::SeparateProfiles),
-            "storage-cleanup-confirmation" => {
-                Some(Surface::StorageCleanup(uuid::Uuid::from_u128(91)))
-            }
             "games-help" => Some(Surface::GamesHelp),
             "setup-import-sources" | "setup-import-list" => {
                 Some(Surface::Drawer(Drawer::ImportGames))

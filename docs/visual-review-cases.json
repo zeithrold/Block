@@ -1936,225 +1936,41 @@
       ],
       "review_status": "source_audited_correspondence",
       "object": {
-        "type": "launcher settings category",
-        "identity": "selected category and editable defaults"
+        "type": "storage settings information",
+        "identity": "read-only effective game-storage and download-cache paths"
       },
       "trigger": {
-        "value": "Native opens Settings then directly selects named category.",
-        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+        "value": "Native opens Settings → Storage; storage is chosen automatically and the page has no actions.",
+        "source": "crates/block-ui/src/scenarios.rs; crates/block-ui/src/settings.rs"
       },
       "data": {
-        "value": "Native preferences are synthetic/default; no settings are saved by scenario.",
-        "source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs"
+        "value": "Synthetic/default preferences; the effective library and cache paths come from the isolated data root.",
+        "source": "crates/block-ui/src/scenarios.rs; crates/block-ui/src/settings.rs"
       },
       "viewport": {
         "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
         "react": "unknown unless capture receipt is present"
       },
-      "focus": "unknown",
-      "scroll": "unknown",
+      "focus": "none (read-only information page)",
+      "scroll": "none",
       "source_provenance": {
         "native_source": "crates/block-ui/src/scenarios.rs:397-404; crates/block-ui/src/settings.rs",
         "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
         "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
         "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
       },
-      "comparable_scope": "settings_category_layout_only",
-      "rationale": "Same settings categories and user task; direct initialization vs user navigation and separate fixture/default values prevent full-state comparison.",
+      "comparable_scope": "storage_readonly_information_only",
+      "rationale": "The page only reports automatically chosen locations, so there is no interaction state to compare with the prototype.",
       "reference_audit": {
         "current_snap_proto_status": "scripted_capture",
         "requested_by_current_script": true,
         "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:43-45,253-258; /Users/zeithrold/Documents/Develop/Frontend/Block-UI/components/settings/settings-screen.tsx:14-32",
-        "trigger": "Current script opens /settings?section=<category> and checks category heading.",
-        "data": "React settings are static preview settings, section changes reset focus/scroll via route state effect; values differ from native preferences.",
+        "trigger": "Current React capture opens the static Storage settings section; the native page is now read-only.",
+        "data": "Static path preview only; native paths come from the isolated data root.",
         "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
       },
       "coverage_counts_as_independent": false,
       "semantic_group": "launcher-settings-category"
-    },
-    {
-      "case_id": "settings-storage-moving",
-      "native_stems": [
-        "settings-storage-moving"
-      ],
-      "reference_candidates": [
-        "settings-storage-moving"
-      ],
-      "review_status": "native_only",
-      "object": {
-        "type": "managed storage migration",
-        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
-      },
-      "trigger": {
-        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "data": {
-        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "viewport": {
-        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
-        "react": "unknown unless capture receipt is present"
-      },
-      "focus": "unknown",
-      "scroll": "unknown",
-      "source_provenance": {
-        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
-        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
-        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
-      },
-      "comparable_scope": "storage_settings_shell_only",
-      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
-      "reference_audit": {
-        "current_snap_proto_status": "not_requested",
-        "requested_by_current_script": false,
-        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
-        "data": "Static path preview only; no migration lifecycle data.",
-        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
-      },
-      "coverage_counts_as_independent": false,
-      "semantic_group": "managed-storage-migration"
-    },
-    {
-      "case_id": "settings-storage-retained",
-      "native_stems": [
-        "settings-storage-retained"
-      ],
-      "reference_candidates": [
-        "settings-storage-retained"
-      ],
-      "review_status": "native_only",
-      "object": {
-        "type": "managed storage migration",
-        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
-      },
-      "trigger": {
-        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "data": {
-        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "viewport": {
-        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
-        "react": "unknown unless capture receipt is present"
-      },
-      "focus": "unknown",
-      "scroll": "unknown",
-      "source_provenance": {
-        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
-        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
-        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
-      },
-      "comparable_scope": "storage_settings_shell_only",
-      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
-      "reference_audit": {
-        "current_snap_proto_status": "not_requested",
-        "requested_by_current_script": false,
-        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
-        "data": "Static path preview only; no migration lifecycle data.",
-        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
-      },
-      "coverage_counts_as_independent": false,
-      "semantic_group": "managed-storage-migration"
-    },
-    {
-      "case_id": "settings-storage-interrupted",
-      "native_stems": [
-        "settings-storage-interrupted"
-      ],
-      "reference_candidates": [
-        "settings-storage-interrupted"
-      ],
-      "review_status": "native_only",
-      "object": {
-        "type": "managed storage migration",
-        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
-      },
-      "trigger": {
-        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "data": {
-        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "viewport": {
-        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
-        "react": "unknown unless capture receipt is present"
-      },
-      "focus": "unknown",
-      "scroll": "unknown",
-      "source_provenance": {
-        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
-        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
-        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
-      },
-      "comparable_scope": "storage_settings_shell_only",
-      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
-      "reference_audit": {
-        "current_snap_proto_status": "not_requested",
-        "requested_by_current_script": false,
-        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
-        "data": "Static path preview only; no migration lifecycle data.",
-        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
-      },
-      "coverage_counts_as_independent": false,
-      "semantic_group": "managed-storage-migration"
-    },
-    {
-      "case_id": "storage-cleanup-confirmation",
-      "native_stems": [
-        "storage-cleanup-confirmation"
-      ],
-      "reference_candidates": [
-        "storage-cleanup-confirmation"
-      ],
-      "review_status": "native_only",
-      "object": {
-        "type": "managed storage migration",
-        "identity": "copy progress, retained copy, rollback, or cleanup confirmation"
-      },
-      "trigger": {
-        "value": "Native directly seeds storage migration progress/cleanup state or opens cleanup confirmation.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "data": {
-        "value": "Synthetic /Volumes/Previous/Block paths, 25 MiB of 100 MiB progress, or interrupted rollback; no filesystem move occurs.",
-        "source": "crates/block-ui/src/scenarios.rs:414-450,481-488"
-      },
-      "viewport": {
-        "native": "unknown in archived PNG; current capture opens home or management window according to scenario",
-        "react": "unknown unless capture receipt is present"
-      },
-      "focus": "unknown",
-      "scroll": "unknown",
-      "source_provenance": {
-        "native_source": "crates/block-ui/src/scenarios.rs:414-450,481-488",
-        "react_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "native_image_commit": "unknown for archived images; populate from per-image capture receipt",
-        "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
-      },
-      "comparable_scope": "storage_settings_shell_only",
-      "rationale": "No source-defined React migration lifecycle state exists in the current prototype capture workflow.",
-      "reference_audit": {
-        "current_snap_proto_status": "not_requested",
-        "requested_by_current_script": false,
-        "current_recipe_source": "/Users/zeithrold/Documents/Develop/Frontend/Block-UI/scripts/snap-proto:18-20,253-258",
-        "trigger": "Current React capture only opens the static Storage settings section; no migration or cleanup interaction recipe.",
-        "data": "Static path preview only; no migration lifecycle data.",
-        "archive_state_note": "Archived PNG source revision is unknown unless its capture receipt exists."
-      },
-      "coverage_counts_as_independent": false,
-      "semantic_group": "managed-storage-migration"
     },
     {
       "case_id": "about",

@@ -161,9 +161,6 @@ enum UiAction {
     ReduceMotion,
     SavePreferences,
     ResetPreferences,
-    StorageMoveGames,
-    StorageReviewCleanup,
-    StorageCleanup(uuid::Uuid, bool),
     ConfirmSeparate(bool),
     SeparateProfiles,
     WizardNext,
@@ -821,8 +818,6 @@ impl Block {
                 Message::ConnectionTest(request, result) => {
                     self.connection_finished(request, result, cx);
                 }
-                Message::StorageProgress(id, progress) => self.storage_progress(id, progress),
-                Message::StorageFinished(finished) => self.storage_finished(*finished, cx),
                 Message::Created { instance, profile } => {
                     self.creation_saved(instance, profile, cx);
                 }
@@ -1460,17 +1455,6 @@ impl Block {
             UiAction::ReduceMotion => self.preview_reduce_motion(),
             UiAction::ResetPreferences => self.reset_settings(cx),
             UiAction::SavePreferences => self.save_settings(window, cx),
-            UiAction::StorageMoveGames => self.move_storage_games(window, cx),
-            UiAction::StorageReviewCleanup => {
-                if let Some(cleanup) = &self.shell.storage.cleanup {
-                    self.shell.surfaces.open(
-                        shell::Surface::StorageCleanup(cleanup.id),
-                        window,
-                        cx,
-                    );
-                }
-            }
-            UiAction::StorageCleanup(id, remove) => self.clean_storage(id, remove, window, cx),
             UiAction::SetFullscreen => {
                 if let Some(form) = &mut self.settings_form {
                     form.fullscreen = !form.fullscreen;
@@ -2267,7 +2251,7 @@ impl Block {
             | UiAction::OnboardingNext
             | UiAction::SignIn
             | UiAction::Drawer(Some(Drawer::Profiles)) => components::ButtonVariant::Primary,
-            UiAction::SignOut(_) | UiAction::ConfirmDelete | UiAction::StorageCleanup(_, true) => {
+            UiAction::SignOut(_) | UiAction::ConfirmDelete => {
                 components::ButtonVariant::Destructive
             }
             UiAction::Tab(_)

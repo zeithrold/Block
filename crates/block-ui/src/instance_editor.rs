@@ -633,7 +633,7 @@ impl Block {
                 cx.listener(|view, (), window, cx| view.handle(UiAction::InstanceFullscreen, window, cx))))
             .child(self.instance_optifine_section(editor, cx))
             .child(div().flex().flex_col().gap_2().child("Installation directory").child(note(editor.original.directory.display().to_string()).min_w_0().w_full().truncate())
-                .child(note("This location is read-only. Move the installation from Settings → Storage.")))
+                .child(note("This location is read-only. Block chooses storage automatically and existing games stay where they are.")))
             .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
             .children(editor.save_error.clone().map(note));
         let footer = patterns::management_footer(self.page_viewport(window), self.palette)
