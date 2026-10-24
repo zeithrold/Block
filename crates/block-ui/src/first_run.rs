@@ -321,6 +321,10 @@ impl Block {
                 // Returning to Welcome is navigation, not a reset: `setup-started`
                 // and the saved game parent keep the draft resumable.
                 let outgoing = std::rc::Rc::new(self.visual_snapshot(cx));
+                // The previous control was unmounted while hovered and may
+                // never receive mouse-leave. Give the returning control fresh
+                // hover/pointer state without changing the frozen snapshot.
+                self.shell.first_run.welcome_button = Default::default();
                 self.shell.first_run.stage = Stage::Welcome;
                 self.shell.first_run.entered = None;
                 self.motion_dirty = true;
