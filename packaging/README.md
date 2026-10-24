@@ -18,9 +18,11 @@ right-click → Open on first launch, Windows SmartScreen warns, and Linux
 packages rely on checksums only. The manifest records that no signing or
 notarization was performed.
 
-The pilot workflow `.github/workflows/pilot-build.yml` runs on every push to
-`main` and on manual dispatch, and produces one artifact set per run for every
-supported platform. It publishes nothing to GitHub Releases. See
+The pilot workflow `.github/workflows/pilot-build.yml` runs only after
+**Cross-platform checks** succeeds for a push to `main` (manual dispatch also
+requires a successful check run for the same commit), then produces one
+artifact set for every supported platform. It publishes nothing to GitHub
+Releases. See
 [pilot builds](../docs/pilot-builds.md).
 
 Build the executable first, then choose a new output directory:

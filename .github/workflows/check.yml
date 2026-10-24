@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes an in-flight check matrix for the same ref.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native:
     name: Native / ${{ matrix.platform }}

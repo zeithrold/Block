@@ -5,10 +5,13 @@ published to GitHub Releases.
 
 ## Workflow
 
-`.github/workflows/pilot-build.yml` runs on every push to `main` and on
-manual dispatch (`workflow_dispatch`). Each run produces one downloadable
-artifact set per platform; a newer push cancels an in-flight run for the same
-ref:
+`.github/workflows/pilot-build.yml` runs only after the
+**Cross-platform checks** workflow succeeds for a push to `main` (via
+`workflow_run`), and on manual dispatch. A manual dispatch also requires a
+successful completed check run for the dispatched commit; a `gate` job fails
+the workflow otherwise, so failing checks can never produce packages. Each run
+produces one downloadable artifact set per platform; a newer push cancels an
+in-flight run for the same ref:
 
 | Job | Runner | Artifacts |
 | --- | --- | --- |

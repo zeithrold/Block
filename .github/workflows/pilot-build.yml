@@ -1,11 +1,13 @@
 name: Pilot packages
 
-# Pilot builds run on every push to main and on manual dispatch: each run
-# produces unsigned release packages for all supported platforms as
-# downloadable workflow artifacts. Nothing is published to GitHub Releases,
-# and no package is code-signed or notarized.
+# Pilot packages are produced only after "Cross-platform checks" succeeds for a
+# push to main; a manual dispatch is also accepted but must find a successful
+# completed check run for the dispatched commit. Nothing is published to
+# GitHub Releases, and no package is code-signed or notarized.
 on:
-  push:
+  workflow_run:
+    workflows: ["Cross-platform checks"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -16,13 +18,38 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  gate:
+    name: Require passing checks
+    # workflow_run already carries the conclusion; a manual dispatch must find
+    # a successful completed check run for exactly this commit.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify a successful check run for this commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/check.yml/runs?head_sha=${{ github.sha }}&status=completed&per_page=1" \
+            --jq '.workflow_runs[0].conclusion // "missing"')
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::Cross-platform checks must succeed before packaging (found: $conclusion)"
+            exit 1
+          fi
+
   stamp:
     name: Stamp source
+    needs: gate
     runs-on: ubuntu-24.04
     outputs:
       commit: ${{ steps.stamp.outputs.commit }}
@@ -30,6 +57,8 @@ jobs:
       epoch: ${{ steps.stamp.outputs.epoch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - id: stamp
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -47,6 +76,8 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -105,6 +136,8 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -175,6 +208,8 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
