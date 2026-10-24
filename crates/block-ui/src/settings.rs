@@ -1368,18 +1368,8 @@ impl Block {
                             .flex_col()
                             .gap_6()
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_xl()
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .track_focus(&draft.heading)
-                                            .child(title),
-                                    )
-                                    .child(note(description)),
+                                patterns::page_heading(title, description)
+                                    .track_focus(&draft.heading),
                             )
                             .children(feedback.map(|(message, error)| {
                                 note(message)
@@ -1899,8 +1889,8 @@ mod tests {
             catalog.create_instance("Existing game".into(), "26.3".into(), None, None)?;
             let preferences = super::Preferences::default();
             preferences.save(root.path())?;
-            let original_preferences = std::fs::read(root.path().join("preferences.json"))?;
-            let original_catalog = std::fs::read(root.path().join("catalog.json"))?;
+            let original_preferences = std::fs::read(root.path().join(crate::global_config::FILE))?;
+            let original_catalog = serde_json::to_value(catalog.snapshot()?)?;
             let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
             cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
@@ -1951,13 +1941,10 @@ mod tests {
             }));
             assert!(cx.debug_bounds("settings-status").is_some());
             assert_eq!(
-                std::fs::read(root.path().join("preferences.json"))?,
+                std::fs::read(root.path().join(crate::global_config::FILE))?,
                 original_preferences
             );
-            assert_eq!(
-                std::fs::read(root.path().join("catalog.json"))?,
-                original_catalog
-            );
+            assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original_catalog);
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");

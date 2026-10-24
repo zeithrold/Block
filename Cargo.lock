@@ -801,6 +801,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml 0.8.23",
  "uuid",
  "widestring",
  "zip",
@@ -838,6 +839,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "unicode-segmentation",
  "uuid",
 ]

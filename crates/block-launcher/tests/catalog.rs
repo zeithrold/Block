@@ -172,14 +172,14 @@ fn corrupt_catalog_is_never_silently_reset_or_overwritten() -> anyhow::Result<()
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     let original = b"{broken user catalog";
-    fs::write(root.path().join("catalog.json"), original)?;
+    fs::write(root.path().join("block.toml"), original)?;
     assert!(catalog.snapshot().is_err());
     assert!(
         catalog
             .create_instance("New".into(), "1.20.6".into(), None, None)
             .is_err()
     );
-    assert_eq!(fs::read(root.path().join("catalog.json"))?, original);
+    assert_eq!(fs::read(root.path().join("block.toml"))?, original);
     Ok(())
 }
 

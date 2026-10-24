@@ -1,3 +1,5 @@
+mod common;
+
 use std::{fs, sync::Arc};
 
 use block_launcher::catalog::{Catalog, ProfileMode, Snapshot};
@@ -11,7 +13,7 @@ fn new_catalog_bundles_and_rejects_shared_profiles_without_writing() -> anyhow::
     let (instance, profile) =
         catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     assert_eq!(profile.name, instance.name);
-    let path = root.path().join("catalog.json");
+    let path = common::path(root.path());
     let original = fs::read(&path)?;
     assert!(
         catalog
@@ -51,9 +53,9 @@ fn conversion_is_durable_one_way_and_preserves_worlds_and_settings() -> anyhow::
     assert_eq!(after["instances"], before["instances"]);
     assert_eq!(after["profiles"], before["profiles"]);
     assert_eq!(fs::read(&world)?, b"existing world");
-    let converted = fs::read(root.path().join("catalog.json"))?;
+    let converted = fs::read(common::path(root.path()))?;
     assert!(catalog.separate_profiles().is_err());
-    assert_eq!(fs::read(root.path().join("catalog.json"))?, converted);
+    assert_eq!(fs::read(common::path(root.path()))?, converted);
     catalog.create_profile(&instance.id, "Extra".into())?;
     catalog.copy_profile(&profile.id, "Copy".into())?;
     assert_eq!(catalog.snapshot()?.profiles.len(), 3);
@@ -74,13 +76,10 @@ fn legacy_catalogs_keep_separated_semantics_without_read_side_migration() -> any
         if shared {
             catalog.create_profile(&instance.id, "Existing extra".into())?;
         }
-        let path = root.path().join("catalog.json");
-        let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-        document["snapshot"]
-            .as_object_mut()
-            .ok_or_else(|| anyhow::anyhow!("missing snapshot"))?
-            .remove("profile_mode");
-        let original = serde_json::to_vec_pretty(&document)?;
+        let path = common::path(root.path());
+        let mut document = common::load(root.path())?;
+        common::snapshot_mut(&mut document)?.remove("profile_mode");
+        let original = toml::to_string_pretty(&document)?.into_bytes();
         fs::write(&path, &original)?;
         let catalog = Catalog::open(root.path())?;
         assert_eq!(catalog.snapshot()?.profile_mode, ProfileMode::Separated);
@@ -90,8 +89,11 @@ fn legacy_catalogs_keep_separated_semantics_without_read_side_migration() -> any
             catalog.snapshot()?.profiles.len(),
             if shared { 3 } else { 2 }
         );
-        let saved: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-        assert_eq!(saved["snapshot"]["profile_mode"], "separated");
+        let saved = common::load(root.path())?;
+        assert_eq!(
+            saved["catalog"]["snapshot"]["profile_mode"].as_str(),
+            Some("separated")
+        );
     }
     Ok(())
 }
@@ -139,13 +141,16 @@ fn explicit_bundled_catalog_rejects_shared_or_missing_profiles_without_resetting
         let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
         catalog.separate_profiles()?;
         catalog.create_profile(&instance.id, "Extra".into())?;
-        let path = root.path().join("catalog.json");
-        let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-        document["snapshot"]["profile_mode"] = "bundled".into();
-        if orphan {
-            document["snapshot"]["profiles"] = serde_json::json!([]);
+        let path = common::path(root.path());
+        let mut document = common::load(root.path())?;
+        {
+            let snapshot = common::snapshot_mut(&mut document)?;
+            snapshot.insert("profile_mode".into(), toml::Value::String("bundled".into()));
+            if orphan {
+                snapshot.insert("profiles".into(), toml::Value::Array(Vec::new()));
+            }
         }
-        let original = serde_json::to_vec_pretty(&document)?;
+        let original = toml::to_string_pretty(&document)?.into_bytes();
         fs::write(&path, &original)?;
         assert!(catalog.snapshot().is_err());
         assert!(catalog.separate_profiles().is_err());

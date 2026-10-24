@@ -273,12 +273,12 @@ fn account_selection_is_staged_until_setup_preference_save_and_failure_can_retry
                 assert_eq!(view.shell.onboarding.account.as_ref(), Some(&other_id));
             });
         });
-        std::fs::create_dir(root.path().join("preferences.json"))?;
+        std::fs::create_dir(root.path().join(crate::global_config::FILE))?;
         view.update(cx, |view, _| {
             assert!(!view.complete_onboarding());
             assert_eq!(view.selected_account.as_ref(), Some(&first_id));
         });
-        std::fs::remove_dir(root.path().join("preferences.json"))?;
+        std::fs::remove_dir(root.path().join(crate::global_config::FILE))?;
         view.update(cx, |view, _| {
             assert!(view.complete_onboarding());
             assert_eq!(view.selected_account.as_ref(), Some(&other_id));
@@ -343,7 +343,7 @@ fn create_uses_the_reviewed_configuration_and_setup_save_retry_does_not_create_t
         let (engine, mut receiver) = crate::engine::Engine::with_root(root.path().to_owned())?;
         // An owned directory deliberately blocks preference reads and writes.
         // Engine still creates the real catalog, then fails before network setup.
-        std::fs::create_dir(root.path().join("preferences.json"))?;
+        std::fs::create_dir(root.path().join(crate::global_config::FILE))?;
         let java = std::env::current_exe()?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
@@ -417,7 +417,7 @@ fn create_uses_the_reviewed_configuration_and_setup_save_retry_does_not_create_t
             assert!(view.form.is_some());
             assert!(!view.busy);
         });
-        std::fs::remove_dir(root.path().join("preferences.json"))?;
+        std::fs::remove_dir(root.path().join(crate::global_config::FILE))?;
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.handle(UiAction::OnboardingNext, window, cx);
@@ -765,13 +765,12 @@ fn first_run_saves_account_before_game_and_keeps_it_after_game_creation(cx: &mut
                     .any(|account| account.player_name == "Local_Player")
                 && view.selected_account.is_some()
         }));
-        let account_bytes = std::fs::read(root.path().join("accounts.json"))?;
-        let accounts: Vec<block_auth::Account> = serde_json::from_slice(&account_bytes)?;
+        let accounts = saved_accounts(root.path())?;
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].player_name, "Local_Player");
-        // The file is already durable before game creation starts.
-        assert!(root.path().join("accounts.json").exists());
-        assert!(!root.path().join("catalog.json").exists());
+        // The document is already durable before game creation starts.
+        assert!(root.path().join(crate::global_config::FILE).exists());
+        assert!(!root.path().join("block.toml").exists());
 
         submit_first_run(&view, cx);
         let runtime = tokio::runtime::Runtime::new()?;
@@ -779,12 +778,7 @@ fn first_run_saves_account_before_game_and_keeps_it_after_game_creation(cx: &mut
         let snapshot = catalog.snapshot()?;
         assert_eq!(snapshot.instances.len(), 1);
         assert_eq!(snapshot.profiles.len(), 1);
-        assert_eq!(
-            serde_json::from_slice::<Vec<block_auth::Account>>(&std::fs::read(
-                root.path().join("accounts.json")
-            )?)?,
-            accounts
-        );
+        assert_eq!(saved_accounts(root.path())?, accounts);
         apply_engine_messages(&view, cx, messages)?;
         view.update(cx, |view, _| view.cancel.cancel());
         cx.run_until_parked();
@@ -807,7 +801,7 @@ fn first_run_game_save_failure_keeps_the_already_saved_account(cx: &mut TestAppC
         let (engine, mut receiver) = first_run_engine(root.path())?;
         // A directory at the catalog path rejects game creation after the
         // separate account Wizard has already committed its save.
-        std::fs::create_dir(root.path().join("catalog.json"))?;
+        std::fs::create_dir(root.path().join("block.toml"))?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -819,8 +813,7 @@ fn first_run_game_save_failure_keeps_the_already_saved_account(cx: &mut TestAppC
             });
         });
         finish_local_account_save(&view, cx, &mut receiver, "Rollback_Player")?;
-        let accounts_before: Vec<block_auth::Account> =
-            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        let accounts_before = saved_accounts(root.path())?;
         assert_eq!(accounts_before.len(), 1);
         assert_eq!(accounts_before[0].player_name, "Rollback_Player");
         submit_first_run(&view, cx);
@@ -835,8 +828,7 @@ fn first_run_game_save_failure_keeps_the_already_saved_account(cx: &mut TestAppC
         };
         assert!(matches!(inner, crate::Message::Finished(Err(_))));
         // The game failed, while the prior per-Wizard account save remains.
-        let accounts: Vec<block_auth::Account> =
-            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        let accounts = saved_accounts(root.path())?;
         assert_eq!(accounts, accounts_before);
         assert!(catalog_free(&root));
         apply_engine_messages(&view, cx, messages)?;
@@ -855,10 +847,17 @@ fn first_run_game_save_failure_keeps_the_already_saved_account(cx: &mut TestAppC
     assert!(result.is_ok(), "{result:?}");
 }
 
-/// The catalog file is a directory in the rollback fixture, so its absence is
-/// checked through a reading attempt instead of `exists`.
+/// The catalog document is a directory in the rollback fixture, so its absence
+/// is checked through a reading attempt instead of `exists`.
 fn catalog_free(root: &tempfile::TempDir) -> bool {
-    std::fs::read(root.path().join("catalog.json")).is_err()
+    std::fs::read(root.path().join("block.toml")).is_err()
+}
+
+/// Saved accounts from the `[accounts]` section of the global document.
+fn saved_accounts(root: &std::path::Path) -> anyhow::Result<Vec<block_auth::Account>> {
+    Ok(crate::global_config::read(root)?
+        .map(|config| config.accounts)
+        .unwrap_or_default())
 }
 
 #[gpui::test]
@@ -893,11 +892,10 @@ fn leaving_first_run_after_account_save_keeps_account_without_game(cx: &mut Test
                 assert_eq!(view.accounts.len(), 1);
             });
         });
-        let accounts: Vec<block_auth::Account> =
-            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        let accounts = saved_accounts(root.path())?;
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].player_name, "Local_Player");
-        assert!(!root.path().join("catalog.json").exists());
+        assert!(!root.path().join("block.toml").exists());
         assert!(crate::Preferences::load(root.path())?.onboarding_complete);
         Ok(())
     })();
@@ -940,8 +938,8 @@ fn cancelling_first_run_account_setup_leaves_no_identity_behind(cx: &mut TestApp
                 assert!(view.accounts.is_empty());
             });
         });
-        assert!(!root.path().join("accounts.json").exists());
-        assert!(!root.path().join("catalog.json").exists());
+        assert!(saved_accounts(root.path())?.is_empty());
+        assert!(!root.path().join("block.toml").exists());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -978,11 +976,10 @@ fn saved_account_unblocks_first_run_continue_without_a_game(cx: &mut TestAppCont
         assert!(view.read_with(cx, |view, _| {
             view.shell.first_run.stage == FirstRunStage::GameChoice
         }));
-        let accounts: Vec<block_auth::Account> =
-            serde_json::from_slice(&std::fs::read(root.path().join("accounts.json"))?)?;
+        let accounts = saved_accounts(root.path())?;
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].player_name, "Footer_Player");
-        assert!(!root.path().join("catalog.json").exists());
+        assert!(!root.path().join("block.toml").exists());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");

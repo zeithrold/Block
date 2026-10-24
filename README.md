@@ -53,7 +53,7 @@ just launch examples/vanilla-offline.json
 
 The CLI's `--cache-only` forbids network access once required metadata and resources are cached. See [launch recipes](docs/recipes.md) for saved secret-free preparation plans and compatibility settings. Normal Profile launches verify the installed closure locally; missing or damaged files have an explicit Repair entry. Resolved token-bearing LaunchPlans are never saved.
 
-Application data, downloaded resources, and logs default to the OS application-data directory. Set `BLOCK_DATA_DIR` for the desktop app or pass the CLI's `--data-dir` option to select an external location.
+Application data, downloaded resources, and logs default to the OS application-data directory (`one.ztd.block` on macOS, `Block` on Windows, `Block` under `~/.local/share` on Linux). Configuration lives in exactly two TOML documents, `block-global.toml` and `block.toml`; the previous JSON files are deliberately not migrated. Set `BLOCK_DATA_DIR` for the desktop app or pass the CLI's `--data-dir` option to select an external location. See [config storage](docs/config-storage.md).
 
 The first build downloads and compiles GPUI dependencies. Subsequent builds reuse Cargo's cache.
 

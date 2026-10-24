@@ -34,7 +34,7 @@ use minecraft_manifest::{
 };
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-use super::{appearance::Preferences, settings::GameDefaults};
+use super::{appearance::Preferences, global_config, settings::GameDefaults};
 
 #[derive(Clone, Debug)]
 pub(super) struct ProfileDraftValues {
@@ -221,8 +221,11 @@ impl Engine {
     pub(super) fn new() -> anyhow::Result<(Self, Receiver<Message>)> {
         let root = std::env::var_os("BLOCK_DATA_DIR").map_or_else(
             || {
-                directories::ProjectDirs::from("dev", "zeithrold", "Block")
-                    .map(|dirs| dirs.data_local_dir().to_owned())
+                directories::BaseDirs::new()
+                    .map(|dirs| {
+                        dirs.data_dir()
+                            .join(super::setup_storage::global_application_directory())
+                    })
                     .context("cannot determine the data directory")
             },
             |path| Ok(PathBuf::from(path)),
@@ -1806,13 +1809,10 @@ async fn finish(sender: &EventSender, result: anyhow::Result<String>) {
 }
 
 fn load_accounts(root: &Path) -> anyhow::Result<Vec<Account>> {
-    let path = root.join("accounts.json");
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            serde_json::from_slice(&bytes).context("Saved account metadata could not be read")
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(error).context("Saved account metadata could not be opened"),
+    match global_config::read(root) {
+        Ok(Some(config)) => Ok(config.accounts),
+        Ok(None) => Ok(Vec::new()),
+        Err(error) => Err(error).context("Saved account metadata could not be read"),
     }
 }
 
@@ -1823,7 +1823,10 @@ async fn account_images(
     cancel: &CancellationToken,
 ) -> anyhow::Result<Vec<(String, block_launcher::avatars::SkinImage)>> {
     let accounts = load_accounts(root)?;
-    let providers = load_providers(root).unwrap_or_default();
+    // Avatars are display-only: a damaged configuration must not prevent the
+    // UI from rendering, so this path uses the lenient loader instead of the
+    // strict account/provider readers.
+    let providers = global_config::load(root).providers;
     let fetch = block_launcher::avatars::ImageFetch::new()?;
     let cache = block_launcher::avatars::ImageCache::new(root);
     let mut images = Vec::new();
@@ -1897,22 +1900,14 @@ async fn provider_images(
 }
 
 fn load_providers(root: &Path) -> anyhow::Result<Vec<block_auth::AuthlibProvider>> {
-    use std::io::Read as _;
-    let file = match File::open(root.join("providers.json")) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).context("Saved providers could not be opened"),
-    };
-    let mut bytes = Vec::new();
-    file.take(16 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() <= 16 * 1024 * 1024,
-        "Saved providers are too large"
-    );
-    let providers: Vec<block_auth::AuthlibProvider> =
-        serde_json::from_slice(&bytes).context("Saved provider metadata could not be read")?;
-    validate_providers(&providers)?;
-    Ok(providers)
+    match global_config::read(root) {
+        Ok(Some(config)) => {
+            validate_providers(&config.providers)?;
+            Ok(config.providers)
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(error) => Err(error).context("Saved provider metadata could not be read"),
+    }
 }
 
 fn provider_by_id(root: &Path, id: uuid::Uuid) -> anyhow::Result<block_auth::AuthlibProvider> {
@@ -1959,19 +1954,12 @@ fn delete_provider(
 }
 
 fn save_providers(root: &Path, providers: &[block_auth::AuthlibProvider]) -> anyhow::Result<()> {
-    use std::io::Write as _;
     validate_providers(providers)?;
-    let bytes = serde_json::to_vec_pretty(providers)?;
     ensure!(
-        bytes.len() <= 16 * 1024 * 1024,
+        serde_json::to_vec_pretty(providers)?.len() <= 16 * 1024 * 1024,
         "Saved providers are too large"
     );
-    std::fs::create_dir_all(root)?;
-    let mut file = tempfile::NamedTempFile::new_in(root)?;
-    file.write_all(&bytes)?;
-    file.as_file().sync_all()?;
-    file.persist(root.join("providers.json"))?;
-    Ok(())
+    global_config::update(root, |config| config.providers = providers.to_vec())
 }
 
 fn persist_provider(
@@ -2039,13 +2027,7 @@ fn merge_signed_in_account(
 }
 
 fn save_accounts(root: &Path, accounts: &[Account]) -> anyhow::Result<()> {
-    use std::io::Write as _;
-    std::fs::create_dir_all(root)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(root)?;
-    temporary.write_all(&serde_json::to_vec_pretty(accounts)?)?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(root.join("accounts.json"))?;
-    Ok(())
+    global_config::update(root, |config| config.accounts = accounts.to_vec())
 }
 
 /// Durably saves one verified identity and returns the updated account list.
@@ -2238,12 +2220,12 @@ mod tests {
         let provider = crate::providers::fixture_provider(false)?;
         super::persist_provider(root.path(), None, &provider)?;
         assert_eq!(super::load_providers(root.path())?, vec![provider.clone()]);
-        let original_bytes = std::fs::read(root.path().join("providers.json"))?;
+        let original_bytes = std::fs::read(root.path().join(crate::global_config::FILE))?;
         let mut duplicate = provider.clone();
         duplicate.id = uuid::Uuid::new_v4();
         assert!(super::persist_provider(root.path(), None, &duplicate).is_err());
         assert_eq!(
-            std::fs::read(root.path().join("providers.json"))?,
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
             original_bytes
         );
         let mut account = super::offline_account("Player")?;
@@ -2264,11 +2246,14 @@ mod tests {
         assert_eq!(super::load_providers(root.path())?, vec![renamed]);
         super::save_accounts(root.path(), &[])?;
         assert!(super::delete_provider(root.path(), provider.id)?.is_empty());
-        std::fs::write(root.path().join("providers.json"), b"broken cache")?;
+        std::fs::write(
+            root.path().join(crate::global_config::FILE),
+            b"broken cache",
+        )?;
         assert!(super::load_providers(root.path()).is_err());
         assert!(super::persist_provider(root.path(), None, &provider).is_err());
         assert_eq!(
-            std::fs::read(root.path().join("providers.json"))?,
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
             b"broken cache"
         );
         Ok(())
@@ -2346,20 +2331,23 @@ mod tests {
         engine.save_offline_account(account.clone());
         finish(&mut receiver)?;
         assert_eq!(super::load_accounts(root.path())?.len(), 1);
-        let original = std::fs::read(root.path().join("accounts.json"))?;
+        let original = std::fs::read(root.path().join(crate::global_config::FILE))?;
         let mut forged = account.clone();
         forged.client_id = "must-not-be-treated-as-microsoft".into();
         engine.save_offline_account(forged);
         assert!(finish(&mut receiver).is_err());
-        assert_eq!(std::fs::read(root.path().join("accounts.json"))?, original);
+        assert_eq!(
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
+            original
+        );
         engine.sign_out(account.clone());
         finish(&mut receiver)?;
         assert!(super::load_accounts(root.path())?.is_empty());
-        std::fs::write(root.path().join("accounts.json"), b"corrupt")?;
+        std::fs::write(root.path().join(crate::global_config::FILE), b"corrupt")?;
         engine.save_offline_account(account);
         assert!(finish(&mut receiver).is_err());
         assert_eq!(
-            std::fs::read(root.path().join("accounts.json"))?,
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
             b"corrupt"
         );
         Ok(())
@@ -2475,10 +2463,13 @@ mod tests {
         assert_eq!(super::load_accounts(root.path())?, vec![account]);
         super::save_accounts(root.path(), &[])?;
         assert_eq!(super::load_accounts(root.path())?, Vec::new());
-        std::fs::write(root.path().join("accounts.json"), b"invalid catalog")?;
+        std::fs::write(
+            root.path().join(crate::global_config::FILE),
+            b"invalid catalog",
+        )?;
         assert!(super::load_accounts(root.path()).is_err());
         assert_eq!(
-            std::fs::read(root.path().join("accounts.json"))?,
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
             b"invalid catalog"
         );
         Ok(())
@@ -2519,10 +2510,7 @@ mod tests {
         provider.api_url = format!("http://{}/api/", listener.local_addr()?);
         provider.metadata.icon_url = format!("http://{}/favicon.ico", listener.local_addr()?);
         provider.validate()?;
-        std::fs::write(
-            directory.path().join("providers.json"),
-            serde_json::to_vec(&[provider.clone()])?,
-        )?;
+        super::save_providers(directory.path(), &[provider.clone()])?;
         let (engine, mut receiver) = super::Engine::with_root(directory.path().into())?;
         engine.sign_in_authlib(
             provider.id,
@@ -2542,7 +2530,7 @@ mod tests {
                 .accept()
                 .is_err_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
         );
-        assert!(!directory.path().join("accounts.json").exists());
+        assert!(super::load_accounts(directory.path())?.is_empty());
         Ok(())
     }
 
@@ -2551,7 +2539,7 @@ mod tests {
     -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         std::fs::write(
-            directory.path().join("accounts.json"),
+            directory.path().join(crate::global_config::FILE),
             b"corrupt account document",
         )?;
         let runtime = std::sync::Arc::new(
@@ -2577,7 +2565,7 @@ mod tests {
             matches!(message, Some(super::Message::Finished(Err(error))) if error.contains("Saved account metadata could not be read"))
         );
         assert_eq!(
-            std::fs::read(directory.path().join("accounts.json"))?,
+            std::fs::read(directory.path().join(crate::global_config::FILE))?,
             b"corrupt account document"
         );
         Ok(())

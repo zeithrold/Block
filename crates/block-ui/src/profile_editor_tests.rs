@@ -124,7 +124,7 @@ fn final_save_persists_the_complete_profile_and_subpage_actions_do_not_write(
             catalog.create_instance("Editor".into(), "1.20.6".into(), None, None)?;
         catalog.separate_profiles()?;
         let snapshot = catalog.snapshot()?;
-        let before = std::fs::read(root.path().join("catalog.json"))?;
+        let before = serde_json::to_value(&snapshot)?;
         let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
@@ -158,7 +158,7 @@ fn final_save_persists_the_complete_profile_and_subpage_actions_do_not_write(
                 view.handle(UiAction::ProfileConnect, window, cx);
             });
         });
-        assert_eq!(std::fs::read(root.path().join("catalog.json"))?, before);
+        assert_eq!(serde_json::to_value(catalog.snapshot()?)?, before);
         click(cx, "save-profile");
         let deadline = Instant::now() + Duration::from_secs(3);
         while view.read_with(cx, |view, _| view.busy) && Instant::now() < deadline {
@@ -277,7 +277,7 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
         let catalog = Catalog::open(root.path())?;
         let (_, profile) = catalog.create_instance("Focus".into(), "1.20.6".into(), None, None)?;
         let snapshot = catalog.snapshot()?;
-        let path = root.path().join("catalog.json");
+        let path = root.path().join("block.toml");
         let original = std::fs::read(&path)?;
         let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);

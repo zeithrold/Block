@@ -12,6 +12,8 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::config;
+
 const CACHE_TREES: &[&str] = &[
     "objects",
     "objects-sha256",
@@ -22,6 +24,10 @@ const CACHE_TREES: &[&str] = &[
     "installations",
     "installer-staging",
 ];
+// Crash-recovery state for an in-flight relocation. This is deliberately not
+// user configuration: it is a disposable, internal JSON document that is
+// removed as soon as the migration is resolved, so it does not live in
+// `block.toml`.
 const JOURNAL: &str = "storage-migration.json";
 const BACKUP: &str = "storage-backup";
 
@@ -83,14 +89,32 @@ pub struct Progress {
 }
 
 impl Locations {
+    /// Read the `[storage]` section of `block.toml`.
+    ///
+    /// Missing documents and missing sections mean the defaults. The legacy
+    /// `storage.json` document is never consulted.
     pub fn load(root: &Path) -> anyhow::Result<Self> {
-        match fs::read(root.join("storage.json")) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)
-                .context("Storage configuration is invalid; it was preserved")?),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(error) => Err(error.into()),
+        let table = config::load(root)?;
+        match table.get(config::STORAGE_SECTION) {
+            Some(value) => serde_json::from_value(config::to_json(value))
+                .context("Storage configuration is invalid; it was preserved"),
+            None => Ok(Self::default()),
         }
     }
+
+    /// Atomically write the `[storage]` section of `block.toml`.
+    ///
+    /// Only the owned section changes: the catalog and sections owned by other
+    /// components are preserved. Callers must already hold the data-root lease
+    /// ([`acquire`]) so concurrent read-modify-write cycles cannot drop each
+    /// other's sections. `None` fields are omitted from the section.
+    pub fn save(&self, root: &Path) -> anyhow::Result<()> {
+        let value = config::from_json(&serde_json::to_value(self)?)?;
+        config::update(root, |table| {
+            table.insert(config::STORAGE_SECTION.into(), value);
+        })
+    }
+
     pub fn library(&self, root: &Path) -> PathBuf {
         self.library
             .clone()
@@ -602,8 +626,14 @@ fn rewrite_value(value: &mut serde_json::Value, trees: &[Tree]) {
         _ => {}
     }
 }
+/// Session documents below the data root whose absolute paths move with the
+/// trees.
+///
+/// The catalog document lives in the `[catalog]` section of `block.toml` and is
+/// rewritten by [`rewrite_configuration`]. Legacy JSON configuration files are
+/// never read or written again, so they are not rebased here.
 fn document_paths(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut documents = vec![root.join("catalog.json"), root.join("preferences.json")];
+    let mut documents = Vec::new();
     let sessions = root.join("sessions");
     if sessions.exists() {
         documents.extend(
@@ -621,7 +651,38 @@ fn document_paths(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
         .filter(|path| path.is_file())
         .collect())
 }
+/// Rebase absolute paths inside the `[catalog]` section of `block.toml`.
+///
+/// Only the owned section is decoded and rewritten; `[storage]` and sections
+/// owned by other components are preserved byte-for-byte in value terms. The
+/// original document is backed up before it changes so [`rollback`] can restore
+/// it after a later failure.
+fn rewrite_configuration(root: &Path, state: &Journal) -> anyhow::Result<()> {
+    let path = root.join(config::FILE);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut table = config::load(root)?;
+    let Some(section) = table.get(config::CATALOG_SECTION) else {
+        return Ok(());
+    };
+    let mut value = config::to_json(section);
+    let original = value.clone();
+    rewrite_value(&mut value, &state.trees);
+    if value == original {
+        return Ok(());
+    }
+    let backup = root.join(BACKUP).join(state.id.to_string());
+    let saved = backup.join(config::FILE);
+    fs::create_dir_all(saved.parent().context("Missing backup parent")?)?;
+    atomic(&saved, &bytes)?;
+    table.insert(config::CATALOG_SECTION.into(), config::from_json(&value)?);
+    config::write(root, &table)
+}
 fn rewrite_documents(root: &Path, state: &Journal) -> anyhow::Result<()> {
+    rewrite_configuration(root, state)?;
     let documents = document_paths(root)?;
     let backup = root.join(BACKUP).join(state.id.to_string());
     for path in documents {
@@ -754,7 +815,7 @@ pub fn apply(
         );
     }
     if trees.is_empty() {
-        save(&root, &after, "storage.json")?;
+        after.save(&root)?;
         return Ok(None);
     }
     ensure!(!cancel.is_cancelled(), "Storage relocation cancelled");
@@ -789,10 +850,15 @@ pub fn apply(
             .map(|e| e.size)
             .sum::<u64>();
     }
-    let metadata_bytes = document_paths(&root)?.iter().try_fold(0u64, |sum, path| {
-        sum.checked_add(fs::metadata(path)?.len().saturating_add(4096))
-            .context("Storage metadata is too large")
-    })?;
+    let configuration = root.join(config::FILE);
+    let metadata_bytes = document_paths(&root)?
+        .iter()
+        .chain(std::iter::once(&configuration))
+        .filter(|path| path.is_file())
+        .try_fold(0u64, |sum, path| {
+            sum.checked_add(fs::metadata(path)?.len().saturating_add(4096))
+                .context("Storage metadata is too large")
+        })?;
     // Metadata is backed up and rewritten on the control filesystem. Reserve
     // it on destination checks too when both locations share the same disk.
     let metadata_bytes = metadata_bytes.saturating_mul(3);
@@ -843,7 +909,7 @@ pub fn apply(
         });
         rewrite_documents(&root, &state)?;
         ensure!(!cancel.is_cancelled(), "Storage relocation cancelled");
-        save(&root, &state.after, "storage.json")?;
+        state.after.save(&root)?;
         state.phase = Phase::Switched;
         save(&root, &state, JOURNAL)?;
         Ok(())
@@ -857,17 +923,18 @@ pub fn apply(
 fn rollback(root: &Path, state: &mut Journal) -> anyhow::Result<()> {
     let backup = root.join(BACKUP).join(state.id.to_string());
     if backup.exists() {
-        for entry in scan(&backup, false)?.into_iter().filter(|entry| {
-            matches!(entry.kind, Kind::File)
-                && entry.relative.extension().is_some_and(|ext| ext == "json")
-        }) {
+        // Every backed-up document is restored, including `block.toml`.
+        for entry in scan(&backup, false)?
+            .into_iter()
+            .filter(|entry| matches!(entry.kind, Kind::File))
+        {
             atomic(
                 &root.join(&entry.relative),
                 &fs::read(backup.join(&entry.relative))?,
             )?;
         }
     }
-    save(root, &state.before, "storage.json")?;
+    state.before.save(root)?;
     state.phase = Phase::RolledBack;
     save(root, state, JOURNAL)
 }

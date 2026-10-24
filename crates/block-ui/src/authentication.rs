@@ -711,8 +711,8 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_xl().child("Add a provider"))
-            .child(note(
+            .child(patterns::page_heading(
+                "Add a provider",
                 "Enter the server details or paste an Authlib quick link.",
             ))
             .child(super::attach_provider_drop_bounds(
@@ -1977,8 +1977,13 @@ impl Block {
             div()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .child(div().text_2xl().child(title))
+                .gap(px(6.))
+                .child(
+                    div()
+                        .text_2xl()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child(title),
+                )
                 .child(note(description)),
         );
         body = match state.phase {
@@ -3174,7 +3179,13 @@ mod tests {
                         .any(|saved| saved.identity_key() == account.identity_key())
                     && view.shell.onboarding.pending_identity.is_none()
             }));
-            assert!(root.path().join("accounts.json").exists());
+            let saved = crate::global_config::read(root.path())?;
+            assert!(saved.is_some_and(|config| {
+                config
+                    .accounts
+                    .iter()
+                    .any(|saved| saved.identity_key() == account.identity_key())
+            }));
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");

@@ -3,12 +3,57 @@ use std::{collections::BTreeSet, fs};
 use super::{
     Tab, UiAction,
     engine::Engine,
-    first_run::{Action as FirstRunAction, Stage},
+    first_run::{Action as FirstRunAction, Stage, StorageChoice},
     import_games::{Action as ImportAction, DeferredDiscovery},
 };
 use block_launcher::game_import::{
     DiscoveryReport, GameCandidate, ImportSourceReport, LoaderKind, SourceKind,
 };
+
+fn bounds(
+    cx: &mut gpui::VisualTestContext,
+    selector: &'static str,
+) -> anyhow::Result<gpui::Bounds<gpui::Pixels>> {
+    crate::test_support::control_bounds(cx, selector)
+        .ok_or_else(|| anyhow::anyhow!("missing rendered control: {selector}"))
+}
+
+/// Let the page-transition motion finish so its mouse barrier releases before a
+/// test clicks a first-run control.
+fn settle_transition(cx: &mut gpui::VisualTestContext) {
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+}
+
+/// Open Stage::Storage with a deterministic Local path, exactly like the
+/// Overview's More options action does.
+fn open_storage_page<'a>(
+    cx: &'a mut gpui::TestAppContext,
+    root: &std::path::Path,
+    local: std::path::PathBuf,
+) -> anyhow::Result<(gpui::Entity<super::Block>, &'a mut gpui::VisualTestContext)> {
+    fs::write(root.join("setup-started"), b"1")?;
+    let (engine, messages) = Engine::with_root(root.to_owned())?;
+    let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.engine = Some(engine);
+        view.messages = Some(messages);
+        view
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.begin_first_run(cx);
+            view.shell.first_run.game_parent = Some(local);
+            view.handle_first_run(FirstRunAction::MoreOptions, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    settle_transition(cx);
+    Ok((view, cx))
+}
 
 fn candidate(id: &str, source: SourceKind, importable: bool) -> GameCandidate {
     GameCandidate {
@@ -335,6 +380,101 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
 }
 
 #[gpui::test]
+fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        fs::write(root.path().join("setup-started"), b"1")?;
+        let management =
+            cx.update(|window, cx| crate::window_geometry::management_size(window, cx));
+        cx.simulate_resize(management);
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.begin_first_run(cx);
+                assert_eq!(view.shell.first_run.stage, Stage::Overview);
+                assert!(!view.wizard_task_active());
+            });
+        });
+        cx.run_until_parked();
+        assert!(
+            crate::test_support::control_bounds(cx, "setup-back-welcome").is_some(),
+            "the Overview chrome must expose Back to welcome"
+        );
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle_first_run(FirstRunAction::BackToWelcome, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.tab == Tab::Onboarding
+                && view.shell.first_run.enabled
+                && view.shell.first_run.stage == Stage::Welcome
+                && view.shell.first_run.entered.is_none()
+                && view.is_home_frame()
+        }));
+        // `request_frame_resize` asks the platform for the Home-sized outer
+        // width; deliver that resize like the real platform callback would.
+        let home = cx.update(|window, cx| crate::window_geometry::home_size(window, cx));
+        cx.update(|window, cx| window.bounds_changed(cx));
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|window, _| window.viewport_size().width),
+            home.width,
+            "Back to welcome must restore the Home-sized frame"
+        );
+        assert!(
+            root.path().join("setup-started").is_file(),
+            "returning to Welcome must keep saved setup progress"
+        );
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn overview_footer_keeps_a_single_more_options_and_continue_row(cx: &mut gpui::TestAppContext) {
+    let (_view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.tab = Tab::Onboarding;
+        view.shell.first_run.enabled = true;
+        view.shell.first_run.stage = Stage::Overview;
+        view
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
+    cx.run_until_parked();
+    let more = crate::test_support::control_bounds(cx, "setup-more-options");
+    let finish = crate::test_support::control_bounds(cx, "setup-continue");
+    assert!(more.is_some(), "More options must stay in the footer");
+    assert!(finish.is_some(), "Continue must stay in the footer");
+    assert!(
+        crate::test_support::control_bounds(cx, "setup-overview-skip").is_none(),
+        "the Overview footer must not offer Skip setup"
+    );
+    if let (Some(more), Some(finish)) = (more, finish) {
+        assert_eq!(
+            more.center().y,
+            finish.center().y,
+            "More options and Continue must share one footer row"
+        );
+        assert!(
+            more.right() <= finish.left(),
+            "More options stays left of Continue"
+        );
+    }
+}
+
+#[gpui::test]
 fn welcome_pointer_events_keep_the_window_alive_and_hit_area_fixed(cx: &mut gpui::TestAppContext) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -558,10 +698,9 @@ fn restart_reconstructs_account_and_game_completion_from_saved_data(cx: &mut gpu
         let root = tempfile::tempdir()?;
         let account = crate::test_support::test_account()?;
         let account_id = crate::account_id(&account);
-        fs::write(
-            root.path().join("accounts.json"),
-            serde_json::to_vec(&vec![account.clone()])?,
-        )?;
+        crate::global_config::update(root.path(), |config| {
+            config.accounts = vec![account.clone()];
+        })?;
         let catalog = block_launcher::catalog::Catalog::open(root.path())?;
         catalog.create_instance("Saved game".into(), "1.20.6".into(), None, None)?;
         let persisted_snapshot = catalog.snapshot()?;
@@ -581,6 +720,157 @@ fn restart_reconstructs_account_and_game_completion_from_saved_data(cx: &mut gpu
             view.shell.first_run.stage == Stage::Overview
                 && view.first_run_account_ready()
                 && view.first_run_game_ready()
+        }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn storage_choice_prefers_global_only_when_the_saved_parent_matches() {
+    let global = std::path::Path::new("/scenario/Application Support/one.ztd.block/.minecraft");
+    assert_eq!(
+        StorageChoice::infer(global, Some(global)),
+        StorageChoice::Global
+    );
+    assert_eq!(StorageChoice::infer(global, None), StorageChoice::Local);
+    assert_eq!(
+        StorageChoice::infer(
+            std::path::Path::new("/scenario/Block/.minecraft"),
+            Some(global)
+        ),
+        StorageChoice::Local
+    );
+}
+
+#[gpui::test]
+fn storage_cards_are_read_only_mutually_exclusive_and_only_local_browses(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let local = root.path().join("local-games");
+        fs::create_dir_all(&local)?;
+        let (view, cx) = open_storage_page(cx, root.path(), local.clone())?;
+        cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
+        cx.run_until_parked();
+        settle_transition(cx);
+        let global = root.path().join("app-data/one.ztd.block/.minecraft");
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.shell.first_run.storage_global = Some(global.clone());
+                assert_eq!(view.shell.first_run.storage_choice, StorageChoice::Local);
+                assert_eq!(
+                    view.shell.first_run.storage_local.as_deref(),
+                    Some(local.as_path())
+                );
+                assert_eq!(view.shell.first_run.stage, Stage::Storage);
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+
+        // Both cards render a read-only path box and the Save action sits below
+        // them; only the Local card has a folder picker.
+        let global_card = bounds(cx, "setup-storage-global-card")?;
+        let local_card = bounds(cx, "setup-storage-local-card")?;
+        let global_path = bounds(cx, "setup-storage-global-path")?;
+        let local_path = bounds(cx, "setup-storage-local-path")?;
+        let choose = bounds(cx, "setup-storage-choose-folder")?;
+        let save = bounds(cx, "setup-save-storage")?;
+        assert!(global_card.contains(&global_path.center()));
+        assert!(local_card.contains(&local_path.center()));
+        assert!(local_card.contains(&choose.center()));
+        assert!(
+            !global_card.contains(&choose.center()),
+            "Global storage is read-only and must not browse"
+        );
+        assert!(
+            global_card.bottom() <= local_card.top(),
+            "the storage cards are stacked"
+        );
+        assert!(
+            save.top() >= local_card.bottom(),
+            "the primary Save action sits at the bottom of the page"
+        );
+
+        // Selecting a card is exclusive: each click leaves exactly one choice.
+        cx.simulate_click(global_card.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.storage_choice == StorageChoice::Global
+                && view.shell.first_run.storage_local.as_deref() == Some(local.as_path())
+        }));
+
+        cx.simulate_click(local_path.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.storage_choice == StorageChoice::Local
+        }));
+
+        cx.simulate_click(global_path.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.storage_choice == StorageChoice::Global
+        }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn storage_save_persists_the_selected_card_path(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let local = root.path().join("local-games");
+        fs::create_dir_all(&local)?;
+        let (view, cx) = open_storage_page(cx, root.path(), local.clone())?;
+        cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
+        cx.run_until_parked();
+        settle_transition(cx);
+
+        let save = bounds(cx, "setup-save-storage")?;
+        cx.simulate_click(save.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.stage == Stage::Overview
+                && view.shell.first_run.game_parent.as_deref() == Some(local.as_path())
+        }));
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?
+                .library
+                .as_deref(),
+            Some(fs::canonicalize(&local)?.as_path())
+        );
+
+        // The Global card persists the fixed app-data library instead.
+        let global = root.path().join("app-data/one.ztd.block/.minecraft");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle_first_run(FirstRunAction::MoreOptions, window, cx);
+                view.shell.first_run.storage_global = Some(global);
+                view.handle_first_run(
+                    FirstRunAction::SelectStorage(StorageChoice::Global),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        settle_transition(cx);
+        let save = bounds(cx, "setup-save-storage")?;
+        cx.simulate_click(save.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        let expected_global =
+            fs::canonicalize(root.path())?.join("app-data/one.ztd.block/.minecraft");
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?
+                .library
+                .as_deref(),
+            Some(expected_global.as_path())
+        );
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.first_run.stage == Stage::Overview
         }));
         Ok(())
     })();

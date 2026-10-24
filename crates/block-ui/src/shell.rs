@@ -271,6 +271,25 @@ impl Block {
         }
     }
 
+    /// Window-chrome icon button: the same Ghost geometry as minimize/close so
+    /// chrome never mixes an outlined action with the window controls.
+    fn chrome_icon_button(
+        &self,
+        id: &'static str,
+        action: UiAction,
+        icon: impl IntoElement,
+        label: &'static str,
+        cx: &Context<'_, Self>,
+    ) -> super::components::Control {
+        self.button_with_variant(id, "", action, super::components::ButtonVariant::Ghost, cx)
+            .aria_label(label)
+            .w(px(32.))
+            .h(px(32.))
+            .px_0()
+            .justify_center()
+            .child(icon)
+    }
+
     fn chrome(
         &self,
         _window: &Window,
@@ -314,9 +333,27 @@ impl Block {
                     UiAction::CancelForm
                 };
                 super::tooltip::trigger(
-                    self.button("task-close", "", action, cx)
-                        .child(super::design::Icon::ChevronDown.render(18., self.palette.muted)),
+                    self.chrome_icon_button(
+                        "task-close",
+                        action,
+                        super::design::Icon::ChevronDown.render(16., self.palette.muted),
+                        "Close setup",
+                        cx,
+                    ),
                     "Close setup",
+                    cx,
+                )
+                .into_any_element()
+            } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
+                super::tooltip::trigger(
+                    self.chrome_icon_button(
+                        "setup-back-welcome",
+                        UiAction::FirstRun(super::first_run::Action::BackToWelcome),
+                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                        "Back to welcome",
+                        cx,
+                    ),
+                    "Back to welcome",
                     cx,
                 )
                 .into_any_element()
@@ -385,24 +422,20 @@ impl Block {
                     div().into_any_element()
                 }
             }))
-            .child(
-                self.button("window-minimize", "", UiAction::MinimizeWindow, cx)
-                    .aria_label("Minimize Block")
-                    .w(px(32.))
-                    .h(px(32.))
-                    .px_0()
-                    .justify_center()
-                    .child(super::design::Icon::Minus.render(16., self.palette.muted)),
-            )
-            .child(
-                self.button("window-close", "", UiAction::CloseWindow, cx)
-                    .aria_label("Close Block")
-                    .w(px(32.))
-                    .h(px(32.))
-                    .px_0()
-                    .justify_center()
-                    .child(super::design::Icon::Close.render(16., self.palette.muted)),
-            )
+            .child(self.chrome_icon_button(
+                "window-minimize",
+                UiAction::MinimizeWindow,
+                super::design::Icon::Minus.render(16., self.palette.muted),
+                "Minimize Block",
+                cx,
+            ))
+            .child(self.chrome_icon_button(
+                "window-close",
+                UiAction::CloseWindow,
+                super::design::Icon::Close.render(16., self.palette.muted),
+                "Close Block",
+                cx,
+            ))
     }
 
     pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {

@@ -249,3 +249,34 @@ acceptance complete from tests or screenshots.
   Clippy, formatting and the native rebuild pass. Frame evidence is in
   `target/onboarding-validation/welcome-lucide-hover/repro-frames-fixed/`.
 - User confirmation of the revised flow remains pending.
+
+## Onboarding layout and storage review — 2026-10-24
+
+- One shared heading treatment now drives every wizard, editor and management
+  page: bold 20 px title, muted subtitle and a 6 px title/subtitle gap
+  (`patterns::page_heading` / `page_title`). Welcome keeps its larger 2xl title.
+- Overview heading copy is `Two steps and you're ready`; the Account/Game card
+  titles are larger and bold with a 6 px gap to their descriptions. Cards are
+  auto-height with `p_6` padding, two equal halves of the same 620 px column as
+  the heading, and equal height with top-aligned content.
+- The Overview footer is one row: More options left, Continue/Finish right. The
+  `Next: …` hint and the Overview Skip setup button are removed (Welcome's
+  bottom Skip setup remains). A chrome back button returns to the Home-sized
+  Welcome page without deleting saved setup progress; the existing top-left
+  close-setup chevron now shares the Ghost window-control style (no border,
+  32×32, 16 px muted icon) with minimize/close.
+- Game storage (More options) is two mutually exclusive read-only cards:
+  Global storage (fixed app-data `.minecraft`, no folder picker) and Local
+  storage (executable-adjacent `.minecraft`, path display plus Choose Folder).
+  Save is the primary action in the pinned footer and persists only the game
+  library path through the new `block.toml` `[storage]` section.
+- The config migration that backs these screens is documented separately in
+  [config storage](config-storage.md): `block-global.toml` plus `block.toml`,
+  the new platform data root and the deliberate no-migration policy.
+- Verification: `just check` (formatting, workspace check, strict Clippy,
+  workspace tests) passes, including the new first-run regressions for the back
+  action, single-row footer, read-only mutually exclusive storage cards and
+  `Locations::save`. Native captures of the Overview (light/dark), Game storage
+  and Create game screens are in
+  `target/onboarding-validation/ui-refinement/`. User acceptance remains
+  pending.

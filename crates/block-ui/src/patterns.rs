@@ -10,6 +10,29 @@ use gpui::{
     px, relative, rgb,
 };
 
+/// Canonical page heading: one bold 20 px title, a muted subtitle and the
+/// shared 6 px title/subtitle rhythm used by every wizard and management page.
+pub(super) fn page_heading(
+    title: impl Into<gpui::SharedString>,
+    subtitle: impl Into<gpui::SharedString>,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(page_title(title))
+        .child(super::note(subtitle))
+}
+
+/// A standalone bold page title for pages without a subtitle.
+pub(super) fn page_title(title: impl Into<gpui::SharedString>) -> Div {
+    div()
+        .text_xl()
+        .line_height(px(28.))
+        .font_weight(gpui::FontWeight::BOLD)
+        .child(title.into())
+}
+
 /// Reveal a newly invalid field after its actual layout, including a page that
 /// was hidden when validation ran. The same path runs in native and test windows.
 pub(super) fn reveal_field<T: Copy + Eq + 'static>(

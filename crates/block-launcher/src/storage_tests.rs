@@ -155,7 +155,7 @@ fn cache_move_rebases_installed_targets_retains_accounts_and_requires_explicit_c
     assert!(!root.join("objects").exists());
     assert!(new.join("objects/ab/payload").exists());
     assert!(instance.directory.exists());
-    assert!(root.join("catalog.json").is_file());
+    assert!(config::load(&root)?.contains_key(config::CATALOG_SECTION));
     Ok(())
 }
 
@@ -323,7 +323,7 @@ fn recovery_distinguishes_a_committed_generation_from_identical_folder_settings(
         };
         save(&root, &state, JOURNAL)?;
         if switched {
-            save(&root, &after, "storage.json")?;
+            after.save(&root)?;
         }
         let cleanup = recover(&root)?.context("Cleanup state")?;
         assert_eq!(cleanup.interrupted, !switched);
@@ -349,8 +349,13 @@ fn metadata_rewrite_failure_and_interrupted_cleanup_preserve_a_recoverable_state
     target.manifest = Some(root.canonicalize()?.join("objects/data"));
     target.status = InstallStatus::Ready;
     catalog.set_target(&instance.id, &target)?;
-    put(&root.join("preferences.json"), b"invalid configuration")?;
-    let original = fs::read(root.join("catalog.json"))?;
+    // A malformed session document fails after the catalog section was
+    // rewritten, exercising the backup/rollback path for `block.toml`.
+    put(
+        &root.join("sessions/6f1c8b6e-1d3f-4a3a-9f0e-0d6b5a4c3b2a/run.json"),
+        b"invalid session document",
+    )?;
+    let original = config::load(&root)?.get(config::CATALOG_SECTION).cloned();
     assert!(
         apply(
             &root,
@@ -361,7 +366,10 @@ fn metadata_rewrite_failure_and_interrupted_cleanup_preserve_a_recoverable_state
         )
         .is_err()
     );
-    assert_eq!(fs::read(root.join("catalog.json"))?, original);
+    assert_eq!(
+        config::load(&root)?.get(config::CATALOG_SECTION).cloned(),
+        original
+    );
     assert_eq!(
         catalog.snapshot()?.instances[0].directory,
         instance.directory
@@ -441,7 +449,7 @@ fn cache_can_return_to_the_managed_root_without_touching_games_or_control_files(
         fs::read(root.join("instances/not-a-cache/world.dat"))?,
         b"synthetic world"
     );
-    assert!(root.join("storage.json").is_file());
+    assert!(config::load(&root)?.contains_key(config::STORAGE_SECTION));
     assert!(!other.join("objects").exists());
     Ok(())
 }
@@ -486,5 +494,97 @@ fn internal_and_external_links_are_preserved_without_copying_external_data() -> 
     finish_retained(&root, true)?;
     assert_eq!(fs::read(external)?, b"not copied");
     assert!(destination.join("runtimes/bin/internal").is_file());
+    Ok(())
+}
+
+#[test]
+fn block_toml_holds_storage_and_preserves_foreign_sections() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("control");
+    fs::create_dir(&root)?;
+    put(
+        &root.join(config::FILE),
+        b"[foreign]\nkept = \"value\"\n\n[catalog]\nschema_version = 1\n\n[catalog.snapshot]\nprofile_mode = \"bundled\"\ninstances = []\nprofiles = []\n",
+    )?;
+    let locations = Locations {
+        cache: Some(temp.path().canonicalize()?.join("cache")),
+        ..Default::default()
+    };
+    locations.save(&root)?;
+
+    let table = config::load(&root)?;
+    assert!(table.contains_key(config::CATALOG_SECTION));
+    assert_eq!(
+        table
+            .get("foreign")
+            .and_then(|value| value.get("kept"))
+            .and_then(toml::Value::as_str),
+        Some("value")
+    );
+    let storage = table
+        .get(config::STORAGE_SECTION)
+        .and_then(toml::Value::as_table)
+        .context("storage section")?;
+    assert!(storage.contains_key("cache"));
+    assert!(!storage.contains_key("library"));
+    assert!(!storage.contains_key("generation"));
+    assert_eq!(Locations::load(&root)?, locations);
+    Ok(())
+}
+
+#[test]
+fn legacy_json_configuration_is_never_read_or_written() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("control");
+    fs::create_dir(&root)?;
+    put(
+        &root.join("storage.json"),
+        b"{\"library\":\"/synthetic/legacy\"}",
+    )?;
+    put(
+        &root.join("catalog.json"),
+        b"{\"schema_version\":1,\"snapshot\":{\"instances\":[{\"id\":\"legacy\"}],\"profiles\":[]}}",
+    )?;
+
+    assert_eq!(Locations::load(&root)?, Locations::default());
+    let catalog = Catalog::open(&root)?;
+    assert!(catalog.snapshot()?.instances.is_empty());
+    assert!(!root.join(config::FILE).exists());
+    catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+
+    assert!(root.join(config::FILE).is_file());
+    assert_eq!(
+        fs::read(root.join("storage.json"))?,
+        b"{\"library\":\"/synthetic/legacy\"}"
+    );
+    assert!(root.join("catalog.json").is_file());
+    Ok(())
+}
+
+#[test]
+fn catalog_document_round_trips_inside_block_toml_without_null_values() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("control");
+    fs::create_dir(&root)?;
+    put(&root.join(config::FILE), b"[foreign]\nkept = true\n")?;
+    let catalog = Catalog::open(&root)?;
+    let (instance, profile) =
+        catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+
+    let text = fs::read_to_string(root.join(config::FILE))?;
+    assert!(text.contains("[catalog]"));
+    assert!(!text.contains("null"));
+    assert!(!root.join("catalog.json").exists());
+    let reopened = Catalog::open(&root)?.snapshot()?;
+    assert_eq!(reopened.instances[0].id, instance.id);
+    assert_eq!(reopened.profiles[0].id, profile.id);
+    let table = config::load(&root)?;
+    assert_eq!(
+        table
+            .get("foreign")
+            .and_then(|value| value.get("kept"))
+            .and_then(toml::Value::as_bool),
+        Some(true)
+    );
     Ok(())
 }

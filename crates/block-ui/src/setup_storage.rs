@@ -5,6 +5,46 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+/// Game library folder name inside a storage parent.
+const GAME_FOLDER_NAME: &str = ".minecraft";
+
+/// Application folder inside the operating system's app-data directory. macOS
+/// uses the bundle identifier; Windows and Linux use the product name.
+#[cfg(target_os = "macos")]
+const GLOBAL_APPLICATION_DIRECTORY: &str = "one.ztd.block";
+#[cfg(not(target_os = "macos"))]
+const GLOBAL_APPLICATION_DIRECTORY: &str = "Block";
+
+/// Platform application folder shared by the data root and the Global storage
+/// card, so both always resolve to the same app-data location.
+pub(super) const fn global_application_directory() -> &'static str {
+    GLOBAL_APPLICATION_DIRECTORY
+}
+
+/// The fixed app-data game library offered by the Global storage card:
+/// `<OS app-data>/<application folder>/.minecraft`.
+///
+/// Returns `None` when the platform app-data directory is unavailable, so the
+/// caller can report an actionable error instead of inventing a path.
+pub(super) fn global_game_parent() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|directories| global_game_parent_in(directories.data_dir()))
+}
+
+/// Pure app-data composition point, split out so the platform folder name stays
+/// unit-testable on every host.
+fn global_game_parent_in(app_data: &Path) -> PathBuf {
+    app_data
+        .join(GLOBAL_APPLICATION_DIRECTORY)
+        .join(GAME_FOLDER_NAME)
+}
+
+/// The executable-adjacent game library offered by the Local storage card:
+/// `<application directory>/.minecraft`. On macOS the application directory is
+/// the parent of the `.app` bundle, so this never writes inside the bundle.
+pub(super) fn adjacent_game_parent(executable: &Path) -> PathBuf {
+    application_directory(executable).join(GAME_FOLDER_NAME)
+}
+
 /// Select the default game-library directory without writing to protected or
 /// temporary install locations. Portable installs keep their game data beside
 /// the application under `.minecraft`.
@@ -24,7 +64,7 @@ fn parent_for_location(
 ) -> PathBuf {
     match location {
         InstallLocation::Protected | InstallLocation::Unwritable => user_library.to_owned(),
-        InstallLocation::Portable | InstallLocation::Writable => application.join(".minecraft"),
+        InstallLocation::Portable | InstallLocation::Writable => application.join(GAME_FOLDER_NAME),
     }
 }
 
@@ -67,13 +107,8 @@ pub(super) fn save_game_parent(root: &Path, parent: &Path) -> anyhow::Result<()>
     let _storage_lease = block_launcher::storage::acquire(root)?;
     let mut locations = block_launcher::storage::Locations::load(root)?;
     locations.library = Some(parent.to_owned());
-    locations = locations.validate(root)?;
-
-    let mut temporary = tempfile::NamedTempFile::new_in(root)?;
-    use std::io::Write as _;
-    temporary.write_all(&serde_json::to_vec_pretty(&locations)?)?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(root.join("storage.json"))?;
+    let locations = locations.validate(root)?;
+    block_launcher::storage::Locations::save(&locations, root)?;
     Ok(())
 }
 
@@ -225,6 +260,33 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_game_parent_keeps_the_library_beside_the_application() {
+        assert_eq!(
+            adjacent_game_parent(Path::new("/Applications/Block.app/Contents/MacOS/Block")),
+            PathBuf::from("/Applications/.minecraft")
+        );
+        assert_eq!(
+            adjacent_game_parent(Path::new("/opt/block/bin/block")),
+            PathBuf::from("/opt/block/bin/.minecraft")
+        );
+    }
+
+    #[test]
+    fn global_game_parent_uses_app_data_and_the_platform_application_folder() {
+        let app_data = Path::new("/Users/user/Library/Application Support");
+        assert_eq!(
+            global_game_parent_in(app_data),
+            app_data
+                .join(GLOBAL_APPLICATION_DIRECTORY)
+                .join(".minecraft")
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(GLOBAL_APPLICATION_DIRECTORY, "one.ztd.block");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(GLOBAL_APPLICATION_DIRECTORY, "Block");
+    }
+
+    #[test]
     fn protected_and_user_selected_locations_are_classified() {
         for path in [
             "/Applications/Block.app",
@@ -325,10 +387,9 @@ mod tests {
             cache: Some(cache.clone()),
             generation: Some(generation),
         };
-        fs::write(
-            root.join("storage.json"),
-            serde_json::to_vec_pretty(&before)?,
-        )?;
+        // Seed the shared data-root document with the pre-existing cache and
+        // generation so the save must preserve both.
+        block_launcher::storage::Locations::save(&before, &root)?;
 
         save_game_parent(&root, &game_parent)?;
         let saved = block_launcher::storage::Locations::load(&root)?;

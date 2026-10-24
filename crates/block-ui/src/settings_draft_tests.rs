@@ -114,11 +114,9 @@ fn corrupt_storage_configuration_stays_visible_and_is_never_reset_by_settings_sa
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         Preferences::default().save(root.path())?;
-        let original_preferences = std::fs::read(root.path().join("preferences.json"))?;
-        std::fs::write(
-            root.path().join("storage.json"),
-            b"not valid location settings",
-        )?;
+        let original_preferences = std::fs::read(root.path().join(crate::global_config::FILE))?;
+        let original_storage = b"not valid location settings";
+        std::fs::write(root.path().join("block.toml"), original_storage)?;
         let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
@@ -139,11 +137,11 @@ fn corrupt_storage_configuration_stays_visible_and_is_never_reset_by_settings_sa
             })
         });
         assert_eq!(
-            std::fs::read(root.path().join("storage.json"))?,
-            b"not valid location settings"
+            std::fs::read(root.path().join("block.toml"))?,
+            original_storage
         );
         assert_eq!(
-            std::fs::read(root.path().join("preferences.json"))?,
+            std::fs::read(root.path().join(crate::global_config::FILE))?,
             original_preferences
         );
         Ok(())
@@ -721,7 +719,7 @@ fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
                     block_launcher::ProxyMode::System
                 );
                 parsed.save(root.path())?;
-                let original = std::fs::read(root.path().join("preferences.json"))?;
+                let original = std::fs::read(root.path().join(crate::global_config::FILE))?;
                 view.saved_preferences = Preferences::load(root.path())?;
                 view.preferences.clone_from(&view.saved_preferences);
                 view.open_settings(cx);
@@ -736,7 +734,7 @@ fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
                 });
                 assert!(draft.parse_downloads(cx).is_err());
                 assert_eq!(
-                    std::fs::read(root.path().join("preferences.json"))?,
+                    std::fs::read(root.path().join(crate::global_config::FILE))?,
                     original
                 );
                 view.handle(UiAction::Tab(Tab::Home), window, cx);

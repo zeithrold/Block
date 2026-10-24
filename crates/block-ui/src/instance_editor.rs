@@ -586,7 +586,7 @@ impl Block {
         };
         let mut body = div().id(gpui::SharedString::from(format!("instance-editor-body-{}", editor.identity()))).debug_selector(|| "instance-editor-body".into())
             .flex_1().min_h_0().scroll_area(&editor.scroll, "Instance settings", self.palette, false).p_6().flex().flex_col().gap_5()
-            .child(div().text_2xl().child("Instance configuration"))
+            .child(div().text_2xl().font_weight(gpui::FontWeight::BOLD).child("Instance configuration"))
             .child(self.instance_field(editor, Field::Name, "Instance name"))
             .child(note("These defaults apply to Profiles that inherit Instance settings. A Profile’s custom Java keeps priority."))
             .child(self.product_select_field("instance-runtime", "Java runtime", if editor.managed { "Automatic Java" } else { "Custom executable" }, super::select::ProductChoice::InstanceRuntime, cx));
@@ -918,7 +918,7 @@ mod tests {
             let (instance, profile) =
                 catalog.create_instance("Before".into(), "1.20.6".into(), None, None)?;
             let state = catalog.snapshot()?;
-            let path = root.path().join("catalog.json");
+            let path = root.path().join("block.toml");
             let bytes = fs::read(&path)?;
             let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);

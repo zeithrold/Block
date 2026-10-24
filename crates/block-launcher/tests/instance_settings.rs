@@ -1,3 +1,5 @@
+mod common;
+
 use block_launcher::{
     catalog::{
         Catalog, GameDirectoryGuard, InstanceConfiguration, InstanceSettings, ProfileConfiguration,
@@ -23,17 +25,11 @@ fn legacy_missing_defaults_preserve_java_arguments_and_catalog_bytes() -> anyhow
         "localhost".into(),
     ];
     catalog.save_profile(profile.clone())?;
-    let path = root.path().join("catalog.json");
-    let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-    document["snapshot"]["instances"][0]
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("instance fixture"))?
-        .remove("settings");
-    document["snapshot"]["profiles"][0]
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("profile fixture"))?
-        .remove("inheritance");
-    let bytes = serde_json::to_vec(&document)?;
+    let path = common::path(root.path());
+    let mut document = common::load(root.path())?;
+    common::first_instance_mut(&mut document)?.remove("settings");
+    common::first_profile_mut(&mut document)?.remove("inheritance");
+    let bytes = toml::to_string_pretty(&document)?.into_bytes();
     fs::write(&path, &bytes)?;
     let state = Catalog::open(root.path())?.snapshot()?;
     let (instance, profile, _) = state.selection(&profile.id)?;
@@ -173,7 +169,7 @@ fn instance_save_is_atomic_and_preserves_world_locks_and_mode_names() -> anyhow:
             fs::read(directory.join("saves/Fixture/level.dat"))?,
             b"test-only world marker"
         );
-        let before = fs::read(root.path().join("catalog.json"))?;
+        let before = fs::read(common::path(root.path()))?;
         for settings in [
             InstanceSettings {
                 width: 0,
@@ -201,7 +197,7 @@ fn instance_save_is_atomic_and_preserves_world_locks_and_mode_names() -> anyhow:
                     )
                     .is_err()
             );
-            assert_eq!(fs::read(root.path().join("catalog.json"))?, before);
+            assert_eq!(fs::read(common::path(root.path()))?, before);
         }
     }
     Ok(())
@@ -246,11 +242,17 @@ fn invalid_creation_leaves_no_game_directory_and_unknown_fields_preserve_bytes()
         catalog.snapshot()?.launch_fingerprint(&profile.id)?,
         fingerprint
     );
-    let path = root.path().join("catalog.json");
-    let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-    document["snapshot"]["instances"][0]["settings"]["gameDirectory"] =
-        serde_json::json!("outside");
-    let bytes = serde_json::to_vec(&document)?;
+    let path = common::path(root.path());
+    let mut document = common::load(root.path())?;
+    common::first_instance_mut(&mut document)?
+        .get_mut("settings")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| anyhow::anyhow!("instance settings fixture"))?
+        .insert(
+            "gameDirectory".into(),
+            toml::Value::String("outside".into()),
+        );
+    let bytes = toml::to_string_pretty(&document)?.into_bytes();
     fs::write(&path, &bytes)?;
     assert!(catalog.snapshot().is_err());
     assert_eq!(fs::read(path)?, bytes);

@@ -1,13 +1,15 @@
+mod common;
+
 use block_launcher::catalog::{Catalog, ProfileConfiguration};
-use serde_json::json;
-use std::{fs, path::Path};
+use std::path::Path;
 
 fn set_stored_memory(root: &Path, memory_mib: u32) -> anyhow::Result<()> {
-    let path = root.join("catalog.json");
-    let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-    document["snapshot"]["profiles"][0]["memory_mib"] = json!(memory_mib);
-    fs::write(&path, serde_json::to_vec(&document)?)?;
-    Ok(())
+    let mut document = common::load(root)?;
+    common::first_profile_mut(&mut document)?.insert(
+        "memory_mib".into(),
+        toml::Value::Integer(i64::from(memory_mib)),
+    );
+    common::save(root, &document)
 }
 
 #[test]
@@ -40,9 +42,11 @@ fn out_of_range_stored_profile_memory_clamps_on_load_and_on_next_write() -> anyh
         .clone();
     profile.memory_mib = state.profiles[0].memory_mib;
     catalog.save_profile(profile)?;
-    let document: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.path().join("catalog.json"))?)?;
-    assert_eq!(document["snapshot"]["profiles"][0]["memory_mib"], 1024);
+    let document = common::load(root.path())?;
+    assert_eq!(
+        document["catalog"]["snapshot"]["profiles"][0]["memory_mib"].as_integer(),
+        Some(1024)
+    );
     Ok(())
 }
 

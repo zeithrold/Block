@@ -4,6 +4,7 @@ pub mod avatars;
 pub mod azul;
 pub mod catalog;
 pub mod command;
+mod config;
 pub mod crash;
 pub mod executor;
 pub mod game_import;

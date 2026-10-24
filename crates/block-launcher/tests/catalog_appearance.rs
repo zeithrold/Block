@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 
 use block_launcher::{
@@ -6,20 +8,16 @@ use block_launcher::{
     },
     recipe::RuntimeSelection,
 };
-use serde_json::json;
 
 #[test]
 fn legacy_profiles_default_appearance_without_rewriting_the_catalog() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     let (_, profile) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let path = root.path().join("catalog.json");
-    let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
-    document["snapshot"]["profiles"][0]
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("profile fixture is not an object"))?
-        .remove("appearance");
-    let original = serde_json::to_vec_pretty(&document)?;
+    let path = common::path(root.path());
+    let mut document = common::load(root.path())?;
+    common::first_profile_mut(&mut document)?.remove("appearance");
+    let original = toml::to_string_pretty(&document)?.into_bytes();
     fs::write(&path, &original)?;
 
     let reopened = Catalog::open(root.path())?.snapshot()?;
@@ -74,19 +72,29 @@ fn unknown_appearance_values_reject_the_catalog_without_resetting_it() -> anyhow
     let catalog = Catalog::open(root.path())?;
     catalog.separate_profiles()?;
     let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let path = root.path().join("catalog.json");
-    let original: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+    let path = common::path(root.path());
+    let original = common::load(root.path())?;
 
     for appearance in [
-        json!({"icon": "../../external.svg", "color": "Gray"}),
-        json!({"icon": "Blocks", "color": "#ffffff"}),
-        json!({"icon": "Blocks", "color": 42}),
-        json!({"icon": "Blocks", "color": "Gray", "path": "external.svg"}),
-        serde_json::Value::Null,
+        common::table(&[
+            ("icon", "../../external.svg".into()),
+            ("color", "Gray".into()),
+        ]),
+        common::table(&[("icon", "Blocks".into()), ("color", "#ffffff".into())]),
+        common::table(&[
+            ("icon", "Blocks".into()),
+            ("color", toml::Value::Integer(42)),
+        ]),
+        common::table(&[
+            ("icon", "Blocks".into()),
+            ("color", "Gray".into()),
+            ("path", "external.svg".into()),
+        ]),
+        toml::Value::String("invalid appearance".into()),
     ] {
         let mut document = original.clone();
-        document["snapshot"]["profiles"][0]["appearance"] = appearance;
-        let invalid = serde_json::to_vec_pretty(&document)?;
+        common::first_profile_mut(&mut document)?.insert("appearance".into(), appearance);
+        let invalid = toml::to_string_pretty(&document)?.into_bytes();
         fs::write(&path, &invalid)?;
         assert!(catalog.snapshot().is_err());
         assert!(
@@ -143,7 +151,7 @@ fn invalid_configured_profile_preserves_metadata_and_creates_no_game_data() -> a
     let (instance, original) =
         catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     let valid = ProfileConfiguration::from(&original);
-    let path = root.path().join("catalog.json");
+    let path = common::path(root.path());
     let bundled = fs::read(&path)?;
     assert!(
         catalog
@@ -283,7 +291,7 @@ fn invalid_instance_configuration_creates_neither_metadata_nor_directories() -> 
                 .is_err()
         );
         assert!(!root.path().join("must-not-exist").exists());
-        assert!(!catalog.root().join("catalog.json").exists());
+        assert!(!common::path(catalog.root()).exists());
     }
     Ok(())
 }
@@ -293,7 +301,7 @@ fn failed_instance_commit_rolls_back_only_new_empty_directories() -> anyhow::Res
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path().join("catalog"))?;
     let original = b"broken catalog that must remain unchanged";
-    fs::write(catalog.root().join("catalog.json"), original)?;
+    fs::write(common::path(catalog.root()), original)?;
     let configuration = ProfileConfiguration {
         name: "Game".into(),
         ..ProfileConfiguration::default()
@@ -310,7 +318,7 @@ fn failed_instance_commit_rolls_back_only_new_empty_directories() -> anyhow::Res
             .is_err()
     );
     assert!(!root.path().join("new-tree").exists());
-    assert_eq!(fs::read(catalog.root().join("catalog.json"))?, original);
+    assert_eq!(fs::read(common::path(catalog.root()))?, original);
 
     let user_directory = root.path().join("existing-user-data");
     fs::create_dir_all(&user_directory)?;
@@ -330,6 +338,6 @@ fn failed_instance_commit_rolls_back_only_new_empty_directories() -> anyhow::Res
         fs::read(user_directory.join("sentinel"))?,
         b"preserve existing data"
     );
-    assert_eq!(fs::read(catalog.root().join("catalog.json"))?, original);
+    assert_eq!(fs::read(common::path(catalog.root()))?, original);
     Ok(())
 }

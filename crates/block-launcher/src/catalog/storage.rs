@@ -704,22 +704,25 @@ impl Catalog {
         operation: impl FnOnce(&mut Snapshot) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
         let _storage = if write {
+            // The configuration document is shared with storage settings, so a
+            // writer must hold the data-root lease to keep its read-modify-write
+            // cycle atomic and preserve the `[storage]` section.
             Some(crate::storage::acquire(&self.root)?)
         } else {
             None
         };
         let lock = open_lock(&self.root.join("catalog.lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
-        let path = self.root.join("catalog.json");
+        let path = self.root.join(crate::config::FILE);
         reject_symlink(&path)?;
-        let mut document = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice::<Document>(&bytes)
+        let mut table = crate::config::load(&self.root)?;
+        let mut document = match table.get(crate::config::CATALOG_SECTION) {
+            Some(section) => serde_json::from_value::<Document>(crate::config::to_json(section))
                 .context("catalog is invalid; original file was preserved")?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Document {
+            None => Document {
                 schema_version: 1,
                 snapshot: Snapshot::default(),
             },
-            Err(error) => return Err(error.into()),
         };
         ensure!(
             document.schema_version == 1,
@@ -733,10 +736,9 @@ impl Catalog {
         let result = operation(&mut document.snapshot)?;
         if write {
             validate_snapshot(&document.snapshot)?;
-            let mut temp = tempfile::NamedTempFile::new_in(&self.root)?;
-            temp.write_all(&serde_json::to_vec_pretty(&document)?)?;
-            temp.as_file().sync_all()?;
-            temp.persist(path)?;
+            let section = crate::config::from_json(&serde_json::to_value(&document)?)?;
+            table.insert(crate::config::CATALOG_SECTION.into(), section);
+            crate::config::write(&self.root, &table)?;
         }
         Ok(result)
     }

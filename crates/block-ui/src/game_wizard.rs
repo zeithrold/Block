@@ -619,8 +619,10 @@ impl Block {
     pub(super) fn wizard_optifine(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::Div {
         let pending = self.shell.wizard.optifine_request.is_some();
         div().flex().flex_col().gap_4()
-            .child(div().text_xl().child("Install OptiFine"))
-            .child(note("Download the installer JAR for your Minecraft version from optifine.net, then select it here. Block validates it and performs the remaining installation automatically."))
+            .child(patterns::page_heading(
+                "Install OptiFine",
+                "Download the installer JAR for your Minecraft version from optifine.net, then select it here. Block validates it and performs the remaining installation automatically.",
+            ))
             .child(components::button("optifine-official-download", "Open official downloads", self.palette, ButtonVariant::Outline, ControlState::default(), |&(), _, cx| cx.open_url("https://optifine.net/downloads")))
             .child(self.button("optifine-select-jar", if pending { "Validating selected JAR…" } else { "Select downloaded JAR" }, UiAction::WizardOptiFineFile, cx))
             .children(form.optifine.as_ref().map(|selected| div().flex().flex_col().gap_2()
@@ -1921,8 +1923,10 @@ impl Block {
             cx,
         );
         div().flex().flex_col().gap_4()
-            .child(div().text_xl().child("What would you like to create?"))
-            .child(note("Start fresh or add a new way to play an existing game."))
+            .child(patterns::page_heading(
+                "What would you like to create?",
+                "Start fresh or add a new way to play an existing game.",
+            ))
             .child(components::badge("Separated Profile", self.palette, BadgeVariant::Outline))
             .child(group.container().flex().flex_col().gap_4()
                 .child(group.item("instance", components::radio("wizard-kind-instance", "New Instance + Profile", state.kind == CreationKind::NewInstance,
@@ -1957,8 +1961,8 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_xl().child("Choose a game Instance"))
-            .child(note(
+            .child(patterns::page_heading(
+                "Choose a game Instance",
                 "Your new Profile uses these existing game files and components.",
             ))
             .child(group.container().flex().flex_col().gap_4().children(
@@ -2022,7 +2026,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .children(show_name.then(|| div().text_xl().child("Your way to play")))
+            .children(show_name.then(|| patterns::page_title("Your way to play")))
             .children(show_name.then(|| {
                 self.wizard_field(
                     WizardField::ProfileName,
@@ -2421,8 +2425,8 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_xl().child("Create your game"))
-            .child(note(
+            .child(patterns::page_heading(
+                "Create your game",
                 "Choose the game components. Review everything before installation begins.",
             ))
             .child(self.wizard_field(
@@ -2734,8 +2738,10 @@ impl Block {
 
         div().id("wizard-version-picker").flex().flex_col().gap_4()
             .on_key_down(cx.listener(Self::move_wizard_version))
-            .child(div().text_xl().child("Minecraft version"))
-            .child(note("Version and loader become fixed when this Instance is created."))
+            .child(patterns::page_heading(
+                "Minecraft version",
+                "Version and loader become fixed when this Instance is created.",
+            ))
             .child(self.wizard_version_catalog_status(cx))
             .children(self.shell.wizard.version_search.as_ref().map(|search| components::field_with(
                 "Search versions", search, self.palette,
@@ -3054,8 +3060,10 @@ impl Block {
             cx,
         );
         div().flex().flex_col().gap_3()
-            .child(div().text_xl().child("Mod loader"))
-            .child(note("Choose a loader and build. These choices become fixed when this Instance is created."))
+            .child(patterns::page_heading(
+                "Mod loader",
+                "Choose a loader and build. These choices become fixed when this Instance is created.",
+            ))
             .child(div().id("wizard-loader-picker").debug_selector(|| "wizard-loader-picker".into())
                 .h(px(336.)).min_w_0().flex().overflow_hidden()
                 .rounded_xl().border_1().border_color(rgb(self.palette.border))
@@ -3283,8 +3291,8 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_2xl().child("Configuration"))
-            .child(note(
+            .child(patterns::page_heading(
+                "Configuration",
                 "Choose this Instance’s game folder, Java runtime and window settings.",
             ))
             .child(self.wizard_field(
@@ -3399,8 +3407,10 @@ impl Block {
         );
         let automatic_connection = self.automatic_connection(&version);
         div().flex().flex_col().gap_4()
-            .child(div().text_xl().child(if existing { "Review profile setup" } else { "Review game setup" }))
-            .child(note(if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else if self.tab == Tab::Onboarding && self.shell.first_run.enabled { "Create game saves this setup. Finish setup to begin preparing game files." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." }))
+            .child(patterns::page_heading(
+                if existing { "Review profile setup" } else { "Review game setup" },
+                if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else if self.tab == Tab::Onboarding && self.shell.first_run.enabled { "Create game saves this setup. Finish setup to begin preparing game files." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." },
+            ))
             .child(components::card(self.palette)
                 .child(div().flex().items_center().gap_3().child(Icon::Blocks.render(24., self.palette.muted))
                     .child(div().flex_1().min_w_0().child(note(if existing { "EXISTING INSTANCE" } else if state.separated { "NEW INSTANCE" } else { "NEW GAME" }))

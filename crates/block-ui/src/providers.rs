@@ -669,18 +669,14 @@ impl Block {
                             self.palette,
                             36.,
                         ))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(div().text_xl().child(if form.original.is_some() {
-                                    "Provider details"
-                                } else {
-                                    "Add a provider"
-                                }))
-                                .child(note("Authlib-Injector · Custom authentication")),
-                        ),
+                        .child(patterns::page_heading(
+                            if form.original.is_some() {
+                                "Provider details"
+                            } else {
+                                "Add a provider"
+                            },
+                            "Authlib-Injector · Custom authentication",
+                        )),
                 )
                 .child(components::field_with(
                     "Display name",
@@ -755,8 +751,11 @@ impl Block {
                 cx,
             ));
         } else {
-            content = content.child(div().text_xl().child("Your authentication providers"))
-                .child(note("Choose a provider or add a server API address. Block discovers its API and caches real metadata."))
+            content = content
+                .child(patterns::page_heading(
+                    "Your authentication providers",
+                    "Choose a provider or add a server API address. Block discovers its API and caches real metadata.",
+                ))
                 .child(self.provider_button("provider-new","Add provider",UiAction::ProviderAdd,self.busy,ButtonVariant::Primary,cx));
         }
         if let Some(error) = &self.shell.providers.error {

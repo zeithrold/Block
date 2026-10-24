@@ -20,6 +20,7 @@ mod first_run;
 mod first_run_tests;
 mod frame_motion;
 mod game_wizard;
+mod global_config;
 mod import_games;
 mod instance_editor;
 #[cfg(test)]
@@ -3043,7 +3044,10 @@ mod tests {
                 view.read_with(cx, |view, _| view.shell.onboarding.step),
                 super::onboarding::Step::Account
             );
-            assert!(!root.path().join("preferences.json").exists());
+            assert_eq!(
+                super::Preferences::load(root.path())?,
+                super::Preferences::default()
+            );
             assert!(view.read_with(cx, |view, _| view.form.is_some()));
             assert!(cx.debug_bounds("onboarding-next-disabled").is_some());
             click_selector(cx, "onboarding-account-later");
@@ -3077,7 +3081,10 @@ mod tests {
                 view.read_with(cx, |view, _| view.tab),
                 super::Tab::Onboarding
             );
-            assert!(!root.path().join("preferences.json").exists());
+            assert_eq!(
+                super::Preferences::load(root.path())?,
+                super::Preferences::default()
+            );
             click_selector(cx, "onboarding-skip");
             assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Home);
             let saved = super::Preferences::load(root.path())?;
@@ -3127,7 +3134,10 @@ mod tests {
                     && view.busy
                     && !view.cancel.is_cancelled())
             );
-            assert!(!root.path().join("preferences.json").exists());
+            assert_eq!(
+                super::Preferences::load(root.path())?,
+                super::Preferences::default()
+            );
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
@@ -3145,7 +3155,7 @@ mod tests {
             let (engine, _messages) = super::Engine::with_root(root.path().into())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
             cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
-            std::fs::create_dir(root.path().join("preferences.json"))?;
+            std::fs::create_dir(root.path().join(super::global_config::FILE))?;
             view.update(cx, |view, cx| {
                 view.engine = Some(engine);
                 view.begin_onboarding(cx);
@@ -3168,7 +3178,7 @@ mod tests {
                 view.read_with(cx, |view, _| view.onboarding_progress),
                 super::onboarding::Progress::Created
             );
-            std::fs::remove_dir(root.path().join("preferences.json"))?;
+            std::fs::remove_dir(root.path().join(super::global_config::FILE))?;
             click_selector(cx, "welcome-next");
             assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Home);
             assert!(view.read_with(cx, |view, _| view.busy));
@@ -3547,7 +3557,7 @@ mod tests {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
             catalog.create_instance("Existing game".into(), "1.20.6".into(), None, None)?;
-            let original = std::fs::read(root.path().join("catalog.json"))?;
+            let original = serde_json::to_value(catalog.snapshot()?)?;
             let snapshot = catalog.snapshot()?;
             let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
@@ -3584,7 +3594,7 @@ mod tests {
             click_selector(cx, "cancel-instance");
             assert!(view.read_with(cx, |view, _| view.form.is_none()));
             assert!(!view.read_with(cx, |view, _| view.busy));
-            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             assert!(!directory.exists());
             Ok(())
         })();
@@ -3600,7 +3610,7 @@ mod tests {
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
             let (existing, _) =
                 catalog.create_instance("Existing game".into(), "1.20.6".into(), None, None)?;
-            let original = std::fs::read(root.path().join("catalog.json"))?;
+            let original = serde_json::to_value(catalog.snapshot()?)?;
             let snapshot = catalog.snapshot()?;
             let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
@@ -3625,7 +3635,7 @@ mod tests {
                 super::game_wizard::WizardStep::Review
             );
             assert!(!view.read_with(cx, |view, _| view.busy));
-            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             click_selector(cx, "wizard-back");
             click_selector(cx, "wizard-next");
             click_selector(cx, "wizard-next");
@@ -3644,7 +3654,7 @@ mod tests {
                 view.status
                     .contains("installation directory overlaps another instance")
             }));
-            assert_eq!(std::fs::read(root.path().join("catalog.json"))?, original);
+            assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             assert_eq!(catalog.snapshot()?.instances.len(), 1);
             Ok(())
         })();

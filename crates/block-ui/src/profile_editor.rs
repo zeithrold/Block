@@ -308,7 +308,7 @@ impl Block {
             .flex_col()
             .gap_5();
         body = match page {
-            None => body.child(div().text_2xl().child("Edit profile"))
+            None => body.child(div().text_2xl().font_weight(gpui::FontWeight::BOLD).child("Edit profile"))
                 .child(self.profile_field(EditorField::Name, "Name", &form.name))
                 .child(self.profile_field(EditorField::Server, "Server address (optional)", &form.server))
                 .child(self.profile_server_choice(form, cx))
@@ -317,12 +317,12 @@ impl Block {
                 .child(self.button("edit-profile-launch", "Launch settings", UiAction::ProfilePage(EditorPage::Launch), cx))
                 .child(self.button("edit-profile-data", "Data and account", UiAction::ProfilePage(EditorPage::Data), cx))
                 .child(note("Changes stay in this draft until you save.")),
-            Some(EditorPage::Appearance) => body.child(div().text_2xl().child("Profile appearance"))
+            Some(EditorPage::Appearance) => body.child(div().text_2xl().font_weight(gpui::FontWeight::BOLD).child("Profile appearance"))
                 .child(components::profile_avatar(form.original.appearance, self.palette, 80.))
                 .child(self.profile_page_trigger(self.button("profile-icon", form.original.appearance.icon.label(), UiAction::ChooseAppearance { wizard: false, color: false }, cx)))
                 .child(self.button("profile-color", form.original.appearance.color.label(), UiAction::ChooseAppearance { wizard: false, color: true }, cx)),
             Some(EditorPage::Launch) => self.profile_launch_fields(body, form, cx),
-            Some(EditorPage::Data) => body.child(div().text_2xl().child("Data and account"))
+            Some(EditorPage::Data) => body.child(div().text_2xl().font_weight(gpui::FontWeight::BOLD).child("Data and account"))
                 .child(self.product_select_field("data-policy", "Game data", match form.original.data_policy { DataPolicy::Isolated => "Isolated profile directory", DataPolicy::Shared => "Shared Instance directory" }, super::select::ProductChoice::ProfileDataPolicy, cx))
                 .child(note("Isolated uses this profile's own directory. Shared uses the Instance game directory. Changing policy selects a directory and preserves all existing files."))
                 .child(self.profile_account_group(form, cx)),
@@ -471,19 +471,24 @@ impl Block {
         form: &ProfileForm,
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
-        let mut fields =
-            body.child(div().text_2xl().child("Launch settings"))
-                .child(self.product_select_field(
-                    "profile-runtime",
-                    "Java runtime",
-                    if form.managed {
-                        "Automatic Java"
-                    } else {
-                        "Custom executable"
-                    },
-                    super::select::ProductChoice::ProfileRuntime,
-                    cx,
-                ));
+        let mut fields = body
+            .child(
+                div()
+                    .text_2xl()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child("Launch settings"),
+            )
+            .child(self.product_select_field(
+                "profile-runtime",
+                "Java runtime",
+                if form.managed {
+                    "Automatic Java"
+                } else {
+                    "Custom executable"
+                },
+                super::select::ProductChoice::ProfileRuntime,
+                cx,
+            ));
         if !form.managed {
             fields =
                 fields.child(self.profile_field(EditorField::Java, "Java executable", &form.java));

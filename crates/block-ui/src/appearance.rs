@@ -2,7 +2,7 @@
     clippy::redundant_pub_crate,
     reason = "Keep private UI modules scoped to their parent."
 )]
-use std::{io::Write as _, path::Path};
+use std::path::Path;
 
 use gpui::{Global, WindowAppearance};
 use serde::{Deserialize, Serialize};
@@ -26,31 +26,26 @@ pub(super) struct Preferences {
 }
 
 impl Preferences {
+    /// Read the `[preferences]` section of the global configuration document.
+    ///
+    /// Stored memory outside the 1–32 GB product range is clamped before
+    /// validation, then persisted on the next save.
     pub(super) fn load(root: &Path) -> anyhow::Result<Self> {
-        match std::fs::read(root.join("preferences.json")) {
-            Ok(bytes) => {
-                let mut preferences: Self = serde_json::from_slice(&bytes)?;
-                // Older preferences may store memory outside the 1–32 GB
-                // product range; clamp on load and persist on the next save.
-                preferences.game.memory_mib =
-                    block_launcher::clamp_memory_mib(preferences.game.memory_mib);
-                preferences.validate()?;
-                Ok(preferences)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(error) => Err(error.into()),
-        }
+        let mut preferences = match super::global_config::read(root)? {
+            Some(config) => config.preferences,
+            None => Self::default(),
+        };
+        preferences.game.memory_mib = block_launcher::clamp_memory_mib(preferences.game.memory_mib);
+        preferences.validate()?;
+        Ok(preferences)
     }
 
+    /// Replace only the `[preferences]` section, preserving accounts,
+    /// providers and unknown sections written by other components.
     pub(super) fn save(&self, root: &Path) -> anyhow::Result<()> {
         self.validate()?;
         let _storage = block_launcher::storage::acquire(root)?;
-        std::fs::create_dir_all(root)?;
-        let mut file = tempfile::NamedTempFile::new_in(root)?;
-        file.write_all(&serde_json::to_vec_pretty(self)?)?;
-        file.as_file().sync_all()?;
-        file.persist(root.join("preferences.json"))?;
-        Ok(())
+        super::global_config::update(root, |config| config.preferences = self.clone())
     }
 
     pub(super) fn validate(&self) -> anyhow::Result<()> {
@@ -165,7 +160,7 @@ mod tests {
         assert_eq!(Preferences::load(root.path())?, preferences);
         Preferences::default().save(root.path())?;
         assert_eq!(Preferences::load(root.path())?, Preferences::default());
-        std::fs::write(root.path().join("preferences.json"), b"invalid")?;
+        std::fs::write(root.path().join(crate::global_config::FILE), b"invalid")?;
         assert!(Preferences::load(root.path()).is_err());
         Ok(())
     }
@@ -174,8 +169,8 @@ mod tests {
     fn legacy_settings_gain_defaults_and_invalid_drafts_preserve_saved_preferences()
     -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let path = root.path().join("preferences.json");
-        let original = br#"{"appearance":"Dark","reduce_motion":true,"onboarding_complete":true}"#;
+        let path = root.path().join(crate::global_config::FILE);
+        let original = b"[preferences]\nappearance = \"Dark\"\nreduce_motion = true\nonboarding_complete = true\n";
         std::fs::write(&path, original)?;
         let mut preferences = Preferences::load(root.path())?;
         assert_eq!(
@@ -198,7 +193,6 @@ mod tests {
     #[test]
     fn loading_out_of_range_stored_memory_clamps_to_the_product_bounds() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let path = root.path().join("preferences.json");
         for (stored, expected) in [(256, 1024), (65536, 32768), (4096, 4096)] {
             let preferences = Preferences {
                 onboarding_complete: true,
@@ -208,7 +202,11 @@ mod tests {
                 },
                 ..Default::default()
             };
-            std::fs::write(&path, serde_json::to_vec(&preferences)?)?;
+            // Bypass validation so the out-of-range value really reaches the
+            // document, exactly like a value written by an older version.
+            crate::global_config::update(root.path(), |config| {
+                config.preferences = preferences;
+            })?;
             let loaded = Preferences::load(root.path())?;
             assert_eq!(loaded.game.memory_mib, expected);
             loaded.save(root.path())?;

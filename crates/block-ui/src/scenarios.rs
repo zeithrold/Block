@@ -516,9 +516,12 @@ impl Block {
                     self.selected_instance = Some("vanilla".into());
                 }
                 "setup-storage" => {
-                    let path = "/scenario/Block/new-games";
-                    self.shell.first_run.storage_input =
-                        Some(crate::input(path, "New game folder", cx));
+                    self.shell.first_run.storage_choice = first_run::StorageChoice::Local;
+                    self.shell.first_run.storage_global = Some(std::path::PathBuf::from(
+                        "/scenario/Application Support/one.ztd.block/.minecraft",
+                    ));
+                    self.shell.first_run.storage_local =
+                        Some(std::path::PathBuf::from("/scenario/Block/.minecraft"));
                 }
                 "setup-import-sources" | "setup-import-list" => {
                     let report = setup_import_report();
