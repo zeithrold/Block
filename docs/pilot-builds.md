@@ -5,8 +5,10 @@ published to GitHub Releases.
 
 ## Workflow
 
-`.github/workflows/pilot-build.yml` runs manually (`workflow_dispatch`) and
-produces one downloadable artifact set per platform per run:
+`.github/workflows/pilot-build.yml` runs on every push to `main` and on
+manual dispatch (`workflow_dispatch`). Each run produces one downloadable
+artifact set per platform; a newer push cancels an in-flight run for the same
+ref:
 
 | Job | Runner | Artifacts |
 | --- | --- | --- |

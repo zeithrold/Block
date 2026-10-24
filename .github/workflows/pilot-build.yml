@@ -1,10 +1,18 @@
 name: Pilot packages
 
-# Manual pilot builds: every run produces unsigned release packages for all
-# supported platforms as downloadable workflow artifacts. Nothing is published
-# to GitHub Releases, and no package is code-signed or notarized.
+# Pilot builds run on every push to main and on manual dispatch: each run
+# produces unsigned release packages for all supported platforms as
+# downloadable workflow artifacts. Nothing is published to GitHub Releases,
+# and no package is code-signed or notarized.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+# A newer push supersedes an in-flight package run for the same ref.
+concurrency:
+  group: pilot-packages-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
