@@ -443,6 +443,93 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
 }
 
 #[gpui::test]
+fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view.preferences.reduce_motion = true;
+            view.begin_first_run(cx);
+            view
+        });
+        let home = cx.update(|window, cx| crate::window_geometry::home_size(window, cx));
+        let management =
+            cx.update(|window, cx| crate::window_geometry::management_size(window, cx));
+        cx.simulate_resize(home);
+        cx.run_until_parked();
+
+        for _ in 0..2 {
+            let play = bounds(cx, "welcome-play")?;
+            cx.simulate_mouse_move(play.center(), None, gpui::Modifiers::none());
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.first_run.welcome_button.is_hovered()
+            }));
+            cx.simulate_click(play.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            view.update_in(cx, |view, window, cx| {
+                let request = view.shell.import_games.discovery;
+                assert!(request.is_some(), "Play must start game discovery");
+                let decision = view.resolve_game_discovery(
+                    request.unwrap_or_else(uuid::Uuid::nil),
+                    DiscoveryReport::default(),
+                );
+                assert_eq!(decision, DeferredDiscovery::ContinueToOverview);
+                view.apply_deferred_discovery(decision, window, cx);
+            });
+            cx.simulate_resize(management);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.first_run.stage == Stage::Overview
+            }));
+
+            let back = bounds(cx, "setup-back-welcome")?;
+            cx.simulate_mouse_move(back.center(), None, gpui::Modifiers::none());
+            cx.simulate_click(back.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            cx.simulate_resize(home);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.first_run.stage == Stage::Welcome
+            }));
+            assert!(
+                !view.read_with(cx, |view, _| view
+                    .shell
+                    .first_run
+                    .welcome_button
+                    .is_hovered()),
+                "Back to Welcome must not retain the Play button's previous hover"
+            );
+            assert!(
+                root.path().join("setup-started").is_file(),
+                "resetting hover must preserve saved setup progress"
+            );
+
+            let play = bounds(cx, "welcome-play")?;
+            cx.simulate_mouse_move(play.center(), None, gpui::Modifiers::none());
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.first_run.welcome_button.is_hovered()
+            }));
+            cx.simulate_mouse_move(
+                gpui::point(play.left() - gpui::px(12.), play.center().y),
+                None,
+                gpui::Modifiers::none(),
+            );
+            cx.run_until_parked();
+            assert!(!view.read_with(cx, |view, _| {
+                view.shell.first_run.welcome_button.is_hovered()
+            }));
+        }
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
 fn overview_footer_keeps_a_single_more_options_and_continue_row(cx: &mut gpui::TestAppContext) {
     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
