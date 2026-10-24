@@ -4,7 +4,7 @@ A Minecraft Java Edition launcher MVP built with Rust and [GPUI](https://gpui.rs
 
 Block separates persistent Instances, launch Profiles and Accounts from transient LaunchPlans. The native interface manages games and accounts, installs Vanilla, Fabric, Quilt, Forge and NeoForge, imports user-provided official OptiFine JARs, and hands a verified Java invocation to an independent session supervisor. See [Pilot status](docs/STATUS.md) for current native evidence and compatibility limits, and [next tasks](docs/next-tasks.md) for the milestone plan. The [MVP acceptance record](docs/mvp-progress.md) preserves earlier baseline results.
 
-Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is next; user acceptance remains pending. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
+Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is in progress: the Windows ARM64 motion increment is user-accepted, while broader acceptance remains pending. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
 
 ## Prerequisites
 
@@ -112,5 +112,11 @@ The workspace enables Clippy's `all`, `pedantic`, and `nursery` groups. Addition
 ## Minecraft manifest experiment
 
 See [the experiment notes](experiments/minecraft-manifests/README.md) for the schema coverage, recorded full-corpus results, and reproduction steps. The parser is a separate workspace crate; the desktop application remains the default member.
+
+## License
+
+Block is licensed under the [BSD 3-Clause License](LICENSE). Third-party code,
+fonts and icons retain their respective licenses and notices; see
+[third-party notices](packaging/THIRD_PARTY_NOTICES.txt).
 
 Development stages: Pilot Milestone II (basic usability, DeepSeek), III (interaction fixes, Codex), IV (architecture design), then v0 (the first public unstable release). See [the milestone plan](docs/next-tasks.md) and [current status](docs/STATUS.md). Desktop packaging and the `one.ztd.block` product identity: [packaging](packaging/README.md).

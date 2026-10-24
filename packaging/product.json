@@ -6,5 +6,6 @@
   "description": "Minecraft Java Edition launcher",
   "icon_png": "crates/block-ui/assets/block.png",
   "icon_macos_png": "crates/block-ui/assets/block-1024.png",
+  "icon_windows_ico": "packaging/windows/Block.ico",
   "icon_svg": "crates/block-ui/assets/block.svg"
 }

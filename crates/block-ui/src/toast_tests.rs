@@ -39,17 +39,15 @@ fn manager_keeps_five_active_items_and_retains_exiting_items() {
             now,
         );
     }
-    trim_to_limit(&mut manager, now);
+    let mut ending = HashSet::new();
+    trim_to_limit(&manager, &mut ending);
     let active = manager
         .iter()
-        .filter(|(_, _, status)| *status != ToastTransitionStatus::Ending)
+        .filter(|(id, _, _)| !ending.contains(id))
         .count();
     assert_eq!(active, 5);
-    assert!(
-        manager
-            .iter()
-            .any(|(_, _, status)| status == ToastTransitionStatus::Ending)
-    );
+    assert_eq!(ending, HashSet::from([1]));
+    assert_eq!(manager.len(), 6);
 }
 
 #[test]
@@ -68,12 +66,21 @@ fn duplicate_refreshes_deadline_without_restarting_manager_entry() {
 
     let duplicate = Toast::new("saved".into(), ToastKind::Success);
     assert_eq!(
-        coalesce_existing(&manager, &duplicate, now + Duration::from_secs(1)),
+        coalesce_existing(
+            &manager,
+            &HashSet::new(),
+            &duplicate,
+            now + Duration::from_secs(1)
+        ),
         Some(41)
     );
     assert_eq!(manager.len(), 1);
     assert_eq!(manager.iter().next().expect("one mounted toast").2, status);
     assert!(value.borrow().expires > now + Duration::from_secs(4));
+    assert_eq!(
+        coalesce_existing(&manager, &HashSet::from([41]), &duplicate, now),
+        None
+    );
 }
 
 #[test]
@@ -181,25 +188,20 @@ fn adapter_expires_after_executor_clock_advances(cx: &mut gpui::TestAppContext) 
             .plugin::<ToastLayer>()
             .expect("product windows install the toast layer")
     });
+    let toast = Toast::new("Expires".into(), ToastKind::Info);
+    let id = toast.id;
     cx.update(|window, app| {
-        ToastLayer::enqueue(
-            vec![Toast::new("Expires".into(), ToastKind::Info)],
-            window,
-            app,
-        );
+        ToastLayer::enqueue(vec![toast], window, app);
     });
     cx.run_until_parked();
+    assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()));
     cx.executor().advance_clock(Duration::from_secs(5));
     cx.run_until_parked();
-    assert!(layer.read_with(cx, |layer, _| {
-        layer
-            .manager
-            .iter()
-            .all(|(_, _, status)| status == ToastTransitionStatus::Ending)
-    }));
-    frame(cx, 250);
+    frame(cx, 1_000);
+    frame(cx, 50);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()
-        && !layer.timer_running));
+        && !layer.timer_running
+        && !layer.close_focus.contains_key(&id)));
 }
 
 fn frame(cx: &mut gpui::VisualTestContext, millis: u64) {
@@ -243,7 +245,7 @@ fn pointer_hover_pauses_expiry_and_leaving_resumes_it(cx: &mut gpui::TestAppCont
     frame(cx, 50);
     assert!(!layer.read_with(cx, |layer, _| layer.stack_state.is_expanded()));
     frame(cx, 4_000);
-    frame(cx, 250);
+    frame(cx, 600);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()
         && !layer.timer_running));
 }
@@ -252,6 +254,7 @@ fn pointer_hover_pauses_expiry_and_leaving_resumes_it(cx: &mut gpui::TestAppCont
 fn keyboard_close_uses_native_activation_and_pauses_expiry(cx: &mut gpui::TestAppContext) {
     let (_, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
     frame(cx, 500);
     let focus = layer
         .read_with(cx, |layer, _| layer.close_focus.values().next().cloned())
@@ -266,7 +269,13 @@ fn keyboard_close_uses_native_activation_and_pauses_expiry(cx: &mut gpui::TestAp
             .any(|(_, _, phase)| phase == ToastTransitionStatus::Present)
     }));
     crate::test_support::press(cx, "space");
-    frame(cx, 250);
+    frame(cx, 400);
+    assert!(layer.read_with(cx, |layer, _| {
+        layer.manager.get(&id).is_some()
+            && layer.settled_exits.contains(&id)
+            && !layer.close_focus.contains_key(&id)
+    }));
+    frame(cx, 100);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
 }
 
@@ -275,6 +284,7 @@ fn swipe_tracks_pointer_outside_card_and_dismisses(cx: &mut gpui::TestAppContext
     let (_, cx, _system_motion) = fixture(cx);
     cx.simulate_resize(gpui::size(px(432.), px(768.)));
     let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
     frame(cx, 500);
     let card = cx.debug_bounds("toast").expect("painted toast");
     let start = card.center();
@@ -285,6 +295,13 @@ fn swipe_tracks_pointer_outside_card_and_dismisses(cx: &mut gpui::TestAppContext
     let moved = cx.debug_bounds("toast").expect("dragged toast");
     assert!(moved.origin.x > card.origin.x + px(72.));
     cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::none());
+    frame(cx, 300);
+    assert!(layer.read_with(cx, |layer, _| {
+        layer.manager.get(&id).is_some()
+            && layer.gestures.borrow().is_empty()
+            && layer.swipe_exits.is_empty()
+            && layer.settled_exits.contains(&id)
+    }));
     frame(cx, 250);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()
         && layer.gestures.borrow().is_empty()));
@@ -326,6 +343,10 @@ fn system_reduced_motion_settles_exit_with_the_app_preference_off(cx: &mut gpui:
 }
 
 fn card(cx: &mut gpui::VisualTestContext, id: u64) -> gpui::Bounds<Pixels> {
+    maybe_card(cx, id).expect("painted card")
+}
+
+fn maybe_card(cx: &mut gpui::VisualTestContext, id: u64) -> Option<gpui::Bounds<Pixels>> {
     cx.update(|window, _| {
         gpui_base::test_support::find(
             window,
@@ -333,8 +354,7 @@ fn card(cx: &mut gpui::VisualTestContext, id: u64) -> gpui::Bounds<Pixels> {
             &ElementId::NamedInteger("block-toast-card".into(), id),
         )
     })
-    .expect("painted card")
-    .bounds()
+    .map(|card| card.bounds())
 }
 
 fn first_id(layer: &gpui::Entity<ToastLayer>, cx: &gpui::VisualTestContext) -> u64 {
@@ -442,7 +462,32 @@ fn stack_expand_and_interrupted_collapse_share_css_reversal_timing(cx: &mut gpui
 }
 
 #[gpui::test]
-fn collapsed_back_toast_uses_500ms_motion_before_200ms_removal(cx: &mut gpui::TestAppContext) {
+fn toast_exit_waits_for_presence_after_a_delayed_first_render(cx: &mut gpui::TestAppContext) {
+    let (_, cx, _system_motion) = fixture(cx);
+    let layer = enqueue(cx);
+    let id = first_id(&layer, cx);
+    frame(cx, 400);
+    // Model a delayed renderer: record the same ending intent without waking
+    // the window, then deliver the first exiting render 250 ms later.
+    layer.update(cx, |layer, _| assert!(layer.ending.insert(id)));
+    cx.executor().advance_clock(Duration::from_millis(250));
+    cx.run_until_parked();
+    frame(cx, 0);
+    frame(cx, 399);
+    assert!(
+        layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()
+            && !layer.settled_exits.contains(&id))
+    );
+    assert!(cx.debug_bounds("toast").is_some());
+    frame(cx, 1);
+    assert!(layer.read_with(cx, |layer, _| layer.settled_exits.contains(&id)));
+    assert!(maybe_card(cx, id).is_none());
+    frame(cx, 50);
+    assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_none()));
+}
+
+#[gpui::test]
+fn collapsed_back_toast_remains_mounted_through_500ms_motion(cx: &mut gpui::TestAppContext) {
     let (_, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
     let id = first_id(&layer, cx);
@@ -463,6 +508,16 @@ fn collapsed_back_toast_uses_500ms_motion_before_200ms_removal(cx: &mut gpui::Te
         initial.origin.y + initial.size.height * 0.4 * 0.29524,
     );
     frame(cx, 150);
+    assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()));
+    frame(cx, 249);
+    assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()));
+    frame(cx, 1);
+    assert!(
+        layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()
+            && layer.settled_exits.contains(&id))
+    );
+    assert!(maybe_card(cx, id).is_none());
+    frame(cx, 50);
     assert!(layer.read_with(cx, |layer, _| layer.manager.get(&id).is_none()));
 }
 
@@ -567,12 +622,18 @@ fn accepted_swipe_continues_outward_from_release_with_200ms_ease_out(
         dragged.origin.x + initial.size.width * 0.68464,
     );
     frame(cx, 150);
+    assert!(
+        layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()
+            && layer.swipe_exits.is_empty()
+            && layer.settled_exits.contains(&id))
+    );
+    frame(cx, 300);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()
         && layer.swipe_exits.is_empty()));
 }
 
 #[gpui::test]
-fn ordinary_exit_matches_the_prototype_200ms_retention(cx: &mut gpui::TestAppContext) {
+fn ordinary_exit_releases_interaction_at_presence_completion(cx: &mut gpui::TestAppContext) {
     let (_, cx, _system_motion) = fixture(cx);
     let layer = enqueue(cx);
     let id = first_id(&layer, cx);
@@ -582,11 +643,16 @@ fn ordinary_exit_matches_the_prototype_200ms_retention(cx: &mut gpui::TestAppCon
     frame(cx, 0);
     assert_near(card(cx, id).origin.y, initial.origin.y);
     frame(cx, 100);
-    assert_near(
-        card(cx, id).origin.y,
-        initial.origin.y + initial.size.height * 0.40851,
-    );
-    frame(cx, 150);
+    let moving = card(cx, id);
+    assert!(moving.origin.y > initial.origin.y);
+    assert!(moving.origin.y < initial.origin.y + initial.size.height);
+    frame(cx, 300);
     assert!(cx.debug_bounds("toast").is_none());
+    assert!(
+        layer.read_with(cx, |layer, _| layer.manager.get(&id).is_some()
+            && layer.settled_exits.contains(&id)
+            && !layer.close_focus.contains_key(&id))
+    );
+    frame(cx, 100);
     assert!(layer.read_with(cx, |layer, _| layer.manager.is_empty()));
 }

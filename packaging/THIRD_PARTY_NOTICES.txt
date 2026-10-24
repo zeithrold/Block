@@ -2,9 +2,10 @@ Block
 https://block.ztd.one
 Application identifier: one.ztd.block
 
-The Block project does not currently declare a project-wide source license.
-This package does not assign one. Its brand artwork comes from the companion
-Block-Icon project, icon-v4; source asset hashes accompany the package.
+Block is licensed under the BSD 3-Clause License; the project's copyright,
+conditions and disclaimer are included in LICENSE. Third-party components
+retain the licenses and notices below. Block's brand artwork comes from the
+companion Block-Icon project, icon-v4; source asset hashes accompany the package.
 
 The launcher includes text-input code adapted from GPUI examples by
 Zed Industries, Inc. The supplied GPUI-LICENSE-APACHE preserves that notice

@@ -77,6 +77,8 @@ pub const SCENARIOS: &[&str] = &[
     "home-profile-drawer",
     "home-account-drawer",
     "home-downloads-drawer",
+    "toast-motion",
+    "toast-motion-reduced",
     "download-files",
     "wizard-version-picker",
     "wizard-loader-picker",
@@ -121,8 +123,19 @@ impl Block {
         } else {
             Appearance::Light
         };
-        self.preferences.reduce_motion =
-            !(crate::drawer::motion_trace_enabled() || crate::frame_motion::trace::enabled());
+        let toast_scenario = matches!(
+            options.name.as_str(),
+            "toast-motion" | "toast-motion-reduced"
+        );
+        let toast_trace = toast_scenario && crate::feedback::toast_trace::enabled();
+        self.preferences.reduce_motion = if toast_trace {
+            options.name == "toast-motion-reduced"
+        } else {
+            !(crate::drawer::motion_trace_enabled() || crate::frame_motion::trace::enabled())
+        };
+        if toast_trace {
+            self.motion.apply_policy(self.preferences.reduce_motion, cx);
+        }
         self.preferences.onboarding_complete = true;
         self.saved_preferences = self.preferences.clone();
         self.palette = self.preferences.palette(window.appearance());
@@ -174,7 +187,7 @@ impl Block {
         self.shell.accounts.load = CollectionLoad::Ready;
         self.tab = Tab::Home;
         let name = options.name.as_str();
-        let home = name.starts_with("home-") || name == "download-files";
+        let home = name.starts_with("home-") || name == "download-files" || toast_scenario;
         window.resize(if home {
             crate::window_geometry::home_size(window, cx)
         } else {
@@ -479,6 +492,18 @@ impl Block {
         }
         if crate::frame_motion::trace::enabled() {
             crate::frame_motion::trace::start(cx.weak_entity(), window, cx);
+        }
+        if toast_trace {
+            crate::feedback::toast_trace::start(
+                window,
+                cx,
+                if self.preferences.reduce_motion {
+                    "toast-motion-reduced"
+                } else {
+                    "toast-motion"
+                },
+                self.preferences.reduce_motion,
+            );
         }
         cx.notify();
         Ok(())

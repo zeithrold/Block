@@ -36,7 +36,7 @@ none are enlarged from the UI's 256 px image. If `iconutil` rejects the iconset,
 the script wraps the existing PNG representations in standard ICNS chunks,
 preserving the original 1024 px PNG bytes. This changes only the container;
 native `sips` still performs all downscaling.
-The UI, Linux PNG and Windows ICO continue to use the original 256 px source.
+The UI and Linux PNG continue to use the original 256 px source.
 Both native PNG sources and the SVG have individual SHA-256 provenance receipts.
 No image-generation tool or package installation is needed.
 
@@ -66,29 +66,49 @@ still depends on the application and compositor.
 ## Windows
 
 Produces a portable directory and ZIP with `block.exe`, `Block.ico`, website
-shortcut, provenance and license notices. The ICO wraps the existing PNG
-without changing it. It is supplied separately; this script does not inject
-Windows PE icon/version resources into an already compiled executable.
+shortcut, provenance and license notices. `crates/block-app/build.rs` uses
+[`winresource`](https://github.com/BenjaminRi/winresource) to compile the icon
+into the PE at build time for Windows targets, including AMD64 and ARM64.
+Both debug and release builds use `packaging/windows/Block.ico`; resource
+compilation errors fail the build. Non-Windows targets skip resource compilation.
+Windows builds require the Windows SDK resource compiler; native MSVC builds
+use the SDK installed with the C++ build tools.
+
+The ICO contains unchanged 16, 32, 64, 128 and 256 px PNG representations from
+Block-Icon's v4 assets. Their source hashes and the ICO hash are recorded in
+`windows/icon-provenance.json`, included in the package. The separate ICO and
+embedded PE icon use the same asset. Packaging copies the existing executable
+byte for byte and does not rewrite its resources.
 The package is not an installer and does not provide an Authenticode signature.
+
+Native verification (2026-10-24): Windows AMD64 debug and Windows ARM64 release
+builds passed strict Clippy and the `--build-info` startup check. Reading the
+resulting PE resources found group icon 1 with all five PNG representations;
+each embedded payload matched its source hash. The AMD64 portable package smoke
+also passed, preserving the executable's hash. Receipts are under
+`target/windows-pe-icon/`. The existing ARM64 interactive review window remained
+running while its release build was verified.
 
 ## License status
 
-The repository currently has no project-wide `LICENSE`. The script preserves
-the supplied UI dependency and asset notices without labeling the entire
-product as Apache-2.0, MIT, ISC or OFL. The package contains:
+Block is licensed under the [BSD 3-Clause License](../LICENSE). Every package
+includes the project's `LICENSE`, alongside the supplied third-party dependency
+and asset notices. Third-party components retain their respective licenses.
+The package contains:
 
-| License file under `licenses/` | Source |
+| License file | Source |
 | --- | --- |
-| `GPUI-LICENSE-APACHE` | Existing TextInput adaptation and the gpui-pre 0.3.9 Zed family; the original adaptation notice remains intact |
-| `GPUI-BASE-LICENSE-APACHE` | gpui-base 0.8.0, including its separate Longbridge copyright |
-| `Inter-OFL.txt` | Bundled Inter fonts |
-| `Lucide-LICENSE` | Bundled Lucide icons, including inherited Feather MIT notices |
-| `SOURCES.md` | Explicit supplied UI dependency/asset versions and license source paths |
+| `LICENSE` | Block project, BSD-3-Clause |
+| `licenses/GPUI-LICENSE-APACHE` | Existing TextInput adaptation and the gpui-pre 0.3.9 Zed family; the original adaptation notice remains intact |
+| `licenses/GPUI-BASE-LICENSE-APACHE` | gpui-base 0.8.0, including its separate Longbridge copyright |
+| `licenses/Inter-OFL.txt` | Bundled Inter fonts |
+| `licenses/Lucide-LICENSE` | Bundled Lucide icons, including inherited Feather MIT notices |
+| `licenses/SOURCES.md` | Explicit supplied UI dependency/asset versions and license source paths |
 
 [License sources](licenses/SOURCES.md) are repository-local, so packaging needs
 no Cargo registry, prototype checkout or Node tools. The obsolete xattr patch
 is not in the resolved dependency graph and is no longer a packaging input.
-`THIRD_PARTY_NOTICES.txt` describes the notices' scope. A project license
-decision and complete transitive dependency notice inventory remain release
-prerequisites. This wiring change does not claim a new package/build smoke
-has passed; the upgraded binary and package verification remain pending.
+`THIRD_PARTY_NOTICES.txt` describes the notices' scope. The complete transitive
+dependency notice inventory remains a release prerequisite. The scoped Windows
+checks above do not establish complete
+packaging validation or distribution readiness across every platform.

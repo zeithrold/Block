@@ -111,10 +111,28 @@ checks that both tracks enter settled. The full macOS gate passed formatting,
 all-target/all-feature checking, strict Clippy, 556 tests across 39 suites with
 zero failures/ignored tests, and the desktop executable build.
 
+## Cross-platform native check (2026-10-24)
+
+The same drawer entrance/exit replay was measured on the four non-macOS native
+platforms (paint clock, foreground, animated path): Windows AMD64 first open
+464.6 ms panel / 463.7 ms backdrop with 23 intermediate panel samples; Windows
+ARM64 462.6 ms / 27 samples; Linux ARM64 479.0 ms / 11–24 samples; Linux AMD64
+459.4 ms / 458.3 ms with 10 samples. macOS reference: 446.6 ms / 53 samples.
+Every run kept the 540 px panel and translation 0↔542 px (540 px + the 2 px
+closed offset), a separate backdrop curve and `reduced:false`. Physical video on
+Windows and Linux shows intermediate frames rather than hard cuts. Details and
+platform caveats: [motion-platform-verification.md](motion-platform-verification.md).
+Interrupted drag, focus return, short-window content and system Reduce Motion
+remain open; this does not set Accepted.
+
+User review follow-up (2026-10-24): Windows ARM64 motion is Accepted; other platform reviews remain open. The later Toast lifecycle fixes and scoped acceptance are recorded in [motion-platform-fixes.md](motion-platform-fixes.md).
+
 ## Remaining To-Do
 
 - [ ] Review the corrected entrance and interrupted drag on native Windows,
-  macOS, Linux X11 and Wayland/Xwayland desktops.
+  macOS, Linux X11 and Wayland/Xwayland desktops. Entrance is now physically
+  measured on Windows AMD64/ARM64 and Linux AMD64/ARM64 (see the section above);
+  interrupted drag and user visual review stay open.
 - [ ] Inspect OS Reduce Motion and actual displayed transition frames during
   the existing Milestone III review.
 - [ ] Evaluate native backdrop blur only if the product flow requires it;

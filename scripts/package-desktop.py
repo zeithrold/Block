@@ -63,6 +63,7 @@ def write(path, text):
 
 
 def notices(destination):
+    copy(ROOT / "LICENSE", destination / "LICENSE")
     for source, name in (
         ("crates/block-ui/GPUI-LICENSE-APACHE", "GPUI-LICENSE-APACHE"),
         ("packaging/licenses/GPUI-BASE-LICENSE-APACHE", "GPUI-BASE-LICENSE-APACHE"),
@@ -165,12 +166,9 @@ def linux(package, binary, product):
 
 def windows(package, binary, product):
     copy(binary, package / f"{product['executable']}.exe", executable=True)
-    png = (ROOT / product["icon_png"]).read_bytes()
-    # ICO's zero width/height denote the existing 256 px PNG representation.
-    ico = struct.pack("<HHH", 0, 1, 1)
-    ico += struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 32, len(png), 22)
-    (package / "Block.ico").write_bytes(ico + png)
-    (package / "Block.ico").chmod(0o644)
+    copy(ROOT / product["icon_windows_ico"], package / "Block.ico")
+    copy(ROOT / "packaging/windows/icon-provenance.json",
+         package / "windows-icon-provenance.json")
     write(package / "Block website.url", f"[InternetShortcut]\nURL={product['website']}\n")
     notices(package)
 

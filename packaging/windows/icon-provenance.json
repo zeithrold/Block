@@ -1,0 +1,32 @@
+{
+  "asset": "packaging/windows/Block.ico",
+  "sha256": "7a5b47e73b10c829946f650e62b08627232ebafa602d8ef43cbdb95c390f6f9a",
+  "encoding": "ICO containing unchanged PNG representations",
+  "representations": [
+    {
+      "size": 16,
+      "source": "Native/Block-Icon/icon-v4-16.png",
+      "sha256": "606313b2db599a16d3cf5f10b5fdb13b92fed0ff26a0fae9df4f078965b26e13"
+    },
+    {
+      "size": 32,
+      "source": "Native/Block-Icon/icon-v4-32.png",
+      "sha256": "7719b151cddb7f9583b1b191d2379d028cdd3c0e770554222050b12d2fcf0922"
+    },
+    {
+      "size": 64,
+      "source": "Native/Block-Icon/icon-v4-64.png",
+      "sha256": "676a3d894cbf2647db159a73c638dba2dbc08ab791224f1a1ccd28e4137fa94a"
+    },
+    {
+      "size": 128,
+      "source": "Native/Block-Icon/icon-v4-128.png",
+      "sha256": "328acedd0f34d7b6c9b731db5d0012464a31682420c323b942f89fa7f5c8def8"
+    },
+    {
+      "size": 256,
+      "source": "Native/Block-Icon/icon-v4-256.png",
+      "sha256": "afa36f1c64f30e0e4364a8062f1e17fc6a58eaa8f49f976de2036579f700fd63"
+    }
+  ]
+}

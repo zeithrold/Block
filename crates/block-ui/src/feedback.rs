@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
@@ -29,10 +29,16 @@ static NEXT_TOAST_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_TOASTS: usize = 5;
 const TOAST_WIDTH: f32 = 356.0;
 const TOAST_BOTTOM: f32 = 24.0;
+const NORMAL_EXIT_DURATION: Duration = Duration::from_millis(400);
+const COLLAPSED_EXIT_DURATION: Duration = Duration::from_millis(500);
+const SWIPE_EXIT_DURATION: Duration = Duration::from_millis(200);
 
 #[path = "toast_motion.rs"]
 mod toast_motion;
 use toast_motion::{SwipeExit, ToastPosition};
+#[cfg(debug_assertions)]
+#[path = "toast_trace.rs"]
+pub(super) mod toast_trace;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum ToastKind {
@@ -67,16 +73,14 @@ impl Toast {
 
 type ToastValue = Rc<RefCell<Toast>>;
 
-fn trim_to_limit(manager: &mut ToastManager<u64, ToastValue>, now: Instant) {
+fn trim_to_limit(manager: &ToastManager<u64, ToastValue>, ending: &mut HashSet<u64>) {
     let active = manager
         .iter()
-        .filter(|(_, _, status)| *status != ToastTransitionStatus::Ending)
+        .filter(|(id, _, status)| *status != ToastTransitionStatus::Ending && !ending.contains(id))
         .map(|(id, _, _)| *id)
         .collect::<Vec<_>>();
     let overflow = active.len().saturating_sub(MAX_TOASTS);
-    for id in active.into_iter().take(overflow) {
-        manager.dismiss(&id, now);
-    }
+    ending.extend(active.into_iter().take(overflow));
 }
 
 fn swipe_dismisses(dx: Pixels, dy: Pixels) -> bool {
@@ -109,11 +113,13 @@ fn lifetime(kind: ToastKind) -> Duration {
 
 fn coalesce_existing(
     manager: &ToastManager<u64, ToastValue>,
+    ending: &HashSet<u64>,
     toast: &Toast,
     now: Instant,
 ) -> Option<u64> {
     let id = manager.iter().find_map(|(id, value, status)| {
         (status != ToastTransitionStatus::Ending
+            && !ending.contains(id)
             && value.borrow().kind == toast.kind
             && value.borrow().message == toast.message)
             .then_some(*id)
@@ -150,6 +156,17 @@ fn animation_duration(reduced_motion: bool) -> Duration {
 
 fn css_transition(reduced_motion: bool) -> Transition {
     Transition::new(animation_duration(reduced_motion)).easing(Easing::Ease)
+}
+
+fn manager_motion(reduced_motion: bool) -> ToastMotion {
+    let mut motion = ToastMotion::sonner();
+    if reduced_motion {
+        motion.duration = Duration::ZERO;
+    }
+    // Presence owns the visible exit. Only dismiss from the manager after its
+    // Absent sample, so a delayed render cannot lose an unfinished transition.
+    motion.exit_duration = Duration::ZERO;
+    motion
 }
 
 #[derive(Clone, Copy)]
@@ -205,6 +222,8 @@ pub(super) struct ToastLayer {
     close_focus: HashMap<u64, FocusHandle>,
     gestures: Rc<RefCell<HashMap<u64, DragState>>>,
     swipe_exits: HashMap<u64, SwipeExit>,
+    ending: HashSet<u64>,
+    settled_exits: HashSet<u64>,
     timer_running: bool,
     last_tick: Option<Instant>,
     reduced_motion: bool,
@@ -213,15 +232,7 @@ pub(super) struct ToastLayer {
 
 impl ToastLayer {
     pub(super) fn new(_: &mut Window, cx: &mut Context<'_, Self>) -> Self {
-        let motion = if cx.reduce_motion() {
-            ToastMotion {
-                duration: Duration::ZERO,
-                exit_duration: Duration::ZERO,
-                ..ToastMotion::sonner()
-            }
-        } else {
-            ToastMotion::sonner()
-        };
+        let motion = manager_motion(cx.reduce_motion());
         Self {
             manager: ToastManager::new(motion),
             stack_state: ToastStackState::default(),
@@ -229,6 +240,8 @@ impl ToastLayer {
             close_focus: HashMap::new(),
             gestures: Rc::default(),
             swipe_exits: HashMap::new(),
+            ending: HashSet::new(),
+            settled_exits: HashSet::new(),
             timer_running: false,
             last_tick: None,
             reduced_motion: cx.reduce_motion(),
@@ -278,7 +291,7 @@ impl ToastLayer {
             // The shell creates Toasts with the wall clock; adapt them to the
             // executor clock so virtual-time tests and expiry share one clock.
             toast.expires = now + lifetime(toast.kind);
-            if let Some(id) = coalesce_existing(&self.manager, &toast, now) {
+            if let Some(id) = coalesce_existing(&self.manager, &self.ending, &toast, now) {
                 if let Some(value) = self.manager.get(&id) {
                     value.borrow_mut().id = id;
                 }
@@ -296,7 +309,7 @@ impl ToastLayer {
         }
 
         // Bound active items while allowing their exit transitions to finish.
-        trim_to_limit(&mut self.manager, now);
+        trim_to_limit(&self.manager, &mut self.ending);
 
         if !self.timer_running {
             self.timer_running = true;
@@ -334,15 +347,16 @@ impl ToastLayer {
         }
 
         let advance = self.manager.advance(now, paused);
-        let expired = expired_present(&self.manager, now);
         let mut changed = advance.changed;
+        for id in expired_present(&self.manager, now) {
+            changed |= self.ending.insert(id);
+        }
         for (id, _) in advance.removed {
             self.close_focus.remove(&id);
             self.gestures.borrow_mut().remove(&id);
             self.swipe_exits.remove(&id);
-        }
-        for id in expired {
-            changed |= self.manager.dismiss(&id, now);
+            self.ending.remove(&id);
+            self.settled_exits.remove(&id);
         }
         if changed {
             cx.notify();
@@ -356,8 +370,7 @@ impl ToastLayer {
     }
 
     fn dismiss(&mut self, id: u64, cx: &mut Context<'_, Self>) {
-        let now = cx.background_executor().now();
-        if self.manager.dismiss(&id, now) {
+        if self.manager.get(&id).is_some() && self.ending.insert(id) {
             cx.notify();
         }
     }
@@ -367,15 +380,45 @@ impl ToastLayer {
         if gestures.is_empty() {
             return;
         }
-        for (id, mut drag) in gestures {
-            drag.update(event.position);
-            if let Some(axis) = drag.axis.filter(|_| drag.dismisses()) {
-                self.swipe_exits
-                    .insert(id, SwipeExit::new(drag_visual(Some(drag)), axis));
-                self.dismiss(id, cx);
-            }
+        for (id, drag) in gestures {
+            let _ = self.finish_drag(id, drag, event.position, cx);
         }
         cx.notify();
+    }
+
+    fn finish_drag(
+        &mut self,
+        id: u64,
+        mut drag: DragState,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        drag.update(position);
+        if let Some(axis) = drag.axis.filter(|_| drag.dismisses()) {
+            self.swipe_exits
+                .insert(id, SwipeExit::new(drag_visual(Some(drag)), axis));
+            self.dismiss(id, cx);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn trace_swipe(
+        &mut self,
+        id: u64,
+        bounds: gpui::Bounds<Pixels>,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let start = gpui::point(
+            bounds.origin.x + bounds.size.width / 2.,
+            bounds.origin.y + bounds.size.height / 2.,
+        );
+        let drag = DragState::new(start, gpui::Point::default());
+        let dismissed = self.finish_drag(id, drag, start + gpui::point(px(96.), px(0.)), cx);
+        cx.notify();
+        dismissed
     }
 
     fn sync_motion(&mut self, cx: &mut Context<'_, Self>) {
@@ -391,24 +434,19 @@ impl ToastLayer {
         let entries = self
             .manager
             .iter()
-            .filter(|(_, _, phase)| *phase != ToastTransitionStatus::Ending)
+            .filter(|(id, _, phase)| {
+                *phase != ToastTransitionStatus::Ending && !self.ending.contains(id)
+            })
             .map(|(id, value, _)| (*id, value.clone()))
             .collect::<Vec<_>>();
-        let motion = if reduced {
-            ToastMotion {
-                duration: Duration::ZERO,
-                exit_duration: Duration::ZERO,
-                ..ToastMotion::sonner()
-            }
-        } else {
-            ToastMotion::sonner()
-        };
+        let motion = manager_motion(reduced);
         self.manager = ToastManager::new(motion);
         for (id, value) in entries {
             self.manager
                 .push(id, value, ToastOptions::default(), now - motion.duration);
         }
         self.manager.advance(now, true);
+        self.ending.clear();
         self.close_focus
             .retain(|id, _| self.manager.get(id).is_some());
         self.gestures
@@ -416,6 +454,8 @@ impl ToastLayer {
             .retain(|id, _| self.manager.get(id).is_some());
         self.swipe_exits
             .retain(|id, _| self.manager.get(id).is_some());
+        self.settled_exits
+            .retain(|id| self.manager.get(id).is_some());
     }
 
     fn toast_element(
@@ -426,7 +466,7 @@ impl ToastLayer {
         appearance: ToastAppearance,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
-    ) -> impl IntoElement {
+    ) -> Option<gpui::AnyElement> {
         let ToastAppearance {
             palette,
             width,
@@ -484,22 +524,21 @@ impl ToastLayer {
             cx,
         );
 
+        let collapsed_exit = status == ToastTransitionStatus::Ending && !expanded && rank > 0;
+        let presence_duration = if reduced {
+            Duration::ZERO
+        } else if swipe.is_some() {
+            SWIPE_EXIT_DURATION
+        } else if collapsed_exit {
+            COLLAPSED_EXIT_DURATION
+        } else {
+            NORMAL_EXIT_DURATION
+        };
         let presence = Presence::new(
             ElementId::NamedInteger("block-toast-presence".into(), id),
-            status != ToastTransitionStatus::Ending || swipe.is_some(),
+            status != ToastTransitionStatus::Ending,
         )
-        .transition(
-            if status == ToastTransitionStatus::Ending && !expanded && rank > 0 {
-                Transition::new(if reduced {
-                    Duration::ZERO
-                } else {
-                    Duration::from_millis(500)
-                })
-                .easing(Easing::Ease)
-            } else {
-                policy.clone()
-            },
-        )
+        .transition(Transition::new(presence_duration).easing(Easing::Ease))
         .sample(window, cx);
         let opacity = Presence::new(
             ElementId::NamedInteger("block-toast-opacity".into(), id),
@@ -518,6 +557,23 @@ impl ToastLayer {
             },
         )
         .sample(window, cx);
+        if !presence.should_render() {
+            #[cfg(debug_assertions)]
+            if toast_trace::enabled() {
+                toast_trace::unmounted(
+                    id,
+                    status == ToastTransitionStatus::Ending,
+                    reduced,
+                    window,
+                );
+            }
+            self.close_focus.remove(&id);
+            self.gestures.borrow_mut().remove(&id);
+            self.swipe_exits.remove(&id);
+            self.settled_exits.insert(id);
+            self.manager.dismiss(&id, cx.background_executor().now());
+            return None;
+        }
         let card_width = transition(
             ElementId::NamedInteger("block-toast-width".into(), id),
             width
@@ -594,19 +650,41 @@ impl ToastLayer {
                         .tab_stop(true)
                         .child(Icon::Close.render(14., palette.muted)),
                     ),
-            )
+            );
+        #[cfg(debug_assertions)]
+        let card = card.when(toast_trace::enabled(), |card| {
+            card.child(toast_trace::probe(
+                id,
+                if status == ToastTransitionStatus::Ending {
+                    None
+                } else {
+                    Some(presence.progress)
+                },
+                (status == ToastTransitionStatus::Ending).then_some(if swipe.is_some() {
+                    swipe_progress
+                } else {
+                    presence.progress
+                }),
+                status == ToastTransitionStatus::Ending,
+                reduced,
+            ))
+        });
+        let card = card
             .id(ElementId::NamedInteger("block-toast-card".into(), id))
             .test_support();
         let toast = BaseToast::new(ElementId::NamedInteger("block-toast".into(), id))
             .transition_status(status)
             .child(div().debug_selector(|| "toast".into()).child(card));
-        ToastPosition::new(
-            id,
-            toast.into_any_element(),
-            presence.progress,
-            drag_offset,
-            swipe.map(|swipe| (swipe, swipe_progress)),
-            status == ToastTransitionStatus::Ending && !expanded && rank > 0,
+        Some(
+            ToastPosition::new(
+                id,
+                toast.into_any_element(),
+                presence.progress,
+                drag_offset,
+                swipe.map(|swipe| (swipe, swipe_progress)),
+                collapsed_exit,
+            )
+            .into_any_element(),
         )
     }
 }
@@ -616,6 +694,15 @@ impl RootPlugin for ToastLayer {}
 impl Render for ToastLayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.sync_motion(cx);
+        #[cfg(debug_assertions)]
+        if toast_trace::enabled() {
+            let managed_ids = self
+                .manager
+                .iter()
+                .map(|(id, _, _)| *id)
+                .collect::<Vec<_>>();
+            toast_trace::observe_managed_ids(&managed_ids, cx.reduce_motion(), window);
+        }
         if self.manager.is_empty() {
             return div();
         }
@@ -645,26 +732,36 @@ impl Render for ToastLayer {
 
         let entries = self
             .manager
-            .visible(MAX_TOASTS)
-            .map(|(id, value, status)| (*id, value.borrow().clone(), status))
+            .iter()
+            .filter(|(id, _, _)| !self.settled_exits.contains(id))
+            .map(|(id, value, status)| {
+                let status = if self.ending.contains(id) {
+                    ToastTransitionStatus::Ending
+                } else {
+                    status
+                };
+                (*id, value.borrow().clone(), status)
+            })
             .collect::<Vec<_>>();
         let count = entries.len();
         for (index, (id, toast, status)) in entries.into_iter().enumerate() {
-            stack = stack.item(
-                ElementId::NamedInteger("block-toast-stack-item".into(), id),
-                self.toast_element(
-                    id,
-                    toast,
-                    status,
-                    ToastAppearance {
-                        palette,
-                        width,
-                        rank: count - index - 1,
-                    },
-                    window,
-                    cx,
-                ),
-            );
+            if let Some(element) = self.toast_element(
+                id,
+                toast,
+                status,
+                ToastAppearance {
+                    palette,
+                    width,
+                    rank: count - index - 1,
+                },
+                window,
+                cx,
+            ) {
+                stack = stack.item(
+                    ElementId::NamedInteger("block-toast-stack-item".into(), id),
+                    element,
+                );
+            }
         }
         div()
             .absolute()

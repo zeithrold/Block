@@ -737,7 +737,7 @@ impl Block {
                                     .text_color(rgb(self.palette.muted))
                                     .child(format!("v{}", self.build_info.version))
                                     .child(super::components::badge(
-                                        "pilot M2",
+                                        "pilot.m2",
                                         self.palette,
                                         super::components::BadgeVariant::Secondary,
                                     )),
