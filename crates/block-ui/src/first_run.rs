@@ -840,8 +840,9 @@ impl Block {
         }
     }
 
-    /// Read-only path presentation. The Local card adds its folder picker on the
-    /// right; the Global card never browses.
+    /// Read-only path presentation: plain small text, never an input or a
+    /// framed container. The Local card adds its folder picker on the right;
+    /// the Global card never browses.
     fn storage_path_row(
         &self,
         path_selector: &'static str,
@@ -859,13 +860,10 @@ impl Block {
                 .debug_selector(move || path_selector.to_owned())
                 .flex_1()
                 .min_w_0()
-                .px_3()
-                .py_2()
-                .rounded(px(8.))
-                .border_1()
-                .border_color(rgb(self.palette.border))
-                .bg(rgb(self.palette.background))
-                .child(div().text_sm().truncate().child(path_text)),
+                .text_xs()
+                .text_color(rgb(self.palette.muted))
+                .truncate()
+                .child(path_text),
         );
         if browsable {
             row = row.child(self.button_with_variant(
