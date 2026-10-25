@@ -86,6 +86,10 @@ under `share/doc/one.ztd.block`. The desktop entry expects `block` on `PATH`.
 Install the prefix into a user-selected location using the normal package or
 desktop integration mechanism; this script does not modify desktop settings.
 Shared-library dependencies must already be present on the target host.
+The pilot packages are built on Ubuntu 24.04, so the binaries currently require
+**glibc 2.39** (Ubuntu 24.04+, Debian 13+, Fedora 40+, RHEL 10+). Lowering that
+baseline is investigated in [linux-glibc-baseline.md](../docs/linux-glibc-baseline.md);
+no older-glibc build is shipped yet.
 `StartupWMClass` declares the intended identity; runtime Wayland/X11 identity
 still depends on the application and compositor.
 
