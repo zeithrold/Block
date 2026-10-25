@@ -24,9 +24,9 @@ jobs:
         # https://docs.github.com/en/actions/reference/runners/github-hosted-runners
         # Linux ARM64 uses GitHub's arm64 hosted runner, free for public repositories.
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             platform: linux-amd64
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             platform: linux-arm64
           - os: windows-2022
             platform: windows-amd64
