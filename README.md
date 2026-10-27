@@ -4,7 +4,7 @@ A Minecraft Java Edition launcher MVP built with Rust and [GPUI](https://gpui.rs
 
 Block separates persistent Instances, launch Profiles and Accounts from transient LaunchPlans. The native interface manages games and accounts, installs Vanilla, Fabric, Quilt, Forge and NeoForge, imports user-provided official OptiFine JARs, and hands a verified Java invocation to an independent session supervisor. See [Pilot status](docs/STATUS.md) for current native evidence and compatibility limits, and [next tasks](docs/next-tasks.md) for the milestone plan. The [MVP acceptance record](docs/mvp-progress.md) preserves earlier baseline results.
 
-Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is in progress: the Windows ARM64 motion increment is user-accepted, while broader acceptance remains pending. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
+Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is in progress. The Windows ARM64 motion increment was manually observed by the user because automated motion detection could not observe it, but that observation is not product acceptance; no platform or page has passed full-product/visual acceptance. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
 
 ## Prerequisites
 

@@ -74,6 +74,16 @@ jobs:
       BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
       BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+      # Compiler output is shared with the check workflow through this
+      # repository's Actions cache. The namespace names the compile host so
+      # entries built against one OS/library baseline are never reused on
+      # another. Automatic workflow_run jobs consume the trusted cache;
+      # explicit manual dispatches may also publish entries.
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: macos-arm64-macos-15
+      SCCACHE_GHA_RW_MODE: "${{ github.event_name == 'workflow_run' && 'READ_ONLY' || 'READ_WRITE' }}"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,7 +94,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: Swatinem/rust-cache@v2
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: Verify the sccache backend
+        shell: bash
+        run: |
+          sccache --start-server
+          sccache --show-stats
       - name: Build both macOS architectures
         run: |
           cargo build --locked --release -p block-app --bin block --target aarch64-apple-darwin
@@ -96,6 +114,11 @@ jobs:
             -output target/macos-universal/block
           lipo -info target/macos-universal/block
           target/macos-universal/block --build-info
+      - name: Report sccache statistics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: sccache --show-stats
       - name: Package .app, .zip and .dmg
         run: |
           python3 scripts/package-desktop.py \
@@ -152,6 +175,16 @@ jobs:
       BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
       BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+      # Compiler output is shared with the check workflow through this
+      # repository's Actions cache. The namespace names the compile host so
+      # entries built against one OS/library baseline are never reused on
+      # another. Automatic workflow_run jobs consume the trusted cache;
+      # explicit manual dispatches may also publish entries.
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: windows-${{ matrix.arch }}-${{ matrix.os }}
+      SCCACHE_GHA_RW_MODE: "${{ github.event_name == 'workflow_run' && 'READ_ONLY' || 'READ_WRITE' }}"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,9 +193,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: Swatinem/rust-cache@v2
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: Verify the sccache backend
+        shell: bash
+        run: |
+          sccache --start-server
+          sccache --show-stats
       - name: Build release launcher
         run: cargo build --locked --release -p block-app --bin block
+      - name: Report sccache statistics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: sccache --show-stats
       - name: Package portable ZIP
         shell: bash
         run: |
@@ -242,6 +288,16 @@ jobs:
       BLOCK_SOURCE_COMMIT: ${{ needs.stamp.outputs.commit }}
       BLOCK_SOURCE_SHA256: ${{ needs.stamp.outputs.sha256 }}
       SOURCE_DATE_EPOCH: ${{ needs.stamp.outputs.epoch }}
+      # Compiler output is shared with the check workflow through this
+      # repository's Actions cache. The namespace names the compile host so
+      # entries built against one OS/library baseline are never reused on
+      # another. Automatic workflow_run jobs consume the trusted cache;
+      # explicit manual dispatches may also publish entries.
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: linux-${{ matrix.arch }}-${{ matrix.os }}
+      SCCACHE_GHA_RW_MODE: "${{ github.event_name == 'workflow_run' && 'READ_ONLY' || 'READ_WRITE' }}"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -250,13 +306,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: Swatinem/rust-cache@v2
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: Verify the sccache backend
+        shell: bash
+        run: |
+          sccache --start-server
+          sccache --show-stats
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libfontconfig1-dev libfreetype6-dev libvulkan-dev libegl1-mesa-dev libgl1-mesa-dev
       - name: Build release launcher
         run: cargo build --locked --release -p block-app --bin block
+      - name: Report sccache statistics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: sccache --show-stats
       - name: Fetch appimagetool
         run: |
           case "${{ matrix.arch }}" in

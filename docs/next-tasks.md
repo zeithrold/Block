@@ -1,6 +1,6 @@
 # Block: Pilot Task List
 
-Date: 2026-10-21, updated 2026-10-24 with completed E01–E03 evidence calibration, including source-stamped Windows verification. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [codex-goal-prompt.md](codex-goal-prompt.md).
+Date: 2026-10-21; updated 2026-10-25. E01–E03 evidence calibration, including source-stamped Windows verification, was completed 2026-10-24. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [codex-goal-prompt.md](codex-goal-prompt.md).
 
 ## Development milestones (user decision, 2026-10-23)
 
@@ -13,7 +13,11 @@ Date: 2026-10-21, updated 2026-10-24 with completed E01–E03 evidence calibrati
 
 These stages supersede the earlier combined Pilot acceptance gate and the rule that architecture waits for v0. Milestone II still requires real behavior rather than placeholders, safe persistence, and explicit compatibility limits. An interaction defect that blocks a core flow remains a Milestone II usability issue; visual or interaction refinement belongs to Milestone III. Only the user's review sets Accepted in Milestone III. Missing visual acceptance does not by itself block Milestone II completion.
 
-## Where we are (2026-10-23, reviewed HEAD `f2a5fd7`)
+## Current checkpoint
+
+- Latest remote CI (`d9041b0`, run `40153043866`): five of six native jobs passed, including macOS AMD64; Linux AMD64 failed while linking vendored D-Bus, and package jobs were skipped. The failed job does not prove a repair or produce a package baseline; see [current status](STATUS.md) and the [glibc baseline report](linux-glibc-baseline.md).
+
+## Historical handoff snapshot (2026-10-23, reviewed HEAD `f2a5fd7`)
 
 - DeepSeek completed Milestone II under the scoped v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). Codex's handoff review confirmed artifact counts and links; the subsequent Milestone III screenshot/source assessment found content and comparison issues listed below. Neither review repeats native E2E or sets Accepted. v6/v7 are in Git history.
 - CI: latest completed four-platform run is green at `df2db40` (run 39885268348); `c8406ad` and `f2a5fd7` documentation runs are still in progress at this review. Windows ARM64 is green with an uploaded artifact at `82b3847` (run 39823711474). Pending runs retain their own result.
@@ -129,10 +133,10 @@ Exit criterion: entry points land in the intended context, common fields and dec
 - [ ] **A03 — Adapt account flow presentation to the identity type.** Keep Offline support secondary rather than actively promoting it in onboarding or Home; evaluate a shorter local-name/confirmation presentation within account management. Use an explicitly named character-selection stage for multi-character Authlib accounts instead of forcing identical four-step wording. Show real character names/avatars where available and put UUIDs in details. Preserve transient preparation, final confirmation and secure persistence; verify each provider's back/cancel/finish paths.
 - [ ] **A04 — Keep the Authlib trust destination visible.** Present provider identity, actual endpoint and HTTP(S) context near credential entry. Unify Identify/Recognize wording and distinguish recognized, existing and unsaved providers. Keep drag, paste and manual entry, including an honest Wayland fallback. Give confirmable HTTP risk a consistent treatment distinct from operational failure, while preserving explicit acknowledgement and password/token boundaries.
 - [ ] **T01 — Explain effective settings and their scope.** Make new-game defaults, this game's settings and Separated Profile overrides understandable through effective values and their sources, not only inheritance prose. Keep existing games unchanged by new defaults. Consolidate the memory input, step controls and repeated value into a compact control without losing the 1–32 GB policy, validation or IME protections. Verify save/cancel and new-versus-existing behavior through native flows.
-- [ ] **T02 — Separate storage defaults from migration decisions.** Distinguish the future game library, shared cache location and moving existing managed games. Before migration, identify source, destination, affected data and retained-copy policy; during migration show readable phases/units; afterward identify the active location and any old copy. Make interrupted rollback and cleanup targets clear. Preserve copy verification, recovery and explicit cleanup; do not invent disk savings/ETA or silently remove old data.
+- **T02 — Superseded by the 2026-10-24 automatic-storage decision.** Storage is selected from the portable/installed launch shape, and Settings → Storage reports effective paths read-only. Migration, relocation, cleanup and new storage-choice UI are not in scope; see [the implemented behavior](STATUS.md#verification-notes).
 - [ ] **T03 — Describe connection tests within their actual scope.** Keep results beside the current proxy draft and state that testing does not save it. Describe the endpoint tested without implying every CDN/loader service is healthy. Keep retry/concurrency/speed limits readable and move low-level transport qualifications into secondary detail. Verify draft edits invalidate stale results and a later Save persists the intended configuration.
 
-Exit criterion: users can identify the service receiving credentials, understand what Finish saves, distinguish settings scopes, and explain which storage copy is active after success, cancellation or failure.
+Exit criterion: users can identify the service receiving credentials, understand what Finish saves, distinguish settings scopes, and understand connection-test results.
 
 ### 5. Converge visual language, motion and platform behavior
 

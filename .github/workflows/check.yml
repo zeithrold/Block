@@ -36,6 +36,20 @@ jobs:
             platform: macos-arm64
           - os: macos-15-intel
             platform: macos-amd64
+    env:
+      # sccache keeps compiler output in this repository's GitHub Actions cache.
+      # The namespace names the compile host, not just the target: the same OS
+      # and architecture run under different library baselines (Ubuntu 22.04
+      # glibc 2.35 versus 24.04 glibc 2.39, see docs/linux-glibc-baseline.md),
+      # and a cache built against one baseline must never satisfy the other.
+      # Changing the namespace abandons the old entries.
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: ${{ matrix.platform }}-${{ matrix.os }}
+      # Pull requests reuse entries published by trusted pushes but never
+      # publish entries of their own.
+      SCCACHE_GHA_RW_MODE: "${{ github.event_name == 'pull_request' && 'READ_ONLY' || 'READ_WRITE' }}"
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -44,7 +58,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: Swatinem/rust-cache@v2
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: Verify the sccache backend
+        shell: bash
+        run: |
+          sccache --start-server
+          sccache --show-stats
       - name: Verify runner and Rust host architecture
         run: python scripts/verify-platform.py --platform ${{ matrix.platform }} --verify-host-only
       - name: Install Linux desktop dependencies
@@ -55,6 +77,11 @@ jobs:
       - name: Verify core, desktop, framework interactions, and session supervision
         id: verify
         run: python scripts/verify-platform.py --platform ${{ matrix.platform }}
+      - name: Report sccache statistics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: sccache --show-stats
       - name: Upload the native launcher artifact
         uses: actions/upload-artifact@v4
         with:

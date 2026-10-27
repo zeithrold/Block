@@ -1,12 +1,15 @@
 # Linux glibc baseline: investigation and options
 
-Date: 2026-10-25. Status: research report. No packaging change has been
-applied yet. Related: [pilot builds](pilot-builds.md),
+Date: 2026-10-25. Status: research report. Commit `a01a8b3` switched both
+cross-platform CI and pilot-packaging Linux runners to `ubuntu-22.04` /
+`ubuntu-22.04-arm`; the expected glibc 2.35 baseline is not yet measured in new
+package artifacts. Related: [pilot builds](pilot-builds.md),
 [packaging README](../packaging/README.md).
 
 ## Summary
 
-The Linux pilot packages built on `ubuntu-24.04` / `ubuntu-24.04-arm` require
+The historical Linux pilot packages built on `ubuntu-24.04` /
+`ubuntu-24.04-arm` require
 **glibc 2.39** on both x86_64 and aarch64. That limits the packages to very
 recent distributions (Ubuntu 24.04+, Debian 13+, Fedora 40+, RHEL 10+).
 
@@ -22,11 +25,12 @@ Three ways to lower the baseline were investigated:
    link time against the runner's newer system libraries. It cannot lower the
    baseline without also providing an older sysroot.
 
-Recommendation: for a quick win choose option 1 (2.35). For wider coverage with
-a small CI change choose option 2 (2.30). `cargo-zigbuild` alone is not
-sufficient for this GUI stack.
+The option 1 runner change has been applied in `a01a8b3`; glibc 2.35 remains an
+expectation until new package artifacts can be measured. Option 2 would provide
+wider coverage with a small CI change (expected 2.30). `cargo-zigbuild` alone
+is not sufficient for this GUI stack.
 
-## Current baseline (measured)
+## Historical baseline (measured from Ubuntu 24.04 artifacts)
 
 Artifacts from Pilot packages run `40112948723` (commit `1878a3e`, built on
 `ubuntu-24.04` / `ubuntu-24.04-arm`, CI release profile):
@@ -49,7 +53,7 @@ std probes (`weak!`) that the linker resolves against the build host's libc.
 The practical minimum is therefore the build environment's glibc, not a value
 the project selects in advance.
 
-## Option 1 — older GitHub-hosted runner (no container)
+## Option 1 — older GitHub-hosted runner (applied; measurement pending)
 
 Runner images currently available for public repositories (checked against the
 `actions/runner-images` table):
@@ -60,15 +64,38 @@ Runner images currently available for public repositories (checked against the
 | `ubuntu-22.04-arm` | arm64 |
 
 Building on 22.04 replaces the 24.04 system libraries, so the resulting
-requirement is expected to be **glibc 2.35** (the 2.35 `hypot` and 2.36+
-symbols disappear; the exact value must be re-measured on the first CI run).
+requirement is expected to be **glibc 2.35** (the newer symbol requirements
+must disappear; the exact value must be re-measured from the first
+successful package artifacts).
 
 - Coverage: Ubuntu 22.04+, Debian 12+, Fedora 36+ (`glibc 2.35`).
   RHEL 9 (`glibc 2.34`) remains unsupported.
 - Cost: change `runs-on` for the two Linux jobs; no new tools, no containers.
 - Risk: low. Only the build image changes; packaging and verify steps stay the
   same.
-- Not yet measured on CI.
+- Not yet measured from package artifacts built on the new runners. The latest
+  native check failed on Linux AMD64 before packaging; see [current status](STATUS.md#automatic-ci-coverage).
+
+### Cache-baseline failure and remediation
+
+Run `40112416770` restored the Linux AMD64 `target/` cache on Ubuntu 24.04
+with a full key match; that run did not create it, and the original saving
+run has not been identified.
+After the runner switch, runs `40150776916` and `40153043866` restored the
+same `v0-rust-native-Linux-x64-01b81e85-1dd20dab` key on Ubuntu 22.04.
+The key did not include the runner image. The latter run reused
+`libdbus-sys` instead of rebuilding it: its vendored D-Bus archive retained
+the 24.04 headers' `__isoc23_strtol`/`__isoc23_strtoul` references, which
+22.04's glibc 2.35 cannot resolve. The ARM64 leg rebuilt on 22.04 and passed.
+
+The eight existing GitHub Actions caches were deleted and the workflow
+configuration now uses sccache's GitHub Actions backend instead of restoring
+whole `target/` directories. Check and package jobs use matching OS,
+architecture and runner-label namespaces; changing the runner label changes
+the namespace. Pull requests and automatic `workflow_run` package jobs are
+read-only cache consumers; manual package dispatches may write. A clean Linux
+AMD64 check and new package baseline still require a post-change GitHub run;
+local wrapper checks do not establish either result.
 
 ## Option 2 — Ubuntu 20.04 container (verified locally)
 
@@ -160,8 +187,8 @@ distribution container is simpler and already proven.
 
 | Build baseline | Ubuntu | Debian | Fedora | RHEL | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 24.04 (current) | 24.04+ | 13+ | 40+ | 10+ | current pilot |
-| 22.04 runner | 22.04+ | 12+ | 36+ | — | simplest lowering |
+| 24.04 (historical measured) | 24.04+ | 13+ | 40+ | 10+ | measured package baseline |
+| 22.04 runner | 22.04+ | 12+ | 36+ | — | applied at `a01a8b3`; expected, not measured |
 | 20.04 container | 20.04+ | 11+ | 31+ | 9+ | verified locally |
 | 18.04 container (untested) | 18.04+ | 10+ | 28+ | 8+ | would need Rust 1.99 + deps check |
 
@@ -172,8 +199,9 @@ not been performed.
 
 ## Recommendation
 
-1. If the goal is "a bit older without CI changes": switch the Linux pilot jobs
-   to `ubuntu-22.04` / `ubuntu-22.04-arm` and re-measure (expected 2.35).
+1. The Linux pilot jobs now use `ubuntu-22.04` / `ubuntu-22.04-arm` (commit
+   `a01a8b3`). Measure the first successful package artifacts; 2.35 remains
+   expected, not measured.
 2. If RHEL 9 / Debian 11 / Ubuntu 20.04 support matters: adopt the verified
    Ubuntu 20.04 container build for the Linux jobs (expected 2.30). Validate
    amd64 first, then arm64.
