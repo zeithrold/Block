@@ -455,6 +455,15 @@ impl WizardState {
                 WizardStep::Setup if self.separated => WizardStep::Profile,
                 WizardStep::Setup | WizardStep::Profile | WizardStep::Review => WizardStep::Review,
             };
+            // The Review leads with the decisions; its folded defaults open
+            // only when the user asks for them there. Setup shares the wizard's
+            // one expansion state, so entering the Review closes that state
+            // instead of letting a Setup expansion arrive already open.
+            if self.step == WizardStep::Review
+                && let Some(profile) = &mut self.profile
+            {
+                profile.options = false;
+            }
             self.transition(false);
         }
     }
@@ -486,6 +495,15 @@ impl WizardState {
         self.revision = self.revision.wrapping_add(1);
         self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
     }
+}
+
+/// The shared component summary serves two layouts. First-run onboarding keeps
+/// the compact four-up square tiles it was designed around; the game wizard uses
+/// wide cards whose height follows their wrapped content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CardShape {
+    Square,
+    Natural,
 }
 
 impl Block {
@@ -582,22 +600,32 @@ impl Block {
         cx.notify();
     }
 
+    /// First-run onboarding's OptiFine tile, in the square shape that page
+    /// lays out in four columns.
     pub(super) fn wizard_optifine_component(
         &self,
         form: &InstanceForm,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
+        self.wizard_optifine_card(CardShape::Square, form, cx)
+    }
+
+    fn wizard_optifine_card(
+        &self,
+        shape: CardShape,
+        form: &InstanceForm,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         if !matches!(form.loader, LoaderKind::Vanilla | LoaderKind::Forge) {
-            return self
-                .wizard_unavailable(
-                    "optifine",
-                    "OptiFine",
-                    &format!("Cannot combine directly with {}", form.loader.name()),
-                    true,
-                )
-                .into_any_element();
+            return self.wizard_unavailable(
+                shape,
+                "optifine",
+                "OptiFine",
+                &format!("Cannot combine directly with {}", form.loader.name()),
+            );
         }
-        self.wizard_component(
+        self.wizard_card(
+            shape,
             "optifine",
             "OptiFine",
             (
@@ -613,7 +641,6 @@ impl Block {
             WizardPage::OptiFine,
             cx,
         )
-        .into_any_element()
     }
 
     pub(super) fn wizard_optifine(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::Div {
@@ -1472,10 +1499,18 @@ impl Block {
             let directory =
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim()));
             let defaults = values.defaults.clone();
-            self.begin_cancellable("Creating your game and preparing verified downloads");
+            // One decision routes the work and names it, so the busy status can
+            // never promise preparation this branch does not start: first-run
+            // Create only saves the setup, and Finish prepares game files.
+            let saves_setup = self.tab == Tab::Onboarding && self.shell.first_run.enabled;
+            self.begin_cancellable(if saves_setup {
+                "Saving your game setup"
+            } else {
+                "Creating your game and preparing verified downloads"
+            });
             self.mark_creation();
             if let Some(engine) = &self.engine {
-                if self.tab == Tab::Onboarding && self.shell.first_run.enabled {
+                if saves_setup {
                     engine.save_setup_game(
                         name,
                         version,
@@ -1719,22 +1754,19 @@ impl Block {
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
             Some(WizardPage::OptiFine) => self.wizard_optifine(form, cx).into_any_element(),
             Some(WizardPage::Location) => self.wizard_location(form, cx).into_any_element(),
+            // The Review is ordinary content of the outer `wizard-body` viewport.
+            // A second viewport here would claim the shared `body_scroll` while
+            // sizing itself to its own content, so the outer page would keep the
+            // space and report no remaining range: the facts below the fold could
+            // never be scrolled above the fixed footer.
             None if review => div()
-                .size_full()
-                .min_h_0()
-                .child(super::scroll_area::viewport(
-                    div()
-                        .id("wizard-review-scroll")
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(self.wizard_review(form, cx)),
-                    &self.shell.wizard.body_scroll,
-                    "Review",
-                    self.palette,
-                    false,
-                ))
+                .id("wizard-review-content")
+                .debug_selector(|| "wizard-review-content".into())
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(self.wizard_review(form, window, cx))
                 .into_any_element(),
             None if state.step == WizardStep::GetStarted => {
                 self.wizard_start(cx).into_any_element()
@@ -2065,10 +2097,13 @@ impl Block {
                 (self.shell.wizard.kind == CreationKind::ExistingInstance)
                     .then(|| self.wizard_profile_targets(profile, cx)),
             )
-            .children(
-                show_name
-                    .then(|| self.wizard_profile_options_trigger("Advanced launch settings", cx)),
-            )
+            .children(show_name.then(|| {
+                self.wizard_profile_options_trigger(
+                    "wizard-profile-options",
+                    "Advanced launch settings",
+                    cx,
+                )
+            }))
             .children(show_name.then(|| {
                 super::motion::disclosure(
                     "wizard-advanced",
@@ -2098,11 +2133,12 @@ impl Block {
 
     fn wizard_profile_options_trigger(
         &self,
+        id: &'static str,
         label: &'static str,
         cx: &Context<'_, Self>,
     ) -> components::Control {
         super::motion::disclosure_trigger(
-            "wizard-profile-options",
+            id,
             label,
             &self.shell.wizard.advanced.borrow(),
             self.palette,
@@ -2429,39 +2465,36 @@ impl Block {
                 "Create your game",
                 "Choose the game components. Review everything before installation begins.",
             ))
-            .child(self.wizard_field(
-                WizardField::GameName,
-                "Game name",
-                &form.name,
-                Some("Required. Up to 160 UTF-8 bytes; no control characters."),
-            ))
+            .child(self.wizard_field(WizardField::GameName, "Game name", &form.name, None))
             .child(
                 div()
                     .id("wizard-components")
                     .debug_selector(|| "wizard-components".into())
                     .grid()
-                    .grid_cols(if self.page_viewport(window).width < px(760.) {
-                        2
-                    } else {
-                        4
-                    })
+                    .grid_cols(2)
                     .gap_3()
-                    .child(self.wizard_component(
+                    .child(self.wizard_card(
+                        CardShape::Natural,
                         "version",
                         "Minecraft version",
                         (&version, version_kind),
                         WizardPage::Version,
                         cx,
                     ))
-                    .child(self.wizard_component(
+                    .child(self.wizard_card(
+                        CardShape::Natural,
                         "loader",
                         "Mod loader",
-                        (form.loader.name(), form.loader_version.as_deref().unwrap_or("Original game")),
+                        (
+                            form.loader.name(),
+                            form.loader_version.as_deref().unwrap_or("Original game"),
+                        ),
                         WizardPage::Loader,
                         cx,
                     ))
-                    .child(self.wizard_optifine_component(form, cx))
-                    .child(self.wizard_component(
+                    .child(self.wizard_optifine_card(CardShape::Natural, form, cx))
+                    .child(self.wizard_card(
+                        CardShape::Natural,
                         "location",
                         "Configuration",
                         (&configuration.0, &configuration.1),
@@ -2469,12 +2502,31 @@ impl Block {
                         cx,
                     )),
             )
-            .child(note("Open a tile to configure it. Minecraft version and Mod loader become fixed when this Instance is created."))
-            .children(self.shell.wizard.version_notice.as_ref().map(|notice| self.wizard_version_notice(notice)))
-            .children((!self.shell.wizard.separated).then(|| self.wizard_profile_options_trigger("Appearance & launch settings", cx)))
+            .child(note("Open a card to change that choice."))
+            .children(
+                self.shell
+                    .wizard
+                    .version_notice
+                    .as_ref()
+                    .map(|notice| self.wizard_version_notice(notice)),
+            )
+            .children((!self.shell.wizard.separated).then(|| {
+                self.wizard_profile_options_trigger(
+                    "wizard-profile-options",
+                    "Appearance & launch settings",
+                    cx,
+                )
+            }))
             .children((!self.shell.wizard.separated).then(|| {
                 let content = self.wizard_profile(window, cx, false).into_any_element();
-                super::motion::disclosure("wizard-appearance-launch", &self.shell.wizard.advanced.borrow(), self.motion_preferences(), content, window, cx)
+                super::motion::disclosure(
+                    "wizard-appearance-launch",
+                    &self.shell.wizard.advanced.borrow(),
+                    self.motion_preferences(),
+                    content,
+                    window,
+                    cx,
+                )
             }))
     }
 
@@ -2503,6 +2555,8 @@ impl Block {
         )
     }
 
+    /// First-run onboarding's component tile: a square card that clips each
+    /// line so four columns keep one row.
     pub(super) fn wizard_component(
         &self,
         id: &str,
@@ -2510,7 +2564,19 @@ impl Block {
         summary: (&str, &str),
         page: WizardPage,
         cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
+    ) -> gpui::AnyElement {
+        self.wizard_card(CardShape::Square, id, title, summary, page, cx)
+    }
+
+    fn wizard_card(
+        &self,
+        shape: CardShape,
+        id: &str,
+        title: &str,
+        summary: (&str, &str),
+        page: WizardPage,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         let (value, detail) = summary;
         let icon = match page {
             WizardPage::Version => Icon::Games,
@@ -2518,7 +2584,9 @@ impl Block {
             WizardPage::OptiFine => Icon::Experiment,
             WizardPage::Location => Icon::Settings,
         };
-        let mut card = components::button(
+        let value_id = format!("wizard-component-{id}-value");
+        let detail_id = format!("wizard-component-{id}-detail");
+        let card = components::button(
             format!("wizard-component-{id}"),
             "",
             self.palette,
@@ -2531,66 +2599,85 @@ impl Block {
                 view.handle(UiAction::WizardPage(Some(page)), window, cx);
             }),
         )
-        // Grid stretch supplies the column width. A percentage width makes
-        // Taffy's intrinsic aspect-ratio row use the entire grid's width.
         .w_auto()
         .h_auto()
         .min_w_0()
-        .min_h_0()
         .flex()
         .flex_col()
         .items_start()
-        .justify_between()
-        .gap_2()
-        .p_3()
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(icon.render(20., self.palette.muted))
-                .child(Icon::ChevronRight.render(14., self.palette.muted)),
-        )
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(note(title.to_owned()))
-                .child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .text_sm()
-                        .truncate()
-                        .child(value.to_owned()),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .text_size(px(10.))
-                        .line_height(px(14.))
-                        .text_color(rgb(self.palette.muted))
-                        .truncate()
-                        .child(detail.to_owned()),
-                ),
-        );
-        card.style().aspect_ratio = Some(1.);
-        super::tooltip::trigger(card, format!("{title}: {value} · {detail}"), cx)
+        .justify_between();
+        // Grid stretch supplies the column width either way; only the height
+        // rule differs. A summary card never takes its height from its width.
+        let mut card = match shape {
+            CardShape::Square => card.min_h_0().gap_2().p_3(),
+            CardShape::Natural => card.min_h(px(96.)).gap_3().p_4(),
+        };
+        if shape == CardShape::Square {
+            card.style().aspect_ratio = Some(1.);
+        }
+        let card = card
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(icon.render(20., self.palette.muted))
+                    .child(Icon::ChevronRight.render(14., self.palette.muted)),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(note(title.to_owned()))
+                    .child({
+                        let debug_id = value_id.clone();
+                        let line = div()
+                            .id(value_id)
+                            .debug_selector(move || debug_id)
+                            .w_full()
+                            .min_w_0();
+                        match shape {
+                            CardShape::Square => line.text_sm().truncate(),
+                            CardShape::Natural => line.text_sm().whitespace_normal(),
+                        }
+                        .child(value.to_owned())
+                    })
+                    .child({
+                        let debug_id = detail_id.clone();
+                        let line = div()
+                            .id(detail_id)
+                            .debug_selector(move || debug_id)
+                            .w_full()
+                            .min_w_0();
+                        match shape {
+                            CardShape::Square => line
+                                .text_size(px(10.))
+                                .line_height(px(14.))
+                                .text_color(rgb(self.palette.muted))
+                                .truncate(),
+                            CardShape::Natural => line
+                                .text_xs()
+                                .text_color(rgb(self.palette.muted))
+                                .whitespace_normal(),
+                        }
+                        .child(detail.to_owned())
+                    }),
+            );
+        super::tooltip::trigger(card, format!("{title}: {value} · {detail}"), cx).into_any_element()
     }
 
-    pub(super) fn wizard_unavailable(
+    fn wizard_unavailable(
         &self,
+        shape: CardShape,
         id: &str,
         title: &str,
         reason: &str,
-        square: bool,
-    ) -> impl IntoElement + use<> {
-        let mut card = components::button(
+    ) -> gpui::AnyElement {
+        let card = components::button(
             format!("wizard-unavailable-{id}"),
             "",
             self.palette,
@@ -2603,29 +2690,71 @@ impl Block {
         )
         .w_auto()
         .h_auto()
-        .min_w_0()
-        .min_h_0()
-        .rounded_md()
-        .border_1()
-        .border_color(rgb(self.palette.border))
-        .p_3()
-        .flex()
-        .flex_col()
-        .justify_between()
-        .gap_2()
-        .child(Icon::Info.render(20., self.palette.muted))
-        .child(
-            div()
-                .min_w_0()
-                .w_full()
-                .whitespace_normal()
-                .child(title.to_owned())
-                .child(note(reason.to_owned()).w_full().line_clamp(3)),
-        );
-        if square {
+        .min_w_0();
+        let mut card = match shape {
+            CardShape::Square => card
+                .min_h_0()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(self.palette.border))
+                .p_3()
+                .flex()
+                .flex_col()
+                .justify_between()
+                .gap_2(),
+            CardShape::Natural => card
+                .min_h(px(96.))
+                .flex()
+                .flex_col()
+                .items_start()
+                .justify_between()
+                .gap_3()
+                .p_4(),
+        };
+        if shape == CardShape::Square {
             card.style().aspect_ratio = Some(1.);
         }
-        card
+        let card = match shape {
+            CardShape::Square => card
+                .child(Icon::Info.render(20., self.palette.muted))
+                .child(
+                    div()
+                        .min_w_0()
+                        .w_full()
+                        .whitespace_normal()
+                        .child(title.to_owned())
+                        .child(note(reason.to_owned()).w_full().line_clamp(3)),
+                ),
+            CardShape::Natural => card
+                .child(Icon::Info.render(20., self.palette.muted))
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(note(title.to_owned()))
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .text_sm()
+                                .whitespace_normal()
+                                .child("Unavailable"),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(rgb(self.palette.muted))
+                                .whitespace_normal()
+                                .child(reason.to_owned()),
+                        ),
+                ),
+        };
+        card.into_any_element()
     }
 
     fn matching_wizard_versions(
@@ -3320,9 +3449,15 @@ impl Block {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "The confirmation keeps all committed values together in one review."
+        reason = "The confirmation keeps identity, visible choices and folded defaults together."
     )]
-    fn wizard_review(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::Div {
+    fn wizard_review(
+        &self,
+        form: &InstanceForm,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        self.reconcile_wizard_disclosure(cx);
         let state = &self.shell.wizard;
         let existing = state.kind == CreationKind::ExistingInstance;
         let chosen = self
@@ -3371,10 +3506,13 @@ impl Block {
         } else {
             form.loader_label()
         };
-        let memory = profile.map_or_else(
-            || components::memory_gb_text(self.saved_preferences.game.memory_mib),
+        let defaults = &self.saved_preferences.game;
+        let memory_input = profile.map_or_else(
+            || components::memory_gb_text(defaults.memory_mib),
             |profile| profile.memory.read(cx).value(),
         );
+        let memory = components::parse_memory_gb(&memory_input)
+            .map_or_else(|_| memory_input.clone(), components::memory_label);
         let java = profile.map_or_else(
             || "Automatic · managed by Block".to_owned(),
             |profile| {
@@ -3385,13 +3523,11 @@ impl Block {
                 }
             },
         );
+        let server = profile.map_or_else(String::new, |profile| profile.server.read(cx).value());
+        let connect = profile.is_some_and(|profile| profile.connect_on_launch);
+        let jvm = profile.map_or_else(String::new, |profile| profile.jvm.read(cx).value());
         let resolution = profile.map_or_else(
-            || {
-                format!(
-                    "{} × {}",
-                    self.saved_preferences.game.width, self.saved_preferences.game.height
-                )
-            },
+            || format!("{} × {}", defaults.width, defaults.height),
             |profile| {
                 format!(
                     "{} × {}{}",
@@ -3405,37 +3541,255 @@ impl Block {
                 )
             },
         );
+        // Show an effective window choice when it differs from the built-in
+        // default or deliberately overrides the saved preference.
+        let ordinary_window = super::settings::GameDefaults::default();
+        let window_visible = profile.is_some_and(|profile| {
+            let width = profile.width.read(cx).value();
+            let height = profile.height.read(cx).value();
+            profile.fullscreen
+                || profile.window_custom
+                || profile.fullscreen != defaults.fullscreen
+                || width.trim() != defaults.width.to_string()
+                || height.trim() != defaults.height.to_string()
+                || width.trim() != ordinary_window.width.to_string()
+                || height.trim() != ordinary_window.height.to_string()
+        });
         let automatic_connection = self.automatic_connection(&version);
-        div().flex().flex_col().gap_4()
-            .child(patterns::page_heading(
-                if existing { "Review profile setup" } else { "Review game setup" },
-                if existing { "Review the new Profile. Existing game files and other Profiles stay in place." } else if self.tab == Tab::Onboarding && self.shell.first_run.enabled { "Create game saves this setup. Finish setup to begin preparing game files." } else { "Create game saves your setup and begins verified downloads. You can follow installation on Home." },
-            ))
-            .child(components::card(self.palette)
-                .child(div().flex().items_center().gap_3().child(Icon::Blocks.render(24., self.palette.muted))
-                    .child(div().flex_1().min_w_0().child(note(if existing { "EXISTING INSTANCE" } else if state.separated { "NEW INSTANCE" } else { "NEW GAME" }))
-                        .child(div().text_sm().whitespace_normal().child(game_name)))
-                    .child(components::badge(version, self.palette, BadgeVariant::Secondary)))
-                .children(state.separated.then(|| div().border_t_1().border_color(rgb(self.palette.border)).pt_3().flex().items_center().gap_3()
-                    .child(components::profile_avatar(appearance, self.palette, 40.))
-                    .child(div().min_w_0().child(note("NEW PROFILE")).child(profile_name)))) )
-            .child(div().flex().flex_wrap().gap_3().children([
-                ("Launch target", launch_target),
-                ("Maximum memory", components::parse_memory_gb(&memory).map_or_else(|_| memory.clone(), components::memory_label)),
-                ("Server", profile.map_or_else(|| "Choose in game".to_owned(), |profile| { let value = profile.server.read(cx).value(); if value.trim().is_empty() { "Choose in game".into() } else { value } })),
-                ("Automatic connection", if profile.is_some_and(|profile| profile.connect_on_launch) {
-                    match automatic_connection {
-                        Some(block_launcher::catalog::AutomaticConnection::Legacy) => "On · server arguments",
-                        _ => "On · Quick Play",
+        // The summary carries every submitted value whose consequence the user
+        // must weigh, including values inherited from saved defaults: arguments,
+        // a server, an automatic connection, a location or a window choice all
+        // change what Create writes. The fold keeps only values that decide
+        // nothing, and never claims a non-empty value is empty.
+        let mut summary = Vec::new();
+        if !server.trim().is_empty() {
+            summary.push(("Server", server.clone()));
+        }
+        if connect {
+            summary.push((
+                "Automatic connection",
+                match automatic_connection {
+                    Some(block_launcher::catalog::AutomaticConnection::Legacy) => {
+                        "On · server arguments".to_owned()
                     }
-                } else { "Off" }.to_owned()),
-                ("JVM arguments", profile.map_or_else(|| "Default arguments".to_owned(), |profile| { let value = profile.jvm.read(cx).value(); if value.trim().is_empty() { "Default arguments".into() } else { value } })),
-                ("Java runtime", java),
-                ("Game window", resolution),
-                ("Game files", if directory.is_empty() { "A separate folder in Block’s data directory".to_owned() } else { directory }),
-                ("Game data", "Isolated folder for this Profile".to_owned()),
-            ].map(|(label,value)| div().w(px(260.)).min_w_0().flex().flex_col().gap_1().child(note(label)).child(div().text_sm().whitespace_normal().child(value)))))
-            .child(components::badge("Version and loader fixed after creation", self.palette, BadgeVariant::Outline))
-            .children(existing.then(|| note("Only the new Profile is saved. Any missing files for its selected target are installed before play.")))
+                    _ => "On · Quick Play".to_owned(),
+                },
+            ));
+        }
+        if !jvm.trim().is_empty() {
+            summary.push(("JVM arguments", jvm.clone()));
+        }
+        if window_visible {
+            summary.push(("Game window", resolution.clone()));
+        }
+        if !directory.trim().is_empty() {
+            summary.push(("Game files", directory.clone()));
+        }
+        // Only values that need no decision stay folded.
+        let mut details = Vec::new();
+        if server.trim().is_empty() {
+            details.push(("Server", "Choose in game".to_owned()));
+        }
+        if !connect {
+            details.push(("Automatic connection", "Off".to_owned()));
+        }
+        if jvm.trim().is_empty() {
+            details.push(("JVM arguments", "No extra arguments".to_owned()));
+        }
+        if !window_visible {
+            details.push(("Game window", resolution));
+        }
+        if directory.trim().is_empty() {
+            details.push((
+                "Game files",
+                "A separate folder in Block’s data directory".to_owned(),
+            ));
+        }
+        // Every Profile this wizard creates owns an isolated data folder; it is
+        // a fixed policy rather than a choice, so it stays in the fold.
+        details.push(("Game data", "Isolated folder for this Profile".to_owned()));
+        let title = if existing {
+            "Review profile setup"
+        } else {
+            "Review game setup"
+        };
+        let consequence = if existing {
+            "Review the new Profile. Existing game files and other Profiles stay in place."
+        } else if self.tab == Tab::Onboarding && self.shell.first_run.enabled {
+            "Create game saves this setup. Finish setup to begin preparing game files."
+        } else {
+            "Create game saves your setup and begins verified downloads. You can follow installation on Home."
+        };
+        let eyebrow = if existing {
+            "EXISTING INSTANCE"
+        } else if state.separated {
+            "NEW INSTANCE"
+        } else {
+            "NEW GAME"
+        };
+        let fixed = if existing {
+            "This Profile follows the Instance’s fixed Minecraft version and loader."
+        } else {
+            "Minecraft version and mod loader become fixed when this game is created."
+        };
+        let identity = components::card(self.palette)
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap_3()
+                    .child(Icon::Blocks.render(24., self.palette.muted))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(note(eyebrow))
+                            .child(div().text_sm().whitespace_normal().child(game_name))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .gap_2()
+                                    .child(components::badge(
+                                        version,
+                                        self.palette,
+                                        BadgeVariant::Secondary,
+                                    ))
+                                    .child(
+                                        components::badge(
+                                            launch_target,
+                                            self.palette,
+                                            BadgeVariant::Outline,
+                                        )
+                                        .flex_col()
+                                        .items_stretch()
+                                        .max_w_full()
+                                        .min_w_0()
+                                        .h_auto()
+                                        .min_h(px(20.))
+                                        .whitespace_normal()
+                                        .line_height(px(18.))
+                                        .debug_selector(|| "wizard-review-launch-target".into()),
+                                    ),
+                            ),
+                    ),
+            )
+            .children(state.separated.then(|| {
+                div()
+                    .border_t_1()
+                    .border_color(rgb(self.palette.border))
+                    .pt_3()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(components::profile_avatar(appearance, self.palette, 40.))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .child(note("NEW PROFILE"))
+                            .child(profile_name),
+                    )
+            }))
+            .id("wizard-review-identity")
+            .debug_selector(|| "wizard-review-identity".into());
+        // Identity first, then what Create does, then the runtime choices the
+        // user must weigh, and only then the folded unchanged defaults.
+        div()
+            .id("wizard-review")
+            .debug_selector(|| "wizard-review".into())
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(patterns::page_title(title))
+            .child(identity)
+            .child(
+                div()
+                    .id("wizard-review-consequence")
+                    .debug_selector(|| "wizard-review-consequence".into())
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(note(consequence))
+                    .child(note(fixed)),
+            )
+            .child(
+                div()
+                    .id("wizard-review-summary")
+                    .debug_selector(|| "wizard-review-summary".into())
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_wrap()
+                    .gap_4()
+                    .child(review_fact("Java", java))
+                    .child(review_fact("Memory", memory))
+                    .children(
+                        summary
+                            .into_iter()
+                            .map(|(label, value)| review_fact(label, value)),
+                    ),
+            )
+            .children(profile.is_some().then(|| {
+                self.wizard_profile_options_trigger(
+                    "wizard-review-options",
+                    "Detailed settings",
+                    cx,
+                )
+            }))
+            .children(profile.is_some().then(|| {
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(note("Settings that need no decision."))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_4()
+                            .children(
+                                details
+                                    .into_iter()
+                                    .map(|(label, value)| review_fact(label, value)),
+                            ),
+                    )
+                    .into_any_element();
+                super::motion::disclosure(
+                    "wizard-review-details",
+                    &state.advanced.borrow(),
+                    self.motion_preferences(),
+                    content,
+                    window,
+                    cx,
+                )
+            }))
+            .children(existing.then(|| {
+                note("Only the new Profile is saved. Any missing files for its selected target are installed before play.")
+            }))
     }
+}
+
+/// One review fact: a muted 12 px label above a wrapping 14 px value.
+fn review_fact(
+    label: &'static str,
+    value: impl Into<gpui::SharedString>,
+) -> gpui::Stateful<gpui::Div> {
+    let id = format!("wizard-review-{}", label.to_lowercase().replace(' ', "-"));
+    div()
+        .id(id.clone())
+        .debug_selector(move || id)
+        .w(px(240.))
+        // A narrow window narrows the fact instead of pushing it out of view.
+        .max_w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(note(label))
+        .child(div().text_sm().whitespace_normal().child(value.into()))
 }

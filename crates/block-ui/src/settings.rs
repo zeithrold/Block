@@ -962,7 +962,7 @@ impl Block {
                         note(if dirty {
                             "Unsaved changes"
                         } else {
-                            "Saved for this session"
+                            "No unsaved changes"
                         })
                         .into_any_element()
                     }),

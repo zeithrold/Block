@@ -119,14 +119,24 @@ impl Block {
         let Some(state) = &self.shell.selector else {
             return;
         };
-        let query = state.query.read(cx).value().trim().to_lowercase();
-        if query == state.last_query {
+        let value = state.query.read(cx).value();
+        if value == state.last_query {
+            return;
+        }
+        let query = value.trim().to_lowercase();
+        if query == state.last_query.trim().to_lowercase() {
+            // The search result did not change, but the raw input did. Repaint
+            // the Clear action without resetting the current row or scroll.
+            if let Some(state) = &mut self.shell.selector {
+                state.last_query = value;
+            }
+            cx.notify();
             return;
         }
         let choices = self.selector_choices(state.drawer, &query);
         let active = active_index(&choices, state.active.as_deref());
         if let Some(state) = &mut self.shell.selector {
-            state.last_query = query;
+            state.last_query = value;
             state.active = active.map(|index| choices[index].id.clone());
             state.scroll.set_offset(point(px(0.), px(0.)));
             if let Some(index) = active {
@@ -170,8 +180,8 @@ impl Block {
         }
         let query_focused = state.query.read(cx).focus_handle(cx).is_focused(window);
         let row_focused = state.row_focus.is_focused(window);
-        // Native Base controls commit Enter/Space on key up. A Clear, Remove
-        // or Manage button must therefore keep its key down instead of the
+        // Native Base controls commit Enter/Space on key up. A Clear or Manage
+        // button must therefore keep its key down instead of the
         // selector activating the inspected choice before that control fires.
         if !query_focused && !row_focused {
             return false;
@@ -228,7 +238,7 @@ impl Block {
                 .child(note("Open the selector again to search."))
                 .into_any_element();
         };
-        let query = state.query.read(cx).value().trim().to_lowercase();
+        let has_query = !state.query.read(cx).value().is_empty();
         let accounts = drawer == Drawer::Accounts;
         let rows = self.selector_results(drawer, state, window, cx);
         let query_entity = state.query.clone();
@@ -259,19 +269,21 @@ impl Block {
                         },
                         &state.query,
                     )))
-                    .child(components::button(
-                        "selector-clear",
-                        "Clear",
-                        self.palette,
-                        ButtonVariant::Ghost,
-                        ControlState {
-                            disabled: query.is_empty(),
-                            ..ControlState::default()
-                        },
-                        move |(), _, cx| {
-                            query_entity.update(cx, |field, cx| field.set_value("", cx));
-                        },
-                    )),
+                    .children(has_query.then(|| {
+                        components::button(
+                            "selector-clear",
+                            "Clear",
+                            self.palette,
+                            ButtonVariant::Ghost,
+                            ControlState::default(),
+                            move |(), window, cx| {
+                                query_entity.update(cx, |field, cx| {
+                                    field.set_value("", cx);
+                                    field.focus_handle(cx).focus(window, cx);
+                                });
+                            },
+                        )
+                    })),
             )
             .child(rows)
             .child(
@@ -412,19 +424,7 @@ impl Block {
         if active {
             primary = primary.track_focus(&state.row_focus);
         }
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(primary)
-            .children(accounts.then(|| {
-                self.button(
-                    format!("selector-remove-{id}"),
-                    "Remove",
-                    UiAction::RequestSignOut(id),
-                    cx,
-                )
-            }))
+        div().flex().items_center().gap_1().child(primary)
     }
 
     fn selector_row_text(&self, choice: &Choice) -> gpui::Div {
@@ -782,9 +782,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn keyboard_remove_opens_nested_confirmation_and_restores_search_context(
-        cx: &mut TestAppContext,
-    ) {
+    fn account_switcher_keeps_removal_in_management(cx: &mut TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let account = test_account()?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
@@ -796,74 +794,35 @@ mod tests {
                 });
             });
             crate::test_support::control_bounds(cx, "selector-results");
+            assert!(
+                cx.debug_bounds("selector-remove-00000000-0000-4000-8000-000000000001")
+                    .is_none(),
+                "Switching accounts must not expose a destructive row action"
+            );
+            assert!(
+                crate::test_support::control_bounds(cx, "selector-clear").is_none(),
+                "An empty search needs no Clear action"
+            );
             cx.simulate_input("Test");
-            crate::test_support::press(cx, "tab tab");
-            cx.update(|window, cx| {
-                view.read_with(cx, |view, _| {
-                    assert!(
-                        view.shell
-                            .selector
-                            .as_ref()
-                            .is_some_and(|state| state.row_focus.is_focused(window))
-                    );
-                });
-            });
-            crate::test_support::press(cx, "tab");
-            let remove_focus = cx.update(|window, cx| window.focused(cx));
-            let key = gpui::Keystroke::parse("enter");
-            assert!(key.is_ok());
-            if let Ok(keystroke) = key {
-                cx.simulate_event(gpui::KeyDownEvent {
-                    keystroke: keystroke.clone(),
-                    is_held: false,
-                    prefer_character_input: false,
-                });
-                assert!(
-                    view.read_with(cx, |view, _| matches!(
-                        view.shell.surfaces.top().map(|layer| &layer.kind),
-                        Some(Surface::Drawer(Drawer::Accounts))
-                    ) && view.selected_account.is_none()),
-                    "Remove key down must not choose the inspected account or close its parent"
-                );
-                cx.simulate_event(gpui::KeyUpEvent { keystroke });
-            }
+            click(cx, "selector-clear");
+            assert!(crate::test_support::control_bounds(cx, "selector-clear").is_none());
+            click(cx, "manage-accounts");
+            assert!(view.read_with(cx, |view, _| {
+                view.tab == Tab::Accounts
+                    && view.accounts.len() == 1
+                    && view.selected_account.is_none()
+                    && !view.shell.surfaces.is_open()
+            }));
+            // Account management, not the temporary selector, owns removal.
+            cx.simulate_resize(size(px(1152.), px(720.)));
+            click(cx, "account-logout-00000000-0000-4000-8000-000000000001");
             assert!(view.read_with(cx, |view, _| matches!(
                 view.shell.surfaces.top().map(|layer| &layer.kind),
                 Some(Surface::RemoveAccount(_))
             )));
             crate::test_support::press(cx, "escape");
-            cx.update(|window, _| {
-                assert!(
-                    remove_focus
-                        .as_ref()
-                        .is_some_and(|focus| focus.is_focused(window))
-                );
-            });
-            assert!(view.read_with(cx, |view, cx| {
-                view.shell.surfaces.layers().count() == 1
-                    && matches!(
-                        view.shell.surfaces.top().map(|layer| &layer.kind),
-                        Some(Surface::Drawer(Drawer::Accounts))
-                    )
-                    && view
-                        .shell
-                        .selector
-                        .as_ref()
-                        .is_some_and(|state| state.query.read(cx).value() == "Test")
-                    && view.accounts.len() == 1
-                    && view.selected_account.is_none()
-            }));
-            crate::test_support::press(cx, "escape");
-            cx.update(|window, cx| {
-                view.update(cx, |view, cx| {
-                    view.handle(UiAction::Drawer(Some(Drawer::Accounts)), window, cx);
-                });
-            });
-            assert!(view.read_with(cx, |view, cx| {
-                view.shell
-                    .selector
-                    .as_ref()
-                    .is_some_and(|state| state.query.read(cx).value().is_empty())
+            assert!(view.read_with(cx, |view, _| {
+                view.accounts.len() == 1 && !view.shell.surfaces.is_open()
             }));
             Ok(())
         })();
@@ -901,7 +860,50 @@ mod tests {
                         .as_ref()
                         .is_some_and(|state| state.query.read(cx).value().is_empty())
             }));
+            cx.update(|window, cx| {
+                view.read_with(cx, |view, cx| {
+                    assert!(
+                        view.shell
+                            .selector
+                            .as_ref()
+                            .is_some_and(|state| state.query_focus(cx).is_focused(window)),
+                        "clearing the search must return focus to the input"
+                    );
+                });
+            });
+            cx.simulate_input("Test");
+            assert!(view.read_with(cx, |view, cx| {
+                view.shell
+                    .selector
+                    .as_ref()
+                    .is_some_and(|state| state.query.read(cx).value() == "Test")
+            }));
         }
+    }
+
+    #[gpui::test]
+    fn whitespace_input_still_offers_a_clear_action(cx: &mut TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.handle(UiAction::Drawer(Some(Drawer::Accounts)), window, cx);
+            });
+        });
+        crate::test_support::control_bounds(cx, "selector-results");
+        cx.simulate_input("  ");
+        assert!(
+            crate::test_support::control_bounds(cx, "selector-clear").is_some(),
+            "nonempty input should be clearable even when its search terms are blank"
+        );
+        click(cx, "selector-clear");
+        assert!(view.read_with(cx, |view, cx| {
+            view.shell
+                .selector
+                .as_ref()
+                .is_some_and(|state| state.query.read(cx).value().is_empty())
+        }));
+        assert!(crate::test_support::control_bounds(cx, "selector-clear").is_none());
     }
 
     #[gpui::test]

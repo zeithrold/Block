@@ -3482,7 +3482,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn game_wizard_four_square_tiles_and_footer_fit_default_window(cx: &mut gpui::TestAppContext) {
+    fn game_wizard_cards_scroll_without_hiding_the_footer(cx: &mut gpui::TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, test_view);
         cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
         view.update(cx, |view, _| view.preferences.reduce_motion = true);
@@ -3496,28 +3496,34 @@ mod tests {
         };
         assert!(footer.bottom() <= gpui::px(600.), "footer: {footer:?}");
         assert_eq!(footer.size.height, gpui::px(72.));
-        let mut previous_right = gpui::px(0.);
-        let mut tile_top = None;
-        for selector in [
-            "wizard-component-version",
-            "wizard-component-loader",
-            "wizard-component-optifine",
-            "wizard-component-location",
-        ] {
-            let bounds = crate::test_support::control_bounds(cx, selector);
-            assert!(bounds.is_some(), "missing {selector}");
-            let Some(bounds) = bounds else {
-                return;
-            };
-            assert!((f32::from(bounds.size.width - bounds.size.height)).abs() < 1.);
-            assert!(bounds.size.width >= gpui::px(120.));
-            assert!(bounds.bottom() < footer.top(), "{selector}: {bounds:?}");
-            assert!(bounds.left() >= previous_right);
-            if let Some(top) = tile_top {
-                assert_eq!(bounds.top(), top);
-            }
-            tile_top = Some(bounds.top());
-            previous_right = bounds.right();
+        let viewport = cx.debug_bounds("wizard-body");
+        let location = crate::test_support::control_bounds(cx, "wizard-component-location");
+        assert!(viewport.is_some() && location.is_some());
+        if let (Some(viewport), Some(location)) = (viewport, location)
+            && location.bottom() > viewport.bottom() + gpui::px(1.)
+        {
+            view.update(cx, |view, cx| {
+                let scroll = &view.shell.wizard.body_scroll;
+                assert!(scroll.max_offset().y > gpui::px(0.));
+                scroll.set_offset(gpui::point(gpui::px(0.), -scroll.max_offset().y));
+                cx.notify();
+            });
+            cx.run_until_parked();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(32));
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            let scrolled = crate::test_support::control_bounds(cx, "wizard-component-location");
+            assert!(
+                scrolled.is_some_and(|bounds| bounds.bottom() <= viewport.bottom()),
+                "scrolled={scrolled:?} viewport={viewport:?}"
+            );
+            assert_eq!(
+                cx.debug_bounds("wizard-footer")
+                    .map(|bounds| bounds.bottom()),
+                Some(footer.bottom()),
+                "the footer does not scroll away"
+            );
         }
         assert!(cx.debug_bounds("nav-profiles").is_none());
         click_selector(cx, "wizard-next");
