@@ -5,7 +5,7 @@ dispatch). Nothing is published to GitHub Releases.
 
 ## Workflow
 
-`.github/workflows/pilot-build.yml` runs only after the
+`.github/workflows/desktop-build.yml` runs only after the
 **Cross-platform checks** workflow succeeds for a push to `main` (via
 `workflow_run`), and on manual dispatch. A manual dispatch also requires a
 successful completed check run for the dispatched commit; a `gate` job fails

@@ -1,6 +1,6 @@
-name: Pilot packages
+name: Desktop packages
 
-# Pilot packages are produced only after "Cross-platform checks" succeeds for a
+# Desktop packages are produced only after "Cross-platform checks" succeeds for a
 # push to main; a manual dispatch is also accepted but must find a successful
 # completed check run for the dispatched commit. Nothing is published to
 # GitHub Releases, and no package is code-signed or notarized.
@@ -13,7 +13,7 @@ on:
 
 # A newer push supersedes an in-flight package run for the same ref.
 concurrency:
-  group: pilot-packages-${{ github.ref }}
+  group: desktop-packages-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -130,7 +130,7 @@ jobs:
         run: |
           cd dist/macos
           shasum -a 256 Block-* > SHA256SUMS
-          printf 'Pilot build. Packages are not code-signed or notarized.\nmacOS will require right-click > Open on first launch.\n' > UNSIGNED.txt
+          printf 'Packages are not code-signed or notarized.\nmacOS will require right-click > Open on first launch.\n' > UNSIGNED.txt
           cat SHA256SUMS
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
@@ -245,7 +245,7 @@ jobs:
             "$hash  $($file.Name)"
           }
           $lines | Set-Content dist/windows/SHA256SUMS
-          "Pilot build. Packages are not code-signed. Windows SmartScreen will warn on first run." | Set-Content dist/windows/UNSIGNED.txt
+          "Packages are not code-signed. Windows SmartScreen will warn on first run." | Set-Content dist/windows/UNSIGNED.txt
           Get-Content dist/windows/SHA256SUMS
       - name: Upload Windows portable ZIP
         uses: actions/upload-artifact@v4
@@ -347,7 +347,7 @@ jobs:
         run: |
           cd dist/linux
           sha256sum Block-*.tar.gz Block-*.deb Block-*.AppImage > SHA256SUMS
-          printf 'Pilot build. Packages are not code-signed.\n' > UNSIGNED.txt
+          printf 'Packages are not code-signed.\n' > UNSIGNED.txt
           cat SHA256SUMS
       - name: Upload Linux portable tar.gz
         uses: actions/upload-artifact@v4

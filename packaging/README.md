@@ -18,7 +18,7 @@ right-click → Open on first launch, Windows SmartScreen warns, and Linux
 packages rely on checksums only. The manifest records that no signing or
 notarization was performed.
 
-The pilot workflow `.github/workflows/pilot-build.yml` runs only after
+The desktop workflow `.github/workflows/desktop-build.yml` runs only after
 **Cross-platform checks** succeeds for a push to `main` (manual dispatch also
 requires a successful check run for the same commit), then builds every
 supported platform. Each package type is uploaded as its own workflow artifact
