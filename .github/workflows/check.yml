@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+
 # A newer push supersedes an in-flight check matrix for the same ref.
 concurrency:
   group: checks-${{ github.ref }}

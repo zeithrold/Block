@@ -22,6 +22,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
 
 jobs:
   gate:
