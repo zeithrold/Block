@@ -3,6 +3,9 @@
 ## Architecture and data boundaries
 
 - Keep desktop and CLI launch behavior in the shared `block-launcher` core rather than implementing parallel rules in each interface. See [workspace architecture](README.md#workspace-layout).
+- Official metadata belongs to `block-launcher::manifest`; `manifest-audit` belongs to the CLI. Prefer modules for coupled core features; create crates for real consumer, dependency or platform boundaries. See [architecture boundaries](docs/ui-architecture-proposal.md).
+- UI page/frame/region identity comes from `navigation::PageSpec`; the shared page host composes slots and orchestrates page motion, while component hosts retain their own motion. See [UI ownership](docs/ui-architecture-proposal.md#ownership-and-interfaces).
+- Keep handwritten source directories small and grouped by responsibility, with tests beside their owner. Preserve logical module/API boundaries when reorganizing physical paths; do not add wrapper modules or crates just to reduce directory counts.
 - Keep persistent Instances, Profiles and Accounts separate from transient LaunchPlans. Preparation instructions are secret-free; bind current authentication only when producing a transient execution plan.
 - Preserve the independent per-game supervisor's ownership of its accepted plan, game-directory lock and Java child. Closing the launcher must not terminate an accepted game; explicit Stop is a different operation. Microsoft authentication remains in the launcher. See [session supervision](docs/session-supervisor.md).
 
@@ -21,6 +24,7 @@
 - Keep platform, CPU architecture, Minecraft version and Loader evidence explicit. Do not generalize a host result to other targets. Use [current status](docs/STATUS.md) for recorded compatibility limits, not assumptions.
 - Tests should protect observable contracts against credible regressions. Extend existing coverage before duplicating it, exercise the real implementation rather than a copy, and confirm regression tests fail before the fix when practical. Prefer established dependency boundaries over test-only production interfaces.
 - For UI changes, verify the actual native behavior affected. Use semantic theme roles rather than borrowing visually similar tokens; fix layout or font-metric causes rather than hiding clipping with cosmetic offsets. Record any native verification that could not be performed.
+- Run native UI verification on Linux ARM64. Another host's build, tests or screenshots do not replace that UI evidence.
 
 ## Maintaining these instructions
 

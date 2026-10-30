@@ -1,0 +1,3 @@
+# Bound individual review units; cognitive complexity separately limits nesting.
+# See README.md § Lint policy for module and crate boundaries.
+too-many-lines-threshold = 200

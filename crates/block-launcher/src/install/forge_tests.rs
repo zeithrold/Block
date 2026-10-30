@@ -5,7 +5,7 @@ use serde_json::json;
 use sha1::{Digest as _, Sha1};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-use crate::{Store, resolver::ResolveContext};
+use crate::{Store, manifest::model::VersionManifest, resolver::ResolveContext};
 
 fn context(path: &Path, offline: bool, retries: u32) -> anyhow::Result<ResolveContext> {
     Ok(ResolveContext {
@@ -264,13 +264,12 @@ async fn legacy_v1_and_backported_v2_install_without_running_java_and_repair_cor
         let root = tempfile::tempdir()?;
         let context = context(root.path(), false, 0)?;
         let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../minecraft-manifest/tests/fixtures/official/versions");
+            .join("tests/fixtures/manifests/official/versions");
         let path = std::fs::read_dir(fixture_root)?
             .next()
             .context("manifest fixture")??
             .path();
-        let mut base: minecraft_manifest::model::VersionManifest =
-            serde_json::from_slice(&std::fs::read(path)?)?;
+        let mut base: VersionManifest = serde_json::from_slice(&std::fs::read(path)?)?;
         base.id = game.into();
         let client = b"base client fixture";
         base.downloads.client.sha1 = format!("{:x}", Sha1::digest(client));
@@ -311,7 +310,7 @@ async fn legacy_v1_and_backported_v2_install_without_running_java_and_repair_cor
             continue;
         }
         let installed = result?;
-        let manifest: minecraft_manifest::model::VersionManifest =
+        let manifest: VersionManifest =
             serde_json::from_slice(&std::fs::read(&installed.manifest_path)?)?;
         assert_eq!(manifest.main_class, "net.minecraft.launchwrapper.Launch");
         assert!(manifest.arguments.is_none());

@@ -3,11 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use minecraft_manifest::{decode, resources::AssetObjects};
-
 use super::{JavaExecutable, PrepareAction, plan_runtime};
 use crate::{
     azul::{ArchiveKind, ZuluRuntime},
+    manifest::{decode, resources::AssetObjects},
     platform::{Architecture, OperatingSystem, Target},
     recipe::{Compatibility, LaunchRecipe, ParsedRecipe, RecipeSource, RuntimeSelection},
     resolver::{ManagedRuntime, ResolvedMetadata},
@@ -15,7 +14,7 @@ use crate::{
 };
 
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../minecraft-manifest/tests/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests")
 }
 
 fn recipe() -> LaunchRecipe {

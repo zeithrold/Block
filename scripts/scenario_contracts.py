@@ -12,9 +12,10 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCENARIO_SOURCE = ROOT / "crates/block-ui/src/scenarios.rs"
+SCENARIO_SOURCE = ROOT / "crates/block-ui/src/runtime/scenarios.rs"
 HOME_VIEWPORT = (360, 720)
 MANAGEMENT_VIEWPORT = (1152, 720)
+_WELCOME_FRAME_SCENARIOS = {"setup-welcome", "setup-import-sources", "setup-import-list"}
 
 
 def scenario_names(source: Path = SCENARIO_SOURCE) -> set[str]:
@@ -116,22 +117,14 @@ _add("settings-downloads", "Downloads & network", "Parallel downloads")
 _add("settings-socks5", "Downloads & network", "socks5h://127.0.0.1:1080")
 _add("settings-storage", "Storage", "Game storage", "Download cache")
 _add("about", "MINECRAFT: JAVA EDITION LAUNCHER", "Made for your next world.")
-_add("setup-welcome", "Welcome to Block", "Game setup")
+_add("setup-welcome", "Welcome Back", "Add an account and set up a game.", "Skip setup")
 _add("setup-overview", "Two steps and you're ready", "Account", "Game")
 _add("setup-overview-ready", "Two steps and you're ready", "Finish")
 _add("setup-game-choice", "Set up a game", "Recommended setup", "Custom setup")
 _add("setup-account", "Account", "Microsoft")
 _add("setup-game", "Create a game", "Minecraft")
-_add("setup-import-sources", "Import existing games", "Choose a folder")
-_add("setup-import-list", "Import existing games", "Import")
-
-_add("welcome-1", "Welcome to Block", "Game setup")
-_add("welcome-2", "Welcome to Block", "Account")
-_add("welcome-3", "Welcome to Block", "Review")
-_add("welcome-version-picker", "Welcome to Block", "Search versions")
-_add("welcome-settings", "General", "Make Block feel at home.")
-_add("welcome-about", "MINECRAFT: JAVA EDITION LAUNCHER", "Made for your next world.")
-_add("welcome-settings", "General", "Appearance")
+_add("setup-import-sources", "Import games", "Choose a source.")
+_add("setup-import-list", "Minecraft Launcher", "Select games to copy.")
 
 
 def _window_title(name: str) -> str:
@@ -143,12 +136,18 @@ def _window_title(name: str) -> str:
         page = "Instance settings"
     elif name.startswith("wizard-"):
         page = "Create a game"
-    elif name.startswith("settings-") or name == "welcome-settings":
+    elif name.startswith("settings-"):
         page = "Settings"
-    elif name in {"about", "welcome-about"}:
+    elif name == "about":
         page = "About Block"
-    elif name.startswith("welcome-") or name.startswith("setup-"):
-        page = "Welcome to Block"
+    elif name == "setup-account":
+        page = "Accounts"
+    elif name == "setup-game":
+        page = "Create a game"
+    elif name == "setup-game-choice":
+        page = "Set up a game"
+    elif name.startswith("setup-"):
+        page = "Set up Block"
     elif name.startswith("accounts-") or name == "remove-account-confirmation":
         page = "Accounts"
     elif name.startswith("home-") or name.startswith("toast-") or name == "download-files":
@@ -171,7 +170,12 @@ def contract(name: str) -> dict[str, object]:
     required = _REQUIRED.get(name)
     if required is None:
         raise KeyError(f"native scenario has no visual contract: {name}")
-    home = name.startswith("home-") or name.startswith("toast-") or name in {"download-files"}
+    home = (
+        name.startswith("home-")
+        or name.startswith("toast-")
+        or name == "download-files"
+        or name in _WELCOME_FRAME_SCENARIOS
+    )
     return {
         "title": _window_title(name),
         "viewport": HOME_VIEWPORT if home else MANAGEMENT_VIEWPORT,

@@ -6,6 +6,7 @@ use crate::{
     executor::{ExecutionSink, Executor},
     install::neoforge::{self, InstalledLoader},
     launch::{LaunchExecutor, LaunchPlan},
+    manifest::model::VersionManifest,
     plan::{ExecutionPlan, JavaExecutable, compile},
     recipe::{LaunchRecipe, RecipeSource},
     resolver::{ResolveContext, resolve},
@@ -366,7 +367,7 @@ fn apply_profile_arguments(
     plan: &mut ExecutionPlan,
     instance: &Instance,
     profile: &Profile,
-    manifest: &minecraft_manifest::model::VersionManifest,
+    manifest: &VersionManifest,
 ) -> anyhow::Result<()> {
     let server = profile.server.launch_arguments(manifest)?;
     plan.command
@@ -378,7 +379,7 @@ fn apply_profile_arguments(
 
 fn adapt(
     plan: &mut ExecutionPlan,
-    manifest: &minecraft_manifest::model::VersionManifest,
+    manifest: &VersionManifest,
     target: &LaunchTarget,
     path: &Path,
 ) -> anyhow::Result<()> {
@@ -444,6 +445,11 @@ async fn resolve_for_host(
 mod instance_defaults_tests {
     use crate::{
         catalog::{Catalog, InstanceConfiguration, InstanceSettings},
+        manifest::{
+            decode,
+            model::{VersionIndex, VersionType},
+            resources::AssetObjects,
+        },
         platform::Target,
         recipe::{ParsedRecipe, RecipeSource, RuntimeSelection},
         resolver::ResolvedMetadata,
@@ -451,10 +457,6 @@ mod instance_defaults_tests {
     use std::{collections::BTreeMap, path::Path};
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "The integration follows persisted defaults through production compilation and installed-manifest Quick Play rejection."
-    )]
     fn persisted_defaults_feed_the_real_recipe_and_compiled_launch_arguments() -> anyhow::Result<()>
     {
         let root = tempfile::tempdir()?;
@@ -483,10 +485,10 @@ mod instance_defaults_tests {
         catalog.save_profile(profile.clone())?;
         let state = catalog.snapshot()?;
         let (instance, profile, _) = state.selection(&profile.id)?;
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../minecraft-manifest/tests/fixtures/official");
-        let index: minecraft_manifest::model::VersionIndex =
-            minecraft_manifest::decode(&std::fs::read(fixtures.join("version_manifest_v2.json"))?)?;
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/official");
+        let index: VersionIndex =
+            decode(&std::fs::read(fixtures.join("version_manifest_v2.json"))?)?;
         let entry = index
             .versions
             .iter()
@@ -505,7 +507,7 @@ mod instance_defaults_tests {
         assert!(matches!(&recipe.runtime, RuntimeSelection::Local { java: path } if path == &java));
         let metadata = ResolvedMetadata {
             parsed: ParsedRecipe {
-                manifest: minecraft_manifest::decode(&std::fs::read(fixture)?)?,
+                manifest: decode(&std::fs::read(fixture)?)?,
                 manifest_sha1: "0".repeat(40),
             },
             // Compilation logic is host-independent; pin the reviewed fixture to
@@ -515,7 +517,7 @@ mod instance_defaults_tests {
                 arch: crate::platform::Architecture::X86_64,
                 os_version: "6.0".into(),
             },
-            assets: minecraft_manifest::resources::AssetObjects {
+            assets: AssetObjects {
                 objects: BTreeMap::new(),
                 virtual_layout: None,
                 map_to_resources: None,
@@ -581,7 +583,7 @@ mod instance_defaults_tests {
             1
         );
         // Versions that predate Quick Play receive the legacy server arguments.
-        let legacy = minecraft_manifest::decode(&std::fs::read(fixtures.join("../1.12.2.json"))?)?;
+        let legacy = decode(&std::fs::read(fixtures.join("../1.12.2.json"))?)?;
         let mut legacy_plan = crate::plan::compile(&recipe, &metadata)?;
         super::apply_profile_arguments(&mut legacy_plan, instance, quick_play, &legacy)?;
         assert!(legacy_plan.command.game_args.ends_with(&[
@@ -593,7 +595,7 @@ mod instance_defaults_tests {
         // An official pre-release client accepts neither form; a failed
         // connection decision leaves the compiled plan untouched.
         let mut beta = legacy.clone();
-        beta.kind = minecraft_manifest::model::VersionType::OldBeta;
+        beta.kind = VersionType::OldBeta;
         let mut beta_plan = crate::plan::compile(&recipe, &metadata)?;
         let before = beta_plan.command.game_args.clone();
         assert!(

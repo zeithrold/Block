@@ -70,7 +70,7 @@ def image_size(path: Path) -> dict[str, int]:
     return {"width": width, "height": height}
 
 
-def scenario_names(source: Path = ROOT / "crates/block-ui/src/scenarios.rs") -> set[str]:
+def scenario_names(source: Path = ROOT / "crates/block-ui/src/runtime/scenarios.rs") -> set[str]:
     match = re.search(r"pub const SCENARIOS: &\[&str\] = &\[(.*?)\n\];", source.read_text(), re.S)
     if not match:
         raise ValueError(f"could not read SCENARIOS from {source}")

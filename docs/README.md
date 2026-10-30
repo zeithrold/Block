@@ -27,6 +27,7 @@ These documents explain feature decisions and implementation scope. Consult
 [next tasks](next-tasks.md) for which remaining work is currently scheduled.
 
 - [UI refinement plan](ui-refinement-plan.md): the first Milestone III interaction package.
+- [UI and crate boundaries](ui-architecture-proposal.md): manifest ownership, typed navigation and shared page layouts.
 - [Home and management frame](home-management-frame.md): dimensions, navigation and shell transitions.
 - [Toast and Drawer implementation](toast-drawer-implementation.md): behavior and timing.
 - [First-run onboarding](onboarding-implementation-plan.md): agreed flow, implementation and review.
@@ -36,6 +37,7 @@ These documents explain feature decisions and implementation scope. Consult
 
 ### UI and native interaction
 
+- [Architecture migration verification](architecture-migration-verification.md): crate migration, Welcome retirement, OptiFine entry and page-host checks.
 - [Evidence calibration](evidence-calibration.md): corrected account/scenario captures and comparison semantics.
 - [Visual review cases](visual-review-cases.json): machine-readable scenario/reference mapping used by the review tools.
 - [Drawer motion comparison](drawer-motion-comparison.md): frame measurements and reproduction.

@@ -42,15 +42,15 @@ test:
 
 # Download the current official Minecraft indexes and version metadata.
 manifest-fetch:
-    cargo run --locked --package minecraft-manifest --bin manifest-audit -- fetch
+    cargo run --locked --package block-cli --bin manifest-audit -- fetch
 
 # Recreate the recorded experiment using its pinned official index snapshot.
 manifest-fetch-snapshot:
-    cargo run --locked --package minecraft-manifest --bin manifest-audit -- fetch-snapshot
+    cargo run --locked --package block-cli --bin manifest-audit -- fetch-snapshot
 
 # Run the complete official corpus through Cargo integration tests, offline.
 manifest-verify:
-    cargo test --locked --package minecraft-manifest --test official_manifests
+    cargo test --locked --package block-launcher --test official_manifests
 
 # Run the complete verification suite in order.
 check:

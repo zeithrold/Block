@@ -18,7 +18,6 @@ unicode-segmentation.workspace = true
 tempfile.workspace = true
 block-launcher.workspace = true
 directories.workspace = true
-minecraft-manifest.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 toml.workspace = true

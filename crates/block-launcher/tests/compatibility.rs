@@ -10,20 +10,20 @@ use block_download::{Resource, Store};
 use block_launcher::{
     CancellationToken,
     command::JavaCommand,
+    manifest::{
+        decode,
+        model::{VersionIndex, VersionManifest},
+    },
     plan::compile,
     platform::{Architecture, OperatingSystem, Target},
     recipe::{Compatibility, LaunchRecipe, RecipeSource, RuntimeSelection},
     resolver::{ResolveContext, resolve},
     session::OfflineSession,
 };
-use minecraft_manifest::{
-    decode,
-    model::{VersionIndex, VersionManifest},
-};
 use sha1::{Digest as _, Sha1};
 
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../minecraft-manifest/tests/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests")
 }
 
 fn manifest(version: &str) -> anyhow::Result<(PathBuf, VersionManifest)> {

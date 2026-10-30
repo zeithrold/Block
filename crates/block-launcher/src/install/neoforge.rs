@@ -14,11 +14,11 @@ use std::{
 
 use anyhow::{Context as _, ensure};
 use block_download::Resource;
-use minecraft_manifest::model::{Argument, Library, VersionManifest};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
 
 use crate::{
+    manifest::model::{Argument, Library, VersionManifest},
     plan::{ExecutionPlan, PrepareAction},
     resolver::{ResolveContext, download_resource},
 };

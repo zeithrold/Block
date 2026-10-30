@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/block-app", "crates/block-ui", "crates/minecraft-manifest", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth", "crates/block-drop"]
+members = ["crates/block-app", "crates/block-ui", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth", "crates/block-drop"]
 default-members = ["crates/block-app"]
 resolver = "3"
 
@@ -31,7 +31,6 @@ sha1 = "0.10"
 tempfile = "3"
 block-download = { path = "crates/block-download" }
 block-launcher = { path = "crates/block-launcher" }
-minecraft-manifest = { path = "crates/minecraft-manifest" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std", "process", "sync", "time", "signal", "net"] }
 interprocess = { version = "2.4.6", features = ["tokio"] }
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -58,10 +57,13 @@ unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+cognitive_complexity = "warn"
 dbg_macro = "deny"
 expect_used = "deny"
+match_same_arms = "warn"
 panic = "deny"
 todo = "deny"
+too_many_lines = "warn"
 unimplemented = "deny"
 unwrap_used = "deny"
 wildcard_imports = "deny"

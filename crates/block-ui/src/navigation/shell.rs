@@ -1,0 +1,1272 @@
+#![expect(
+    clippy::redundant_pub_crate,
+    reason = "Keep private UI modules scoped to their parent."
+)]
+//! Native product shell, keeping page, detail and drawer animation lifetimes independent.
+use std::{
+    cell::RefCell,
+    sync::{Arc, LazyLock},
+};
+
+use gpui::{
+    AnyElement, Context, Image, ImageFormat, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, WindowControlArea,
+    div, img, px, rgb,
+};
+
+use super::{Block, Form, Tab, UiAction, account_id, note, scroll_area::ScrollAreaExt as _};
+
+static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
+    Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!("../../assets/block.png").to_vec(),
+    ))
+});
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Drawer {
+    ImportGames,
+    Menu,
+    Accounts,
+    Profiles,
+    Downloads,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum Surface {
+    Drawer(Drawer),
+    DownloadFiles(super::downloads::DownloadGroup),
+    DeleteProfile(String),
+    RemoveAccount(String),
+    RemoveProvider(String),
+    SeparateProfiles,
+    GamesHelp,
+    WizardSection(super::WizardPage),
+    AuthProviderAdd,
+    Select(super::select::SelectState<UiAction>),
+}
+
+/// The library overlay that presents a surface inside the product window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OverlayPresentation {
+    Dialog,
+    Sheet,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ShellState {
+    pub wizard_entrance: super::wizard_entrance::WizardEntrance,
+    pub first_run: super::first_run::State,
+    pub import_games: super::import_games::State,
+    pub surfaces: super::overlays::Overlays,
+    pub connection: super::connection_test::State,
+    pub storage: super::settings::StorageState,
+    pub downloads: super::downloads::State,
+    pub home_scroll: gpui::ScrollHandle,
+    pub home: RefCell<HomeState>,
+    pub about_scroll: gpui::ScrollHandle,
+    pub help_scroll: gpui::ScrollHandle,
+    pub output_scroll: gpui::ScrollHandle,
+    pub toast: Option<super::feedback::Toast>,
+    pub pending_toasts: Vec<super::feedback::Toast>,
+    pub auth: Option<super::authentication::AuthWizard>,
+    pub editor: super::profile_editor::EditorState,
+    pub instance_editor: Option<super::instance_editor::InstanceEditor>,
+    pub games: super::browser::CollectionState,
+    pub profiles: super::browser::CollectionState,
+    pub accounts: super::browser::CollectionState,
+    pub providers: super::providers::State,
+    pub selector: Option<super::search_selector::SearchSelectorState>,
+    pub revision: usize,
+    pub backwards: bool,
+    pub settings_page: u8,
+    pub wizard: super::game_wizard::WizardState,
+    pub onboarding: super::onboarding::State,
+    pub chrome_dragging: bool,
+}
+
+/// Retain only the last truthful panel presentation through its local exit.
+/// Changing text or byte counts never changes the disclosure's open identity.
+#[derive(Clone, Debug, Default)]
+pub(super) struct HomeState {
+    disclosure: super::motion::Disclosure,
+    panel: Option<HomePanel>,
+    pub(super) avatar_hover: super::motion::HoverDecoration,
+}
+
+#[derive(Clone, Debug)]
+struct HomePanel {
+    phase: &'static str,
+    status: String,
+    resource: Option<(u64, Option<u64>)>,
+    verified: usize,
+}
+
+impl HomeState {
+    fn reconcile(
+        &mut self,
+        panel: Option<HomePanel>,
+        now: std::time::Instant,
+        preferences: super::motion::Preferences,
+    ) {
+        self.disclosure.set_open(panel.is_some(), now, preferences);
+        if panel.is_some() {
+            self.panel = panel;
+        }
+    }
+}
+
+impl ShellState {
+    #[cfg(test)]
+    pub(super) fn drawer(&self) -> Option<Drawer> {
+        self.surfaces.top().and_then(|layer| match layer.kind {
+            Surface::Drawer(drawer) => Some(drawer),
+            Surface::Select(ref state) if state.menu == Some(super::select::MenuKind::App) => {
+                Some(Drawer::Menu)
+            }
+            Surface::DownloadFiles(_)
+            | Surface::DeleteProfile(_)
+            | Surface::RemoveAccount(_)
+            | Surface::RemoveProvider(_)
+            | Surface::SeparateProfiles
+            | Surface::GamesHelp
+            | Surface::WizardSection(_)
+            | Surface::AuthProviderAdd
+            | Surface::Select(_) => None,
+        })
+    }
+}
+
+pub(super) fn brand(size: f32) -> impl IntoElement {
+    img(BRAND.clone()).size(px(size))
+}
+
+impl Block {
+    pub(super) fn wizard_task_active(&self) -> bool {
+        self.page_spec().task
+    }
+
+    pub(super) fn render_shell(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> impl IntoElement + use<> {
+        let home = self.router.tab() == Tab::Home && self.form.is_none();
+        let content = self.render_frame_body(window, cx);
+        let mut root = div()
+            .id("block-shell")
+            .debug_selector(|| "block-shell".into())
+            .key_context("LauncherForm")
+            .track_focus(&self.focus)
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
+            )
+            .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    // Base Dialog owns Escape while a surface is mounted.
+                    if !view.shell.surfaces.is_open() {
+                        if view.shell.auth.is_some() {
+                            view.handle(UiAction::AuthCancel, window, cx);
+                            cx.stop_propagation();
+                        } else if view.shell.instance_editor.is_some() {
+                            view.handle(UiAction::CancelInstanceSettings, window, cx);
+                            cx.stop_propagation();
+                        } else if view.form.is_some() {
+                            view.handle(UiAction::CancelForm, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }
+                }
+            }))
+            .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
+                if !view.motion.frame.active() {
+                    view.move_focus(false, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
+                if !view.motion.frame.active() {
+                    view.move_focus(true, window, cx);
+                }
+            }))
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .bg(rgb(self.palette.background))
+            .text_color(rgb(self.palette.foreground))
+            .text_size(px(14.))
+            .font_family(super::design::FONT_FAMILY)
+            .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
+            .child(div().flex_1().min_h_0().child(content));
+        root = root.children(self.render_popups(cx));
+        root
+    }
+
+    pub(super) fn navigation_title(&self) -> &'static str {
+        let page = self.page_spec().page;
+        if page == super::navigation::Page::Authentication {
+            return "Accounts";
+        }
+        if page == super::navigation::Page::Providers {
+            return "Authlib providers";
+        }
+        if self.shell.instance_editor.is_some() {
+            return "Instance settings";
+        }
+        match &self.form {
+            Some(Form::Profile(_)) => match self.shell.editor.page {
+                Some(super::profile_editor::EditorPage::Appearance) => "Profile appearance",
+                Some(super::profile_editor::EditorPage::Data) => "Data and account",
+                Some(super::profile_editor::EditorPage::Launch) | None => "Launch settings",
+            },
+            Some(Form::Instance(_))
+                if page == super::navigation::Page::GameWizard
+                    && self.router.tab() != Tab::Onboarding =>
+            {
+                "Create a game"
+            }
+            _ => match self.router.tab() {
+                Tab::Home => "Block",
+                Tab::Onboarding if self.shell.first_run.enabled => match self.shell.first_run.stage
+                {
+                    super::first_run::Stage::Welcome | super::first_run::Stage::Overview => {
+                        "Set up Block"
+                    }
+                    super::first_run::Stage::GameChoice => "Set up a game",
+                    super::first_run::Stage::GameWizard => "Create a game",
+                },
+                Tab::Onboarding => "Set up Block",
+                Tab::Instances | Tab::Profiles => "Games",
+                Tab::Accounts => "Accounts",
+                Tab::Settings => "Settings",
+                Tab::About => "About Block",
+            },
+        }
+    }
+
+    /// Window-chrome icon button: the same Ghost geometry as minimize/close so
+    /// chrome never mixes an outlined action with the window controls.
+    fn chrome_icon_button(
+        &self,
+        id: &'static str,
+        action: UiAction,
+        icon: impl IntoElement,
+        label: &'static str,
+        cx: &Context<'_, Self>,
+    ) -> super::components::Control {
+        self.button_with_variant(id, "", action, super::components::ButtonVariant::Ghost, cx)
+            .aria_label(label)
+            .w(px(32.))
+            .h(px(32.))
+            .px_0()
+            .justify_center()
+            .child(icon)
+    }
+
+    fn chrome(
+        &self,
+        _window: &Window,
+        home: bool,
+        cx: &Context<'_, Self>,
+    ) -> impl IntoElement + use<> {
+        let first_run = self.setup_incomplete() && self.shell.first_run.enabled;
+        let task = self.wizard_task_active();
+        let title = if home
+            || first_run && self.shell.first_run.stage == super::first_run::Stage::Welcome
+        {
+            ""
+        } else {
+            self.navigation_title()
+        };
+        div()
+            .id("window-chrome")
+            .h(px(super::design::CHROME_HEIGHT))
+            .relative()
+            .flex_shrink_0()
+            .px_4()
+            .pl(px(16.))
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left(px(16.))
+                    .right(px(16.))
+                    .h(px(1.))
+                    .bg(rgb(self.palette.border)),
+            )
+            .child(if task {
+                let action = if self.shell.auth.is_some() {
+                    UiAction::AuthCancel
+                } else if first_run {
+                    UiAction::FirstRun(super::first_run::Action::Back)
+                } else {
+                    UiAction::CancelForm
+                };
+                super::tooltip::trigger(
+                    self.chrome_icon_button(
+                        "task-close",
+                        action,
+                        super::design::Icon::ChevronDown.render(16., self.palette.muted),
+                        "Close setup",
+                        cx,
+                    ),
+                    "Close setup",
+                    cx,
+                )
+                .into_any_element()
+            } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
+                super::tooltip::trigger(
+                    self.chrome_icon_button(
+                        "setup-back-welcome",
+                        UiAction::FirstRun(super::first_run::Action::BackToWelcome),
+                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                        "Back to welcome",
+                        cx,
+                    ),
+                    "Back to welcome",
+                    cx,
+                )
+                .into_any_element()
+            } else if first_run {
+                div().w(px(32.)).into_any_element()
+            } else {
+                self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
+                    .child(super::design::Icon::Menu.render(18., self.palette.muted))
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .id("window-title")
+                    .debug_selector(|| "window-title".into())
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .min_w_0()
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.shell.chrome_dragging = true),
+                    )
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
+                    )
+                    .on_mouse_move(
+                        cx.listener(|view, event: &gpui::MouseMoveEvent, window, _| {
+                            if view.shell.chrome_dragging
+                                && event.pressed_button == Some(gpui::MouseButton::Left)
+                            {
+                                view.shell.chrome_dragging = false;
+                                window.start_window_move();
+                            } else if event.pressed_button.is_none() {
+                                view.shell.chrome_dragging = false;
+                            }
+                        }),
+                    )
+                    .child(div().truncate().text_sm().child(title)),
+            )
+            .children((!first_run).then(|| {
+                if home {
+                    div()
+                        .children((self.busy && self.downloads.is_some()).then(|| {
+                            super::tooltip::trigger(
+                                self.button(
+                                    "downloads",
+                                    "",
+                                    UiAction::Drawer(Some(Drawer::Downloads)),
+                                    cx,
+                                )
+                                .child(
+                                    super::components::progress_ring(
+                                        super::components::ProgressState::Indeterminate,
+                                        self.palette,
+                                    ),
+                                ),
+                                "View downloads",
+                                cx,
+                            )
+                        }))
+                        .into_any_element()
+                } else {
+                    div().into_any_element()
+                }
+            }))
+            .child(self.chrome_icon_button(
+                "window-minimize",
+                UiAction::MinimizeWindow,
+                super::design::Icon::Minus.render(16., self.palette.muted),
+                "Minimize Block",
+                cx,
+            ))
+            .child(self.chrome_icon_button(
+                "window-close",
+                UiAction::CloseWindow,
+                super::design::Icon::Close.render(16., self.palette.muted),
+                "Close Block",
+                cx,
+            ))
+    }
+
+    pub(super) fn home(&self, window: &Window, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        let account = self
+            .accounts
+            .iter()
+            .find(|account| Some(account_id(account)) == self.selected_account);
+
+        let mut content = div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .px_6()
+            .pb_6()
+            .gap_0()
+            .child(self.home_identity(account, window, cx))
+            .children(
+                (!matches!(
+                    self.status.as_str(),
+                    "Welcome to Block" | "UI scenario fixture"
+                ))
+                .then(|| {
+                    div()
+                        .id("home-status")
+                        .mb_3()
+                        .text_xs()
+                        .text_color(rgb(self.palette.muted))
+                        .child(self.status.clone())
+                }),
+            );
+        content = content.child(self.home_task(window, cx));
+        // While an install/repair runs the Play action queues instead of
+        // disappearing, so the user can ask for a launch without waiting.
+        let queue_play = self.play_queue_eligible() && account.is_some();
+        if self.busy && !queue_play {
+            return content.into_any_element();
+        }
+        let profile = self.profile();
+        let (label, action) = if queue_play {
+            (
+                if self.pending_play {
+                    "Launch queued"
+                } else {
+                    "Queue launch"
+                },
+                UiAction::Play,
+            )
+        } else {
+            match profile.and_then(|profile| self.snapshot.selection(&profile.id).ok()) {
+                Some((_, _, target)) => match &target.status {
+                    block_launcher::catalog::InstallStatus::Ready if account.is_none() => {
+                        ("Sign in to play", UiAction::SignIn)
+                    }
+                    block_launcher::catalog::InstallStatus::Ready => ("Launch", UiAction::Play),
+                    block_launcher::catalog::InstallStatus::Failed { .. } => {
+                        ("Retry download", UiAction::Repair)
+                    }
+                    block_launcher::catalog::InstallStatus::Pending
+                    | block_launcher::catalog::InstallStatus::Installing => {
+                        ("Download", UiAction::Repair)
+                    }
+                },
+                None if profile.is_some() => ("Repair game", UiAction::Repair),
+                None => ("Create game", UiAction::CreateInstance),
+            }
+        };
+        if account.is_none() && matches!(action, UiAction::SignIn | UiAction::CreateInstance) {
+            return content.into_any_element();
+        }
+        let description = if queue_play {
+            if self.pending_play {
+                "Starts as soon as the install finishes".to_owned()
+            } else {
+                "Starts after the current install finishes".to_owned()
+            }
+        } else {
+            profile
+                .map_or("Start a new adventure", |profile| profile.name.as_str())
+                .to_owned()
+        };
+        let icon = match &action {
+            UiAction::Play => super::design::Icon::Play,
+            UiAction::SignIn => super::design::Icon::Account,
+            UiAction::CreateInstance => super::design::Icon::Plus,
+            _ => super::design::Icon::Download,
+        };
+        // The Home action stays primary when its command becomes Create,
+        // Repair or Download; changing only the idle fill leaves Outline's
+        // hover/pressed colors behind.
+        let primary = self
+            .button_with_variant(
+                "home-play",
+                "",
+                action,
+                super::components::ButtonVariant::Primary,
+                cx,
+            )
+            .w_full()
+            .min_w_0()
+            .h(px(80.))
+            .rounded_xl()
+            .px_5()
+            .pr(px(76.))
+            .items_center()
+            .justify_start()
+            .text_xl()
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(icon.render(20., self.palette.on_primary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap_1()
+                            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(label))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .text_color(rgb(self.palette.on_primary).opacity(0.65))
+                                    .truncate()
+                                    .child(description.clone()),
+                            ),
+                    ),
+            );
+        let tooltip = self.home_version().unwrap_or(description);
+        content = content.child(
+            div()
+                .relative()
+                .mt_3()
+                .h(px(80.))
+                .flex_shrink_0()
+                .child(super::tooltip::trigger(primary, tooltip, cx))
+                .child(
+                    self.button(
+                        "home-profiles",
+                        "",
+                        UiAction::Drawer(Some(Drawer::Profiles)),
+                        cx,
+                    )
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .w(px(56.))
+                    .h_full()
+                    .rounded_xl()
+                    .border_0()
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(24.))
+                            .bottom(px(24.))
+                            .w(px(1.))
+                            .bg(rgb(self.palette.on_primary))
+                            .opacity(0.2),
+                    )
+                    .child(super::design::Icon::ChevronDown.render(20., self.palette.on_primary)),
+                ),
+        );
+        content.into_any_element()
+    }
+
+    fn home_identity(
+        &self,
+        account: Option<&block_auth::Account>,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
+        let name = account.map_or("Welcome to Block", |account| account.player_name.as_str());
+        let avatar = account.and_then(|account| self.account_avatars.get(&account_id(account)));
+        let has_account = account.is_some();
+        let mut identity = div()
+            .id(if account.is_some() {
+                "home-player"
+            } else {
+                "home-empty"
+            })
+            .debug_selector(move || {
+                if has_account {
+                    "home-player".into()
+                } else {
+                    "home-empty".into()
+                }
+            })
+            .flex_1()
+            .min_h_0()
+            .scroll_area(&self.shell.home_scroll, "Player", self.palette, false)
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap_6()
+            .text_center();
+        if let Some(account) = account {
+            let provider = self.account_authority(account);
+            let palette = self.palette;
+
+            identity = identity
+                .child(
+                    div()
+                        .max_w_full()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .max_w_full()
+                                .truncate()
+                                .child(name.to_owned()),
+                        )
+                        .child(
+                            div()
+                                .id("home-account-type")
+                                .debug_selector(|| "home-account-type".into())
+                                .child(
+                                    super::components::badge(
+                                        provider,
+                                        palette,
+                                        super::components::BadgeVariant::Info,
+                                    )
+                                    .h(px(24.))
+                                    .border_0(),
+                                ),
+                        ),
+                )
+                .child(self.home_avatar(name, avatar, window, cx));
+        } else {
+            identity = identity
+                .child(super::design::Icon::Account.render(40., self.palette.muted))
+                .child(div().text_2xl().child(name.to_owned()))
+                .child(note("Add an account to start your next adventure."))
+                .child(
+                    self.button("home-sign-in", "Add account", UiAction::SignIn, cx)
+                        .bg(rgb(self.palette.primary))
+                        .text_color(rgb(self.palette.on_primary)),
+                );
+        }
+        identity
+    }
+
+    fn home_avatar(
+        &self,
+        name: &str,
+        avatar: Option<&super::components::AccountAvatar>,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> impl IntoElement + use<> {
+        let palette = self.palette;
+        let avatar_size = (super::design::SIDEBAR_WIDTH - 48.) * 0.45;
+        let (hover, hover_running) = self
+            .shell
+            .home
+            .borrow()
+            .avatar_hover
+            .sample(cx.background_executor().now(), self.motion_preferences());
+        if hover_running {
+            window.request_animation_frame();
+        }
+        let avatar = self
+            .button(
+                "account-avatar",
+                "",
+                UiAction::Drawer(Some(Drawer::Accounts)),
+                cx,
+            )
+            .h_auto()
+            .rounded_xl()
+            .p_0()
+            .border_0()
+            .bg(gpui::hsla(0., 0., 0., 0.))
+            .child(
+                super::components::account_avatar(
+                    name,
+                    avatar,
+                    palette,
+                    avatar_size,
+                    super::components::AvatarState::Fallback,
+                )
+                .rounded_2xl()
+                .text_size(px(36.)),
+            );
+        div()
+            .id("home-avatar-halo")
+            .relative()
+            .on_hover(cx.listener(|view, hovered: &bool, _, cx| {
+                view.shell.home.borrow_mut().avatar_hover.set_hovered(
+                    *hovered,
+                    cx.background_executor().now(),
+                    view.motion_preferences(),
+                );
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .absolute()
+                    .inset(px(-16.))
+                    .rounded_2xl()
+                    .bg(rgb(
+                        if palette.background == super::Palette::DARK.background {
+                            0x0026_2626
+                        } else {
+                            0x00e5_e5e5
+                        },
+                    ))
+                    .opacity(hover),
+            )
+            .child(super::tooltip::trigger(avatar, "Switch account", cx))
+    }
+
+    fn home_version(&self) -> Option<String> {
+        let profile = self.profile()?;
+        let (instance, _, target) = self.snapshot.selection(&profile.id).ok()?;
+        let kind = self
+            .version_catalog
+            .iter()
+            .find(|entry| entry.id == instance.minecraft_version)
+            .map(|entry| entry.kind);
+        let release = match kind {
+            Some(block_launcher::manifest::model::VersionType::Release) => "Stable release",
+            Some(block_launcher::manifest::model::VersionType::Snapshot) => "Snapshot",
+            Some(block_launcher::manifest::model::VersionType::OldBeta) => "Old beta",
+            Some(block_launcher::manifest::model::VersionType::OldAlpha) => "Old alpha",
+            None => "Type unverified",
+        };
+        let loader = target.display_name();
+        let description = format!(
+            "Minecraft {} · {release} · {loader}{}",
+            instance.minecraft_version,
+            if kind.is_none() {
+                ". Official release metadata is not available for this version."
+            } else {
+                ". Type verified by the official version catalog."
+            }
+        );
+
+        Some(description)
+    }
+
+    fn home_task(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
+        let mut state = self.shell.home.borrow_mut();
+        let observed = self.downloads.as_ref().map(|tracker| {
+            tracker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        });
+        let current = observed
+            .as_ref()
+            .and_then(|tracker| tracker.transfers().find(|file| !file.complete));
+        let stopping = self.can_stop()
+            && (self.cancel.is_cancelled()
+                || (self.play_stop.is_cancelled()
+                    && (self.active_run.is_some()
+                        || self.operation_kind == super::OperationKind::Launch)));
+        let phase = if stopping {
+            "Stopping"
+        } else if let Some(run) = &self.active_run {
+            match self.session_revisions.get(run).map(|revision| revision.1) {
+                Some(
+                    block_launcher::session_host::RunState::Starting
+                    | block_launcher::session_host::RunState::Preparing,
+                ) => "Preparing launch",
+                Some(block_launcher::session_host::RunState::MonitoringInterrupted) => {
+                    "Monitoring interrupted"
+                }
+                _ => "Running",
+            }
+        } else if current.is_some() {
+            "Downloading"
+        } else if self.operation_kind == super::OperationKind::Launch {
+            "Preparing launch"
+        } else if self.operation_kind == super::OperationKind::Install {
+            "Verifying installation"
+        } else {
+            "Working"
+        };
+        state.reconcile(
+            self.busy.then(|| HomePanel {
+                phase,
+                status: self.status.clone(),
+                resource: current.map(|file| (file.received, file.size)),
+                verified: self.completed,
+            }),
+            cx.background_executor().now(),
+            self.motion_preferences(),
+        );
+        let panel = state.panel.as_ref().map_or_else(
+            || div().into_any_element(),
+            |panel| self.home_task_content(panel, cx).into_any_element(),
+        );
+        super::motion::disclosure(
+            "home-task-motion",
+            &state.disclosure,
+            self.motion_preferences(),
+            panel,
+            window,
+            cx,
+        )
+        .debug_selector(|| "home-task-motion".into())
+        .flex_shrink_0()
+    }
+
+    fn home_task_content(
+        &self,
+        panel: &HomePanel,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Stateful<gpui::Div> {
+        let progress = panel.resource.map_or(
+            super::components::ProgressState::Indeterminate,
+            |(received, size)| super::components::ProgressState::from_counts(received, size),
+        );
+
+        div()
+            .id("home-task")
+            .debug_selector(|| "home-task".into())
+            .min_h(px(80.))
+            .w_full()
+            .rounded_xl()
+            .p_4()
+            .bg(rgb(self.palette.surface))
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("home-task-phase")
+                            .debug_selector(|| "home-task-phase".into())
+                            .text_sm()
+                            .child(panel.phase),
+                    )
+                    .child(div().text_xs().truncate().child(panel.status.clone()))
+                    .children(
+                        (panel.phase != "Running" && panel.phase != "Monitoring interrupted")
+                            .then(|| super::components::progress(progress, self.palette)),
+                    )
+                    .child(note(panel.resource.map_or_else(
+                        || {
+                            format!(
+                                "{} resources verified · overall total unknown",
+                                panel.verified
+                            )
+                        },
+                        |(received, size)| {
+                            format!(
+                                "Current resource: {received} / {} bytes",
+                                size.map_or_else(|| "unknown".into(), |size| size.to_string())
+                            )
+                        },
+                    ))),
+            )
+            .children(self.can_stop().then(|| {
+                self.button("home-stop", "", UiAction::Stop, cx)
+                    .child(super::design::Icon::Stop.render(14., self.palette.foreground))
+            }))
+    }
+
+    fn render_popups(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        self.shell
+            .surfaces
+            .layers()
+            .filter_map(|layer| {
+                let Surface::Select(state) = &layer.kind else {
+                    return None;
+                };
+                Some(
+                    gpui_base::Positioner::corner(gpui::Anchor::TopLeft, state.anchor)
+                        .margin(px(8.))
+                        .child(
+                            div()
+                                .id(("select-popup", layer.revision))
+                                .debug_selector(|| "drawer-sheet".into())
+                                .track_focus(&layer.focus)
+                                .key_context("LauncherForm")
+                                .on_mouse_down_out(cx.listener(|view, _, window, cx| {
+                                    view.handle(UiAction::Drawer(None), window, cx);
+                                }))
+                                .on_key_down(cx.listener(|view, event, window, cx| {
+                                    if view.select_key(event, window, cx) {
+                                        cx.stop_propagation();
+                                    } else if event.keystroke.key == "escape" {
+                                        view.handle(UiAction::Drawer(None), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }))
+                                .w(state.width)
+                                .max_h(px(696.))
+                                .p_1()
+                                .rounded_lg()
+                                .border_1()
+                                .border_color(rgb(self.palette.border))
+                                .bg(rgb(self.palette.popover))
+                                .child(self.select_options(state, cx)),
+                        )
+                        .into_any_element(),
+                )
+            })
+            .collect()
+    }
+
+    /// One overlay surface's body: notes and its action row. The dialog host
+    /// owns the title and chrome; every value comes from current state so a
+    /// confirmation that started an operation cannot keep stale buttons.
+    pub(super) fn render_surface_dialog_body(
+        &self,
+        revision: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        let kind = self
+            .shell
+            .surfaces
+            .layers()
+            .find(|layer| layer.revision == revision)
+            .map(|layer| layer.kind.clone());
+        let Some(kind) = kind else {
+            return div().into_any_element();
+        };
+        // Wizard sections bring their own headings, scrolling
+        // and actions; size the surface area like the old section window and
+        // keep the dialog footer outside that fixed content height.
+        let section_height = px(520.);
+        let (content, section) = match &kind {
+            Surface::WizardSection(_) => (
+                div()
+                    .min_h_0()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .h(section_height)
+                            .min_h_0()
+                            .w_full()
+                            .child(self.render_game_wizard_transition_body(window, cx)),
+                    )
+                    .child(
+                        super::patterns::management_footer(self.palette)
+                            .justify_end()
+                            .child(
+                                self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)
+                                    .w_auto(),
+                            )
+                            .child(
+                                self.button("section-done", "Done", UiAction::WizardPage(None), cx)
+                                    .w_auto(),
+                            ),
+                    ),
+                true,
+            ),
+            Surface::DownloadFiles(group) => (
+                div()
+                    .px(px(24.))
+                    .child(self.render_download_files_body(*group)),
+                false,
+            ),
+            Surface::GamesHelp => (div().px(px(24.)).child(self.render_games_help(cx)), false),
+            Surface::AuthProviderAdd => (
+                div()
+                    .px(px(24.))
+                    .pb(px(24.))
+                    .child(self.render_auth_provider_add(cx)),
+                true,
+            ),
+            _ => (
+                div()
+                    .px(px(24.))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
+                false,
+            ),
+        };
+        let content = content.w_full().flex().flex_col();
+        if section {
+            return content.into_any_element();
+        }
+        // The separator spans the dialog edge to edge, while the actions keep
+        // the same inset as the body.
+        content
+            .child(
+                div()
+                    .w_full()
+                    .mt_4()
+                    .pt_4()
+                    .pb_4()
+                    .border_t_1()
+                    .border_color(rgb(self.palette.border))
+                    .flex()
+                    .justify_end()
+                    .child(
+                        div()
+                            .px(px(24.))
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .children(self.surface_dialog_actions(&kind, cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Fixed content height for each sheet.
+    pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
+        match kind {
+            Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(),
+            Surface::Drawer(Drawer::Profiles) => {
+                ("Switch Profile", "Choose how you want to play.", 540.)
+            }
+            Surface::Drawer(Drawer::Accounts) => (
+                "Switch Account",
+                "Choose the account you want to use.",
+                540.,
+            ),
+            Surface::Drawer(Drawer::Downloads) => ("Downloads", "Track your download tasks.", 440.),
+            _ => ("", "", 440.),
+        }
+    }
+
+    /// The sheet body for a home drawer. The sheet host owns the title,
+    /// description, scrim, dismissal and focus; this renders the product list.
+    pub(super) fn render_surface_sheet_body(
+        &self,
+        kind: &Surface,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        match kind {
+            Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
+            Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
+                .size_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.render_selector_body(*drawer, window, cx))
+                .into_any_element(),
+            Surface::Drawer(Drawer::Downloads) => div()
+                .size_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.render_downloads_body(window, cx))
+                .into_any_element(),
+            _ => div().into_any_element(),
+        }
+    }
+
+    /// Name the exact record a confirmation removes when the catalog still
+    /// holds it, falling back to the surface's neutral title.
+    pub(super) fn surface_dialog_title(&self, kind: &Surface) -> String {
+        match kind {
+            Surface::DeleteProfile(id) => self
+                .snapshot
+                .profiles
+                .iter()
+                .find(|profile| &profile.id == id)
+                .map_or_else(
+                    || "Delete this profile?".to_owned(),
+                    |profile| format!("Delete {}?", profile.name),
+                ),
+            Surface::RemoveAccount(id) => self
+                .accounts
+                .iter()
+                .find(|account| &account_id(account) == id)
+                .map_or_else(
+                    || "Remove this account?".to_owned(),
+                    |account| format!("Remove {}?", account.player_name),
+                ),
+            Surface::RemoveProvider(_) => "Remove this provider?".to_owned(),
+            Surface::SeparateProfiles => "Enable separated profiles?".to_owned(),
+            _ => kind.title().to_owned(),
+        }
+    }
+
+    fn surface_dialog_notes(&self, kind: &Surface) -> Vec<String> {
+        match kind {
+            Surface::DeleteProfile(_) => vec![if self.snapshot.profile_mode
+                == block_launcher::catalog::ProfileMode::Bundled
+            {
+                "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.".to_owned()
+            } else {
+                "Only launch settings are removed. Worlds, game data and installation files stay on disk.".to_owned()
+            }],
+            Surface::RemoveAccount(_) => vec![
+                "This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it.".to_owned(),
+            ],
+            Surface::RemoveProvider(id) => vec![if self.provider_links(id) > 0 {
+                "This provider is used by saved accounts. Remove those accounts first.".to_owned()
+            } else {
+                "The saved provider and cached metadata are removed. Game files stay on disk.".to_owned()
+            }],
+            Surface::SeparateProfiles => vec![
+                "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.".to_owned(),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn surface_dialog_actions(
+        &self,
+        kind: &Surface,
+        cx: &Context<'_, Self>,
+    ) -> Vec<super::components::Control> {
+        if matches!(kind, Surface::GamesHelp) {
+            return vec![
+                self.surface_dialog_button(
+                    "games-help-settings",
+                    "Profile mode",
+                    Some(UiAction::ProfileModeSettings),
+                    SurfaceDialogTone::Outline,
+                    cx,
+                ),
+                self.surface_dialog_button(
+                    "close-drawer",
+                    "Close",
+                    None,
+                    SurfaceDialogTone::Outline,
+                    cx,
+                ),
+            ];
+        }
+        let (cancel_id, cancel_label, cancel_action, primary) = match kind {
+            Surface::DeleteProfile(_) => (
+                "close-drawer",
+                "Cancel",
+                None,
+                Some((
+                    "confirm-delete",
+                    "Delete profile",
+                    UiAction::ConfirmDelete,
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            Surface::RemoveAccount(id) => (
+                "close-drawer",
+                "Cancel",
+                None,
+                Some((
+                    "confirm-remove-account",
+                    "Remove account",
+                    UiAction::SignOut(id.clone()),
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            Surface::RemoveProvider(id) => {
+                let used = self.provider_links(id) > 0;
+                (
+                    "close-drawer",
+                    if used { "Close" } else { "Cancel" },
+                    None,
+                    (!used).then(|| {
+                        (
+                            "confirm-remove-provider",
+                            "Remove provider",
+                            UiAction::ProviderRemove(id.clone()),
+                            SurfaceDialogTone::Destructive,
+                        )
+                    }),
+                )
+            }
+            Surface::SeparateProfiles => (
+                "cancel-separate",
+                "Keep bundled mode",
+                Some(UiAction::ConfirmSeparate(false)),
+                Some((
+                    "confirm-separate",
+                    "Enable separated profiles",
+                    UiAction::SeparateProfiles,
+                    SurfaceDialogTone::Primary,
+                )),
+            ),
+            Surface::DownloadFiles(_) => ("downloads-back", "Back", None, None),
+            _ => ("close-drawer", "Close", None, None),
+        };
+        let mut actions = vec![self.surface_dialog_button(
+            cancel_id,
+            cancel_label,
+            cancel_action,
+            SurfaceDialogTone::Outline,
+            cx,
+        )];
+        if let Some((id, label, action, tone)) = primary {
+            actions.push(self.surface_dialog_button(id, label, Some(action), tone, cx));
+        }
+        actions
+    }
+
+    fn surface_dialog_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        action: Option<UiAction>,
+        tone: SurfaceDialogTone,
+        cx: &Context<'_, Self>,
+    ) -> super::components::Control {
+        let variant = match tone {
+            SurfaceDialogTone::Primary => super::components::ButtonVariant::Primary,
+            SurfaceDialogTone::Destructive => super::components::ButtonVariant::Destructive,
+            SurfaceDialogTone::Outline => super::components::ButtonVariant::Outline,
+        };
+        // A confirmation keeps its existing busy rules: only actions that stay
+        // available while a run is active may fire, and a plain close always may.
+        let available = action.as_ref().is_none_or(Self::available_while_busy);
+        let on_activate = cx.listener(move |view, (): &(), window, cx| {
+            if view.busy
+                && action
+                    .as_ref()
+                    .is_some_and(|action| !Self::available_while_busy(action))
+            {
+                return;
+            }
+            match action.clone() {
+                Some(action) => view.handle(action, window, cx),
+                None => view.handle(UiAction::Drawer(None), window, cx),
+            }
+        });
+        super::components::button(
+            id,
+            label,
+            self.palette,
+            variant,
+            super::components::ControlState {
+                disabled: self.busy && !available,
+                ..Default::default()
+            },
+            on_activate,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SurfaceDialogTone {
+    Primary,
+    Destructive,
+    Outline,
+}
+
+#[cfg(test)]
+#[path = "home_tests.rs"]
+mod home_tests;

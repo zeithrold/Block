@@ -13,12 +13,12 @@ This is an empirical result for the current official corpus, not a published uni
 - `snapshot/`: verbatim indexes captured for this experiment, including immutable per-version URLs and SHA-1 values.
 - `report.json`: machine-readable coverage results and SHA-1 fingerprints of both indexes.
 - `cache/`: ignored local copies of the indexes and downloaded version JSON documents. No game JARs, libraries, assets, or Java runtimes are downloaded.
-- `../../crates/minecraft-manifest/tests/fixtures/official/`: the complete pinned corpus used by ordinary Cargo integration tests, independent of this cache.
+- `../../crates/block-launcher/tests/fixtures/manifests/official/`: the complete pinned corpus used by ordinary Cargo integration tests, independent of this cache.
 
 From the repository root, run the recorded corpus through Rust's integration test harness:
 
 ```sh
-cargo test --locked -p minecraft-manifest --test official_manifests
+cargo test --locked -p block-launcher --test official_manifests
 ```
 
 Or use the equivalent shortcut:
@@ -33,14 +33,14 @@ The standalone CLI remains available to audit freshly downloaded metadata or reg
 
 ```sh
 just manifest-fetch
-cargo run --locked -p minecraft-manifest --bin manifest-audit -- verify
+cargo run --locked -p block-cli --bin manifest-audit -- verify
 ```
 
 To redownload the original snapshot into the separate ignored cache and regenerate its report:
 
 ```sh
 just manifest-fetch-snapshot
-cargo run --locked -p minecraft-manifest --bin manifest-audit -- verify
+cargo run --locked -p block-cli --bin manifest-audit -- verify
 ```
 
 Fetching uses a Rust HTTP client, eight bounded download workers, timeouts, and up to three attempts for HTTP/network failures. Existing files are reused only if their SHA-1 matches the index. Integrity and schema failures are reported, not treated as successful downloads or parsing results. Verification itself is offline. These commands overwrite the local cache indexes and coverage report; use the recorded snapshot to return to the original corpus.
@@ -48,8 +48,8 @@ Fetching uses a Rust HTTP client, eight bounded download workers, timeouts, and 
 The CLI also accepts a separate experiment directory:
 
 ```sh
-cargo run --locked -p minecraft-manifest --bin manifest-audit -- fetch-snapshot /path/to/experiment
-cargo run --locked -p minecraft-manifest --bin manifest-audit -- verify /path/to/experiment
+cargo run --locked -p block-cli --bin manifest-audit -- fetch-snapshot /path/to/experiment
+cargo run --locked -p block-cli --bin manifest-audit -- verify /path/to/experiment
 ```
 
 For snapshot fetching, that directory must already contain both index files under `snapshot/`.
@@ -78,7 +78,7 @@ The latest pointers in the recorded snapshot are release `26.3` and snapshot `26
 
 ## Model design
 
-`crates/minecraft-manifest/src/model.rs` contains explicit models for index entries, version documents, asset-index descriptors, game downloads, Java requirements, libraries, native classifiers, extraction settings, logging, launch arguments, rule conditions, and OS version ranges.
+`crates/block-launcher/src/manifest/model.rs` contains explicit models for index entries, version documents, asset-index descriptors, game downloads, Java requirements, libraries, native classifiers, extraction settings, logging, launch arguments, rule conditions, and OS version ranges.
 
 - Every fixed-shape object uses `deny_unknown_fields`, including objects nested inside untagged argument enums.
 - Both argument generations have explicit fields. Argument entries are either strings or conditional objects; conditional values are either one string or a string array.
@@ -95,6 +95,6 @@ The full-corpus verifier also checks file SHA-1 against v2, duplicate IDs, agree
 just check
 ```
 
-Eleven offline integration tests cover the full corpus and focused regressions. The three tests in `tests/official_manifests.rs` verify agreement and lossless parsing of both complete indexes, SHA-1 and lossless typed parsing for every version, exact fixture-directory membership, and the recorded corpus coverage totals. Failures identify the affected versions and are aggregated across the corpus.
+Eleven offline integration tests cover the full corpus and focused regressions. The three tests in `crates/block-launcher/tests/official_manifests.rs` verify agreement and lossless parsing of both complete indexes, SHA-1 and lossless typed parsing for every version, exact fixture-directory membership, and the recorded corpus coverage totals. Failures identify the affected versions and are aggregated across the corpus.
 
-The eight focused tests additionally cover seven verbatim version fixtures, sampled entries from both indexes, both argument generations, nested unknown-field rejection, wrong argument types, missing required fields, trailing JSON, successful CLI auditing, and aggregate reporting of missing/corrupt documents. Sample fixture provenance and hashes are recorded in `tests/fixtures/sources.json`; the two small index fixtures contain selected entries. Full-corpus provenance is recorded directly in the complete indexes under `tests/fixtures/official/`.
+The eight focused tests additionally cover seven verbatim version fixtures, sampled entries from both indexes, both argument generations, nested unknown-field rejection, wrong argument types, missing required fields, trailing JSON, successful CLI auditing, and aggregate reporting of missing/corrupt documents. Sample fixture provenance and hashes are recorded in `crates/block-launcher/tests/fixtures/manifests/sources.json`; the two small index fixtures contain selected entries. Full-corpus provenance is recorded directly in the complete indexes under `crates/block-launcher/tests/fixtures/manifests/official/`.

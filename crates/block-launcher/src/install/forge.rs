@@ -3,7 +3,6 @@
 use std::{collections::BTreeMap, fs::File, io::Read as _, path::Path, time::Duration};
 
 use anyhow::{Context as _, ensure};
-use minecraft_manifest::model::{Library, VersionManifest};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha1::{Digest as _, Sha1};
@@ -12,7 +11,10 @@ use super::{
     fabric::LoaderVersion,
     neoforge::{InstalledLoader, InstallerProfile, Overlay},
 };
-use crate::resolver::ResolveContext;
+use crate::{
+    manifest::model::{Library, VersionManifest},
+    resolver::ResolveContext,
+};
 
 const MAVEN: &str = "https://maven.minecraftforge.net/";
 

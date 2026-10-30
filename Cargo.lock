@@ -738,7 +738,12 @@ dependencies = [
  "block-launcher",
  "clap",
  "directories",
+ "rayon",
+ "reqwest",
+ "serde",
  "serde_json",
+ "sha1",
+ "tempfile",
  "tokio",
 ]
 
@@ -786,7 +791,6 @@ dependencies = [
  "futures-util",
  "interprocess",
  "md-5",
- "minecraft-manifest",
  "quick-xml",
  "regex",
  "reqwest",
@@ -795,6 +799,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha1",
  "sha2 0.10.9",
  "tar",
@@ -831,7 +836,6 @@ dependencies = [
  "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-platform",
- "minecraft-manifest",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "semver",
@@ -4231,20 +4235,6 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
-]
-
-[[package]]
-name = "minecraft-manifest"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rayon",
- "reqwest",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "sha1",
- "tempfile",
 ]
 
 [[package]]

@@ -11,6 +11,11 @@ use std::{
 use block_launcher::{
     CancellationToken, Store,
     executor::Executor,
+    manifest::{
+        decode,
+        model::{VersionIndex, VersionManifest},
+        resources::AssetObjects,
+    },
     plan::{ExecutionPlan, compile},
     platform::{Architecture, OperatingSystem, Target},
     recipe::{Compatibility, LaunchRecipe, ParsedRecipe, RecipeSource, RuntimeSelection},
@@ -18,15 +23,9 @@ use block_launcher::{
     session::OfflineSession,
     support::{NativeSupportReason, UnsupportedNativeSupport, manifest_support, plan_support},
 };
-use minecraft_manifest::{
-    decode,
-    model::{VersionIndex, VersionManifest},
-    resources::AssetObjects,
-};
 
 fn fixture(version: &str) -> anyhow::Result<(VersionManifest, PathBuf)> {
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../minecraft-manifest/tests/fixtures/official");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/official");
     let index: VersionIndex = decode(&fs::read(root.join("version_manifest_v2.json"))?)?;
     let entry = index
         .versions
@@ -245,8 +244,7 @@ async fn saved_plan_guard_runs_before_instance_files_downloads_or_java_probes() 
 #[test]
 fn entire_official_corpus_has_consistent_manifest_and_plan_native_decisions() -> anyhow::Result<()>
 {
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../minecraft-manifest/tests/fixtures/official");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/official");
     let index: VersionIndex = decode(&fs::read(root.join("version_manifest_v2.json"))?)?;
     let mut eligible = 0;
     for entry in &index.versions {

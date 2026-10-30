@@ -61,6 +61,9 @@ unused_qualifications = "warn"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+cognitive_complexity = "warn"
+match_same_arms = "warn"
+too_many_lines = "warn"
 dbg_macro = "deny"
 expect_used = "deny"
 panic = "deny"

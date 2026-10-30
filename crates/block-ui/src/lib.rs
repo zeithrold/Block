@@ -1,57 +1,112 @@
 //! A native launcher with persistent installations, launch profiles and Microsoft accounts.
 
+#[path = "settings/about.rs"]
 mod about;
+#[path = "navigation/actions.rs"]
+mod actions;
+#[path = "settings/appearance.rs"]
 mod appearance;
+#[path = "accounts/authentication.rs"]
 mod authentication;
+#[path = "controls/base_controls.rs"]
 mod base_controls;
+#[path = "controls/base_overlay.rs"]
 mod base_overlay;
+#[path = "games/browser.rs"]
 mod browser;
+#[path = "controls/components.rs"]
 mod components;
+#[path = "feedback/connection_test.rs"]
 mod connection_test;
+#[path = "feedback/crash_view.rs"]
 mod crash_view;
+#[path = "settings/design.rs"]
 mod design;
+#[path = "games/downloads.rs"]
 mod downloads;
+#[path = "overlays/drawer.rs"]
 mod drawer;
+#[path = "overlays/drawer_gestures.rs"]
 mod drawer_gestures;
+#[path = "runtime/engine.rs"]
 mod engine;
+#[path = "runtime/events.rs"]
+mod events;
+#[path = "feedback/feedback.rs"]
 mod feedback;
+#[path = "setup/first_run.rs"]
 mod first_run;
 #[cfg(test)]
+#[path = "setup/first_run_tests.rs"]
 mod first_run_tests;
+#[path = "navigation/frame_motion.rs"]
 mod frame_motion;
+#[path = "games/game_wizard.rs"]
 mod game_wizard;
+#[path = "settings/global_config.rs"]
 mod global_config;
+#[path = "games/import_games.rs"]
 mod import_games;
+#[path = "games/instance_editor.rs"]
 mod instance_editor;
 #[cfg(test)]
+#[path = "runtime/interaction_tests.rs"]
 mod interaction_tests;
+#[path = "navigation/motion.rs"]
 mod motion;
 #[cfg(test)]
+#[path = "runtime/native_regressions.rs"]
 mod native_regressions;
+#[path = "navigation/navigation.rs"]
+mod navigation;
+#[path = "accounts/onboarding.rs"]
 mod onboarding;
+#[path = "overlays/overlays.rs"]
 mod overlays;
+#[path = "navigation/page_host.rs"]
+mod page_host;
+#[path = "controls/patterns.rs"]
 mod patterns;
+#[path = "runtime/platform.rs"]
 mod platform;
+#[path = "games/profile_editor.rs"]
 mod profile_editor;
 #[cfg(test)]
+#[path = "games/profile_editor_tests.rs"]
 mod profile_editor_tests;
+#[path = "accounts/providers.rs"]
 mod providers;
 #[cfg(debug_assertions)]
+#[path = "runtime/scenarios.rs"]
 mod scenarios;
+#[path = "controls/scroll_area.rs"]
 mod scroll_area;
+#[path = "controls/search_selector.rs"]
 mod search_selector;
+#[path = "controls/select.rs"]
 mod select;
+#[path = "settings/settings.rs"]
 mod settings;
+#[path = "setup/setup_storage.rs"]
 mod setup_storage;
+#[path = "navigation/shell.rs"]
 mod shell;
+#[path = "runtime/tasks.rs"]
 mod tasks;
 #[cfg(test)]
+#[path = "runtime/test_support.rs"]
 mod test_support;
+#[path = "controls/text_input.rs"]
 mod text_input;
+#[path = "controls/tooltip.rs"]
 mod tooltip;
+#[path = "navigation/transitions.rs"]
 mod transitions;
+#[path = "setup/welcome_button.rs"]
 mod welcome_button;
+#[path = "navigation/window_geometry.rs"]
 mod window_geometry;
+#[path = "navigation/wizard_entrance.rs"]
 mod wizard_entrance;
 
 pub use about::BuildInfo;
@@ -93,24 +148,26 @@ use std::{
 use block_auth::Account;
 use block_launcher::{
     CancellationToken,
-    catalog::{DataPolicy, Instance, Profile, Snapshot},
+    catalog::{Instance, Profile, Snapshot},
     crash::CrashReport,
     platform::Architecture,
     recipe::{LaunchRecipe, RuntimeSelection},
     session_host::{self, RunRecord, RunState},
 };
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, Image, ImageFormat,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, PathPromptOptions,
-    Pixels, Render, SharedString, Styled as _, WeakEntity, Window, div, px, rgb,
+    AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Pixels, Render, SharedString,
+    Styled as _, WeakEntity, Window, div, px, rgb,
 };
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 
+use actions::UiAction;
 use appearance::{Appearance, Palette, Preferences};
 use engine::{Engine, Message};
 use game_wizard::{WizardPage, WizardStep};
+use navigation::{Router, Tab};
 use scroll_area::ScrollAreaExt as _;
 use shell::{Drawer, ShellState};
 use text_input::TextInput;
@@ -125,153 +182,6 @@ pub struct LaunchOptions {
     pub build_info: BuildInfo,
     #[cfg(debug_assertions)]
     pub scenario: Option<ScenarioOptions>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Tab {
-    #[default]
-    Home,
-    Onboarding,
-    Instances,
-    Profiles,
-    Accounts,
-    Settings,
-    About,
-}
-
-#[derive(Clone, Debug)]
-enum UiAction {
-    FirstRun(first_run::Action),
-    ImportGames(import_games::Action),
-    AuthOtherOptions,
-    Providers,
-    ProvidersBack,
-    ProviderAdd,
-    ProviderInspect(String),
-    ProviderIdentify,
-    ProviderConsent,
-    ProviderSave,
-    ProviderRemoveRequest(String),
-    ProviderRemove(String),
-    Tab(Tab),
-    Drawer(Option<Drawer>),
-    DownloadFiles(downloads::DownloadGroup),
-    SetAppearance(Appearance),
-    ReduceMotion,
-    SavePreferences,
-    ResetPreferences,
-    ConfirmSeparate(bool),
-    SeparateProfiles,
-    WizardNext,
-    WizardBack,
-    WizardSnapshots,
-    WizardOptiFineFile,
-    WizardOptiFineRemove,
-    WizardKind(bool),
-    WizardInstance(String),
-    WizardProfileIcon(block_launcher::catalog::ProfileIcon),
-    WizardProfileColor(block_launcher::catalog::ProfileColor),
-    WizardProfileFullscreen,
-    WizardRuntime(bool),
-    WizardWindow { width: u32, height: u32 },
-    WizardCustomWindow,
-    WizardProfileOptions,
-    WizardProfileTarget(String),
-    ChooseAppearance { wizard: bool, color: bool },
-    OpenProductSelect(select::ProductChoice),
-    DefaultJavaAutomatic(bool),
-    DefaultWindow { width: u32, height: u32 },
-    CustomDefaultWindow,
-    ProfileRuntimeAutomatic(bool),
-    ProfileDataPolicy(DataPolicy),
-    InstanceRuntimeAutomatic(bool),
-    InstanceWindow { width: u32, height: u32 },
-    CustomInstanceWindow,
-    ProfileConnect,
-    WizardProfileConnect,
-    ProfileIcon(block_launcher::catalog::ProfileIcon),
-    ProfileColor(block_launcher::catalog::ProfileColor),
-    SelectValue(Box<Self>),
-    MinimizeWindow,
-    CloseWindow,
-    WizardPage(Option<WizardPage>),
-    OnboardingNext,
-    OnboardingBack,
-    OnboardingSkip,
-    OnboardingAccountLater,
-    OnboardingSection(WizardPage),
-    OnboardingSectionDone,
-    OnboardingSectionCancel,
-    OnboardingChange(onboarding::Step),
-    OnboardingChooseAccount,
-    SetFullscreen,
-    ShowSnapshots,
-    ProxyMode(u8),
-    SettingsPage(u8),
-    Inspect(String),
-    InspectLinked { profiles: bool, id: String },
-    GamesHelp,
-    ProfileModeSettings,
-    ReloadLibrary,
-    ReloadVersions,
-    EditInstance,
-    SaveInstanceSettings,
-    CancelInstanceSettings,
-    InstanceFullscreen,
-    InstanceOptiFineFile,
-    InstanceOptiFineRemove,
-    ProfileInheritRuntime,
-    ProfileInheritWindow,
-    SelectProfile(String),
-    SelectAccount(String),
-    CreateInstance,
-    SaveInstance,
-    WizardLoader(block_launcher::catalog::LoaderKind),
-    WizardLoaderBuild(String),
-    ReloadLoaderVersions,
-    BrowseInstall,
-    SelectVersion(String),
-    EditProfile,
-    SaveProfile,
-    ProfilePage(profile_editor::EditorPage),
-    ProfilePageDone,
-    ProfilePageCancel,
-    CancelForm,
-    NewProfile,
-    CopyProfileId(String),
-    DeleteProfileId(String),
-    ProfileActions,
-    ConfirmDelete,
-    ProfileTarget(String),
-    DefaultAccount(Option<String>),
-    SignIn,
-    Authenticate,
-    AuthNext,
-    AuthBack,
-    AuthMethod(authentication::Method),
-    AuthProvider(block_auth::AccountProvider),
-    AuthExternalProvider(uuid::Uuid),
-    AuthHttpConsent,
-    AuthProviderAdd,
-    AuthProviderIdentify,
-    AuthProviderConsent,
-    AuthProviderSave,
-    AuthProviderCancel,
-    AuthCharacter(uuid::Uuid),
-    CopyDeviceCode,
-    AuthCancel,
-    AuthFinish,
-    AuthReopen,
-    AuthRetry,
-    RequestSignOut(String),
-    SignOut(String),
-    Play,
-    Repair,
-    Stop,
-    ToggleOutput,
-    ToggleCommand,
-    OpenRecipe,
-    LaunchRecipe,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
@@ -356,7 +266,6 @@ pub struct Block {
     motion_dirty: bool,
     visual_only: bool,
     pending_window_size: Option<gpui::Size<Pixels>>,
-    onboarding_progress: onboarding::Progress,
     settings_form: Option<settings::SettingsDraft>,
     preferences: Preferences,
     saved_preferences: Preferences,
@@ -369,12 +278,12 @@ pub struct Block {
     /// Test-only architecture override for version-availability policy.
     host_arch_override: Option<Architecture>,
     version_load: browser::CollectionLoad,
-    version_catalog: Vec<minecraft_manifest::model::VersionEntry>,
+    version_catalog: Vec<block_launcher::manifest::model::VersionEntry>,
     selected_instance: Option<String>,
     selected_profile: Option<String>,
     pending_profile: Option<String>,
     selected_account: Option<String>,
-    tab: Tab,
+    router: Router,
     form: Option<Form>,
     engine: Option<Engine>,
     messages: Option<Receiver<Message>>,
@@ -464,10 +373,6 @@ struct PendingCreation {
 
 impl Block {
     #[must_use]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Initial product state and startup tasks are constructed together."
-    )]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>, options: LaunchOptions) -> Self {
         initialize(cx);
         text_input::bind_keys(cx);
@@ -537,7 +442,6 @@ impl Block {
                 ..ShellState::default()
             },
             pending_window_size: None,
-            onboarding_progress: onboarding::Progress::Draft,
             settings_form: None,
             saved_preferences: preferences.clone(),
             palette: preferences.palette(window.appearance()),
@@ -558,7 +462,7 @@ impl Block {
             selected_profile: None,
             pending_profile: options.profile,
             selected_account: None,
-            tab,
+            router: Router::new(tab),
             form: None,
             engine,
             messages,
@@ -624,273 +528,6 @@ impl Block {
         view
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Typed engine messages share one lifecycle and stale-operation gate."
-    )]
-    fn poll(&mut self, cx: &mut Context<'_, Self>) {
-        let mut messages = Vec::new();
-        if let Some(receiver) = &mut self.messages {
-            while let Ok(message) = receiver.try_recv() {
-                messages.push(message);
-            }
-        }
-        let toast_expired = self
-            .shell
-            .toast
-            .as_ref()
-            .is_some_and(|toast| toast.expires <= std::time::Instant::now());
-        if toast_expired {
-            self.shell.toast = None;
-        }
-        let download_changed = self.downloads.as_ref().is_some_and(|tracker| {
-            let tracker = tracker
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if tracker.revision == self.downloads_revision {
-                return false;
-            }
-            self.downloads_revision = tracker.revision;
-            self.completed = tracker.verified();
-            true
-        });
-        if messages.is_empty() && !download_changed && !toast_expired {
-            return;
-        }
-        self.motion_dirty = true;
-        for message in messages {
-            let message = match message {
-                Message::ForOperation { operation, message }
-                    if operation == self.operation_revision =>
-                {
-                    *message
-                }
-                Message::ForOperation { .. } => continue,
-                message => message,
-            };
-            match message {
-                Message::GameDiscovery { request, report } => {
-                    let decision = self.resolve_game_discovery(request, report);
-                    let deferred = matches!(
-                        decision,
-                        import_games::DeferredDiscovery::OpenDrawer
-                            | import_games::DeferredDiscovery::ContinueToOverview
-                    );
-                    if deferred && let Some(handle) = self.shell.import_games.window {
-                        let owner = cx.entity();
-                        cx.defer(move |cx| {
-                            let _ = handle.update(cx, |_, window, cx| {
-                                owner.update(cx, |view, cx| {
-                                    view.apply_deferred_discovery(decision, window, cx);
-                                    cx.notify();
-                                })
-                            });
-                        });
-                    }
-                }
-                Message::GameImported {
-                    request,
-                    candidate,
-                    result,
-                } => self.receive_game_import(request, candidate, result),
-                Message::GameImportFinished { request } => self.finish_game_import(request),
-                Message::ForOperation { .. } => {}
-                Message::Catalog(Ok(snapshot)) => {
-                    self.apply_catalog(snapshot, cx);
-                    self.shell.games.load = browser::CollectionLoad::Ready;
-                    self.shell.profiles.load = browser::CollectionLoad::Ready;
-                }
-                Message::Catalog(Err(error)) => {
-                    self.shell.games.load = browser::CollectionLoad::Failed(error.clone());
-                    self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone());
-                    self.report(error);
-                }
-                Message::Providers(result) => {
-                    self.receive_providers(result);
-                    if let Some(engine) = &self.engine {
-                        engine.load_images();
-                    }
-                }
-                Message::ProviderSaved(id) => {
-                    if !self.auth_provider_saved(&id, cx) {
-                        self.provider_saved(&id, cx);
-                    }
-                    if let Some(engine) = &self.engine {
-                        engine.load_images();
-                    }
-                }
-                Message::Accounts(Err(error)) => {
-                    self.shell.accounts.load = browser::CollectionLoad::Failed(error.clone());
-                    self.report(error);
-                }
-                Message::Accounts(Ok(accounts)) => {
-                    self.shell.accounts.load = browser::CollectionLoad::Ready;
-                    self.reconcile_account_browser(&accounts);
-                    self.accounts = accounts;
-                    if self.shell.first_run.enabled
-                        && !self.preferences.onboarding_complete
-                        && self.selected_account.is_none()
-                    {
-                        self.selected_account = self.accounts.first().map(account_id);
-                        self.shell.onboarding.account = self.selected_account.clone();
-                    }
-                    if self.tab != Tab::Onboarding
-                        && !self
-                            .accounts
-                            .iter()
-                            .any(|a| Some(account_id(a)) == self.selected_account)
-                    {
-                        self.apply_profile_account();
-                    }
-                    if let Some(engine) = &self.engine {
-                        engine.load_images();
-                    }
-                }
-                Message::AccountImages(images) => {
-                    self.account_avatars = images
-                        .into_iter()
-                        .map(|(identity, skin)| {
-                            (
-                                identity,
-                                components::AccountAvatar {
-                                    image: std::sync::Arc::new(Image::from_bytes(
-                                        ImageFormat::Png,
-                                        skin.bytes,
-                                    )),
-                                    width: skin.width,
-                                    height: skin.height,
-                                },
-                            )
-                        })
-                        .collect();
-                }
-                Message::ProviderImages(icons) => {
-                    self.provider_icons = icons
-                        .into_iter()
-                        .map(|(provider, icon)| {
-                            (
-                                provider,
-                                components::ProviderBadge {
-                                    image: std::sync::Arc::new(Image::from_bytes(
-                                        components::icon_image_format(icon.kind),
-                                        icon.bytes,
-                                    )),
-                                },
-                            )
-                        })
-                        .collect();
-                }
-                Message::Versions(Ok(versions)) => {
-                    self.version_load = browser::CollectionLoad::Ready;
-                    self.version_catalog.clone_from(&versions);
-                    self.versions = versions
-                        .into_iter()
-                        .filter(|version| {
-                            self.saved_preferences.game.show_snapshots
-                                || format!("{:?}", version.kind) == "Release"
-                        })
-                        .map(|version| version.id)
-                        .collect();
-                }
-                Message::Versions(Err(error)) => {
-                    self.version_load = browser::CollectionLoad::Failed(error.clone());
-                    self.push_log(format!("Version list unavailable: {error}"));
-                }
-                Message::LoaderVersions { request, result } => {
-                    self.receive_loader_versions(request, result, cx)
-                }
-                Message::Browser(url) => {
-                    if !self.cancel.is_cancelled() {
-                        self.auth_browser(url, cx);
-                    }
-                }
-                Message::AuthPrepared(account) => self.auth_prepared(account),
-                Message::AuthlibCharacters(characters) => self.auth_characters(characters),
-                Message::SignedIn(account) => self.auth_saved(account, cx),
-                Message::DeviceCode {
-                    user_code,
-                    verification_uri,
-                    expires_at,
-                } => self.auth_device_code(user_code, verification_uri, expires_at),
-                Message::AuthStage(stage) => self.auth_stage(stage),
-                Message::ConnectionTest(request, result) => {
-                    self.connection_finished(request, result, cx);
-                }
-                Message::Created { instance, profile } => {
-                    self.creation_saved(instance, profile, cx);
-                }
-                Message::Status(status) => self.status = status,
-                Message::Downloads(tracker) => {
-                    self.downloads = Some(tracker);
-                    self.downloads_revision = 0;
-                }
-                Message::Command(command) => self.command = Some(command),
-                Message::Log(line) => self.push_log(line),
-                Message::Session(record) => {
-                    self.session_updated(*record);
-                    self.start_pending_play(cx);
-                }
-                Message::Crash {
-                    report,
-                    directory,
-                    guard,
-                } => {
-                    self.pending_crashes.push_back(PendingCrash {
-                        report: *report,
-                        directory,
-                        guard,
-                    });
-                }
-                Message::Finished(result) => {
-                    self.auth_provider_finished(&result, cx);
-                    self.providers_finished(&result);
-                    self.instance_edit_finished(&result, cx);
-                    self.profile_edit_finished(&result, cx);
-                    self.auth_finished(&result);
-                    self.busy = self.active_run.is_some();
-                    self.operation_cancellable = false;
-                    match result {
-                        Ok(status) => {
-                            self.push_toast(status.clone(), feedback::ToastKind::Success);
-                            self.status = status;
-                            if self.tab != Tab::Onboarding
-                                && self.shell.auth.is_none()
-                                && self.operation_kind != OperationKind::Account
-                            {
-                                self.form = None;
-                            }
-                        }
-                        Err(_) if self.cancel.is_cancelled() => {
-                            self.discard_uncommitted_onboarding_identity();
-                            self.status = "Cancelled · retry when ready".into();
-                        }
-                        Err(error) => {
-                            self.discard_uncommitted_onboarding_identity();
-                            self.report(format!("Failed · {error}"));
-                        }
-                    }
-                    self.start_pending_play(cx);
-                }
-                Message::Recipe(result) => {
-                    let launch = self.recipe_load.finish(result.is_ok());
-                    match result {
-                        Ok(recipe) => {
-                            self.recipe = Some(recipe);
-                            self.status =
-                                "Development recipe loaded · offline identity is explicit".into();
-                            if launch {
-                                self.launch_recipe(cx);
-                            }
-                        }
-                        Err(error) => self.report(format!("Invalid recipe: {error}")),
-                    }
-                }
-            }
-        }
-        self.sync_form_inputs(cx);
-        cx.notify();
-    }
-
     fn apply_catalog(&mut self, snapshot: Snapshot, cx: &mut Context<'_, Self>) {
         let previous = self
             .profile()
@@ -924,11 +561,12 @@ impl Block {
             if self.form.is_none()
                 && self.shell.auth.is_none()
                 && self.shell.instance_editor.is_none()
+                && !self.setup_incomplete()
             {
-                if self.tab == Tab::Home {
+                if self.router.tab() == Tab::Home {
                     self.pending_window_size = Some(preferred_management_size());
                 }
-                self.tab = Tab::Instances;
+                self.router.navigate(Tab::Instances);
             }
             self.apply_profile_account();
         } else {
@@ -1035,21 +673,9 @@ impl Block {
         if let Some(Form::Instance(form)) = &self.form {
             self.pending_creation = Some(PendingCreation {
                 operation: self.operation_revision,
-                tab: self.tab,
+                tab: self.router.tab(),
                 draft: form.name.entity_id().as_u64(),
             });
-        }
-    }
-
-    /// A failed or cancelled first-run commit rolls its new identity back, so
-    /// the draft no longer holds a prepared account and must add one again.
-    fn discard_uncommitted_onboarding_identity(&mut self) {
-        if self.tab == Tab::Onboarding
-            && self.operation_kind == OperationKind::Install
-            && self.shell.onboarding.pending_identity.take().is_some()
-        {
-            self.shell.onboarding.account = None;
-            self.shell.onboarding.account_decided = false;
         }
     }
 
@@ -1058,7 +684,7 @@ impl Block {
             .pending_creation
             .take()
             .filter(|context| context.operation == self.operation_revision);
-        let owns_draft = context.is_some_and(|context| context.tab == self.tab && matches!(&self.form, Some(Form::Instance(form)) if form.name.entity_id().as_u64() == context.draft));
+        let owns_draft = context.is_some_and(|context| context.tab == self.router.tab() && matches!(&self.form, Some(Form::Instance(form)) if form.name.entity_id().as_u64() == context.draft));
         self.selected_instance = Some(instance.clone());
         self.selected_profile = Some(profile.clone());
         self.shell.games.inspected = Some(
@@ -1070,16 +696,13 @@ impl Block {
         );
         self.shell.profiles.inspected = Some(profile);
         if owns_draft {
-            if self.tab == Tab::Onboarding {
-                self.onboarding_progress = onboarding::Progress::Created;
-                if self.shell.first_run.enabled {
-                    self.form = None;
-                    self.shell.first_run.stage = first_run::Stage::Overview;
-                } else {
-                    self.complete_onboarding();
-                }
+            if self.router.tab() == Tab::Onboarding {
+                self.form = None;
+                self.router.leave_task();
+                self.shell.first_run.stage = first_run::Stage::Overview;
             } else {
                 self.form = None;
+                self.router.leave_task();
                 if let Some(query) = &self.collection().query {
                     query.update(cx, |field, cx| field.set_value("", cx));
                 }
@@ -1088,7 +711,7 @@ impl Block {
     }
 
     fn normalize_selection(&mut self) {
-        if self.tab == Tab::Onboarding {
+        if self.router.tab() == Tab::Onboarding {
             return;
         }
         let previous_profile = self.selected_profile.clone();
@@ -1118,7 +741,7 @@ impl Block {
     }
 
     fn apply_profile_account(&mut self) {
-        if self.tab == Tab::Onboarding {
+        if self.router.tab() == Tab::Onboarding {
             return;
         }
         if let Some(default) = self
@@ -1152,24 +775,17 @@ impl Block {
         self.shell.pending_toasts.push(toast);
     }
 
-    /// True while the first-run setup draft is active (the setup page or its
-    /// Settings/About preview), so menu routes cannot bypass setup.
+    /// Setup owns navigation until the first-run draft is complete.
     fn setup_incomplete(&self) -> bool {
-        !self.preferences.onboarding_complete
-            && (self.shell.first_run.enabled
-                || self.tab == Tab::Onboarding
-                || self.shell.guide_preview.is_some())
+        !self.preferences.onboarding_complete && self.shell.first_run.enabled
     }
 
     fn report(&mut self, error: String) {
         self.push_toast(error.clone(), feedback::ToastKind::Error);
-        if self.tab == Tab::Onboarding {
-            self.shell.onboarding.error = Some(error.clone());
-            if self.shell.first_run.enabled {
-                self.shell.first_run.error = Some(error.clone());
-                if self.shell.first_run.stage == first_run::Stage::GameWizard {
-                    self.shell.wizard.error = Some(error.clone());
-                }
+        if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+            self.shell.first_run.error = Some(error.clone());
+            if self.shell.first_run.stage == first_run::Stage::GameWizard {
+                self.shell.wizard.error = Some(error.clone());
             }
         }
         self.push_log(error.clone());
@@ -1188,9 +804,6 @@ impl Block {
     fn begin(&mut self, status: &str) {
         self.operation_cancellable = false;
         self.operation_kind = OperationKind::General;
-        if self.tab == Tab::Onboarding {
-            self.shell.onboarding.error = None;
-        }
         if self.engine.is_none() {
             self.status =
                 "Engine unavailable · restart Block after checking its data directory".into();
@@ -1212,22 +825,6 @@ impl Block {
         self.cancel = CancellationToken::new();
     }
 
-    /// Leave the Welcome Settings/About preview and restore the setup page,
-    /// keeping its draft and undoing an unsaved settings preview.
-    fn leave_guide_preview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some((tab, size)) = self.shell.guide_preview.take() else {
-            return;
-        };
-        if tab == Tab::Settings {
-            self.preferences.clone_from(&self.saved_preferences);
-            self.settings_form = None;
-        }
-        self.tab = Tab::Onboarding;
-        window.resize(size);
-        self.shell.surfaces.clear(window, &self.focus, cx);
-        cx.notify();
-    }
-
     fn instance(&self) -> Option<&Instance> {
         self.snapshot
             .instances
@@ -1240,629 +837,6 @@ impl Block {
             .profiles
             .iter()
             .find(|p| Some(&p.id) == self.selected_profile.as_ref())
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Concrete UI actions are kept in one dispatcher without a controller framework."
-    )]
-    fn handle(&mut self, action: UiAction, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.motion_dirty = true;
-        self.motion.direction = if matches!(
-            action,
-            UiAction::CancelForm
-                | UiAction::ProvidersBack
-                | UiAction::WizardBack
-                | UiAction::OnboardingBack
-                | UiAction::AuthCancel
-                | UiAction::AuthBack
-                | UiAction::AuthFinish
-                | UiAction::ProfilePageCancel
-                | UiAction::ProfilePageDone
-                | UiAction::Tab(Tab::Home)
-        ) {
-            motion::Direction::Back
-        } else {
-            motion::Direction::Forward
-        };
-        if matches!(
-            action,
-            UiAction::SaveInstance
-                | UiAction::SaveProfile
-                | UiAction::WizardNext
-                | UiAction::OnboardingNext
-                | UiAction::OnboardingSectionDone
-        ) && self
-            .form_inputs()
-            .iter()
-            .any(|field| field.read(cx).is_composing())
-        {
-            return;
-        }
-        let retry_setup_save = matches!(action, UiAction::OnboardingNext)
-            && self.tab == Tab::Onboarding
-            && self.onboarding_progress == onboarding::Progress::Created;
-        if self.busy && !retry_setup_save && !self.can_activate(&action) {
-            return;
-        }
-        let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
-        let previous_page = (self.tab, self.form.is_some());
-        match action {
-            UiAction::FirstRun(action) => self.handle_first_run(action, window, cx),
-            UiAction::ImportGames(action) => self.handle_import_games(action, window, cx),
-            UiAction::AuthOtherOptions => self.toggle_auth_other_options(cx),
-            UiAction::WizardOptiFineFile => self.browse_optifine(cx),
-            UiAction::WizardOptiFineRemove => {
-                if let Some(Form::Instance(form)) = &mut self.form {
-                    form.optifine = None;
-                }
-                self.shell.wizard.cancel_optifine_import();
-            }
-            UiAction::OnboardingSection(page) => self.open_onboarding_section(page, window, cx),
-            UiAction::OnboardingSectionDone => self.finish_onboarding_section(false, window, cx),
-            UiAction::OnboardingSectionCancel => self.finish_onboarding_section(true, window, cx),
-            UiAction::OnboardingChange(step) => self.change_onboarding_step(step, window, cx),
-            UiAction::OnboardingChooseAccount => {
-                self.shell
-                    .surfaces
-                    .open(shell::Surface::Drawer(Drawer::Accounts), window, cx);
-                self.open_selector(Drawer::Accounts, window, cx);
-            }
-            UiAction::OnboardingAccountLater | UiAction::OnboardingNext => {
-                self.advance_onboarding(window, cx);
-            }
-            UiAction::OnboardingBack => self.back_onboarding(window, cx),
-            UiAction::OnboardingSkip => {
-                if self.tab == Tab::Onboarding
-                    && self.shell.onboarding.step == onboarding::Step::Review
-                    && self.busy
-                    && self.onboarding_progress == onboarding::Progress::Draft
-                {
-                    return;
-                }
-                if self.busy {
-                    self.cancel.cancel();
-                }
-                self.complete_onboarding();
-            }
-            UiAction::Tab(tab) => {
-                if self.setup_incomplete() && self.shell.first_run.enabled && tab != Tab::Onboarding
-                {
-                    self.push_toast(
-                        "Finish setup or choose Skip setup to continue.".into(),
-                        feedback::ToastKind::Info,
-                    );
-                    cx.notify();
-                    return;
-                }
-                if self.shell.providers.visible {
-                    self.close_providers(cx);
-                }
-                if self.shell.auth.is_some() {
-                    self.cancel_auth(window, cx);
-                }
-                if self.setup_incomplete()
-                    && !matches!(tab, Tab::Onboarding | Tab::Settings | Tab::About)
-                {
-                    // Setup owns navigation until it is finished: keep the draft
-                    // and surface why the requested page is unavailable.
-                    self.leave_guide_preview(window, cx);
-                    let message = if matches!(tab, Tab::Instances | Tab::Profiles) {
-                        "Finish setup to see your games."
-                    } else {
-                        "Finish setup to continue."
-                    };
-                    self.push_toast(message.into(), feedback::ToastKind::Info);
-                    self.status = message.into();
-                    cx.notify();
-                    return;
-                }
-                if (self.tab == Tab::Onboarding || self.shell.guide_preview.is_some())
-                    && matches!(tab, Tab::Settings | Tab::About)
-                {
-                    if self.shell.guide_preview.is_some()
-                        && self.tab == Tab::Settings
-                        && tab != Tab::Settings
-                    {
-                        self.preferences.clone_from(&self.saved_preferences);
-                        self.settings_form = None;
-                    }
-                    if tab == Tab::Settings {
-                        self.open_settings(cx);
-                    }
-                    self.shell.guide_preview = Some((tab, window.viewport_size()));
-                    self.tab = tab;
-                    self.shell.surfaces.clear(window, &self.focus, cx);
-                    self.request_frame_resize(window, cx);
-                    cx.notify();
-                    return;
-                }
-                if self.tab == Tab::Settings && tab != Tab::Settings {
-                    self.preferences = self.saved_preferences.clone();
-                    self.settings_form = None;
-                }
-                if tab == Tab::Settings && self.tab != Tab::Settings {
-                    self.open_settings(cx);
-                }
-                self.initialize_browsers(cx);
-                self.tab = tab;
-                self.form = None;
-                self.shell.instance_editor = None;
-                if tab == Tab::Onboarding {
-                    self.begin_onboarding(cx);
-                }
-                self.shell.surfaces.clear(window, &self.focus, cx);
-                self.request_frame_resize(window, cx);
-            }
-            UiAction::DownloadFiles(group) => {
-                self.shell
-                    .surfaces
-                    .open(shell::Surface::DownloadFiles(group), window, cx);
-            }
-            UiAction::Drawer(drawer) => {
-                if self.setup_incomplete()
-                    && self.shell.first_run.enabled
-                    && drawer.is_some_and(|drawer| drawer != Drawer::ImportGames)
-                {
-                    return;
-                }
-                if drawer == Some(Drawer::Menu) {
-                    self.open_app_menu_at(None, window, cx);
-                } else if let Some(drawer) = drawer {
-                    if self
-                        .shell
-                        .surfaces
-                        .open(shell::Surface::Drawer(drawer), window, cx)
-                    {
-                        self.open_selector(drawer, window, cx);
-                    }
-                } else if self.shell.guide_preview.is_some() {
-                    self.leave_guide_preview(window, cx);
-                } else if self
-                    .shell
-                    .surfaces
-                    .top()
-                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::AuthProviderAdd))
-                {
-                    self.cancel_auth_provider(cx);
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                } else if self
-                    .shell
-                    .surfaces
-                    .top()
-                    .is_some_and(|entry| matches!(entry.kind, shell::Surface::WizardSection(_)))
-                {
-                    self.cancel_component_draft(cx);
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                } else if self
-                    .shell
-                    .surfaces
-                    .top()
-                    .is_some_and(|layer| matches!(layer.kind, shell::Surface::OnboardingSection(_)))
-                {
-                    self.finish_onboarding_section(true, window, cx);
-                } else {
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                }
-            }
-            UiAction::SetAppearance(appearance) => self.preview_appearance(appearance),
-            UiAction::ReduceMotion => self.preview_reduce_motion(),
-            UiAction::ResetPreferences => self.reset_settings(cx),
-            UiAction::SavePreferences => self.save_settings(window, cx),
-            UiAction::SetFullscreen => {
-                if let Some(form) = &mut self.settings_form {
-                    form.fullscreen = !form.fullscreen;
-                }
-            }
-            UiAction::ShowSnapshots => {
-                if let Some(form) = &mut self.settings_form {
-                    form.show_snapshots = !form.show_snapshots;
-                }
-            }
-            UiAction::SettingsPage(page) => {
-                self.select_settings_page(page, window, cx);
-            }
-            UiAction::ProxyMode(mode) => {
-                if let Some(form) = &mut self.settings_form {
-                    form.proxy_mode = mode;
-                }
-            }
-            UiAction::ConfirmSeparate(confirm) => {
-                if confirm {
-                    self.shell
-                        .surfaces
-                        .open(shell::Surface::SeparateProfiles, window, cx);
-                } else {
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                }
-            }
-            UiAction::SeparateProfiles => {
-                self.shell.surfaces.close(window, &self.focus, cx);
-                self.begin("Enabling separated profiles");
-                if let Some(engine) = &self.engine {
-                    engine.separate_profiles();
-                }
-            }
-            UiAction::Inspect(id) => {
-                self.shell.instance_editor = None;
-                self.collection_mut().inspected = Some(id);
-                self.form = None;
-            }
-            UiAction::InspectLinked { profiles, id } => {
-                self.shell.instance_editor = None;
-                self.tab = if profiles {
-                    Tab::Profiles
-                } else {
-                    Tab::Instances
-                };
-                self.initialize_browsers(cx);
-                self.collection_mut().inspected = Some(id);
-                self.form = None;
-            }
-            UiAction::GamesHelp => {
-                self.shell
-                    .surfaces
-                    .open(shell::Surface::GamesHelp, window, cx);
-            }
-            UiAction::ProfileModeSettings => {
-                self.shell.surfaces.clear(window, &self.focus, cx);
-                self.open_settings(cx);
-                self.tab = Tab::Settings;
-                self.select_settings_page(2, window, cx);
-            }
-            UiAction::ReloadVersions => {
-                if let Some(engine) = &self.engine {
-                    self.version_load = browser::CollectionLoad::Loading;
-                    engine.load_versions();
-                } else {
-                    self.version_load = browser::CollectionLoad::Failed(
-                        "Engine unavailable · restart Block to retry".into(),
-                    );
-                }
-            }
-            UiAction::ReloadLibrary => {
-                if let Some(engine) = &self.engine {
-                    self.shell.games.load = browser::CollectionLoad::Loading;
-                    self.shell.profiles.load = browser::CollectionLoad::Loading;
-                    self.shell.accounts.load = browser::CollectionLoad::Loading;
-                    engine.load_catalog();
-                }
-            }
-            UiAction::EditInstance => self.open_instance_editor(window, cx),
-            UiAction::SaveInstanceSettings => self.save_instance_draft(window, cx),
-            UiAction::CancelInstanceSettings => self.cancel_instance_editor(window, cx),
-            UiAction::InstanceFullscreen => self.toggle_instance_fullscreen(),
-            UiAction::InstanceOptiFineFile => self.browse_instance_optifine(cx),
-            UiAction::InstanceOptiFineRemove => self.remove_instance_optifine(cx),
-            UiAction::ProfileInheritRuntime => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.inheritance.runtime = !form.original.inheritance.runtime;
-                }
-            }
-            UiAction::ProfileInheritWindow => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.inheritance.window = !form.original.inheritance.window;
-                }
-            }
-            UiAction::SelectProfile(id) => {
-                if let Some(profile) = self
-                    .snapshot
-                    .profiles
-                    .iter()
-                    .find(|profile| profile.id == id)
-                {
-                    self.selected_instance = Some(profile.instance_id.clone());
-                    self.selected_profile = Some(id);
-                }
-                self.push_toast(
-                    "Game selected · ready on Home".into(),
-                    feedback::ToastKind::Info,
-                );
-                self.shell.surfaces.clear(window, &self.focus, cx);
-                self.form = None;
-                self.apply_profile_account();
-            }
-            UiAction::SelectAccount(id) => {
-                if self.tab == Tab::Onboarding {
-                    self.choose_onboarding_account(id);
-                } else {
-                    self.selected_account = Some(id);
-                }
-                self.push_toast("Account selected".into(), feedback::ToastKind::Info);
-                self.shell.surfaces.clear(window, &self.focus, cx);
-            }
-            UiAction::CreateInstance => {
-                if self.setup_incomplete() && self.shell.first_run.enabled {
-                    self.handle_first_run(first_run::Action::Game, window, cx);
-                } else {
-                    self.begin_game_wizard(cx);
-                }
-            }
-            UiAction::WizardKind(is_new) => self.wizard_kind(is_new, cx),
-            UiAction::WizardInstance(id) => self.wizard_instance(id),
-            UiAction::WizardProfileIcon(icon) => self.wizard_profile_icon(icon),
-            UiAction::WizardProfileColor(color) => self.wizard_profile_color(color),
-            UiAction::WizardProfileFullscreen => self.wizard_profile_fullscreen(),
-            UiAction::WizardProfileOptions => self.wizard_profile_options(),
-            UiAction::WizardProfileTarget(id) => self.wizard_profile_target(id),
-            UiAction::ChooseAppearance { wizard, color } => {
-                self.open_appearance_select(wizard, color, window, cx);
-            }
-            UiAction::OpenProductSelect(kind) => self.open_product_select(kind, None, window, cx),
-            UiAction::DefaultJavaAutomatic(value) => {
-                self.set_default_java_automatic(value, window, cx);
-            }
-            UiAction::DefaultWindow { width, height } => self.set_default_window(width, height, cx),
-            UiAction::CustomDefaultWindow => self.custom_default_window(window, cx),
-            UiAction::ProfileRuntimeAutomatic(value) => {
-                self.set_profile_runtime_automatic(value, window, cx);
-            }
-            UiAction::ProfileDataPolicy(value) => self.set_profile_data_policy(value),
-            UiAction::InstanceRuntimeAutomatic(value) => {
-                self.set_instance_runtime_automatic(value, window, cx);
-            }
-            UiAction::InstanceWindow { width, height } => {
-                self.set_instance_window(width, height, cx);
-            }
-            UiAction::CustomInstanceWindow => self.custom_instance_window(window, cx),
-            UiAction::ProfileConnect => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.server.connect_on_launch =
-                        !form.original.server.connect_on_launch;
-                }
-            }
-            UiAction::WizardRuntime(value) => self.wizard_runtime(value),
-            UiAction::WizardWindow { width, height } => self.wizard_window(width, height, cx),
-            UiAction::WizardCustomWindow => self.wizard_custom_window(),
-            UiAction::WizardProfileConnect => self.wizard_profile_connect(),
-            UiAction::MinimizeWindow => window.minimize_window(),
-            UiAction::CloseWindow => window.remove_window(),
-            UiAction::SelectValue(action) => {
-                self.shell.surfaces.close(window, &self.focus, cx);
-                self.handle(*action, window, cx);
-            }
-            UiAction::ProfileIcon(icon) => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.appearance.icon = icon;
-                }
-            }
-            UiAction::ProfileColor(color) => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.appearance.color = color;
-                }
-            }
-            UiAction::WizardSnapshots => {
-                self.shell.wizard.include_snapshots = !self.shell.wizard.include_snapshots;
-            }
-            UiAction::WizardNext => {
-                self.advance_game_wizard(cx);
-                self.focus_field(false, window, cx);
-            }
-            UiAction::WizardBack => self.back_game_wizard(cx),
-            UiAction::WizardPage(page) => {
-                if self.tab == Tab::Onboarding && !self.shell.first_run.enabled {
-                    if let Some(page) = page {
-                        self.open_onboarding_section(page, window, cx);
-                    } else {
-                        self.finish_onboarding_section(false, window, cx);
-                    }
-                } else {
-                    if page.is_none()
-                        && self
-                            .shell
-                            .wizard
-                            .page
-                            .is_some_and(|page| !self.validate_wizard_section(page, cx))
-                    {
-                        self.focus_wizard_error(window, cx);
-                        return;
-                    }
-                    if let Some(page) = page
-                        && self
-                            .shell
-                            .surfaces
-                            .layers()
-                            .any(|entry| matches!(entry.kind, shell::Surface::WizardSection(_)))
-                    {
-                        self.shell
-                            .surfaces
-                            .open(shell::Surface::WizardSection(page), window, cx);
-                        return;
-                    }
-                    self.open_game_wizard_page(page, cx);
-                    if let Some(page) = page {
-                        self.shell
-                            .surfaces
-                            .open(shell::Surface::WizardSection(page), window, cx);
-                    } else if self.shell.wizard.page.is_none() {
-                        self.shell.surfaces.close(window, &self.focus, cx);
-                    }
-                }
-            }
-            UiAction::WizardLoader(kind) => self.choose_wizard_loader(kind, cx),
-            UiAction::WizardLoaderBuild(version) => self.choose_wizard_loader_build(version, cx),
-            UiAction::ReloadLoaderVersions => self.load_wizard_loader_versions(true, cx),
-            UiAction::SelectVersion(version) => self.set_wizard_version(version, cx),
-            UiAction::BrowseInstall => self.browse_install(cx),
-            UiAction::SaveInstance => {
-                self.submit_game_wizard(cx);
-                self.focus_field(false, window, cx);
-            }
-            UiAction::EditProfile => self.edit_profile(window, cx),
-            UiAction::SaveProfile => self.save_profile_draft(window, cx),
-            UiAction::ProfilePage(page) => self.open_profile_page(page, window, cx),
-            UiAction::ProfilePageDone => self.finish_profile_page(false, window, cx),
-            UiAction::ProfilePageCancel => self.finish_profile_page(true, window, cx),
-            UiAction::CancelForm => {
-                if self.tab == Tab::Onboarding && self.shell.first_run.enabled {
-                    self.first_run_overview(window, cx);
-                } else if self.shell.editor.page.is_some()
-                    && matches!(self.form, Some(Form::Profile(_)))
-                {
-                    self.finish_profile_page(true, window, cx);
-                } else if matches!(self.form, Some(Form::Instance(_)))
-                    && self.shell.wizard.page.is_some()
-                {
-                    self.back_game_wizard(cx);
-                } else if matches!(self.form, Some(Form::Profile(_))) {
-                    self.cancel_profile_editor(window, cx);
-                } else if self.tab != Tab::Onboarding {
-                    self.form = None;
-                    self.shell.wizard.cancel_loader_request();
-                }
-            }
-            UiAction::NewProfile => {
-                let id = self
-                    .inspected_instance()
-                    .map(|instance| instance.id.clone());
-                self.begin_game_wizard(cx);
-                self.wizard_kind(false, cx);
-                if let Some(id) = id {
-                    self.wizard_instance(id);
-                }
-            }
-            UiAction::ProfileActions => self.open_profile_actions_at(None, window, cx),
-            UiAction::CopyProfileId(id) => {
-                if let Some(profile) = self
-                    .snapshot
-                    .profiles
-                    .iter()
-                    .find(|profile| profile.id == id)
-                    .cloned()
-                {
-                    self.begin("Copying profile settings");
-                    if let Some(engine) = &self.engine {
-                        engine.copy_profile(profile.id, format!("{} copy", profile.name));
-                    }
-                }
-            }
-            UiAction::DeleteProfileId(id) => {
-                if self
-                    .snapshot
-                    .profiles
-                    .iter()
-                    .any(|profile| profile.id == id)
-                {
-                    self.shell
-                        .surfaces
-                        .open(shell::Surface::DeleteProfile(id), window, cx);
-                } else {
-                    self.report(
-                        "This Profile is no longer available. Refresh the game library.".into(),
-                    );
-                }
-            }
-            UiAction::ConfirmDelete => {
-                let id = self
-                    .shell
-                    .surfaces
-                    .top()
-                    .and_then(|layer| match &layer.kind {
-                        shell::Surface::DeleteProfile(id) => Some(id.clone()),
-                        _ => None,
-                    });
-                if let Some(id) = id {
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                    self.begin("Deleting profile metadata");
-                    if let Some(engine) = &self.engine {
-                        engine.delete_profile(id);
-                    }
-                }
-            }
-            UiAction::ProfileTarget(target) => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.target_id = target;
-                }
-            }
-            UiAction::DefaultAccount(account) => {
-                if let Some(Form::Profile(form)) = &mut self.form {
-                    form.original.default_account = account;
-                }
-            }
-            UiAction::SignIn => self.open_auth_wizard(window, cx),
-            UiAction::Authenticate | UiAction::AuthRetry => self.start_auth(window, cx),
-            UiAction::AuthCancel => self.cancel_auth(window, cx),
-            UiAction::AuthFinish => self.finish_auth(window, cx),
-            UiAction::Providers => self.open_providers(cx),
-            UiAction::ProvidersBack => self.close_providers(cx),
-            UiAction::ProviderAdd => self.edit_provider(None, cx),
-            UiAction::ProviderInspect(id) => self.edit_provider(Some(&id), cx),
-            UiAction::ProviderIdentify => self.identify_provider(cx),
-            UiAction::ProviderConsent => self.consent_provider(cx),
-            UiAction::ProviderSave => self.save_provider(cx),
-            UiAction::ProviderRemoveRequest(id) => self.request_remove_provider(id, window, cx),
-            UiAction::ProviderRemove(id) => self.remove_provider(id, window, cx),
-            UiAction::AuthNext => self.auth_next(cx),
-            UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
-            UiAction::AuthBack => self.auth_back(window, cx),
-            UiAction::AuthExternalProvider(id) => self.choose_external_provider(id, window, cx),
-            UiAction::AuthHttpConsent => self.consent_external_auth(cx),
-            UiAction::AuthProviderAdd => self.open_auth_provider_add(window, cx),
-            UiAction::AuthProviderIdentify => self.identify_auth_provider(cx),
-            UiAction::AuthProviderConsent => self.consent_auth_provider(cx),
-            UiAction::AuthProviderSave => self.save_auth_provider(window, cx),
-            UiAction::AuthProviderCancel => {
-                self.cancel_auth_provider(cx);
-                self.shell.surfaces.close(window, &self.focus, cx);
-            }
-            UiAction::AuthCharacter(id) => self.choose_auth_character(id, cx),
-            UiAction::AuthMethod(method) => self.change_auth_method(method, window, cx),
-            UiAction::CopyDeviceCode => self.copy_device_code(cx),
-            UiAction::AuthReopen => self.reopen_auth(cx),
-            UiAction::RequestSignOut(id) => {
-                self.shell
-                    .surfaces
-                    .open(shell::Surface::RemoveAccount(id), window, cx);
-            }
-            UiAction::SignOut(id) => {
-                if let Some(account) = self.accounts.iter().find(|a| account_id(a) == id).cloned() {
-                    self.shell.surfaces.close(window, &self.focus, cx);
-                    self.begin("Removing saved credentials");
-                    self.operation_kind = OperationKind::Account;
-                    if let Some(engine) = &self.engine {
-                        engine.sign_out(account);
-                    }
-                }
-            }
-            UiAction::Play => self.play(cx),
-            UiAction::Repair => {
-                if let Some(profile) = self.profile().cloned() {
-                    self.begin_cancellable("Repairing installation · verifying shared resources");
-                    self.operation_kind = OperationKind::Install;
-                    if let Some(engine) = &self.engine {
-                        engine.install(profile.instance_id, profile.target_id, self.cancel.clone());
-                    }
-                }
-            }
-            UiAction::Stop => {
-                self.pending_play = false;
-                if self.can_stop() {
-                    self.play_stop.cancel();
-                    if let Some(id) = &self.active_run {
-                        if let Some(engine) = &self.engine {
-                            engine.stop_session(id.clone());
-                        }
-                    } else {
-                        self.cancel.cancel();
-                    }
-                    self.status = "Stopping · waiting for the current operation".into();
-                }
-            }
-            UiAction::ToggleOutput => self.show_output = !self.show_output,
-            UiAction::ToggleCommand => self.show_command = !self.show_command,
-            UiAction::OpenRecipe => self.open_recipe(cx),
-            UiAction::LaunchRecipe => self.launch_recipe(cx),
-        }
-        if previous_page != (self.tab, self.form.is_some()) {
-            self.request_frame_resize(window, cx);
-            self.shell.backwards = self.tab == Tab::Home || self.form.is_none() && previous_page.1;
-            self.shell.revision = self.shell.revision.wrapping_add(1);
-        }
-        if focus_first && !self.shell.surfaces.is_open() {
-            self.focus_field(false, window, cx);
-        }
-        self.sync_form_inputs(cx);
-        cx.notify();
     }
 
     fn form_inputs(&self) -> Vec<Entity<TextInput>> {
@@ -1908,21 +882,13 @@ impl Block {
     }
 
     fn focus_field(&self, backwards: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.tab != Tab::Onboarding
+        if self.router.tab() != Tab::Onboarding
             && matches!(self.form, Some(Form::Instance(_)))
             && self.focus_wizard_error(window, cx)
         {
             return;
         }
-        if self.tab == Tab::Onboarding && self.shell.onboarding.step != onboarding::Step::Game {
-            if backwards {
-                window.focus_prev(cx);
-            } else {
-                window.focus_next(cx);
-            }
-            return;
-        }
-        if self.tab == Tab::Settings {
+        if self.router.tab() == Tab::Settings {
             if let Some(form) = &self.settings_form {
                 let fields = form.fields();
                 if let Some(index) = fields
@@ -2099,7 +1065,7 @@ impl Block {
             .find(|a| Some(account_id(a)) == self.selected_account)
             .cloned()
         else {
-            self.tab = Tab::Accounts;
+            self.router.navigate(Tab::Accounts);
             self.status = if self
                 .profile()
                 .is_some_and(|profile| profile.default_account.is_some())
@@ -2121,20 +1087,6 @@ impl Block {
                 self.play_stop.clone(),
             );
         }
-    }
-
-    /// Play may be queued while an install/repair is keeping the app busy.
-    fn play_queue_eligible(&self) -> bool {
-        self.busy
-            && self.operation_kind == OperationKind::Install
-            && self.active_run.is_none()
-            && self.profile().is_some()
-    }
-
-    /// Whether an action may run while another operation is in progress.
-    fn can_activate(&self, action: &UiAction) -> bool {
-        Self::available_while_busy(action)
-            || matches!(action, UiAction::Play) && self.play_queue_eligible()
     }
 
     /// Start a Play that was queued while another operation was in progress.
@@ -2233,7 +1185,6 @@ impl Block {
             | UiAction::SavePreferences
             | UiAction::Play
             | UiAction::WizardNext
-            | UiAction::OnboardingNext
             | UiAction::SignIn
             | UiAction::Drawer(Some(Drawer::Profiles)) => components::ButtonVariant::Primary,
             UiAction::SignOut(_) | UiAction::ConfirmDelete => {
@@ -2336,68 +1287,6 @@ impl Block {
         }
     }
 
-    fn available_while_busy(action: &UiAction) -> bool {
-        if let UiAction::SelectValue(action) = action {
-            return Self::available_while_busy(action);
-        }
-        if let UiAction::OpenProductSelect(choice) = action {
-            return matches!(
-                choice,
-                select::ProductChoice::Appearance
-                    | select::ProductChoice::Proxy
-                    | select::ProductChoice::DefaultJava
-                    | select::ProductChoice::DefaultWindow
-            );
-        }
-        matches!(
-            action,
-            UiAction::Stop
-                | UiAction::OnboardingSkip
-                | UiAction::Tab(_)
-                | UiAction::Providers
-                | UiAction::ProvidersBack
-                | UiAction::DownloadFiles(_)
-                | UiAction::Drawer(_)
-                | UiAction::AuthCancel
-                | UiAction::AuthProviderCancel
-                | UiAction::AuthReopen
-                | UiAction::MinimizeWindow
-                | UiAction::CloseWindow
-                | UiAction::SignIn
-                | UiAction::AuthBack
-                | UiAction::AuthMethod(_)
-                | UiAction::CopyDeviceCode
-                | UiAction::SetAppearance(_)
-                | UiAction::ReduceMotion
-                | UiAction::DefaultJavaAutomatic(_)
-                | UiAction::DefaultWindow { .. }
-                | UiAction::CustomDefaultWindow
-                | UiAction::SavePreferences
-                | UiAction::ResetPreferences
-                | UiAction::SettingsPage(_)
-                | UiAction::SetFullscreen
-                | UiAction::ShowSnapshots
-                | UiAction::ProxyMode(_)
-                | UiAction::Inspect(_)
-                | UiAction::InspectLinked { .. }
-                | UiAction::GamesHelp
-                | UiAction::ProfileModeSettings
-                | UiAction::ReloadVersions
-                | UiAction::ReloadLibrary
-                | UiAction::ToggleOutput
-                | UiAction::ToggleCommand
-        )
-    }
-
-    fn instance_form(
-        &self,
-        form: &InstanceForm,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        self.render_game_wizard(form, window, cx)
-    }
-
     fn output(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         let lines = if self.show_command {
             self.command.as_deref().unwrap_or("A redacted command preview is available for development recipes after preparation.").lines().map(str::to_owned).collect::<Vec<_>>()
@@ -2472,7 +1361,7 @@ impl Render for Block {
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);
-        let action_rail = if self.tab == Tab::Home && self.form.is_none() {
+        let action_rail = if self.router.tab() == Tab::Home && self.form.is_none() {
             104.
         } else {
             design::MANAGEMENT_FOOTER
@@ -2481,11 +1370,13 @@ impl Render for Block {
         feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();
-        window.set_window_title(&if self.tab == Tab::Home && self.shell.auth.is_none() {
-            "Block".to_owned()
-        } else {
-            format!("Block · {title}")
-        });
+        window.set_window_title(
+            &if self.router.tab() == Tab::Home && self.shell.auth.is_none() {
+                "Block".to_owned()
+            } else {
+                format!("Block · {title}")
+            },
+        );
         self.render_shell(window, cx).into_any_element()
     }
 }
@@ -2711,7 +1602,10 @@ mod queued_play_ui_tests {
                 view.start_pending_play(cx);
             });
             assert!(!view.read_with(cx, |view, _| view.pending_play));
-            assert_eq!(view.read_with(cx, |view, _| view.tab), Tab::Accounts);
+            assert_eq!(
+                view.read_with(cx, |view, _| view.router.tab()),
+                Tab::Accounts
+            );
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
@@ -2892,7 +1786,6 @@ mod tests {
             visual_only: false,
             shell: super::ShellState::default(),
             pending_window_size: None,
-            onboarding_progress: super::onboarding::Progress::Draft,
             settings_form: None,
             preferences: super::Preferences::default(),
             saved_preferences: super::Preferences::default(),
@@ -2909,7 +1802,7 @@ mod tests {
             selected_profile: None,
             pending_profile: None,
             selected_account: None,
-            tab: super::Tab::Instances,
+            router: super::Router::new(super::Tab::Instances),
             form: None,
             engine: None,
             messages: None,
@@ -2991,65 +1884,27 @@ mod tests {
             let root = tempfile::tempdir()?;
             let (engine, _messages) = super::Engine::with_root(root.path().into())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
-            cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
-            view.update(cx, |view, cx| {
-                view.engine = Some(engine);
-                view.begin_onboarding(cx);
-                cx.notify();
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.engine = Some(engine);
+                    view.begin_first_run(cx);
+                    view.handle_first_run(super::first_run::Action::Custom, window, cx);
+                });
             });
-            cx.run_until_parked();
-            if let Some(bounds) = cx.debug_bounds("welcome-next") {
-                assert!(
-                    bounds.right() > gpui::px(860.),
-                    "primary action must align with the right form edge: {bounds:?}"
-                );
-                assert!(bounds.bottom() <= gpui::px(600.));
-            }
-            click_selector(cx, "welcome-next");
-            assert_eq!(
-                view.read_with(cx, |view, _| view.shell.onboarding.step),
-                super::onboarding::Step::Account
-            );
             assert_eq!(
                 super::Preferences::load(root.path())?,
                 super::Preferences::default()
             );
             assert!(view.read_with(cx, |view, _| view.form.is_some()));
-            assert!(cx.debug_bounds("onboarding-next-disabled").is_some());
-            click_selector(cx, "onboarding-account-later");
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.handle_first_run(super::first_run::Action::Skip, window, cx);
+                });
+            });
             assert_eq!(
-                view.read_with(cx, |view, _| view.shell.onboarding.step),
-                super::onboarding::Step::Review
+                view.read_with(cx, |view, _| view.router.tab()),
+                super::Tab::Home
             );
-            let action = cx
-                .debug_bounds("welcome-next")
-                .ok_or_else(|| anyhow::anyhow!("missing primary action"))?;
-            let footer = cx
-                .debug_bounds("onboarding-footer")
-                .ok_or_else(|| anyhow::anyhow!("missing footer"))?;
-            assert!(
-                action.right() <= footer.right() && action.bottom() <= footer.bottom(),
-                "primary action must stay inside its animated footer: {action:?}, {footer:?}"
-            );
-            click_selector(cx, "welcome-back");
-            click_selector(cx, "welcome-back");
-            assert_eq!(
-                view.read_with(cx, |view, _| view.shell.onboarding.step),
-                super::onboarding::Step::Game
-            );
-            assert!(view.read_with(cx, |view, _| view.shell.wizard.backwards));
-            click_selector(cx, "welcome-next");
-            assert!(!view.read_with(cx, |view, _| view.shell.wizard.backwards));
-            assert_eq!(
-                view.read_with(cx, |view, _| view.tab),
-                super::Tab::Onboarding
-            );
-            assert_eq!(
-                super::Preferences::load(root.path())?,
-                super::Preferences::default()
-            );
-            click_selector(cx, "onboarding-skip");
-            assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Home);
             let saved = super::Preferences::load(root.path())?;
             assert!(saved.onboarding_complete);
             assert_eq!(saved.appearance, super::Appearance::System);
@@ -3077,22 +1932,27 @@ mod tests {
             let root = tempfile::tempdir()?;
             let (engine, _messages) = super::Engine::with_root(root.path().into())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
-            view.update(cx, |view, cx| {
-                view.engine = Some(engine);
-                view.begin_onboarding(cx);
-                view.shell.onboarding.step = super::onboarding::Step::Review;
-                view.busy = true;
-                cx.notify();
-            });
-            cx.run_until_parked();
-            assert!(cx.debug_bounds("onboarding-skip").is_none());
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
-                    view.handle(super::UiAction::OnboardingSkip, window, cx);
+                    view.engine = Some(engine);
+                    view.begin_first_run(cx);
+                    view.handle_first_run(super::first_run::Action::Custom, window, cx);
+                    view.busy = true;
+                    cx.notify();
+                });
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.handle(
+                        super::UiAction::FirstRun(super::first_run::Action::Skip),
+                        window,
+                        cx,
+                    );
                 });
             });
             assert!(
-                view.read_with(cx, |view, _| view.tab == super::Tab::Onboarding
+                view.read_with(cx, |view, _| view.router.tab() == super::Tab::Onboarding
                     && view.form.is_some()
                     && view.busy
                     && !view.cancel.is_cancelled())
@@ -3107,44 +1967,32 @@ mod tests {
     }
 
     #[gpui::test]
-    fn first_run_save_retry_during_download_does_not_create_a_second_game(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn first_run_save_retry_does_not_create_a_second_game(cx: &mut gpui::TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
             let (instance, profile) =
                 catalog.create_instance("First game".into(), "1.20.6".into(), None, None)?;
+            let snapshot = catalog.snapshot()?;
             let (engine, _messages) = super::Engine::with_root(root.path().into())?;
             let (view, cx) = crate::test_support::window(cx, test_view);
-            cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
             std::fs::create_dir(root.path().join(super::global_config::FILE))?;
             view.update(cx, |view, cx| {
                 view.engine = Some(engine);
-                view.begin_onboarding(cx);
+                view.begin_first_run(cx);
+                view.snapshot = snapshot;
                 view.selected_instance = Some(instance.id.clone());
                 view.selected_profile = Some(profile.id.clone());
-                view.onboarding_progress = super::onboarding::Progress::Created;
-                view.shell.onboarding.step = super::onboarding::Step::Review;
-                view.busy = true;
                 assert!(!view.complete_onboarding());
                 cx.notify();
             });
-            cx.run_until_parked();
-            assert!(cx.debug_bounds("onboarding-error").is_some());
-            click_selector(cx, "welcome-back");
-            assert_eq!(
-                view.read_with(cx, |view, _| view.shell.onboarding.step),
-                super::onboarding::Step::Review
-            );
-            assert_eq!(
-                view.read_with(cx, |view, _| view.onboarding_progress),
-                super::onboarding::Progress::Created
-            );
+            assert!(!view.read_with(cx, |view, _| view.preferences.onboarding_complete));
             std::fs::remove_dir(root.path().join(super::global_config::FILE))?;
-            click_selector(cx, "welcome-next");
-            assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Home);
-            assert!(view.read_with(cx, |view, _| view.busy));
+            view.update(cx, |view, _| assert!(view.complete_onboarding()));
+            assert_eq!(
+                view.read_with(cx, |view, _| view.router.tab()),
+                super::Tab::Home
+            );
             let snapshot = catalog.snapshot()?;
             assert_eq!(snapshot.instances.len(), 1);
             assert_eq!(snapshot.instances[0].id, instance.id);
@@ -3181,7 +2029,10 @@ mod tests {
             Some(super::Drawer::Menu)
         );
         click_selector(cx, "menu-settings");
-        assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Settings);
+        assert_eq!(
+            view.read_with(cx, |view, _| view.router.tab()),
+            super::Tab::Settings
+        );
         cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
         click_selector(cx, "settings-appearance");
         click_selector(cx, "select-choice-2");
@@ -3318,7 +2169,7 @@ mod tests {
             sender.try_send(super::Message::Catalog(Ok(catalog.snapshot()?)))?;
             let (view, cx) = crate::test_support::window(cx, test_view);
             view.update(cx, |view, cx| {
-                view.tab = super::Tab::Home;
+                view.router.navigate(super::Tab::Home);
                 view.pending_profile = Some(profile.id.clone());
                 view.messages = Some(receiver);
                 view.poll(cx);
@@ -3333,7 +2184,7 @@ mod tests {
             );
             assert!(view.read_with(cx, |view, _| view.pending_profile.is_none()));
             assert_eq!(
-                view.read_with(cx, |view, _| view.tab),
+                view.read_with(cx, |view, _| view.router.tab()),
                 super::Tab::Instances
             );
             Ok(())
@@ -3639,7 +2490,10 @@ mod tests {
             view.selected_profile = Some("profile".into());
             view.play(cx);
         });
-        assert_eq!(view.read_with(cx, |view, _| view.tab), super::Tab::Accounts);
+        assert_eq!(
+            view.read_with(cx, |view, _| view.router.tab()),
+            super::Tab::Accounts
+        );
         assert!(!view.read_with(cx, |view, _| view.busy));
         assert!(view.read_with(cx, |view, _| {
             view.status.contains("Add and select an account")
@@ -3741,10 +2595,6 @@ mod tests {
         )));
     }
     #[gpui::test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Exercise startup, missing defaults and explicit account overrides in one unchanged catalog workflow."
-    )]
     fn profile_defaults_apply_on_start_and_switch_without_substituting_a_missing_identity(
         cx: &mut gpui::TestAppContext,
     ) {

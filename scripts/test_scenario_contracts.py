@@ -47,6 +47,35 @@ class ScenarioContractsTest(unittest.TestCase):
     def test_unknown_or_uncontracted_scenarios_fail_closed(self) -> None:
         with self.assertRaises(KeyError):
             contract("home-does-not-exist")
+        names = scenario_names()
+        for name in (
+            "welcome-1",
+            "welcome-2",
+            "welcome-3",
+            "welcome-version-picker",
+            "welcome-settings",
+            "welcome-about",
+        ):
+            with self.subTest(name=name):
+                self.assertNotIn(name, names)
+                with self.assertRaises(KeyError):
+                    contract(name)
+
+    def test_first_run_scenarios_follow_their_page_titles_and_frames(self) -> None:
+        for name in ("setup-welcome", "setup-import-sources", "setup-import-list"):
+            with self.subTest(name=name):
+                self.assertEqual(contract(name)["title"], "Block · Set up Block")
+                self.assertEqual(contract(name)["viewport"], HOME_VIEWPORT)
+        for name, title in (
+            ("setup-overview", "Set up Block"),
+            ("setup-overview-ready", "Set up Block"),
+            ("setup-game-choice", "Set up a game"),
+            ("setup-account", "Accounts"),
+            ("setup-game", "Create a game"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(contract(name)["title"], f"Block · {title}")
+                self.assertEqual(contract(name)["viewport"], MANAGEMENT_VIEWPORT)
 
 
 if __name__ == "__main__":

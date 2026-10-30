@@ -71,10 +71,10 @@ The first build downloads and compiles GPUI dependencies. Subsequent builds reus
     ├── block-app/          # Launcher, headless session supervisor, crash-help entry points
     ├── block-ui/           # GPUI launcher, crash help, and asynchronous core adapter
     ├── block-auth/         # Public Microsoft PKCE, ownership, native secure storage
-    ├── block-cli/          # block-launch: plan, prepare, launch, execute
-    ├── block-launcher/     # Recipes, planning, independent sessions, execution, diagnostics
+    ├── block-cli/          # block-launch and the manifest-audit corpus tool
+    ├── block-launcher/     # Official metadata, planning, sessions, execution, diagnostics
     ├── block-download/     # Verified resource cache, retries, cancellation
-    └── minecraft-manifest/ # Typed official metadata and offline corpus tests
+    └── block-drop/         # Platform-specific native drag and drop
 ```
 
 Both interfaces reuse `block-launcher`. Source parsers and the pure compiler produce secret-free preparation instructions; the native library coordinates persistent installations and Profiles. After resource validation, a transient LaunchPlan binds a currently valid session and mutable-data directory. LaunchExecutor handles the actual Java process and redacted logs. For native Profile launches, an independent per-game supervisor owns that plan, its locks, and its Java child; Microsoft authentication stays in the launcher. Account credentials stay outside saved plans. Workspace crates inherit shared package metadata, dependencies, and lint settings.
@@ -111,13 +111,17 @@ focused checks, evidence reuse and when a full verification run is appropriate.
 
 ## Lint policy
 
-The workspace enables Clippy's `all`, `pedantic`, and `nursery` groups. Additional restrictions reject `unwrap`, `expect`, explicit panics, `dbg!`, `todo!`, `unimplemented!`, and wildcard imports. Unsafe code is forbidden in workspace crates.
+The workspace runs Clippy's `all` group plus the complexity lints it gates explicitly: `cognitive_complexity` (nursery, limit 25), `too_many_lines` (pedantic, limit 200 from [clippy.toml](clippy.toml)), and `match_same_arms` (pedantic, which rejects duplicated branch bodies). Each is enabled on its own rather than through the `pedantic` and `nursery` groups, so a rule only joins the policy with a reason and a tree that already satisfies it. Additional restrictions reject `unwrap`, `expect`, explicit panics, `dbg!`, `todo!`, `unimplemented!`, and wildcard imports. Unsafe code is forbidden except in the isolated `block-drop` native platform bridge, which restates the same lint set with that exception.
 
 `just clippy` checks all workspace crates, targets, and features with `-D warnings`. Both Rust and Clippy warnings in project code fail the check. Third-party dependencies are not held to the workspace lint policy. Prefer fixing a diagnostic; if an exception is necessary, use a narrowly scoped `#[expect(..., reason = "...")]` with a concrete explanation.
 
+Function size and nesting are gated; file size is not. Clippy has no file-length lint, and a line-count limit on files would reward splitting a module without reducing what a reviewer has to hold in mind. Splitting a large module stays a design decision, so the functions inside it must satisfy the limits above either way.
+
+Source directories are grouped by responsibility, with tests beside the owning code. Physical file organization preserves logical module names and public APIs; it is not a reason to add crates or wrapper layers. Clippy does not enforce directory file counts.
+
 ## Minecraft manifest experiment
 
-See [the experiment notes](experiments/minecraft-manifests/README.md) for the schema coverage, recorded full-corpus results, and reproduction steps. The parser is a separate workspace crate; the desktop application remains the default member.
+See [the experiment notes](experiments/minecraft-manifests/README.md) for schema coverage, recorded full-corpus results, and reproduction steps. The parser lives in `block_launcher::manifest`, with the offline corpus under core tests and `manifest-audit` in `block-cli`. The desktop application remains the default member. [Architecture boundaries](docs/ui-architecture-proposal.md) explain when a separate crate is warranted.
 
 ## License
 

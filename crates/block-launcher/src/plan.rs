@@ -2,14 +2,14 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use anyhow::{Context as _, ensure};
 use block_download::Resource;
-use minecraft_manifest::{
-    model::{Argument, ArgumentValue},
-    resources::RuntimeFile,
-};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     azul::ArchiveKind,
+    manifest::{
+        model::{Argument, ArgumentValue},
+        resources::RuntimeFile,
+    },
     platform::{Architecture, OperatingSystem, Target},
     recipe::{LaunchRecipe, RuntimeSelection},
     resolver::{ManagedRuntime, ResolvedMetadata, download_resource},
@@ -499,7 +499,7 @@ fn plan_runtime(
 fn plan_mojang_runtime(
     metadata: &ResolvedMetadata,
     digest: &str,
-    manifest: &minecraft_manifest::resources::RuntimeManifest,
+    manifest: &crate::manifest::resources::RuntimeManifest,
     resources: &mut Vec<Resource>,
     actions: &mut Vec<PrepareAction>,
 ) -> anyhow::Result<JavaExecutable> {

@@ -11,11 +11,14 @@ use std::{
 
 use anyhow::{Context as _, ensure};
 use block_download::Resource;
-use minecraft_manifest::model::{Argument, Artifact, Library, LibraryDownloads, VersionManifest};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
 
-use crate::{catalog::LoaderKind, resolver::ResolveContext};
+use crate::{
+    catalog::LoaderKind,
+    manifest::model::{Argument, Artifact, Library, LibraryDownloads, VersionManifest},
+    resolver::ResolveContext,
+};
 
 const MAX_JAR: u64 = 128 * 1024 * 1024;
 

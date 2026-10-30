@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use anyhow::Context as _;
-use minecraft_manifest::{model::VersionIndex, resources::AssetObjects};
 use serde_json::json;
 use sha1::Digest as _;
 
@@ -12,6 +11,10 @@ use super::{
 };
 use crate::{
     Store,
+    manifest::{
+        model::{Download, VersionIndex, VersionManifest},
+        resources::AssetObjects,
+    },
     plan::{PrepareAction, compile},
     platform::{Architecture, OperatingSystem, Target},
     recipe::{Compatibility, LaunchRecipe, ParsedRecipe, RecipeSource, RuntimeSelection},
@@ -19,9 +22,8 @@ use crate::{
     session::OfflineSession,
 };
 
-fn base() -> anyhow::Result<minecraft_manifest::model::VersionManifest> {
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../minecraft-manifest/tests/fixtures/official");
+fn base() -> anyhow::Result<VersionManifest> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/official");
     let index: VersionIndex =
         serde_json::from_slice(&std::fs::read(root.join("version_manifest_v2.json"))?)?;
     let entry = index
@@ -627,7 +629,7 @@ async fn catalog_timeout_and_cancellation_interrupt_stalled_io() -> anyhow::Resu
 async fn processor_fixture(
     mode: u8,
 ) -> anyhow::Result<(
-    minecraft_manifest::model::VersionManifest,
+    VersionManifest,
     super::InstallerProfile,
     String,
     tokio::task::JoinHandle<anyhow::Result<usize>>,
@@ -637,7 +639,7 @@ async fn processor_fixture(
     let origin = format!("http://{}/", listener.local_addr()?);
     let mut manifest = base()?;
     let mappings = b"official mapping fixture";
-    manifest.downloads.client_mappings = Some(minecraft_manifest::model::Download {
+    manifest.downloads.client_mappings = Some(Download {
         url: format!("{origin}mappings"),
         sha1: format!("{:x}", sha1::Sha1::digest(mappings)),
         size: mappings.len() as u64,

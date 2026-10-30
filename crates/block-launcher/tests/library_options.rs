@@ -77,8 +77,7 @@ async fn launch_preparation_keeps_missing_resources_offline_with_an_explicit_pro
         java: std::env::current_exe()?,
     };
     library.catalog().save_profile(profile.clone())?;
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../minecraft-manifest/tests/fixtures/26.3.json");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/26.3.json");
     let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(fixture)?)?;
     manifest["assetIndex"]["url"] = serde_json::json!(format!("{proxy}/missing-asset-index"));
     let manifest_path = root.path().join("installed.json");

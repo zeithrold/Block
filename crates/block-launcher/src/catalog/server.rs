@@ -1,8 +1,9 @@
 //! Optional server preferences. Only a verified automatic connection launches;
 //! saving an address performs no network request and creates no identity.
 use anyhow::ensure;
-use minecraft_manifest::model::{Argument, ArgumentValue, VersionManifest, VersionType};
 use serde::{Deserialize, Serialize};
+
+use crate::manifest::model::{Argument, ArgumentValue, VersionManifest, VersionType};
 
 /// How an installed version's client accepts an automatic server connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -235,28 +236,28 @@ mod tests {
         assert!(ServerPreferences::default().validate().is_ok());
     }
     use super::{AutomaticConnection, ServerAddress, automatic_connection};
-    use minecraft_manifest::model::VersionType;
+    use crate::manifest::{
+        decode,
+        model::{VersionIndex, VersionManifest, VersionType},
+    };
 
-    fn official_manifests() -> anyhow::Result<(
-        minecraft_manifest::model::VersionManifest,
-        minecraft_manifest::model::VersionManifest,
-    )> {
-        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../minecraft-manifest/tests/fixtures");
-        let index: minecraft_manifest::model::VersionIndex = minecraft_manifest::decode(
-            &std::fs::read(fixtures.join("official/version_manifest_v2.json"))?,
-        )?;
+    fn official_manifests() -> anyhow::Result<(VersionManifest, VersionManifest)> {
+        let fixtures =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests");
+        let index: VersionIndex = decode(&std::fs::read(
+            fixtures.join("official/version_manifest_v2.json"),
+        )?)?;
         let entry = index
             .versions
             .iter()
             .find(|entry| entry.id == "1.20.6")
             .ok_or_else(|| anyhow::anyhow!("official fixture missing"))?;
-        let modern = minecraft_manifest::decode(&std::fs::read(
+        let modern = decode(&std::fs::read(
             fixtures
                 .join("official/versions")
                 .join(format!("{}.json", entry.sha1)),
         )?)?;
-        let legacy = minecraft_manifest::decode(&std::fs::read(fixtures.join("1.12.2.json"))?)?;
+        let legacy = decode(&std::fs::read(fixtures.join("1.12.2.json"))?)?;
         Ok((modern, legacy))
     }
 

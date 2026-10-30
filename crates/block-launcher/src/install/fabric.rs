@@ -4,13 +4,14 @@ use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 use anyhow::{Context as _, ensure};
 use block_download::Resource;
-use minecraft_manifest::model::{
-    Argument, Arguments, Artifact, Library, LibraryDownloads, VersionManifest,
-};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
 
-use crate::{catalog::LoaderKind, resolver::ResolveContext};
+use crate::{
+    catalog::LoaderKind,
+    manifest::model::{Argument, Arguments, Artifact, Library, LibraryDownloads, VersionManifest},
+    resolver::ResolveContext,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoaderVersion {
@@ -422,8 +423,8 @@ mod tests {
 
     fn base() -> anyhow::Result<VersionManifest> {
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../minecraft-manifest/tests/fixtures/official");
-        let index: minecraft_manifest::model::VersionIndex =
+            .join("tests/fixtures/manifests/official");
+        let index: crate::manifest::model::VersionIndex =
             serde_json::from_slice(&std::fs::read(fixtures.join("version_manifest_v2.json"))?)?;
         let entry = index
             .versions

@@ -9,13 +9,24 @@ license.workspace = true
 name = "block-launch"
 path = "src/main.rs"
 
+[[bin]]
+name = "manifest-audit"
+path = "src/bin/manifest-audit.rs"
+
 [dependencies]
 anyhow.workspace = true
 block-launcher.workspace = true
 clap.workspace = true
 directories.workspace = true
+rayon.workspace = true
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+sha1.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
