@@ -1,8 +1,8 @@
 # MVP implementation and acceptance
 
-Historical baseline record. For the current Pilot milestone status, five-platform evidence and compatibility limits, use [STATUS.md](STATUS.md) and [next-tasks.md](next-tasks.md). Milestone II is complete at `f2a5fd7`; its later results supersede pending items here without changing what the earlier baseline actually verified. Milestone III user acceptance remains pending.
+Historical baseline record. For the current Pilot milestone status, five-platform evidence and compatibility limits, use [STATUS.md](../STATUS.md) and [next-tasks.md](../next-tasks.md). Milestone II is complete at `f2a5fd7`; its later results supersede pending items here without changing what the earlier baseline actually verified. Milestone III user acceptance remains pending.
 
-Independent per-session supervision and native crash assistance were added after the baseline gameplay/authentication acceptance below. Their implementation, failure boundaries and separate cross-platform verification results are recorded in [Session supervision and crash help](session-supervisor.md). Earlier baseline test counts do not replace that feature's complete verification runs.
+Independent per-session supervision and native crash assistance were added after the baseline gameplay/authentication acceptance below. Their implementation, failure boundaries and separate cross-platform verification results are recorded in [Session supervision and crash help](../session-supervisor.md). Earlier baseline test counts do not replace that feature's complete verification runs.
 
 The target workflow is Microsoft sign-in → Instance → Profile → install → Play → world → normal exit → relaunch. Fresh Microsoft-authorized Vanilla and NeoForge sessions completed world entry, normal exit and same-world relaunch on macOS. Computer Use drove the native interface and games; a temporary application bundle around the identical Java executable made game windows targetable. Platform and runtime limits remain explicit below.
 
@@ -76,7 +76,7 @@ An earlier Windows attempt reached menus but timed out before world acceptance. 
 
 Authentication uses a public desktop client ID, Authorization Code with PKCE, a one-use loopback callback, Xbox/XSTS and Minecraft identity/entitlement checks. Refresh rotation is stored before downstream calls; changed player UUIDs are rejected. Provider errors omit raw response bodies. Launch binding checks session validity after preparation, and output is redacted before publication.
 
-Earlier confidential-client diagnostics do not prove public desktop registration. A synthetic invalid-code rejection or browser redirect is also insufficient. See [authentication setup](../crates/block-auth/README.md). No Client Secret or plaintext credential fallback is supported. Authentication on additional hosts still requires fresh user authorization; missing secure storage remains a blocker rather than a plaintext fallback.
+Earlier confidential-client diagnostics do not prove public desktop registration. A synthetic invalid-code rejection or browser redirect is also insufficient. See [authentication setup](../../crates/block-auth/README.md). No Client Secret or plaintext credential fallback is supported. Authentication on additional hosts still requires fresh user authorization; missing secure storage remains a blocker rather than a plaintext fallback.
 
 A fresh macOS attempt reproduced a registration rejection with the original callback: the same localhost path belonged to Native, Web and SPA registrations differing only by port. Block now uses the distinct Native-only `/block/callback` path. The existing application gained only that Native URI; previous callbacks, account audience and permissions were preserved. A new browser authorization then completed the actual public PKCE, Xbox/Minecraft ownership/profile and protected credential-save chain successfully. The callback regression rejects the old path and accepts the matching state on the new one. Full `just check` passed 105 tests after the change.
 
@@ -97,7 +97,7 @@ just check
 just build
 ```
 
-These commands use locked workspace dependencies. The [CI workflow](../.github/workflows/check.yml) runs independent core checks on Linux, Windows and macOS, plus desktop checks and GPUI framework tests. The captured 919-version corpus exercises parsing/planning, not graphical gameplay for every version.
+These commands use locked workspace dependencies. The [CI workflow](../../.github/workflows/check.yml) runs independent core checks on Linux, Windows and macOS, plus desktop checks and GPUI framework tests. The captured 919-version corpus exercises parsing/planning, not graphical gameplay for every version.
 
 Real authentication requires a personal-account-capable desktop registration, an available native credential backend and new browser authorization on each host. Do not copy credentials between machines. Graphical acceptance requires an unlocked usable desktop. A commit or CI result does not resolve the pending authentication gates.
 

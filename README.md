@@ -2,7 +2,10 @@
 
 A Minecraft Java Edition launcher MVP built with Rust and [GPUI](https://gpui.rs/), with a shared core for the native interface and command-line tool.
 
-Block separates persistent Instances, launch Profiles and Accounts from transient LaunchPlans. The native interface manages games and accounts, installs Vanilla, Fabric, Quilt, Forge and NeoForge, imports user-provided official OptiFine JARs, and hands a verified Java invocation to an independent session supervisor. See [Pilot status](docs/STATUS.md) for current native evidence and compatibility limits, and [next tasks](docs/next-tasks.md) for the milestone plan. The [MVP acceptance record](docs/mvp-progress.md) preserves earlier baseline results.
+Block separates persistent Instances, launch Profiles and Accounts from transient LaunchPlans. The native interface manages games and accounts, installs Vanilla, Fabric, Quilt, Forge and NeoForge, imports user-provided official OptiFine JARs, and hands a verified Java invocation to an independent session supervisor. See [Pilot status](docs/STATUS.md) for current native evidence and compatibility limits, and [next tasks](docs/next-tasks.md) for the milestone plan. The [MVP acceptance record](docs/archive/mvp-progress.md) preserves earlier baseline results.
+
+The [documentation index](docs/README.md) groups current guides, implementation
+plans, verification reports and historical records.
 
 Pilot Milestone II basic usability is complete at `f2a5fd7`, including the screenshot handoff and live Microsoft sign-in/avatar checks on five platforms. Milestone III visual and interaction review is in progress. The Windows ARM64 motion increment was manually observed by the user because automated motion detection could not observe it, but that observation is not product acceptance; no platform or page has passed full-product/visual acceptance. Architecture design (Milestone IV) and the first public unstable release (v0) remain separate future stages.
 
@@ -102,6 +105,9 @@ The captured 919-version corpus exercises parsing and planning across all three 
 | `just manifest-verify` | Run the full official-corpus Cargo integration tests offline |
 
 Verification and build commands use `--locked` to prevent implicit dependency updates.
+
+See [test-platform guidelines](docs/test-platforms.md) for selecting native hosts,
+focused checks, evidence reuse and when a full verification run is appropriate.
 
 ## Lint policy
 

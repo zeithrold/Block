@@ -1,6 +1,6 @@
 # Block: Pilot Task List
 
-Date: 2026-10-21; updated 2026-10-25. E01–E03 evidence calibration, including source-stamped Windows verification, was completed 2026-10-24. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [codex-goal-prompt.md](codex-goal-prompt.md).
+Date: 2026-10-21; updated 2026-10-25. E01–E03 evidence calibration, including source-stamped Windows verification, was completed 2026-10-24. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [archived goal prompt](archive/codex-goal-prompt.md).
 
 ## Development milestones (user decision, 2026-10-23)
 
@@ -19,7 +19,7 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
 
 ## Historical handoff snapshot (2026-10-23, reviewed HEAD `f2a5fd7`)
 
-- DeepSeek completed Milestone II under the scoped v8 prompt in [codex-goal-prompt.md](codex-goal-prompt.md). Codex's handoff review confirmed artifact counts and links; the subsequent Milestone III screenshot/source assessment found content and comparison issues listed below. Neither review repeats native E2E or sets Accepted. v6/v7 are in Git history.
+- DeepSeek completed Milestone II under the scoped v8 prompt in the [archived goal prompt](archive/codex-goal-prompt.md). Codex's handoff review confirmed artifact counts and links; the subsequent Milestone III screenshot/source assessment found content and comparison issues listed below. Neither review repeats native E2E or sets Accepted. v6/v7 are in Git history.
 - CI: latest completed four-platform run is green at `df2db40` (run 39885268348); `c8406ad` and `f2a5fd7` documentation runs are still in progress at this review. Windows ARM64 is green with an uploaded artifact at `82b3847` (run 39823711474). Pending runs retain their own result.
 - Native app evidence:
   - macOS: live PKCE and Device Code; Welcome → Vanilla → main menu → Stop; relaunch and play without signing in again; overlay, IME and real quick-link drag checks passed.
@@ -34,7 +34,7 @@ These stages supersede the earlier combined Pilot acceptance gate and the rule t
 
 ## CI coverage (2026-10-23)
 
-CI update (2026-10-23): Windows ARM64 is included in the automatic push/PR matrix alongside Windows AMD64, Linux AMD64/ARM64 and macOS ARM64. All five platforms retain native architecture guards and the same full verification script, use a 60-minute timeout and upload their own verified `block-<platform>` executable. The separate manual Windows ARM64 workflow and the redundant macOS Metal compiler preparation step are removed. Windows shares the supervisor-death, native child-process cancellation/pipe capture, launch-context/redaction and symlink protection regressions, with an additional junction-isolation test. Unix permissions/signals and Windows file-sharing tests retain their necessary OS-specific assertions. Each commit requires its own five-platform result; automated checks do not close the production desktop/visual checks in M04.
+CI update (2026-10-23): Windows ARM64 is included in the automatic push/PR matrix alongside Windows AMD64, Linux AMD64/ARM64 and macOS ARM64. All five platforms retain native architecture guards and the same full verification script, use a 60-minute timeout and upload their own verified `block-<platform>` executable. The separate manual Windows ARM64 workflow and the redundant macOS Metal compiler preparation step are removed. Windows shares the supervisor-death, native child-process cancellation/pipe capture, launch-context/redaction and symlink protection regressions, with an additional junction-isolation test. Unix permissions/signals and Windows file-sharing tests retain their necessary OS-specific assertions. CI results apply to the revision they ran against; local test-host work follows [test-platform guidelines](test-platforms.md) without duplicating the full CI matrix. Automated checks do not close the production desktop/visual checks in M04.
 
 ## v0 product intent and recovery policy (user decisions, 2026-10-23)
 
@@ -211,11 +211,11 @@ Exit criterion: full tasks remain readable in both themes and fitted windows, re
 - Agents may install software on the test hosts (capture tools, Java, sccache, Python, Git and similar) without further approval.
 - Multiple agents may collaborate through Git on dedicated branches. No force-push; main history is never rewritten.
 - Agents may use the hosts' overlay addresses for machine-to-machine services; temporary services stop after use.
-- Source access authorization (user, 2026-10-24): all test hosts may retrieve the current project source as needed for validation, including a fingerprinted snapshot of uncommitted fixes. Record commit/fingerprint and binary identity; omit `.env`, credentials, Git metadata and player data from transferred snapshots. This authorization permits the E01–E03 Windows source rebuild/recapture; it is not a verification or acceptance result.
-- `.env` values may be passed to workers inside commands so they can use the real Microsoft client ID. They are never printed or written to disk.
+- Source access authorization (user, 2026-10-24): all test hosts may retrieve the current project source as needed for validation, including uncommitted fixes. Record the commit, relevant patch/snapshot and executable used; omit `.env`, credentials, Git metadata and player data from transferred snapshots. Routine runs do not require source fingerprints. This authorization is not a verification or acceptance result.
+- Supply required environment values through the host's authorized environment or secret mechanism, not literal command text, logs or transferred files. The Microsoft client ID is public; account credentials remain host-local.
 - The number of agents may grow as needed.
 - WireGuard overlay: Mac hub with `10.77.0.0/24` routes only, no full tunnel. It carries SSH, Git, VNC, the Authlib fixture and Minecraft servers.
-- Service placement: Git and the Authlib fixture on the Mac or Linux ARM64; Minecraft servers on Linux AMD64; VNC on each host.
+- Default service placement: Git and the Authlib fixture on the Mac or Linux ARM64; Minecraft servers on Linux AMD64; VNC on each host. Temporary task services may use another suitable test host; stop them after use.
 
 ## Test hosts (addresses in `.env`)
 
@@ -227,7 +227,7 @@ Exit criterion: full tasks remain readable in both themes and fitted windows, re
 | Windows ARM64 `WINDOWS_ARM64_SSH` | Windows-on-ARM VM running on the Mac, `10.77.0.12`; same PowerShell/scheduled-task rules. C: only. Python and Git Bash are installed; the Rust platform comes from the user (decision 22) |
 | Linux AMD64 `LINUX_AMD64_VM_SSH` | VMware guest on the Windows AMD64 host, `10.77.0.22`. Start it DETACHED (WMI `Win32_Process.Create`, never as the last command of an SSH session) with `vmrun -T ws start "D:\Virtual Machines\Block-Debian-AMD64\block-debian-amd64.vmx" nogui`. Also reachable with `ssh -o ProxyJump="$WINDOWS_AMD64_SSH"`. Its login keyring relocks after a reboot. Shares the physical machine with Windows AMD64 (decision 24) |
 
-Keep one checkout per host (`~/block-src`; `D:\block-src` on Windows AMD64) and update it with `git fetch`. Never copy `target/` or player data.
+Prefer the existing checkout (`~/block-src`; `D:\block-src` on Windows AMD64) and update it with `git fetch`. Task-owned worktrees or snapshots are allowed when isolation is useful; follow [test-platform guidelines](test-platforms.md) for workspace permissions, data safety, evidence reuse and verification scope. Never copy `target/` or player data between hosts.
 
 ## Existing Pilot work checklist
 

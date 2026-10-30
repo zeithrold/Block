@@ -15,6 +15,7 @@
 ## Verification and evidence
 
 - Use the [justfile](justfile) as the command source of truth. `just check` is the full formatting, type-check, Clippy and test sequence; use focused package tests while iterating. Preserve `--locked` for builds and checks unless intentionally updating dependencies.
+- Select test hosts and verification depth by the changed contract, following [test-platform guidelines](docs/test-platforms.md). Reuse unaffected evidence; a documentation change or a focused native check does not require a fresh full-platform matrix.
 - Follow the existing [lint policy](README.md#lint-policy); do not broadly suppress diagnostics to get a check passing.
 - Report exactly which checks ran and which did not. Parsing or planning success does not prove graphical launch support; reaching a menu does not prove world gameplay, normal exit or relaunch. Offline recipes do not establish Microsoft authentication acceptance.
 - Keep platform, CPU architecture, Minecraft version and Loader evidence explicit. Do not generalize a host result to other targets. Use [current status](docs/STATUS.md) for recorded compatibility limits, not assumptions.

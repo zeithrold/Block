@@ -2,6 +2,10 @@
 
 2026-10-24. E01–E03 are complete as evidence-preparation tasks for Milestone III visual review. The Windows source-stamped rebuild, native fixture tests and follow-up captures passed after the user authorized source retrieval by all test hosts. This does not set Accepted or complete the broader Milestone III review.
 
+This report records the E01–E03 capture workflow and its evidence. Select new
+test-platform work using [test-platform guidelines](test-platforms.md); the
+source manifests, hashes and receipts below are not a general testing gate.
+
 ## E01: correct pages, preserve the originals
 
 The three incorrect light images were replaced at their existing paths. Both themes were refreshed together: four macOS images (`accounts` and the deliberately reused `account-offline-detail`) and two Windows Accounts images. Every replacement passed **process-owned page title + 1152×720 logical viewport + OCR of the seed name, Account details, Offline Mode and the local-identity explanation**. A title or filename alone cannot pass. The current window geometry differs from the historical 960×600 baseline and is recorded in each receipt.

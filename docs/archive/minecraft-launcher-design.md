@@ -1,6 +1,11 @@
 # Minecraft resource preparation and instance launch
 
-Status: the recipe/plan/executor core and offline CLI MVP are implemented. This document also describes later hardening and compatibility work; concrete supported commands are documented in `recipes.md`.
+Historical launch-engine design from the initial MVP. The recipe/plan/executor
+core and offline CLI MVP are implemented; the implementation sequence and
+platform assumptions below describe that design stage, not the current backlog.
+Use [launch recipes](../recipes.md) for supported commands,
+[session supervision](../session-supervisor.md) for current process ownership,
+and [current status](../STATUS.md) for compatibility evidence.
 
 ## Scope and agreed constraints
 

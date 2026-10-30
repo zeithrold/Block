@@ -2,7 +2,7 @@
 
 Requested by the user on 2026-10-23. Scope: exploration and native compatibility testing; not a Home redesign or production chrome rollout.
 
-This investigation is complete; see [xwayland-compatibility-investigation.md](xwayland-compatibility-investigation.md). The user subsequently authorized a narrow production follow-up for titlebar removal and custom dragging, again assigned to GPT-6 Luna/high. The assessment-only editing restrictions below describe the completed investigation; the follow-up's current scope is tracked in M04 of [next-tasks.md](next-tasks.md).
+This investigation is complete; see [xwayland-compatibility-investigation.md](../xwayland-compatibility-investigation.md). The user subsequently authorized a narrow production follow-up for titlebar removal and custom dragging, again assigned to GPT-6 Luna/high. The assessment-only editing restrictions below describe the completed investigation; the follow-up's current scope is tracked in M04 of [next-tasks.md](../next-tasks.md).
 
 Runner decision: the user replaced the proposed DeepSeek Harness dispatch with a GPT-6 Luna subagent at high reasoning effort. The earlier external DeepSeek launch was rejected by automatic approval review and never started; it must not be retried as part of this task. The user has explicitly authorized this Codex subagent investigation instead. Credentials are for normal authentication only, never task content or logs.
 
