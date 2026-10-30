@@ -69,7 +69,7 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
     cx: &mut TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
@@ -96,7 +96,7 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
     });
     assert!(
         cx.debug_bounds("profile-field-Memory")
-            .is_some_and(|bounds| bounds.top() >= px(40.) && bounds.bottom() <= px(484.))
+            .is_some_and(|bounds| bounds.top() >= px(0.) && bounds.bottom() <= px(648.))
     );
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -188,7 +188,7 @@ fn invalid_server_recovers_on_the_main_page_and_clearing_it_disables_automatic_c
     cx: &mut TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
@@ -215,7 +215,7 @@ fn invalid_server_recovers_on_the_main_page_and_clearing_it_disables_automatic_c
     cx.run_until_parked();
     assert!(
         cx.debug_bounds("profile-field-Server")
-            .is_some_and(|bounds| bounds.top() >= px(40.) && bounds.bottom() <= px(484.))
+            .is_some_and(|bounds| bounds.top() >= px(0.) && bounds.bottom() <= px(648.))
     );
 }
 
@@ -246,7 +246,6 @@ fn main_cancel_restores_the_actual_edit_trigger_and_does_not_change_the_profile(
         view.snapshot = ready_snapshot();
         view.tab = Tab::Instances;
         view.shell.games.inspected = Some("profile-a".into());
-        view.shell.games.detail_visible = true;
         cx.notify();
     });
     let trigger = view.update(cx, |view, cx| view.profile_editor_trigger_focus(cx));
@@ -281,7 +280,7 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
         let original = std::fs::read(&path)?;
         let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-        cx.simulate_resize(size(px(360.), px(540.)));
+        cx.simulate_resize(size(px(1152.), px(720.)));
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.snapshot = snapshot;
@@ -289,7 +288,6 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
             view.messages = Some(messages);
             view.tab = Tab::Instances;
             view.shell.games.inspected = Some(profile.id.clone());
-            view.shell.games.detail_visible = true;
             cx.notify();
         });
         let trigger = view.update(cx, |view, cx| view.profile_editor_trigger_focus(cx));
@@ -306,11 +304,14 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
         click(cx, "save-profile");
         finish_operation(&view, cx);
         assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::Profile(form)) if form.name.read(cx).value() == "Retried profile")));
-        assert!(
-            cx.debug_bounds("profile-save-error")
-                .is_some_and(|bounds| bounds.top() >= px(40.) && bounds.bottom() <= px(484.))
-        );
         let save = cx.debug_bounds("save-profile");
+        let error = cx.debug_bounds("profile-save-error");
+        assert!(
+            error.zip(save).is_some_and(|(error, save)| {
+                error.top() >= px(40.) && error.bottom() <= save.top()
+            }),
+            "save error must stay visible above the retry action: {error:?}, {save:?}"
+        );
         let toast = cx.debug_bounds("toast");
         assert!(
             save.zip(toast).is_some_and(
@@ -355,7 +356,6 @@ fn saving_after_inspection_changes_restores_the_current_detail_instead_of_an_old
             view.messages = Some(messages);
             view.tab = Tab::Profiles;
             view.shell.profiles.inspected = Some(first.id);
-            view.shell.profiles.detail_visible = true;
             cx.notify();
         });
         click(cx, "edit-profile");

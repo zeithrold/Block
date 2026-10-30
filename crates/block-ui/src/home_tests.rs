@@ -249,7 +249,7 @@ fn task_phase_and_progress_follow_real_events_without_replaying_local_entry(
 ) {
     use std::sync::{Arc, Mutex};
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
     configured_home(&view, cx);
     let tracker = Arc::new(Mutex::new(crate::tasks::DownloadTracker::default()));
     tracker
@@ -355,7 +355,7 @@ fn reduced_motion_and_non_cancellable_work_do_not_offer_a_false_stop(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
     configured_home(&view, cx);
     view.update(cx, |view, cx| {
         view.busy = true;

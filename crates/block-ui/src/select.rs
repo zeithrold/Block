@@ -491,8 +491,7 @@ impl Block {
             px(192.)
         } else {
             anchor.map_or(px(224.), |bounds| bounds.size.width.max(px(144.)))
-        }
-        .min((window.viewport_size().width - px(16.)).max(px(1.)));
+        };
         let active = choices
             .iter()
             .position(|choice| choice.selected)

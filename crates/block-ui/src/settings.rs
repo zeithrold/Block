@@ -810,74 +810,37 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl gpui::IntoElement + use<> {
-        let viewport = self.page_viewport(window);
-        let narrow = patterns::is_narrow(viewport);
         let Some(draft) = &self.settings_form else {
             return div().into_any_element();
         };
-        let navigation = self.settings_navigation(draft, viewport, cx);
+        let navigation = self.settings_navigation(draft, cx);
         let detail = self.transition_content(
             super::motion::Scope::Detail,
-            self.render_settings_detail(window, cx),
+            self.render_settings_detail(cx),
             window,
             cx,
         );
-        if narrow {
-            div()
-                .id("settings-page")
-                .size_full()
-                .min_h_0()
-                .flex()
-                .child(
-                    self.frame_sidebar(
-                        div()
-                            .w(px(56.))
-                            .flex_shrink_0()
-                            .border_r_1()
-                            .border_color(rgb(self.palette.border))
-                            .child(navigation),
-                    ),
-                )
-                .child(self.frame_detail(div().flex_1().min_w_0().min_h_0().child(detail)))
-                .into_any_element()
-        } else {
-            patterns::management_layout(
-                viewport,
-                navigation.into_any_element(),
-                detail.into_any_element(),
-                true,
-                super::Palette {
-                    sidebar: self.palette.background,
-                    ..self.palette
-                },
-                self,
-            )
-            .id("settings-page")
-            .into_any_element()
-        }
+        patterns::management_layout(
+            navigation.into_any_element(),
+            detail.into_any_element(),
+            super::Palette {
+                sidebar: self.palette.background,
+                ..self.palette
+            },
+            self,
+        )
+        .id("settings-page")
+        .into_any_element()
     }
 
-    pub(super) fn render_settings_detail(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    pub(super) fn render_settings_detail(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         self.settings_form.as_ref().map_or_else(
             || div().into_any_element(),
-            |draft| {
-                self.settings_detail(draft, self.page_viewport(window), cx)
-                    .into_any_element()
-            },
+            |draft| self.settings_detail(draft, cx).into_any_element(),
         )
     }
 
-    fn settings_navigation(
-        &self,
-        draft: &SettingsDraft,
-        viewport: gpui::Size<gpui::Pixels>,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let narrow = patterns::is_narrow(viewport);
+    fn settings_navigation(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
         let dirty = draft.is_dirty(&self.saved_preferences, cx);
         let categories = [
@@ -930,13 +893,8 @@ impl Block {
                             } else {
                                 self.palette.muted
                             },
-                        ));
-                        if !narrow {
-                            button = button.child(label);
-                        }
-                        if narrow {
-                            button = button.justify_center().px_0().gap_0();
-                        }
+                        ))
+                        .child(label);
                         if active {
                             button = button
                                 .bg(rgb(self.palette.accent))
@@ -946,36 +904,17 @@ impl Block {
                     })),
             )
             .child(
-                patterns::management_footer(viewport, self.palette)
+                patterns::management_footer(self.palette)
                     .justify_center()
-                    .child(if narrow {
-                        div()
-                            .size(px(6.))
-                            .rounded_full()
-                            .bg(rgb(if dirty {
-                                self.palette.warning
-                            } else {
-                                self.palette.muted
-                            }))
-                            .into_any_element()
+                    .child(note(if dirty {
+                        "Unsaved changes"
                     } else {
-                        note(if dirty {
-                            "Unsaved changes"
-                        } else {
-                            "No unsaved changes"
-                        })
-                        .into_any_element()
-                    }),
+                        "No unsaved changes"
+                    })),
             )
     }
 
-    fn settings_detail(
-        &self,
-        draft: &SettingsDraft,
-        viewport: gpui::Size<gpui::Pixels>,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let narrow = patterns::is_narrow(viewport);
+    fn settings_detail(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
         let (title, description) = match page {
             1 => (
@@ -1001,7 +940,7 @@ impl Block {
             .as_ref()
             .map(|error| (error.message.clone(), true))
             .or_else(|| draft.notice.clone().map(|message| (message, false)));
-        let body = self.settings_section_body(draft, narrow, cx);
+        let body = self.settings_section_body(draft, cx);
         div()
             .size_full()
             .min_h_0()
@@ -1020,7 +959,7 @@ impl Block {
                             .mx_auto()
                             .w_full()
                             .max_w(px(608.))
-                            .p(px(if narrow { 16. } else { 32. }))
+                            .p_8()
                             .flex()
                             .flex_col()
                             .gap_6()
@@ -1041,32 +980,25 @@ impl Block {
                             .child(body),
                     ),
             )
-            .child(self.settings_footer(draft, viewport, cx))
+            .child(self.settings_footer(draft, cx))
     }
 
     fn settings_section_body(
         &self,
         draft: &SettingsDraft,
-        narrow: bool,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         match draft.page {
-            1 => self.settings_fields(draft, narrow, cx),
-            2 => self.settings_profile_mode(narrow, cx),
-            3 => self.settings_downloads(draft, narrow, cx),
+            1 => self.settings_fields(draft, cx),
+            2 => self.settings_profile_mode(cx),
+            3 => self.settings_downloads(draft, cx),
             4 => self.settings_storage(),
             _ => self.settings_appearance(draft, cx),
         }
         .into_any_element()
     }
 
-    fn settings_footer(
-        &self,
-        draft: &SettingsDraft,
-        viewport: gpui::Size<gpui::Pixels>,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let narrow = patterns::is_narrow(viewport);
+    fn settings_footer(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
         let dirty = draft.is_dirty(&self.saved_preferences, cx);
         let close = if self.tab == Tab::Onboarding || self.shell.guide_preview.is_some() {
@@ -1074,29 +1006,18 @@ impl Block {
         } else {
             UiAction::Tab(Tab::Home)
         };
-        let mut footer = patterns::management_footer(viewport, self.palette).justify_between();
+        let mut footer = patterns::management_footer(self.palette).justify_between();
         if page == 4 {
             return footer
                 .child(note("Locations are managed automatically.").flex_1())
                 .child(self.button("cancel-preferences", "Close", close, cx));
         }
         if page == 2 {
-            footer = footer.child(
-                note(if narrow {
-                    "Immediate"
-                } else {
-                    "Mode changes apply immediately."
-                })
-                .flex_1(),
-            );
+            footer = footer.child(note("Mode changes apply immediately.").flex_1());
         } else {
             footer = footer.child(self.button(
                 "reset-preferences",
-                if narrow {
-                    "Restore"
-                } else {
-                    "Restore defaults"
-                },
+                "Restore defaults",
                 UiAction::ResetPreferences,
                 cx,
             ));
@@ -1291,18 +1212,7 @@ impl Block {
             .child(note("Appearance previews immediately. Save changes keeps this choice; Cancel restores your saved appearance."))
     }
 
-    fn settings_fields(
-        &self,
-        draft: &SettingsDraft,
-        narrow: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let mut runtime = div().flex().gap_4();
-        let mut dimensions = div().flex().gap_4();
-        if narrow {
-            runtime = runtime.flex_col();
-            dimensions = dimensions.flex_col();
-        }
+    fn settings_fields(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let java = if draft.java_automatic {
             "Automatic Java"
         } else {
@@ -1320,29 +1230,20 @@ impl Block {
         );
         div().flex().flex_col().gap_5()
             .child(note("Defaults apply to new Instances and Profiles. Existing setups keep their current settings.").p_3().rounded_lg().bg(rgb(self.palette.secondary)))
-            .child(runtime.child(self.settings_memory_field(draft, cx).flex_1())
+            .child(div().flex().gap_4().child(self.settings_memory_field(draft, cx).flex_1())
                 .child(self.product_select_field("settings-default-java", "Default Java runtime", java, super::select::ProductChoice::DefaultJava, cx).flex_1()))
             .children((!draft.java_automatic).then(|| self.settings_field(draft, SettingsField::Java, "Java executable path", Some("Absolute path to the Java executable used for new games."))))
             .child(self.product_select_field("settings-default-window", "Default window size", &window, super::select::ProductChoice::DefaultWindow, cx))
-            .children(draft.window_custom.then(|| dimensions.child(self.settings_field(draft, SettingsField::Width, "Window width (px)", Some("Allowed: 320–16384 pixels.")).flex_1())
+            .children(draft.window_custom.then(|| div().flex().gap_4().child(self.settings_field(draft, SettingsField::Width, "Window width (px)", Some("Allowed: 320–16384 pixels.")).flex_1())
                 .child(self.settings_field(draft, SettingsField::Height, "Window height (px)", Some("Allowed: 240–16384 pixels.")).flex_1())))
             .child(self.settings_control("settings-fullscreen", "Start games in fullscreen", draft.fullscreen, UiAction::SetFullscreen, cx))
             .child(self.settings_field(draft, SettingsField::Jvm, "Default extra JVM arguments", Some("Memory is set above. Leave empty unless you need additional launch arguments.")))
             .child(self.settings_control("settings-snapshots", "Include snapshot versions", draft.show_snapshots, UiAction::ShowSnapshots, cx))
     }
 
-    fn settings_downloads(
-        &self,
-        draft: &SettingsDraft,
-        narrow: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let mut limits = div().flex().gap_4();
-        if narrow {
-            limits = limits.flex_col();
-        }
+    fn settings_downloads(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         div().flex().flex_col().gap_5()
-            .child(limits.child(self.settings_field(draft, SettingsField::Concurrent, "Parallel downloads", Some("1–16 active object transfers.")).flex_1())
+            .child(div().flex().gap_4().child(self.settings_field(draft, SettingsField::Concurrent, "Parallel downloads", Some("1–16 active object transfers.")).flex_1())
                 .child(self.settings_field(draft, SettingsField::Retries, "Retry count", Some("0–10 additional attempts.")).flex_1()))
             .child(self.settings_field(draft, SettingsField::Rate, "Download speed limit (MB/s)", Some("0 or empty means unlimited. 1 MB/s = 1,000,000 bytes/s; metadata is not throttled.")))
             .child(self.product_select_field("settings-proxy", "Proxy", match draft.proxy_mode {
@@ -1414,7 +1315,7 @@ impl Block {
             )
     }
 
-    fn settings_profile_mode(&self, narrow: bool, cx: &Context<'_, Self>) -> gpui::Div {
+    fn settings_profile_mode(&self, cx: &Context<'_, Self>) -> gpui::Div {
         let separated = self.snapshot.profile_mode == ProfileMode::Separated;
         let card = |title, description, active| {
             components::card(self.palette)
@@ -1434,12 +1335,8 @@ impl Block {
                     components::badge("Current", self.palette, components::BadgeVariant::Secondary)
                 }))
         };
-        let mut modes = div().flex().gap_3();
-        if narrow {
-            modes = modes.flex_col();
-        }
         div().flex().flex_col().gap_4()
-            .child(modes.child(card("Bundled Profile", "Recommended for beginners. One Instance has one Profile and its own launch preferences.", !separated).flex_1())
+            .child(div().flex().gap_3().child(card("Bundled Profile", "Recommended for beginners. One Instance has one Profile and its own launch preferences.", !separated).flex_1())
                 .child(card("Separated Profile", "Reuse an Instance across several Profiles with independent accounts, memory and JVM arguments.", separated).flex_1()))
             .child(note(if separated { "Your existing setups are preserved. Returning to Bundled is unavailable, including through Restore defaults." }
                 else { "You can switch to Separated Profile once. Existing Instances, Profiles and files stay in place. This cannot be reversed." }))

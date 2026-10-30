@@ -41,7 +41,6 @@ pub(super) fn stepper(
     _label: &str,
     steps: &[StepperStep<'_>],
     current: usize,
-    compact: bool,
     palette: Palette,
 ) -> Stateful<Div> {
     div()
@@ -89,7 +88,7 @@ pub(super) fn stepper(
                         .children(step.complete.then(|| Icon::Check.render(14., foreground)))
                         .children((!step.complete).then(|| (index + 1).to_string())),
                 )
-                .children((!compact).then(|| {
+                .child(
                     div()
                         .min_w_0()
                         .flex_1()
@@ -108,8 +107,8 @@ pub(super) fn stepper(
                                 .text_xs()
                                 .text_color(rgb(palette.muted))
                                 .child(step.description.to_owned())
-                        }))
-                }))
+                        })),
+                )
         }))
 }
 

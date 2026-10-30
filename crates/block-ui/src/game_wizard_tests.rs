@@ -151,9 +151,9 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
     // One value with no ASCII space and full-width glyphs: the longest real
     // value still has to wrap instead of collapsing into one clipped line.
     let long = "1.21.1-neoforge-21.1.172-构建设置与超长版本标识符用于校验换行".to_owned();
-    // Two columns are the layout at every width, so a desktop window and a
-    // narrow one both have to keep the cards content-sized.
-    for width in [960., 360.] {
+    // Two columns are the layout at every window the product opens, so the
+    // cards have to stay content-sized at the standard and fitted widths.
+    for width in [960., 1152.] {
         view.update(cx, |view, cx| {
             if let Some(Form::Instance(form)) = &mut view.form {
                 form.version
@@ -493,7 +493,7 @@ fn review_leads_with_identity_keeps_changed_settings_visible_and_preserves_the_d
     );
 
     // Review a real, compatible combination whose complete identity is wider
-    // than the available space in a narrow wizard.
+    // than one review fact column.
     view.update(cx, |view, cx| {
         let selected = compatible_optifine();
         let loader = block_launcher::catalog::LoaderKind::Forge;
@@ -519,7 +519,7 @@ fn review_leads_with_identity_keeps_changed_settings_visible_and_preserves_the_d
         }
         cx.notify();
     });
-    for width in [360., 960.] {
+    for width in [960., 1152.] {
         cx.simulate_resize(size(px(width), px(1400.)));
         cx.run_until_parked();
         let identity = crate::test_support::control_bounds(cx, "wizard-review-identity");
@@ -536,12 +536,6 @@ fn review_leads_with_identity_keeps_changed_settings_visible_and_preserves_the_d
             "the complete launch target must stay inside the identity card at {width}: \
              target={target:?}, identity={identity:?}"
         );
-        if width == 360. {
-            assert!(
-                target.size.height > px(20.),
-                "the long launch target must wrap in the narrow Review: {target:?}"
-            );
-        }
     }
 }
 
@@ -1463,34 +1457,29 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
 }
 
 #[gpui::test]
-fn narrow_wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext) {
-    for width in [960., 640., 360.] {
+fn wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext) {
+    for (width, height) in [(1152., 720.), (960., 540.)] {
         let (_view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
             view.begin_game_wizard(cx);
             view
         });
-        cx.simulate_resize(size(px(width), px(540.)));
+        cx.simulate_resize(size(px(width), px(height)));
         cx.run_until_parked();
         for selector in ["wizard-rail", "wizard-footer", "wizard-next"] {
             let bounds = crate::test_support::control_bounds(cx, selector);
             assert!(
                 bounds.is_some_and(|bounds| bounds.left() >= px(0.)
                     && bounds.right() <= px(width)
-                    && bounds.bottom() <= px(540.)),
-                "{selector} outside {width}: {bounds:?}"
+                    && bounds.bottom() <= px(height)),
+                "{selector} outside {width}×{height}: {bounds:?}"
             );
         }
         let footer = crate::test_support::control_bounds(cx, "wizard-footer");
-        assert_eq!(
-            footer.map(|bounds| bounds.size.height),
-            Some(px(if width < 640. { 56. } else { 72. }))
-        );
+        assert_eq!(footer.map(|bounds| bounds.size.height), Some(px(72.)));
         let rail = crate::test_support::control_bounds(cx, "wizard-rail");
-        if width < 640. {
-            assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(48.)));
-        }
+        assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(360.)));
     }
 }
 
@@ -1626,7 +1615,7 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
 
 #[gpui::test]
 fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mut TestAppContext) {
-    for width in [960., 360.] {
+    for width in [960., 1152.] {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;

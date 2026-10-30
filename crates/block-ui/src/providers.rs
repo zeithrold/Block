@@ -7,7 +7,7 @@
 use block_auth::{AuthlibProvider, ProviderAddress};
 use gpui::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
-    Styled as _, Window, div, px, relative, rgb,
+    Styled as _, Window, div, px, rgb,
 };
 
 use super::{
@@ -154,14 +154,6 @@ impl Block {
         self.shell.providers.form = None;
         self.shell.providers.error = None;
         cx.notify();
-    }
-
-    pub(super) fn show_provider_list(&mut self, cx: &mut Context<'_, Self>) {
-        if !self.busy {
-            self.shell.providers.form = None;
-            self.shell.providers.error = None;
-            cx.notify();
-        }
     }
 
     pub(super) fn edit_provider(&mut self, id: Option<&str>, cx: &mut Context<'_, Self>) {
@@ -461,7 +453,6 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let state = &self.shell.providers;
-        let narrow = patterns::is_narrow(self.page_viewport(window));
         let query = state.query.as_ref().map_or_else(String::new, |field| {
             field.read(cx).value().trim().to_lowercase()
         });
@@ -552,11 +543,7 @@ impl Block {
             ));
         }
         let rail = div()
-            .w(if narrow {
-                relative(1.)
-            } else {
-                px(super::design::SIDEBAR_WIDTH).into()
-            })
+            .w(px(super::design::SIDEBAR_WIDTH))
             .h_full()
             .min_h_0()
             .flex_shrink_0()
@@ -608,48 +595,33 @@ impl Block {
                     .child(rows),
             )
             .child(
-                patterns::management_footer(self.page_viewport(window), self.palette).child(
-                    self.provider_button(
-                        "providers-back",
-                        "Back to accounts",
-                        UiAction::ProvidersBack,
-                        false,
-                        ButtonVariant::Ghost,
-                        cx,
-                    ),
-                ),
+                patterns::management_footer(self.palette).child(self.provider_button(
+                    "providers-back",
+                    "Back to accounts",
+                    UiAction::ProvidersBack,
+                    false,
+                    ButtonVariant::Ghost,
+                    cx,
+                )),
             );
         div()
             .size_full()
             .min_h_0()
             .flex()
-            .children((!narrow || state.form.is_none()).then_some(self.frame_sidebar(rail)))
-            .children((!narrow || state.form.is_some()).then(|| {
-                self.frame_detail(div().flex_1().min_w_0().min_h_0().child(
-                    self.transition_content(
-                        super::motion::Scope::Detail,
-                        self.provider_editor(window, cx).into_any_element(),
-                        window,
-                        cx,
-                    ),
-                ))
-            }))
+            .child(self.frame_sidebar(rail))
+            .child(self.frame_detail(div().flex_1().min_w_0().min_h_0().child(
+                self.transition_content(
+                    super::motion::Scope::Detail,
+                    self.provider_editor(cx).into_any_element(),
+                    window,
+                    cx,
+                ),
+            )))
     }
 
-    pub(super) fn provider_editor(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Div {
+    pub(super) fn provider_editor(&self, cx: &Context<'_, Self>) -> gpui::Div {
         let mut content = div().p_8().flex().flex_col().gap_6();
-        if patterns::is_narrow(self.page_viewport(window)) {
-            content = content.child(self.provider_button(
-                "provider-show-list",
-                "All providers",
-                UiAction::ProviderList,
-                self.busy,
-                ButtonVariant::Ghost,
-                cx,
-            ));
-        }
-        let mut footer =
-            patterns::management_footer(self.page_viewport(window), self.palette).justify_between();
+        let mut footer = patterns::management_footer(self.palette).justify_between();
         if let Some(form) = &self.shell.providers.form {
             let address = form.address.read(cx).value();
             let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);

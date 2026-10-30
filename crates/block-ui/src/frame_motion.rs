@@ -74,7 +74,6 @@ struct Presentation {
     outer_width: f32,
     home_width: f32,
     manage_width: f32,
-    content_height: f32,
 }
 impl Presentation {
     fn settled(
@@ -109,7 +108,6 @@ impl Presentation {
             }),
             home_width: f32::from(home_size.width) - horizontal,
             manage_width: f32::from(manage_size.width) - horizontal,
-            content_height: f32::from(window_geometry::content_size(window).height),
         }
     }
 }
@@ -210,7 +208,7 @@ impl Block {
     /// the content motion.
     pub(super) fn resize_frame_now(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let home = self.is_home_frame();
-        let (home_size, manage_size) = window_geometry::navigation_sizes(window, cx);
+        let (home_size, manage_size) = window_geometry::navigation_sizes(window);
         let target = Presentation::settled(home, home_size, manage_size, window);
         let frame = &mut self.motion.frame;
         frame.run = None;
@@ -221,8 +219,7 @@ impl Block {
         cx.notify();
     }
 
-    /// Navigation requests are explicit: scenario setup and manual resizing do
-    /// not accidentally replay an entrance or override the user's window size.
+    /// Only explicit navigation requests start the frame transition.
     pub(super) fn request_frame_resize(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let home = self.is_home_frame();
         let frame = &self.motion.frame;
@@ -236,7 +233,7 @@ impl Block {
             return;
         }
         let now = cx.background_executor().now();
-        let (home_size, manage_size) = window_geometry::navigation_sizes(window, cx);
+        let (home_size, manage_size) = window_geometry::navigation_sizes(window);
         let target = Presentation::settled(home, home_size, manage_size, window);
         let from = frame.run.map_or_else(
             || Presentation::settled(previous, home_size, manage_size, window),
@@ -304,28 +301,13 @@ impl Block {
         } else {
             // A direct model/fixture change settles without native side effects.
             frame.observed_home = Some(home);
-            let (home_size, manage_size) = window_geometry::navigation_sizes(window, cx);
+            let (home_size, manage_size) = window_geometry::navigation_sizes(window);
             frame
                 .presentation
                 .set(Presentation::settled(home, home_size, manage_size, window));
         }
     }
 
-    pub(super) fn page_viewport(&self, window: &Window) -> Size<Pixels> {
-        let value = self.motion.frame.presentation.get();
-        if value.active {
-            size(
-                px(if self.is_home_frame() {
-                    value.home_width
-                } else {
-                    value.manage_width
-                }),
-                px(value.content_height),
-            )
-        } else {
-            window_geometry::content_size(window)
-        }
-    }
     pub(super) fn frame_sidebar<E: Styled + gpui::ParentElement>(&self, view: E) -> E {
         let view = if !self.visual_only {
             view.relative().children(self.motion.page.paint_probe())

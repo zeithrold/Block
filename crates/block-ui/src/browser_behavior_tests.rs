@@ -272,50 +272,32 @@ fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
 }
 
 #[gpui::test]
-fn narrow_details_restore_context_and_short_window_keeps_fixed_action_rail(
-    cx: &mut TestAppContext,
-) {
+fn details_keep_fixed_action_rail_and_selected_game(cx: &mut TestAppContext) {
     let (view, cx) =
         crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
-    for (width, height) in [(960., 600.), (360., 400.)] {
-        cx.simulate_resize(size(px(width), px(height)));
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.handle(UiAction::Inspect("profile-b".into()), window, cx);
-            });
+    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::Inspect("profile-b".into()), window, cx);
         });
-        cx.run_until_parked();
-        let footer = cx.debug_bounds("detail-footer");
-        assert!(footer.is_some());
-        if let Some(footer) = footer {
-            assert_eq!(footer.size.height, px(if width < 640. { 56. } else { 72. }));
-            assert!(footer.bottom() <= px(height));
-            assert!(footer.left() >= px(0.) && footer.right() <= px(width));
-        }
-        let use_game = cx.debug_bounds("use-profile");
-        assert!(
-            use_game
-                .is_some_and(|bounds| bounds.bottom() <= px(height) && bounds.right() <= px(width))
-        );
+    });
+    cx.run_until_parked();
+    let footer = cx.debug_bounds("detail-footer");
+    assert!(footer.is_some());
+    if let Some(footer) = footer {
+        assert_eq!(footer.size.height, px(72.));
+        assert!(footer.bottom() <= px(720.));
+        assert!(footer.left() >= px(0.) && footer.right() <= px(1152.));
     }
-    click(cx, "browser-back");
-    assert!(!view.read_with(cx, |view, _| view.shell.games.detail_visible));
+    let use_game = cx.debug_bounds("use-profile");
+    assert!(
+        use_game.is_some_and(|bounds| bounds.bottom() <= px(720.) && bounds.right() <= px(1152.))
+    );
     assert_eq!(
         view.read_with(cx, |view, _| view.selected_profile.clone())
             .as_deref(),
         Some("profile-a")
     );
-    let focus = view.read_with(cx, |view, _| {
-        view.collection()
-            .row_focus
-            .borrow()
-            .get("profile-b")
-            .cloned()
-    });
-    assert!(focus.is_some());
-    if let Some(focus) = focus {
-        cx.update(|window, _| assert!(focus.is_focused(window)));
-    }
 }
 
 #[gpui::test]

@@ -35,7 +35,6 @@ pub(super) const BODY_FONT_SIZE: f32 = 14.;
 pub(super) const SMALL_FONT_SIZE: f32 = 12.;
 pub(super) const BODY_LINE_HEIGHT: f32 = 20.;
 pub(super) const MANAGEMENT_FOOTER: f32 = 72.;
-pub(super) const NARROW_FOOTER: f32 = 56.;
 pub(super) const SIDEBAR_WIDTH: f32 = 360.;
 pub(super) const CHROME_HEIGHT: f32 = 56.;
 
@@ -62,7 +61,6 @@ pub(super) enum Icon {
     ChevronLeft,
     ChevronRight,
     ChevronDown,
-    ArrowLeft,
     ArrowRight,
     More,
     Menu,
@@ -226,11 +224,6 @@ impl Icon {
             Self::ChevronDown,
             "icons/chevron-down.svg",
             include_bytes!("../assets/icons/chevron-down.svg"),
-        ),
-        (
-            Self::ArrowLeft,
-            "icons/arrow-left.svg",
-            include_bytes!("../assets/icons/arrow-left.svg"),
         ),
         (
             Self::ArrowRight,

@@ -6,7 +6,7 @@ Date: 2026-10-24. This is the user-authorized Milestone III geometry/navigation 
 
 All dimensions below are logical **visible content** pixels. Linux client-frame shadow/border insets are added to the outer window separately.
 
-| Part | Preferred size |
+| Part | Fixed size |
 | --- | --- |
 | Home | 360 × 720 |
 | Management | 1152 × 720 (16:10) |
@@ -16,9 +16,9 @@ All dimensions below are logical **visible content** pixels. Linux client-frame 
 
 The sidebar is 31.25% of the default management frame. The choice starts with Home's content budget: 24 px side padding leaves 312 px for the existing primary action and its profile selector. The management content budget accommodates the existing 608 px forms plus surrounding space. The 8 px grid and a common height/header keep both frames related without adding a Home dashboard or changing its composition. The preferred management ratio is a product choice, not a universal design rule. For comparison, Microsoft's [NavigationView default expanded pane](https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.controls.navigationview.openpanelength?view=winrt-28000) is 320 DIP; Block uses 360 to preserve its Home action budget and the requested width equality.
 
-Accounts/Games, Settings, providers, About, game setup, account setup and Welcome share the fixed desktop sidebar token. Existing narrow-screen alternatives remain available when the fitted management width cannot accommodate two panes. This fallback takes precedence over displaying an unusably narrow detail pane.
+Accounts/Games, Settings, providers, About, game setup, account setup and Welcome share the fixed desktop sidebar token. Management pages use the side-by-side sidebar and content layout, with a 72 px action footer.
 
-Startup reserves an on-screen expanded frame position before showing compact Home. Both initial sizes use the same available-height rule. Navigation changes width while retaining the current height and top-left position. The expanded target is bounded by the space to the current display's right edge. Display margins remain estimates (16 px horizontal, 32 px top, 64 px bottom); the 360 × 540 outer minimum and platform compositor/work-area behavior remain explicit limits. Physical screens smaller than that minimum cannot be made to fit by this rule.
+Startup centers the fixed expanded frame before showing Home. Navigation changes width while retaining the current height and top-left position. Window sizes are independent of screen space. The launcher window is not manually resizable.
 
 ## Coordinated transition
 
@@ -31,7 +31,7 @@ One monotonic clock drives four tracks with cubic Bézier `(0.22, 1, 0.36, 1)`:
 | Native width | 130–320 ms: expand to the right | 95–290 ms: retract |
 | Detail | 200–380 ms: fade in and move left 24 px | 0–110 ms: fade out and move right 24 px |
 
-The user requested a faster overall sequence after trying the initial 620 ms version. Both directions now take 380 ms (39% less time), retaining the curve and stage order. Sidebar and detail starts differ by 170 ms. The sidebar finishes its entrance before expansion starts; content begins 70 ms into expansion. The management page is laid out at its final content width throughout, clipped by the real window, so the narrow-layout breakpoint and text wrapping do not change during expansion.
+The user requested a faster overall sequence after trying the initial 620 ms version. Both directions now take 380 ms (39% less time), retaining the curve and stage order. Sidebar and detail starts differ by 170 ms. The sidebar finishes its entrance before expansion starts; content begins 70 ms into expansion. The management page is laid out at its final content width throughout, clipped by the real window, so text wrapping does not change during expansion.
 
 Reversal samples the current opacity, position and actual native width. A return before any expansion uses a shorter 140 ms sequence. Application or system reduced motion immediately settles width and panes, releases the outgoing visual data, and does not replay the sequence when motion is enabled again.
 
@@ -57,7 +57,7 @@ The app menu begins with the Brand display; its vertical padding is 4 px per sid
 
 The local native gate passed 573 tests across 39 suites. Actual macOS Home, menu and Accounts views were inspected and captured. A fresh replay recorded 246 foreground paints, kept the native origin/720 px height fixed, bounded sidebar/content travel at 12/20 px and kept the sidebar stationary during child navigation. The observed page start gap was 37–43 ms. Evidence: `target/ui-alignment/{home-light.jpg,menu-light.jpg,accounts-light.jpg,native.jsonl,measurement.json,macos-verify.log}`. These are native paint submissions rather than compositor timestamps; Windows/Linux visual review remains pending.
 
-## Verification
+## Verification (2026-10-24)
 
 - The final local macOS verification entry passed formatting, workspace all-target/all-feature checks, strict Clippy, **573 tests across 39 suites**, the native build and build-identity check. This is an automated result, not visual acceptance.
 - Regressions cover phase ordering, reversal continuity, actual pane outer width, unchanged height/origin, runtime reduced motion, outgoing-layer release, hidden incoming controls, compact Home actions, CSD insets, negative display origins and small-display startup bounds. TestWindow receives simulated native resize callbacks because its resize implementation only records OS bounds.
@@ -74,6 +74,6 @@ User review follow-up (2026-10-24): the user manually looked at the Windows ARM6
 
 - [ ] Review the preferred proportions and the staggered sequence with the user before setting any Accepted marker.
 - [x] Repeat physical window-origin/height measurements and rapid reversal on Windows and Linux supported compositor paths — done for Windows AMD64, Windows ARM64, Linux AMD64 and Linux ARM64 on 2026-10-24 (macOS remains a paint-trace reference). Results and platform/analyzer-shape caveats: [motion-platform-verification.md](motion-platform-verification.md). CI compilation/tests still do not replace these observations.
-- [ ] Review actual Accounts/Settings and long/localized content at 1280 × 720 and multiple scale factors, including Linux CSD insets and near-right-edge narrow fallback.
+- [ ] Review actual Accounts/Settings and long/localized content at the fixed management size and multiple scale factors, including Linux CSD insets.
 - [ ] Complete the existing macOS system Reduce Motion review and keyboard/IME interaction acceptance across navigation/overlays.
 - [ ] Review the bounded horizontal management/child transitions with the user; the physical Windows/Linux repeat (staggered order, bounded 12/20 px travel, child pages, rapid reversal, reduced-motion hard cut) is recorded in [motion-platform-verification.md](motion-platform-verification.md), while focus/IME and first-paint timing review remain open.

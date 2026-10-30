@@ -1355,7 +1355,6 @@ impl Block {
         // prototype's /accounts/new; never a separate window or overlay.
         self.shell.instance_editor = None;
         self.shell.providers.visible = false;
-        self.shell.accounts.detail_visible = false;
         self.tab = Tab::Accounts;
         self.request_frame_resize(window, cx);
         self.shell.surfaces.clear(window, &focus, cx);
@@ -1679,7 +1678,6 @@ impl Block {
         }
         self.selected_account = Some(id.clone());
         self.shell.accounts.inspected = Some(id);
-        self.shell.accounts.detail_visible = true;
         self.status = format!("{} is saved and ready to use", account.player_name);
         self.close_auth_context(window, cx);
     }
@@ -1718,44 +1716,28 @@ impl Block {
         let Some(state) = &self.shell.auth else {
             return div();
         };
-        let viewport = self.page_viewport(window);
-        let narrow = patterns::is_narrow(viewport);
         let content = div()
             .size_full()
             .min_h_0()
             .min_w_0()
             .flex()
             .flex_col()
-            .children(narrow.then(|| {
-                div()
-                    .px_4()
-                    .py_3()
-                    .flex_shrink_0()
-                    .border_b_1()
-                    .border_color(rgb(self.palette.border))
-                    .child(format!(
-                        "Account setup · Step {} of 4",
-                        state.phase.step() + 1
-                    ))
-            }))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .children((!narrow).then(|| {
-                        self.shell.wizard_entrance.stagger(
-                            self.auth_rail(state).into_any_element(),
-                            std::time::Duration::ZERO,
-                            window,
-                            cx,
-                        )
-                    }))
+                    .child(self.shell.wizard_entrance.stagger(
+                        self.auth_rail(state).into_any_element(),
+                        std::time::Duration::ZERO,
+                        window,
+                        cx,
+                    ))
                     .child(self.frame_detail(div().flex_1().min_h_0().min_w_0().child(
                         self.shell.wizard_entrance.stagger(
                             self.transition_content(
                                 super::motion::Scope::Wizard,
-                                self.render_auth_transition_body(window, cx),
+                                self.render_auth_transition_body(cx),
                                 window,
                                 cx,
                             ),
@@ -1765,7 +1747,7 @@ impl Block {
                         ),
                     ))),
             )
-            .child(self.frame_detail(div().w_full().child(self.auth_footer(state, viewport, cx))));
+            .child(self.frame_detail(div().w_full().child(self.auth_footer(state, cx))));
         let mut root = div()
             .id("account-wizard")
             .debug_selector(|| "account-wizard".into())
@@ -1787,11 +1769,7 @@ impl Block {
         div().size_full().min_h_0().child(root.child(content))
     }
 
-    pub(super) fn render_auth_transition_body(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    pub(super) fn render_auth_transition_body(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let Some(state) = &self.shell.auth else {
             return div().into_any_element();
         };
@@ -1807,11 +1785,7 @@ impl Block {
                 self.palette,
                 false,
             )
-            .p(px(if patterns::is_narrow(self.page_viewport(window)) {
-                16.
-            } else {
-                32.
-            }))
+            .p_8()
             .child(self.auth_body(state, cx))
             .into_any_element()
     }
@@ -1885,7 +1859,6 @@ impl Block {
             "Account setup steps",
             &steps,
             state.phase.step(),
-            false,
             self.palette,
         ));
         self.frame_sidebar(
@@ -2315,13 +2288,8 @@ impl Block {
             .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else { "Finish saves this account securely and selects it. Closing now discards this sign-in." }))
     }
 
-    fn auth_footer(
-        &self,
-        state: &AuthWizard,
-        viewport: Size<Pixels>,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        let mut footer = patterns::management_footer(viewport, self.palette)
+    fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
+        let mut footer = patterns::management_footer(self.palette)
             .id("auth-footer")
             .debug_selector(|| "auth-footer".into())
             .justify_between();
@@ -3232,10 +3200,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn account_setup_keeps_actions_reachable_at_default_and_narrow_sizes(cx: &mut TestAppContext) {
+    fn account_setup_keeps_actions_reachable_at_supported_window_sizes(cx: &mut TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let account = test_account()?;
-            for (width, height) in [(960., 600.), (640., 540.), (360., 540.)] {
+            for (width, height) in [(1152., 720.), (960., 600.)] {
                 for phase in [Phase::Choose, Phase::Waiting, Phase::Complete] {
                     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
                         let mut view = crate::tests::test_view(window, cx);

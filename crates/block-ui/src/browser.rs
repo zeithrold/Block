@@ -17,8 +17,8 @@ use block_launcher::{
 };
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, FontWeight, InteractiveElement as _, IntoElement,
-    KeyDownEvent, ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
-    Window, accesskit::Role, div, px, relative, rgb,
+    KeyDownEvent, ParentElement as _, ScrollHandle, Styled as _, Window, accesskit::Role, div, px,
+    relative, rgb,
 };
 
 use super::{
@@ -40,7 +40,6 @@ pub(super) enum CollectionLoad {
 pub(super) struct CollectionState {
     pub query: Option<Entity<TextInput>>,
     pub inspected: Option<String>,
-    pub detail_visible: bool,
     pub scroll: ScrollHandle,
     pub detail_scroll: ScrollHandle,
     pub load: CollectionLoad,
@@ -59,7 +58,6 @@ impl CollectionState {
                 .as_ref()
                 .map(|input| super::frozen_input(input, cx)),
             inspected: self.inspected.clone(),
-            detail_visible: self.detail_visible,
             scroll,
             detail_scroll,
             load: self.load.clone(),
@@ -463,9 +461,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let viewport = self.page_viewport(window);
         let kind = self.browser_kind();
-        let state = self.collection();
         let records = self.browser_records(cx);
         let inspected = self.inspected_record();
         let roving = records
@@ -478,11 +474,10 @@ impl Block {
             BrowserKind::Instances => self.snapshot.instances.len(),
             BrowserKind::Bundled | BrowserKind::Profiles => self.snapshot.profiles.len(),
         };
-        let compact = patterns::is_narrow(viewport);
-        let heading = self.browser_heading(kind, count, compact, cx);
+        let heading = self.browser_heading(kind, count, cx);
         let rows = self.browser_rows(kind, count, &records, roving, cx);
         let rows = category_panel(kind, rows);
-        let footer = self.browser_footer(kind, count, compact, viewport, cx);
+        let footer = self.browser_footer(kind, count, cx);
         let browser = div()
             .id("browser-pane")
             .debug_selector(|| "browser-pane".into())
@@ -500,86 +495,34 @@ impl Block {
             );
         let detail = self.transition_content(
             super::motion::Scope::Detail,
-            self.browser_detail_content(window, cx),
+            self.browser_detail_content(cx),
             window,
             cx,
         );
-        if compact
-            && (matches!(self.form, Some(Form::Profile(_))) || self.shell.instance_editor.is_some())
-        {
-            return div()
-                .size_full()
-                .min_h_0()
-                .flex()
-                .child(
-                    self.frame_sidebar(
-                        div()
-                            .id("compact-browser")
-                            .debug_selector(|| "compact-browser".into())
-                            .w(px(56.))
-                            .h_full()
-                            .min_h_0()
-                            .flex_shrink_0()
-                            .border_r_1()
-                            .border_color(rgb(self.palette.border))
-                            .bg(rgb(self.palette.sidebar))
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .id("compact-list")
-                                    .flex_1()
-                                    .min_h_0()
-                                    .overflow_y_scroll()
-                                    .children(
-                                        records
-                                            .iter()
-                                            .map(|record| self.browser_icon_row(record, cx)),
-                                    ),
-                            )
-                            .child(patterns::management_footer(viewport, self.palette).px_0()),
-                    ),
-                )
-                .child(self.frame_detail(div().flex_1().min_w_0().h_full().child(detail)));
-        }
-        patterns::management_layout(
-            viewport,
-            browser.into_any_element(),
-            detail,
-            state.detail_visible || self.form.is_some(),
-            self.palette,
-            self,
-        )
+        patterns::management_layout(browser.into_any_element(), detail, self.palette, self)
     }
 
     fn browser_heading(
         &self,
         kind: BrowserKind,
         count: usize,
-        compact: bool,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let state = self.collection();
-        let mut heading = div()
-            .p(px(if compact { 8. } else { 16. }))
-            .flex()
-            .flex_col()
-            .gap(px(if compact { 8. } else { 16. }));
+        let mut heading = div().p_4().flex().flex_col().gap_4();
         if kind == BrowserKind::Accounts || self.snapshot.profile_mode == ProfileMode::Bundled {
-            if !compact {
-                heading = heading.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(note(kind.title()))
-                        .child(if kind == BrowserKind::Accounts {
-                            note(count.to_string()).into_any_element()
-                        } else {
-                            self.browser_help(cx).into_any_element()
-                        }),
-                );
-            }
+            heading = heading.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(note(kind.title()))
+                    .child(if kind == BrowserKind::Accounts {
+                        note(count.to_string()).into_any_element()
+                    } else {
+                        self.browser_help(cx).into_any_element()
+                    }),
+            );
         } else {
             heading = heading.child(
                 div()
@@ -718,19 +661,8 @@ impl Block {
         rows.scroll_list_area(&state.scroll, "Library records", self.palette)
     }
 
-    fn browser_footer(
-        &self,
-        kind: BrowserKind,
-        count: usize,
-        compact: bool,
-        viewport: gpui::Size<gpui::Pixels>,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let mut footer = patterns::management_footer(viewport, self.palette).px(px(if compact {
-            12.
-        } else {
-            20.
-        }));
+    fn browser_footer(&self, kind: BrowserKind, count: usize, cx: &Context<'_, Self>) -> gpui::Div {
+        let mut footer = patterns::management_footer(self.palette).px_5();
         if kind == BrowserKind::Accounts {
             footer = footer.child(
                 self.browser_control(
@@ -1009,19 +941,13 @@ impl Block {
         clippy::too_many_lines,
         reason = "The detail composition keeps its type-specific body and real footer actions together."
     )]
-    pub(super) fn browser_detail_content(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    pub(super) fn browser_detail_content(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         if self.shell.instance_editor.is_some() {
-            return self.render_instance_editor(window, cx);
+            return self.render_instance_editor(cx);
         }
         if matches!(self.form, Some(Form::Profile(_))) {
-            return self.render_profile_editor(window, cx);
+            return self.render_profile_editor(cx);
         }
-        let viewport = self.page_viewport(window);
-        let narrow = patterns::is_narrow(viewport);
         let mut body = div()
             .id("main-content")
             .debug_selector(|| "management-detail".into())
@@ -1036,25 +962,9 @@ impl Block {
             .track_focus(&self.browser_detail_focus(cx))
             .flex()
             .flex_col()
-            .gap(px(if narrow { 20. } else { 24. }))
-            .p(px(if narrow { 16. } else { 32. }));
-        if narrow {
-            body = body.child(
-                self.button(
-                    "browser-back",
-                    if self.tab == Tab::Accounts {
-                        "Back to accounts"
-                    } else {
-                        "Back to games"
-                    },
-                    UiAction::BrowserBack,
-                    cx,
-                )
-                .items_start()
-                .child(Icon::ArrowLeft.render(14., self.palette.foreground)),
-            );
-        }
-        let mut footer = patterns::management_footer(viewport, self.palette).justify_between();
+            .gap_6()
+            .p_8();
+        let mut footer = patterns::management_footer(self.palette).justify_between();
         if self.tab == Tab::Accounts {
             if let Some(account) = self
                 .accounts
@@ -1072,7 +982,7 @@ impl Block {
                     vec![(self.account_authority(account), BadgeVariant::Secondary)],
                     current,
                 ))
-                    .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", account.provider.label().into()), ("Authentication", if offline { "Local identity; no online authorization" } else if external { "External authentication provider" } else { "Ownership rechecked at launch" }.into()), ("Environment", "Minecraft: Java Edition".into())], narrow))
+                    .child(Self::detail_metadata("Account details", &[("Player name", account.player_name.clone()), ("Account type", account.provider.label().into()), ("Authentication", if offline { "Local identity; no online authorization" } else if external { "External authentication provider" } else { "Ownership rechecked at launch" }.into()), ("Environment", "Minecraft: Java Edition".into())]))
                     .child(div().border_t_1().border_color(rgb(self.palette.border)).pt_5().flex().flex_col().gap_2()
                         .child(note(if offline { "A local player identity for offline play." } else if external { "An identity issued by an external authentication provider." } else { "A Microsoft identity for Minecraft: Java Edition." }))
                         .child(note(if offline { "The UUID is derived from the exact player name. No credentials are stored. This identity cannot access authenticated online services." } else if external { "Provider credentials must be verified before launch. Access and client tokens belong in your system credential store." } else { "Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store." })));
@@ -1096,7 +1006,6 @@ impl Block {
                                     .map_or_else(String::new, |link| link.login.clone()),
                             ),
                         ],
-                        narrow,
                     ));
                 }
                 footer = footer
@@ -1121,7 +1030,7 @@ impl Block {
                         cx,
                     ));
             } else {
-                return self.empty_browser_detail(window, true, cx);
+                return self.empty_browser_detail(true, cx);
             }
         } else if let Some(instance) = self.inspected_instance() {
             let profile = self.inspected_profile();
@@ -1135,7 +1044,7 @@ impl Block {
                         self.instance_badges(instance, None),
                         false,
                     ))
-                    .child(self.instance_components(instance, profile, narrow, cx))
+                    .child(self.instance_components(instance, profile, cx))
                     .child(self.linked_profiles(instance, cx));
                 if let Some(notice) = self.installation_notice(instance, None) {
                     body = body.child(notice);
@@ -1177,12 +1086,11 @@ impl Block {
                         ),
                 );
                 if kind == BrowserKind::Bundled {
-                    body =
-                        body.child(self.instance_components(instance, Some(profile), narrow, cx));
+                    body = body.child(self.instance_components(instance, Some(profile), cx));
                 } else {
                     body = body.child(self.linked_instance(instance, cx));
                 }
-                body = body.child(self.launch_details(profile, narrow));
+                body = body.child(self.launch_details(profile));
                 if let Some(notice) = self.installation_notice(instance, Some(profile)) {
                     body = body.child(notice);
                 }
@@ -1221,10 +1129,10 @@ impl Block {
                         cx,
                     ));
             } else {
-                return self.empty_browser_detail(window, false, cx);
+                return self.empty_browser_detail(false, cx);
             }
         } else {
-            return self.empty_browser_detail(window, false, cx);
+            return self.empty_browser_detail(false, cx);
         }
         div()
             .size_full()
@@ -1295,40 +1203,6 @@ impl Block {
             .tab_stop(true)
     }
 
-    pub(super) fn restore_browser_focus(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if let Some(id) = self.inspected_record() {
-            self.collection().focus(&id, cx).focus(window, cx);
-        } else if let Some(query) = &self.collection().query {
-            query.read(cx).focus_handle(cx).focus(window, cx);
-        }
-    }
-
-    fn browser_icon_row(&self, record: &Record, cx: &Context<'_, Self>) -> components::Control {
-        let id = record.id.clone();
-        let control = components::button(
-            record.selector.clone(),
-            "",
-            self.palette,
-            ButtonVariant::Ghost,
-            ControlState::default(),
-            cx.listener(move |view, (): &(), window, cx| {
-                view.handle(UiAction::Inspect(id.clone()), window, cx);
-            }),
-        )
-        .w_full()
-        .h(px(64.))
-        .p_0()
-        .rounded_none()
-        .border_0()
-        .child(self.record_avatar(
-            record.icon,
-            &record.title,
-            self.account_avatars.get(&record.id),
-            32.,
-        ));
-        super::tooltip::trigger(control, record.title.clone(), cx)
-    }
-
     fn record_badge(&self, label: String, variant: BadgeVariant, microsoft: bool) -> gpui::Div {
         let badge = components::badge(label, self.palette, variant);
         if microsoft {
@@ -1394,7 +1268,7 @@ impl Block {
             )
     }
 
-    fn detail_metadata(title: &str, values: &[(&str, String)], narrow: bool) -> gpui::Div {
+    fn detail_metadata(title: &str, values: &[(&str, String)]) -> gpui::Div {
         div()
             .flex()
             .flex_col()
@@ -1412,7 +1286,7 @@ impl Block {
                     .gap_y_6()
                     .children(values.iter().map(|(label, value)| {
                         div()
-                            .w(relative(if narrow { 1. } else { 0.5 }))
+                            .w(relative(0.5))
                             .min_w_0()
                             .pr_4()
                             .flex()
@@ -1432,11 +1306,10 @@ impl Block {
         &self,
         instance: &Instance,
         profile: Option<&Profile>,
-        narrow: bool,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let mut grid = div().flex().flex_wrap().gap_3();
-        let width = if narrow { 1. } else { 0.48 };
+        let width = 0.48;
         for (id, icon, label, value, description, action) in [
             (
                 "component-minecraft",
@@ -1661,9 +1534,9 @@ impl Block {
             )
     }
 
-    fn launch_details(&self, profile: &Profile, narrow: bool) -> gpui::Div {
+    fn launch_details(&self, profile: &Profile) -> gpui::Div {
         let server = (!profile.server.address.is_empty()).then(|| profile.server.address.clone());
-        let width = if narrow { 1. } else { 0.48 };
+        let width = 0.48;
         let card = |icon: Icon, label: &str, value: String, description: &str| {
             div()
                 .w(relative(width))
@@ -1739,12 +1612,7 @@ impl Block {
             )
     }
 
-    fn empty_browser_detail(
-        &self,
-        window: &Window,
-        accounts: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn empty_browser_detail(&self, accounts: bool, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let loading = matches!(self.collection().load, CollectionLoad::Loading);
         let failed = matches!(self.collection().load, CollectionLoad::Failed(_));
         let title = if loading {
@@ -1788,21 +1656,13 @@ impl Block {
                 cx,
             ));
         }
-        let mut section = div().size_full().min_h_0().flex().flex_col();
-        if patterns::is_narrow(self.page_viewport(window)) {
-            section = section.child(self.button(
-                "browser-back",
-                "Back to list",
-                UiAction::BrowserBack,
-                cx,
-            ));
-        }
-        section
+        div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
             .child(content)
-            .child(patterns::management_footer(
-                self.page_viewport(window),
-                self.palette,
-            ))
+            .child(patterns::management_footer(self.palette))
             .into_any_element()
     }
 

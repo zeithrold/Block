@@ -188,7 +188,7 @@ fn a_hidden_invalid_section_is_opened_and_its_exact_field_receives_focus(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.tab = Tab::Settings;
@@ -223,11 +223,11 @@ fn a_hidden_invalid_section_is_opened_and_its_exact_field_receives_focus(
             .map(|draft| draft.scroll.clone())
     });
     assert!(
-        field.is_some_and(|bounds| bounds.top() >= px(0.) && bounds.bottom() <= px(484.)),
+        field.is_some_and(|bounds| bounds.top() >= px(0.) && bounds.bottom() <= px(648.)),
         "{field:?}; scroll={scroll:?}"
     );
     assert!(
-        save.is_some_and(|bounds| bounds.bottom() <= px(540.) && bounds.left() >= px(56.)),
+        save.is_some_and(|bounds| bounds.bottom() <= px(720.) && bounds.left() >= px(360.)),
         "{save:?}"
     );
 }
@@ -414,7 +414,7 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
 ) {
     use gpui::EntityInputHandler as _;
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;

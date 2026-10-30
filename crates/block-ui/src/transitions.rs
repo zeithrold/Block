@@ -464,19 +464,17 @@ impl Block {
     ) -> AnyElement {
         match scope {
             Scope::Page => self.render_page_body(window, cx),
-            Scope::Detail if self.tab == Tab::Settings => self.render_settings_detail(window, cx),
+            Scope::Detail if self.tab == Tab::Settings => self.render_settings_detail(cx),
             Scope::Detail if self.tab == Tab::Accounts && self.shell.providers.visible => {
-                self.provider_editor(window, cx).into_any_element()
+                self.provider_editor(cx).into_any_element()
             }
-            Scope::Detail => self.browser_detail_content(window, cx),
-            Scope::Wizard if self.shell.auth.is_some() => {
-                self.render_auth_transition_body(window, cx)
-            }
+            Scope::Detail => self.browser_detail_content(cx),
+            Scope::Wizard if self.shell.auth.is_some() => self.render_auth_transition_body(cx),
             Scope::Wizard if self.tab == Tab::Onboarding => {
                 if self.shell.first_run.enabled {
                     self.render_game_wizard_transition_body(window, cx)
                 } else {
-                    self.render_onboarding_transition_body(window, cx)
+                    self.render_onboarding_transition_body(cx)
                 }
             }
             Scope::Wizard => self.render_game_wizard_transition_body(window, cx),

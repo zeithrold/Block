@@ -48,14 +48,14 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) -> Option<Bou
     bounds
 }
 
-fn assert_narrow_popup(cx: &mut gpui::VisualTestContext) {
+fn assert_popup_within_window(cx: &mut gpui::VisualTestContext) {
     let popup = cx.debug_bounds("drawer-sheet");
     assert!(
         popup.is_some_and(|bounds| bounds.left() >= px(8.)
-            && bounds.right() <= px(352.)
+            && bounds.right() <= px(1144.)
             && bounds.top() >= px(8.)
-            && bounds.bottom() <= px(532.)),
-        "narrow popup={popup:?}"
+            && bounds.bottom() <= px(712.)),
+        "popup={popup:?}"
     );
 }
 
@@ -64,7 +64,7 @@ fn settings_select_anchors_to_trigger_and_keeps_inspection_separate_from_value(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(960.), px(600.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
@@ -90,19 +90,17 @@ fn settings_select_anchors_to_trigger_and_keeps_inspection_separate_from_value(
         view.preferences.appearance == crate::Appearance::System && view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, Surface::Select(state) if state.active == 2 && state.choices[0].selected && !state.choices[2].selected))
     }));
 
-    cx.simulate_resize(size(px(360.), px(540.)));
     settle(cx);
-    assert_narrow_popup(cx);
+    assert_popup_within_window(cx);
     crate::test_support::press(cx, "escape");
     settle(cx);
     assert!(view.read_with(cx, |view, _| view.preferences.appearance
         == crate::Appearance::System
         && !view.shell.surfaces.is_open()));
     let trigger_focus = cx.update(|window, cx| window.focused(cx));
-    cx.simulate_resize(size(px(360.), px(540.)));
     click(cx, "settings-appearance");
 
-    assert_narrow_popup(cx);
+    assert_popup_within_window(cx);
     crate::test_support::press(cx, "escape");
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
     click(cx, "settings-appearance");

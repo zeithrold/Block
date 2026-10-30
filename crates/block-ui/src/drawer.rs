@@ -14,11 +14,7 @@ use gpui_base::{
     motion::{Easing, Presence, PresencePhase, Spring, Transition, spring},
 };
 
-use super::{
-    Block,
-    drawer_gestures::{DrawerDrag, panel_height},
-    shell::Surface,
-};
+use super::{Block, drawer_gestures::DrawerDrag, shell::Surface};
 use gpui_component::WindowExt as _;
 
 const DURATION: Duration = Duration::from_millis(450);
@@ -247,11 +243,10 @@ impl Render for DrawerLayer {
         let viewport = window.viewport_size();
         let width = (viewport.width - insets.left - insets.right).max(px(0.));
         let height = (viewport.height - insets.top - insets.bottom).max(px(0.));
-        let desired_panel_height = panel_height(f32::from(height), desired_height);
         let reduced = owner.read(cx).motion_preferences().reduced();
         let panel_height = spring(
             ElementId::NamedInteger("block-drawer-height".into(), revision as u64),
-            desired_panel_height,
+            desired_height,
             Spring::new(if reduced {
                 Duration::ZERO
             } else {
@@ -260,7 +255,7 @@ impl Render for DrawerLayer {
             window,
             cx,
         )
-        .clamp(0., f32::from(height) * 0.8);
+        .max(0.);
         active.height = panel_height;
         let offset = spring(
             ElementId::NamedInteger("block-drawer-offset".into(), revision as u64),

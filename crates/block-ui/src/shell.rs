@@ -221,7 +221,7 @@ impl Block {
             .font_family(super::design::FONT_FAMILY)
             .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
             .child(div().flex_1().min_h_0().child(content));
-        root = root.children(self.render_popups(window, cx));
+        root = root.children(self.render_popups(cx));
         root
     }
 
@@ -488,7 +488,7 @@ impl Block {
             return if tab == Tab::Settings {
                 self.render_settings(window, cx).into_any_element()
             } else {
-                self.render_about(window, cx).into_any_element()
+                self.render_about(cx).into_any_element()
             };
         }
         if let Some(Form::Instance(form)) = &self.form {
@@ -772,8 +772,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let palette = self.palette;
-        let avatar_size =
-            ((f32::from(self.page_viewport(window).width) - 48.) * 0.45).clamp(96., 176.);
+        let avatar_size = (super::design::SIDEBAR_WIDTH - 48.) * 0.45;
         let (hover, hover_running) = self
             .shell
             .home
@@ -1001,14 +1000,14 @@ impl Block {
         if self.tab != Tab::About {
             return self.render_browser_detail(window, cx).into_any_element();
         }
-        self.render_about(window, cx).into_any_element()
+        self.render_about(cx).into_any_element()
     }
 
     fn settings(&self, window: &Window, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         self.render_settings(window, cx)
     }
 
-    fn render_popups(&self, window: &Window, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    fn render_popups(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         self.shell
             .surfaces
             .layers()
@@ -1036,10 +1035,8 @@ impl Block {
                                         cx.stop_propagation();
                                     }
                                 }))
-                                .w(state
-                                    .width
-                                    .min((window.viewport_size().width - px(16.)).max(px(1.))))
-                                .max_h((window.viewport_size().height - px(24.)).max(px(100.)))
+                                .w(state.width)
+                                .max_h(px(696.))
                                 .p_1()
                                 .rounded_lg()
                                 .border_1()
@@ -1074,14 +1071,14 @@ impl Block {
         // Wizard and onboarding sections bring their own headings, scrolling
         // and actions; size the surface area like the old section window and
         // keep the dialog footer outside that fixed content height.
-        let section_height = (window.viewport_size().height - px(150.)).clamp(px(320.), px(520.));
+        let section_height = px(520.);
         let (content, section) = match &kind {
             Surface::OnboardingSection(page) => (
                 div()
                     .h(section_height)
                     .min_h_0()
                     .w_full()
-                    .child(self.render_onboarding_section(*page, window, cx)),
+                    .child(self.render_onboarding_section(*page, cx)),
                 true,
             ),
             Surface::WizardSection(_) => (
@@ -1098,7 +1095,7 @@ impl Block {
                             .child(self.render_game_wizard_transition_body(window, cx)),
                     )
                     .child(
-                        super::patterns::management_footer(window.viewport_size(), self.palette)
+                        super::patterns::management_footer(self.palette)
                             .justify_end()
                             .child(
                                 self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)
@@ -1114,7 +1111,7 @@ impl Block {
             Surface::DownloadFiles(group) => (
                 div()
                     .px(px(24.))
-                    .child(self.render_download_files_body(*group, window)),
+                    .child(self.render_download_files_body(*group)),
                 false,
             ),
             Surface::GamesHelp => (div().px(px(24.)).child(self.render_games_help(cx)), false),
@@ -1164,7 +1161,7 @@ impl Block {
             .into_any_element()
     }
 
-    /// Desired content height; the presentation caps this to 80% of the client.
+    /// Fixed content height for each sheet.
     pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(),

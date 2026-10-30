@@ -508,24 +508,23 @@ impl Block {
             Stage::Overview => {
                 let ready = self.first_run_account_ready() && self.first_run_game_ready();
                 Some(
-                    super::patterns::management_footer(self.page_viewport(window), self.palette)
-                        .child(
-                            div()
-                                .w_full()
-                                .max_w(px(620.))
-                                .mx_auto()
-                                .flex()
-                                .items_center()
-                                .justify_end()
-                                .gap_3()
-                                .child(self.button_with_variant(
-                                    "setup-continue",
-                                    if ready { "Finish" } else { "Continue" },
-                                    UiAction::FirstRun(Action::Continue),
-                                    ButtonVariant::Primary,
-                                    cx,
-                                )),
-                        ),
+                    super::patterns::management_footer(self.palette).child(
+                        div()
+                            .w_full()
+                            .max_w(px(620.))
+                            .mx_auto()
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .gap_3()
+                            .child(self.button_with_variant(
+                                "setup-continue",
+                                if ready { "Finish" } else { "Continue" },
+                                UiAction::FirstRun(Action::Continue),
+                                ButtonVariant::Primary,
+                                cx,
+                            )),
+                    ),
                 )
             }
             _ => None,

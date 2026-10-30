@@ -107,7 +107,6 @@ impl Block {
         if self.shell.first_run.enabled {
             return self.first_run_page(window, cx);
         }
-        let compact = patterns::is_narrow(self.page_viewport(window));
         div()
             .id("first-run")
             .debug_selector(|| "first-run".into())
@@ -120,31 +119,29 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .children((!compact).then(|| self.frame_sidebar(self.onboarding_brand(cx))))
+                    .child(self.frame_sidebar(self.onboarding_brand(cx)))
                     .child(
                         self.frame_detail(div().flex_1().min_w_0().min_h_0().h_full().child(
                             self.transition_content(
                                 super::motion::Scope::Wizard,
-                                self.render_onboarding_transition_body(window, cx),
+                                self.render_onboarding_transition_body(cx),
                                 window,
                                 cx,
                             ),
                         )),
                     ),
             )
-            .child(self.frame_detail(div().w_full().child(self.onboarding_footer(window, cx))))
+            .child(self.frame_detail(div().w_full().child(self.onboarding_footer(cx))))
             .into_any_element()
     }
 
     pub(super) fn render_onboarding_transition_body(
         &self,
-        window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
-        let compact = patterns::is_narrow(self.page_viewport(window));
         let step = self.shell.onboarding.step;
         let mut body = match (&self.form, step) {
-            (Some(Form::Instance(form)), Step::Game) => self.onboarding_game(form, compact, cx),
+            (Some(Form::Instance(form)), Step::Game) => self.onboarding_game(form, cx),
             (_, Step::Account) => self.onboarding_account(cx),
             (Some(Form::Instance(form)), Step::Review) => self.onboarding_review(form, cx),
             _ => self
@@ -191,33 +188,9 @@ impl Block {
                     .flex()
                     .flex_col()
                     .justify_center()
-                    .px(if compact { px(24.) } else { px(48.) })
+                    .px_12()
                     .py_6()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(620.))
-                            .mx_auto()
-                            .children(compact.then(|| {
-                                div()
-                                    .mb_5()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(super::shell::brand(56.))
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .child(self.setup_caption("WELCOME TO BLOCK"))
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .child("A little setup. A whole new world."),
-                                            ),
-                                    )
-                            }))
-                            .child(body),
-                    ),
+                    .child(div().w_full().max_w(px(620.)).mx_auto().child(body)),
             )
             .into_any_element()
     }
@@ -278,7 +251,6 @@ impl Block {
                 "Welcome setup",
                 &steps,
                 self.shell.onboarding.step.index(),
-                false,
                 self.palette,
             ))
     }
@@ -321,12 +293,7 @@ impl Block {
             .child(self.setup_caption(description.to_owned()))
     }
 
-    fn onboarding_game(
-        &self,
-        form: &InstanceForm,
-        compact: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn onboarding_game(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let version = form.version.read(cx).value();
         let version_kind = self
             .version_catalog
@@ -366,7 +333,7 @@ impl Block {
             .child(self.setup_heading("01 / YOUR GAME", "Your first Minecraft.", "Start with a name. Choose components now or keep the defaults."))
             .children(self.onboarding_game_ready(cx).then(|| components::badge("Game configuration ready", self.palette, BadgeVariant::Success)))
             .child(name)
-            .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(if compact { 2 } else { 4 }).gap_3()
+            .child(div().id("onboarding-components").debug_selector(|| "onboarding-components".into()).grid().grid_cols(4).gap_3()
                 .child(self.wizard_component("version", "Minecraft", (&version, version_kind), WizardPage::Version, cx))
                 .child(self.wizard_component("loader", "Mod loader", (form.loader.name(), form.loader_version.as_deref().unwrap_or("Original game")), WizardPage::Loader, cx))
                 .child(self.wizard_optifine_component(form, cx))
@@ -658,9 +625,8 @@ impl Block {
         )
     }
 
-    fn onboarding_footer(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    fn onboarding_footer(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let step = self.shell.onboarding.step;
-        let compact = patterns::is_narrow(self.page_viewport(window));
         let created = self.onboarding_progress == Progress::Created;
         // A verified identity kept in memory counts as the step-2 choice; it is
         // persisted only by the final setup commit.
@@ -683,7 +649,7 @@ impl Block {
         let skip_disabled = creating;
         let reason = self.onboarding_footer_reason(has_account, cx);
 
-        patterns::management_footer(self.page_viewport(window), self.palette)
+        patterns::management_footer(self.palette)
             .id("onboarding-footer")
             .debug_selector(|| "onboarding-footer".into())
             .min_w_0()
@@ -711,18 +677,14 @@ impl Block {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap(px(if compact { 4. } else { 12. }))
+                    .gap_3()
                     .child(components::button_sized(
                         if skip_disabled {
                             "onboarding-skip-disabled"
                         } else {
                             "onboarding-skip"
                         },
-                        if compact {
-                            "Set up later"
-                        } else {
-                            "Skip setup"
-                        },
+                        "Skip setup",
                         self.palette,
                         ButtonVariant::Ghost,
                         ButtonSize::Small,
@@ -738,7 +700,7 @@ impl Block {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(if compact { 4. } else { 8. }))
+                            .gap_2()
                             .children((step != Step::Game).then(|| {
                                 components::button_sized(
                                     "welcome-back",
@@ -1019,7 +981,6 @@ impl Block {
     pub(super) fn render_onboarding_section(
         &self,
         page: WizardPage,
-        window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let Some(Form::Instance(form)) = &self.form else {
@@ -1065,7 +1026,7 @@ impl Block {
                     })),
             )
             .child(
-                patterns::management_footer(self.page_viewport(window), self.palette)
+                patterns::management_footer(self.palette)
                     .id("onboarding-section-footer")
                     .debug_selector(|| "onboarding-section-footer".into())
                     .justify_end()

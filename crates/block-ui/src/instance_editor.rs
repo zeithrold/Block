@@ -259,7 +259,6 @@ impl Block {
             return_focus,
             window: window.window_handle(),
         });
-        self.shell.games.detail_visible = true;
         cx.notify();
     }
 
@@ -576,11 +575,7 @@ impl Block {
         }
     }
 
-    pub(super) fn render_instance_editor(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
+    pub(super) fn render_instance_editor(&self, cx: &Context<'_, Self>) -> AnyElement {
         let Some(editor) = &self.shell.instance_editor else {
             return div().into_any_element();
         };
@@ -611,12 +606,10 @@ impl Block {
             cx,
         ));
         if editor.window_custom {
-            let mut dimensions = div().flex().gap_4();
-            if patterns::is_narrow(self.page_viewport(window)) {
-                dimensions = dimensions.flex_col();
-            }
             body = body.child(
-                dimensions
+                div()
+                    .flex()
+                    .gap_4()
                     .child(
                         self.instance_field(editor, Field::Width, "Window width (px)")
                             .flex_1(),
@@ -636,7 +629,7 @@ impl Block {
                 .child(note("This location is read-only. Block chooses storage automatically and existing games stay where they are.")))
             .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
             .children(editor.save_error.clone().map(note));
-        let footer = patterns::management_footer(self.page_viewport(window), self.palette)
+        let footer = patterns::management_footer(self.palette)
             .id("instance-editor-footer")
             .debug_selector(|| "instance-editor-footer".into())
             .justify_end()
@@ -868,7 +861,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-        cx.simulate_resize(size(px(360.), px(540.)));
+        cx.simulate_resize(size(px(1152.), px(540.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
@@ -904,7 +897,7 @@ mod tests {
         ));
         assert!(
             footer
-                .is_some_and(|footer| footer.size.height == px(56.) && footer.bottom() <= px(540.))
+                .is_some_and(|footer| footer.size.height == px(72.) && footer.bottom() <= px(540.))
         );
     }
 

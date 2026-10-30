@@ -92,7 +92,7 @@ fn begin_first_run_starts_welcome_at_home_size_and_resumes_after_setup_started(
             view.messages = Some(messages);
             view
         });
-        let home = cx.update(|window, cx| crate::window_geometry::home_size(window, cx));
+        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
         cx.update(|window, cx| {
@@ -357,8 +357,7 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
             view
         });
         fs::write(root.path().join("setup-started"), b"1")?;
-        let management =
-            cx.update(|window, cx| crate::window_geometry::management_size(window, cx));
+        let management = cx.update(|window, _| crate::window_geometry::management_size(window));
         cx.simulate_resize(management);
         cx.run_until_parked();
         cx.update(|_, cx| {
@@ -388,7 +387,7 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
         }));
         // `request_frame_resize` asks the platform for the Home-sized outer
         // width; deliver that resize like the real platform callback would.
-        let home = cx.update(|window, cx| crate::window_geometry::home_size(window, cx));
+        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.update(|window, cx| window.bounds_changed(cx));
         cx.run_until_parked();
         assert_eq!(
@@ -418,9 +417,8 @@ fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAp
             view.begin_first_run(cx);
             view
         });
-        let home = cx.update(|window, cx| crate::window_geometry::home_size(window, cx));
-        let management =
-            cx.update(|window, cx| crate::window_geometry::management_size(window, cx));
+        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
+        let management = cx.update(|window, _| crate::window_geometry::management_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
 

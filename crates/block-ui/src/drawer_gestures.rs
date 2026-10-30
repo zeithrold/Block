@@ -5,27 +5,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_VIEWPORT_FRACTION: f32 = 0.8;
 const DISMISS_DISTANCE_FRACTION: f32 = 0.3;
 const MIN_FLING_DISTANCE: f32 = 16.0;
 const MIN_FLING_VELOCITY: f32 = 800.0;
 const MAX_VELOCITY_SAMPLE_AGE: Duration = Duration::from_millis(100);
 const MAX_RELEASE_AGE: Duration = Duration::from_millis(120);
-
-/// Returns a positive desired panel height capped to 80% of the viewport.
-/// Invalid or non-positive dimensions produce a zero-height panel, which also
-/// keeps very small viewports from overflowing.
-pub(super) fn panel_height(viewport_height: f32, desired_height: f32) -> f32 {
-    if !viewport_height.is_finite()
-        || !desired_height.is_finite()
-        || viewport_height <= 0.0
-        || desired_height <= 0.0
-    {
-        return 0.0;
-    }
-
-    desired_height.min(viewport_height * MAX_VIEWPORT_FRACTION)
-}
 
 /// Tracks a downward pointer drag that began on the drawer's handle.
 ///
@@ -153,16 +137,6 @@ mod tests {
 
     fn later(start: Instant, millis: u64) -> Instant {
         start + Duration::from_millis(millis)
-    }
-
-    #[test]
-    fn panel_height_is_capped_and_handles_small_or_invalid_viewports() {
-        assert_eq!(panel_height(1000.0, 900.0), 800.0);
-        assert_eq!(panel_height(100.0, 60.0), 60.0);
-        assert_eq!(panel_height(10.0, 50.0), 8.0);
-        assert_eq!(panel_height(0.0, 50.0), 0.0);
-        assert_eq!(panel_height(100.0, f32::INFINITY), 0.0);
-        assert_eq!(panel_height(f32::NAN, 20.0), 0.0);
     }
 
     #[test]

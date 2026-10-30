@@ -6,8 +6,7 @@
 
 use super::Palette;
 use gpui::{
-    AnyElement, Div, InteractiveElement as _, ParentElement as _, Pixels, Size, Styled as _, div,
-    px, relative, rgb,
+    AnyElement, Div, InteractiveElement as _, ParentElement as _, Styled as _, div, px, rgb,
 };
 
 /// Canonical page heading: one bold 20 px title, a muted subtitle and the
@@ -64,45 +63,31 @@ pub(super) fn reveal_field<T: Copy + Eq + 'static>(
     })
 }
 
-pub(super) const NARROW_WIDTH: f32 = 640.;
-
-pub(super) fn is_narrow(viewport: Size<Pixels>) -> bool {
-    viewport.width < px(NARROW_WIDTH)
-}
-
-pub(super) fn management_footer(viewport: Size<Pixels>, palette: Palette) -> Div {
+pub(super) fn management_footer(palette: Palette) -> Div {
     div()
-        .h(px(if is_narrow(viewport) {
-            super::design::NARROW_FOOTER
-        } else {
-            super::design::MANAGEMENT_FOOTER
-        }))
+        .h(px(super::design::MANAGEMENT_FOOTER))
         .flex_shrink_0()
         .flex()
         .items_center()
         .gap_3()
-        .px(px(if is_narrow(viewport) { 16. } else { 32. }))
+        .px(px(32.))
         .border_t_1()
         .border_color(rgb(palette.border))
 }
 
 pub(super) fn management_layout(
-    viewport: Size<Pixels>,
     browser: AnyElement,
     detail: AnyElement,
-    show_detail: bool,
     palette: Palette,
     view: &super::Block,
 ) -> Div {
-    let narrow = is_narrow(viewport);
-    let mut row = div()
+    div()
         .size_full()
         .min_h_0()
         .min_w_0()
         .flex()
-        .overflow_hidden();
-    if !narrow || !show_detail {
-        row = row.child(
+        .overflow_hidden()
+        .child(
             view.frame_sidebar(
                 div()
                     .id("management-sidebar")
@@ -110,21 +95,15 @@ pub(super) fn management_layout(
                     .h_full()
                     .min_h_0()
                     .min_w_0()
-                    .w(if narrow {
-                        relative(1.)
-                    } else {
-                        px(super::design::SIDEBAR_WIDTH).into()
-                    })
+                    .w(px(super::design::SIDEBAR_WIDTH))
                     .flex_shrink_0()
                     .bg(rgb(palette.sidebar))
                     .border_r_1()
                     .border_color(rgb(palette.border))
                     .child(browser),
             ),
-        );
-    }
-    if !narrow || show_detail {
-        row = row.child(
+        )
+        .child(
             view.frame_detail(
                 div()
                     .id("management-content")
@@ -135,9 +114,7 @@ pub(super) fn management_layout(
                     .flex_1()
                     .child(detail),
             ),
-        );
-    }
-    row
+        )
 }
 
 pub(super) fn empty_state(
@@ -166,31 +143,29 @@ pub(super) fn empty_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_narrow, management_footer};
+    use super::management_footer;
     use gpui::{
         Context, InteractiveElement as _, IntoElement, Render, Styled as _, Window, px, size,
     };
 
     struct Footer;
     impl Render for Footer {
-        fn render(&mut self, window: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
-            management_footer(window.viewport_size(), crate::Palette::LIGHT)
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            management_footer(crate::Palette::LIGHT)
                 .id("footer")
                 .debug_selector(|| "footer".into())
                 .w_full()
         }
     }
     #[gpui::test]
-    fn footer_follows_window_width_without_consuming_short_content(cx: &mut gpui::TestAppContext) {
+    fn management_footer_has_fixed_height(cx: &mut gpui::TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| Footer);
-        for (width, expected) in [(960., 72.), (640., 72.), (360., 56.)] {
-            cx.simulate_resize(size(px(width), px(540.)));
-            cx.run_until_parked();
-            let bounds = cx.debug_bounds("footer");
-            assert!(bounds.is_some_and(
-                |bounds| bounds.size.height == px(expected) && bounds.right() <= px(width)
-            ));
-            assert_eq!(is_narrow(size(px(width), px(540.))), width < 640.);
-        }
+        cx.simulate_resize(size(px(1152.), px(720.)));
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds("footer");
+        assert!(
+            bounds
+                .is_some_and(|bounds| bounds.size.height == px(72.) && bounds.right() <= px(1152.))
+        );
     }
 }

@@ -48,13 +48,7 @@ fn resizing_setup_keeps_component_rows_square_and_the_note_next_to_them(cx: &mut
             view.begin_onboarding(cx);
         });
     });
-    for (width, height) in [
-        (960., 600.),
-        (360., 648.),
-        (963., 688.),
-        (360., 540.),
-        (960., 600.),
-    ] {
+    for (width, height) in [(1152., 720.), (963., 688.), (960., 600.)] {
         cx.simulate_resize(size(px(width), px(height)));
         cx.run_until_parked();
         let grid = required_bounds(cx, "onboarding-components");
@@ -69,11 +63,10 @@ fn resizing_setup_keeps_component_rows_square_and_the_note_next_to_them(cx: &mut
             (tile.size.height - tile.size.width).abs() <= px(1.),
             "component tile must stay square"
         );
-        let rows = if width < 640. { 2. } else { 1. };
-        let expected_height = tile.size.height * rows + px(12. * (rows - 1.));
+        let expected_height = tile.size.height;
         assert!(
             (grid.size.height - expected_height).abs() <= px(1.),
-            "grid must reserve only its actual component rows: grid={grid:?}, tile={tile:?}"
+            "grid must reserve only its actual component row: grid={grid:?}, tile={tile:?}"
         );
         assert!(
             (note.top() - grid.bottom() - px(24.)).abs() <= px(1.),
@@ -185,7 +178,7 @@ fn configuration_error_focuses_and_reveals_the_real_field_without_losing_the_dra
     cx: &mut TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
@@ -223,7 +216,7 @@ fn configuration_error_focuses_and_reveals_the_real_field_without_losing_the_dra
             .zip(footer)
             .is_some_and(|(field, footer)| field.top() >= px(0.)
                 && field.bottom() <= footer.top()
-                && footer.bottom() <= px(540.)),
+                && footer.bottom() <= px(720.)),
         "field {field:?}; footer {footer:?}"
     );
     cx.update(|window, cx| {
@@ -292,11 +285,11 @@ fn account_selection_is_staged_until_setup_preference_save_and_failure_can_retry
 }
 
 #[gpui::test]
-fn review_change_keeps_three_steps_and_short_footer_and_invalid_name_focus(
+fn review_change_keeps_three_steps_and_fixed_footer_and_invalid_name_focus(
     cx: &mut TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(1152.), px(720.)));
     cx.update(|window, cx| view.update(cx, |view, cx| {
         view.preferences.reduce_motion = true;
         view.begin_onboarding(cx);
@@ -316,8 +309,8 @@ fn review_change_keeps_three_steps_and_short_footer_and_invalid_name_focus(
         crate::test_support::control_bounds(cx, "onboarding-footer").is_some_and(|bounds| bounds
             .size
             .height
-            == px(56.)
-            && bounds.bottom() <= px(540.))
+            == px(72.)
+            && bounds.bottom() <= px(720.))
     );
     click(cx, "onboarding-review-change-0");
     assert!(view.read_with(cx, |view, cx| view.shell.onboarding.step == Step::Game && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Kept draft")));

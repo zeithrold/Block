@@ -3,7 +3,7 @@
 use super::scroll_area::ScrollAreaExt as _;
 use gpui::{
     ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    Window, div, px, relative, rgb,
+    div, px, relative, rgb,
 };
 
 use super::{
@@ -61,15 +61,10 @@ impl BuildInfo {
 }
 
 impl Block {
-    pub(super) fn render_about(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
-        let narrow = patterns::is_narrow(self.page_viewport(window));
-        let brand = self.about_brand(narrow);
-        let body = self.about_body(narrow, cx);
-        let footer = patterns::management_footer(self.page_viewport(window), self.palette)
+    pub(super) fn render_about(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        let brand = self.about_brand();
+        let body = self.about_body(cx);
+        let footer = patterns::management_footer(self.palette)
             .id("about-footer")
             .debug_selector(|| "about-footer".into())
             .justify_between()
@@ -106,16 +101,12 @@ impl Block {
             )
     }
 
-    fn about_brand(&self, narrow: bool) -> gpui::Stateful<gpui::Div> {
+    fn about_brand(&self) -> gpui::Stateful<gpui::Div> {
         let info = self.build_info;
         div()
             .id("about-brand")
             .debug_selector(|| "about-brand".into())
-            .w(if narrow {
-                relative(0.24)
-            } else {
-                px(super::design::SIDEBAR_WIDTH).into()
-            })
+            .w(px(super::design::SIDEBAR_WIDTH))
             .min_w_0()
             .h_full()
             .flex_shrink_0()
@@ -123,15 +114,15 @@ impl Block {
             .flex_col()
             .items_center()
             .justify_center()
-            .gap(px(if narrow { 8. } else { 20. }))
-            .px(px(if narrow { 8. } else { 20. }))
+            .gap_5()
+            .px_5()
             .border_r_1()
             .border_color(rgb(self.palette.border))
             .bg(rgb(self.palette.sidebar))
-            .child(super::shell::brand(if narrow { 48. } else { 144. }))
+            .child(super::shell::brand(144.))
             .child(
                 div()
-                    .text_size(px(if narrow { 14. } else { 30. }))
+                    .text_size(px(30.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child("Block"),
             )
@@ -140,10 +131,10 @@ impl Block {
                 self.palette,
                 BadgeVariant::Secondary,
             ))
-            .children((!narrow).then(|| note("One block at a time.")))
+            .child(note("One block at a time."))
     }
 
-    fn about_body(&self, narrow: bool, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+    fn about_body(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         let mut body = div()
             .id("about-body")
             .debug_selector(|| "about-body".into())
@@ -157,8 +148,8 @@ impl Block {
                     .min_h_full()
                     .flex()
                     .flex_col()
-                    .gap(px(if narrow { 20. } else { 28. }))
-                    .p(px(if narrow { 16. } else { 32. }))
+                    .gap_7()
+                    .p_8()
                     .child(
                         div()
                             .flex()
@@ -167,13 +158,13 @@ impl Block {
                             .child(note("MINECRAFT: JAVA EDITION LAUNCHER"))
                             .child(
                                 div()
-                                    .text_size(px(if narrow { 18. } else { 24. }))
+                                    .text_size(px(24.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .child("Made for your next world."),
                             )
                             .child(note("A quiet home for your accounts, games, and the way you play. Built around persistent Instances and the Profiles that make them yours.")),
                     )
-                    .child(self.about_build_information(narrow, cx))
+                    .child(self.about_build_information(cx))
                     .child(
                         div()
                             .flex()
@@ -189,7 +180,7 @@ impl Block {
             body = body.child(
                 div()
                     .id("about-diagnostics")
-                    .p(px(if narrow { 16. } else { 32. }))
+                    .p_8()
                     .pt_0()
                     .flex()
                     .flex_col()
@@ -220,11 +211,7 @@ impl Block {
         body
     }
 
-    fn about_build_information(
-        &self,
-        narrow: bool,
-        cx: &Context<'_, Self>,
-    ) -> impl IntoElement + use<> {
+    fn about_build_information(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         let info = self.build_info;
         let rows = [
             ("Version", info.version.to_owned()),
@@ -259,7 +246,7 @@ impl Block {
             )
             .child(
                 div().flex().flex_wrap().gap_y_4().children(rows.into_iter().map(|(label, value)| {
-                    div().w(if narrow { relative(1.) } else { relative(0.5) })
+                    div().w(relative(0.5))
                         .min_w_0().pr_3().flex().flex_col().gap_1()
                         .child(div().text_xs().text_color(rgb(self.palette.muted)).child(label))
                         .child(div().text_sm().child(value))
@@ -387,7 +374,7 @@ mod tests {
             view.preferences.reduce_motion = true;
             view
         });
-        for (width, height) in [(960., 600.), (640., 540.), (360., 540.)] {
+        for (width, height) in [(1152., 720.), (960., 600.)] {
             cx.simulate_resize(size(px(width), px(height)));
             cx.run_until_parked();
             for expanded in [false, true] {

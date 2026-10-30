@@ -116,12 +116,12 @@ fn body_pointer_motion_does_not_start_a_drawer_gesture(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn short_window_caps_panel_and_keeps_management_action_visible(cx: &mut TestAppContext) {
+fn fixed_panel_keeps_management_action_visible(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
-    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.simulate_resize(size(px(360.), px(720.)));
     act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
     let panel = bounds(cx, "block-drawer");
-    assert!(panel.size.height <= px(540. * 0.8));
+    assert_eq!(panel.size.height, px(540.));
     for selector in ["drawer-handle", "selector-results", "manage-games"] {
         let control = bounds(cx, selector);
         assert!(

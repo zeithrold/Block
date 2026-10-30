@@ -147,7 +147,6 @@ enum UiAction {
     Providers,
     ProvidersBack,
     ProviderAdd,
-    ProviderList,
     ProviderInspect(String),
     ProviderIdentify,
     ProviderConsent,
@@ -223,7 +222,6 @@ enum UiAction {
     InstanceOptiFineRemove,
     ProfileInheritRuntime,
     ProfileInheritWindow,
-    BrowserBack,
     SelectProfile(String),
     SelectAccount(String),
     CreateInstance,
@@ -529,7 +527,7 @@ impl Block {
         } else {
             Tab::Onboarding
         };
-        window.resize(window_geometry::home_size(window, cx));
+        window.resize(window_geometry::home_size(window));
         let mut view = Self {
             build_info: options.build_info,
             motion: transitions::MotionState::default(),
@@ -604,7 +602,7 @@ impl Block {
         if tab == Tab::Onboarding {
             view.begin_first_run(cx);
             if view.shell.first_run.stage != first_run::Stage::Welcome {
-                window.resize(window_geometry::management_size(window, cx));
+                window.resize(window_geometry::management_size(window));
             }
         }
         if let Some(path) = options.recipe {
@@ -1071,8 +1069,6 @@ impl Block {
             },
         );
         self.shell.profiles.inspected = Some(profile);
-        self.shell.games.detail_visible = true;
-        self.shell.profiles.detail_visible = true;
         if owns_draft {
             if self.tab == Tab::Onboarding {
                 self.onboarding_progress = onboarding::Progress::Created;
@@ -1256,8 +1252,6 @@ impl Block {
             action,
             UiAction::CancelForm
                 | UiAction::ProvidersBack
-                | UiAction::ProviderList
-                | UiAction::BrowserBack
                 | UiAction::WizardBack
                 | UiAction::OnboardingBack
                 | UiAction::AuthCancel
@@ -1492,7 +1486,6 @@ impl Block {
             UiAction::Inspect(id) => {
                 self.shell.instance_editor = None;
                 self.collection_mut().inspected = Some(id);
-                self.collection_mut().detail_visible = true;
                 self.form = None;
             }
             UiAction::InspectLinked { profiles, id } => {
@@ -1504,7 +1497,6 @@ impl Block {
                 };
                 self.initialize_browsers(cx);
                 self.collection_mut().inspected = Some(id);
-                self.collection_mut().detail_visible = true;
                 self.form = None;
             }
             UiAction::GamesHelp => {
@@ -1551,12 +1543,6 @@ impl Block {
                 if let Some(Form::Profile(form)) = &mut self.form {
                     form.original.inheritance.window = !form.original.inheritance.window;
                 }
-            }
-            UiAction::BrowserBack => {
-                self.shell.instance_editor = None;
-                self.collection_mut().detail_visible = false;
-                self.form = None;
-                self.restore_browser_focus(window, cx);
             }
             UiAction::SelectProfile(id) => {
                 if let Some(profile) = self
@@ -1800,7 +1786,6 @@ impl Block {
             UiAction::Providers => self.open_providers(cx),
             UiAction::ProvidersBack => self.close_providers(cx),
             UiAction::ProviderAdd => self.edit_provider(None, cx),
-            UiAction::ProviderList => self.show_provider_list(cx),
             UiAction::ProviderInspect(id) => self.edit_provider(Some(&id), cx),
             UiAction::ProviderIdentify => self.identify_provider(cx),
             UiAction::ProviderConsent => self.consent_provider(cx),
@@ -2399,7 +2384,6 @@ impl Block {
                 | UiAction::ProfileModeSettings
                 | UiAction::ReloadVersions
                 | UiAction::ReloadLibrary
-                | UiAction::BrowserBack
                 | UiAction::ToggleOutput
                 | UiAction::ToggleCommand
         )
@@ -2490,8 +2474,6 @@ impl Render for Block {
         sync_component_theme(self.palette, cx);
         let action_rail = if self.tab == Tab::Home && self.form.is_none() {
             104.
-        } else if patterns::is_narrow(window.viewport_size()) {
-            design::NARROW_FOOTER
         } else {
             design::MANAGEMENT_FOOTER
         };
@@ -3039,19 +3021,16 @@ mod tests {
                 view.read_with(cx, |view, _| view.shell.onboarding.step),
                 super::onboarding::Step::Review
             );
-            cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
-            cx.run_until_parked();
             let action = cx
                 .debug_bounds("welcome-next")
-                .ok_or_else(|| anyhow::anyhow!("missing compact primary action"))?;
+                .ok_or_else(|| anyhow::anyhow!("missing primary action"))?;
             let footer = cx
                 .debug_bounds("onboarding-footer")
-                .ok_or_else(|| anyhow::anyhow!("missing compact footer"))?;
+                .ok_or_else(|| anyhow::anyhow!("missing footer"))?;
             assert!(
                 action.right() <= footer.right() && action.bottom() <= footer.bottom(),
-                "compact action must stay inside its animated footer: {action:?}, {footer:?}"
+                "primary action must stay inside its animated footer: {action:?}, {footer:?}"
             );
-            cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
             click_selector(cx, "welcome-back");
             click_selector(cx, "welcome-back");
             assert_eq!(

@@ -8,9 +8,7 @@ use anyhow::Context as _;
 use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
-use gpui::{
-    App, AppContext as _, KeyBinding, WindowBounds, WindowDecorations, WindowOptions, px, size,
-};
+use gpui::{App, AppContext as _, KeyBinding, WindowBounds, WindowDecorations, WindowOptions};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
 #[action(namespace = block)]
@@ -159,7 +157,6 @@ fn window_options(cx: &App) -> WindowOptions {
         is_minimizable: true,
         app_id: Some("one.ztd.block".into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(360.0), px(540.0))),
         ..Default::default()
     }
 }

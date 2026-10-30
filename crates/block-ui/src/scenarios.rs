@@ -211,9 +211,9 @@ impl Block {
                 "setup-welcome" | "setup-import-sources" | "setup-import-list"
             );
         window.resize(if home {
-            crate::window_geometry::home_size(window, cx)
+            crate::window_geometry::home_size(window)
         } else {
-            crate::window_geometry::management_size(window, cx)
+            crate::window_geometry::management_size(window)
         });
         if name == "home-empty" {
             self.snapshot = Snapshot::default();

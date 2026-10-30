@@ -1690,7 +1690,6 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
-        let narrow = patterns::is_narrow(self.page_viewport(window));
         let body = self.game_wizard_body(form, window, cx);
         let body = div()
             .flex()
@@ -1715,14 +1714,7 @@ impl Block {
             .size_full()
             .min_h_0()
             .scroll_area(&state.body_scroll, "Game setup", self.palette, false)
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(608.))
-                    .mx_auto()
-                    .p(px(if narrow { 16. } else { 32. }))
-                    .child(body),
-            )
+            .child(div().w_full().max_w(px(608.)).mx_auto().p_8().child(body))
             .into_any_element()
     }
 
@@ -1791,8 +1783,7 @@ impl Block {
         footer: gpui::AnyElement,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
-        let viewport = self.page_viewport(window);
-        let rail = self.wizard_step_rail(steps, current, window);
+        let rail = self.wizard_step_rail(steps, current);
         div()
             .id("wizard-frame")
             .size_full()
@@ -1825,7 +1816,7 @@ impl Block {
                                 )),
                         )
                         .child(
-                            patterns::management_footer(viewport, self.palette)
+                            patterns::management_footer(self.palette)
                                 .id("wizard-footer")
                                 .debug_selector(|| "wizard-footer".into())
                                 .child(
@@ -1843,14 +1834,8 @@ impl Block {
             .into_any_element()
     }
 
-    fn wizard_step_rail(
-        &self,
-        steps: &[(&str, &str)],
-        current: usize,
-        window: &Window,
-    ) -> gpui::AnyElement {
-        let narrow = patterns::is_narrow(self.page_viewport(window));
-        let mut rail = div()
+    fn wizard_step_rail(&self, steps: &[(&str, &str)], current: usize) -> gpui::AnyElement {
+        let rail = div()
             .id("wizard-rail")
             .debug_selector(|| "wizard-rail".into())
             .min_w_0()
@@ -1858,14 +1843,10 @@ impl Block {
             .flex_shrink_0()
             .flex()
             .flex_col()
+            .w(px(super::design::SIDEBAR_WIDTH))
             .border_r_1()
             .border_color(rgb(self.palette.border))
             .bg(rgb(self.palette.sidebar));
-        if narrow {
-            rail = rail.w(px(48.));
-        } else {
-            rail = rail.w(px(super::design::SIDEBAR_WIDTH));
-        }
         self.frame_sidebar(
             rail.child(
                 div()
@@ -1878,12 +1859,12 @@ impl Block {
                         self.palette,
                         false,
                     )
-                    .px(px(if narrow { 9. } else { 24. }))
+                    .px_6()
                     .py_6()
                     .flex()
                     .flex_col()
                     .gap_6()
-                    .children((!narrow).then(|| note("Game setup")))
+                    .child(note("Game setup"))
                     .child(components::stepper(
                         "game-wizard-steps",
                         "Create a game",
@@ -1897,18 +1878,13 @@ impl Block {
                             })
                             .collect::<Vec<_>>(),
                         current,
-                        narrow,
                         self.palette,
                     )),
             )
             .child(
-                patterns::management_footer(self.page_viewport(window), self.palette)
-                    .px(px(if narrow { 8. } else { 24. }))
-                    .child(note(if narrow {
-                        format!("{}/{}", current + 1, steps.len())
-                    } else {
-                        format!("Step {} of {}", current + 1, steps.len())
-                    })),
+                patterns::management_footer(self.palette)
+                    .px_6()
+                    .child(note(format!("Step {} of {}", current + 1, steps.len()))),
             ),
         )
         .into_any_element()
@@ -3784,7 +3760,7 @@ fn review_fact(
         .id(id.clone())
         .debug_selector(move || id)
         .w(px(240.))
-        // A narrow window narrows the fact instead of pushing it out of view.
+        // A fact longer than its column wraps instead of pushing out of view.
         .max_w_full()
         .min_w_0()
         .flex()
