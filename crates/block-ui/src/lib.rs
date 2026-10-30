@@ -102,6 +102,8 @@ mod text_input;
 mod tooltip;
 #[path = "navigation/transitions.rs"]
 mod transitions;
+#[path = "runtime/ui_logging.rs"]
+mod ui_logging;
 #[path = "setup/welcome_button.rs"]
 mod welcome_button;
 #[path = "navigation/window_geometry.rs"]
@@ -261,6 +263,8 @@ enum Form {
 )]
 pub struct Block {
     build_info: BuildInfo,
+    view_id: u64,
+    window_changes: ui_logging::WindowChanges,
     shell: ShellState,
     motion: transitions::MotionState,
     motion_dirty: bool,
@@ -292,6 +296,7 @@ pub struct Block {
     completed: usize,
     operation_kind: OperationKind,
     operation_revision: u64,
+    logged_operation: Option<ui_logging::Operation>,
     pending_creation: Option<PendingCreation>,
     downloads: Option<std::sync::Arc<std::sync::Mutex<tasks::DownloadTracker>>>,
     downloads_revision: u64,
@@ -307,6 +312,8 @@ pub struct Block {
     crash_guard: Option<File>,
     logs: VecDeque<String>,
     show_output: bool,
+    exporting_logs: bool,
+    log_export_cancel: Option<CancellationToken>,
     command: Option<String>,
     show_command: bool,
     recipe: Option<LaunchRecipe>,
@@ -323,6 +330,9 @@ pub struct Block {
 struct RecipeLoadState {
     launch_after_load: Option<bool>,
 }
+
+const INSTALL_CHOOSER_ERROR: &str =
+    "Could not open the installation folder chooser. Check your system file picker and try again.";
 
 impl RecipeLoadState {
     const fn start(&mut self, busy: bool, launch: bool) -> bool {
@@ -352,6 +362,10 @@ struct ProviderDrop {
 impl Drop for Block {
     fn drop(&mut self) {
         self.cancel.cancel();
+        if let Some(cancel) = &self.log_export_cancel {
+            cancel.cancel();
+        }
+        self.finish_logged_operation(ui_logging::Outcome::ViewClosed);
     }
 }
 
@@ -435,6 +449,8 @@ impl Block {
         window.resize(window_geometry::home_size(window));
         let mut view = Self {
             build_info: options.build_info,
+            view_id: cx.entity_id().as_u64(),
+            window_changes: ui_logging::WindowChanges::default(),
             motion: transitions::MotionState::default(),
             motion_dirty: true,
             visual_only: false,
@@ -471,6 +487,7 @@ impl Block {
             completed: 0,
             operation_kind: OperationKind::General,
             operation_revision: 0,
+            logged_operation: None,
             pending_creation: None,
             downloads: None,
             downloads_revision: 0,
@@ -486,6 +503,8 @@ impl Block {
             crash_guard: None,
             logs: VecDeque::new(),
             show_output: false,
+            exporting_logs: false,
+            log_export_cancel: None,
             command: None,
             show_command: false,
             recipe: None,
@@ -558,6 +577,14 @@ impl Block {
         {
             self.selected_instance = Some(profile.instance_id.clone());
             self.selected_profile = Some(profile.id.clone());
+            self.shell.games.inspected = Some(
+                if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
+                    profile.id.clone()
+                } else {
+                    profile.instance_id.clone()
+                },
+            );
+            self.shell.profiles.inspected = Some(profile.id.clone());
             if self.form.is_none()
                 && self.shell.auth.is_none()
                 && self.shell.instance_editor.is_none()
@@ -578,10 +605,22 @@ impl Block {
     fn session_updated(&mut self, record: RunRecord) {
         let id = record.context.run_id.clone();
         let fingerprint = (record.revision, record.state);
-        if let Some(previous) = self.session_revisions.get(&id)
-            && (previous.0 > record.revision || previous == &fingerprint)
+        let previous = self.session_revisions.get(&id).copied();
+        if let Some(previous) = previous
+            && (previous.0 > record.revision || previous == fingerprint)
         {
             return;
+        }
+        if (previous.is_some() || record.is_active())
+            && previous.is_none_or(|previous| previous.1 != record.state)
+            && let Some(id) = ui_logging::session_id(&id)
+        {
+            ui_logging::session_state(
+                self.view_id,
+                id,
+                record.state,
+                record.outcome.as_ref().map(|outcome| outcome.kind),
+            );
         }
         self.session_revisions.insert(id.clone(), fingerprint);
         if self.session_revisions.len() > 256 {
@@ -775,6 +814,17 @@ impl Block {
         self.shell.pending_toasts.push(toast);
     }
 
+    fn notify_logging_failure(&mut self, failed: bool, cx: &mut Context<'_, Self>) -> bool {
+        if !ui_logging::claim_failure_notice(failed, cx) {
+            return false;
+        }
+        self.push_toast(
+            ui_logging::FAILURE_MESSAGE.into(),
+            feedback::ToastKind::Error,
+        );
+        true
+    }
+
     /// Setup owns navigation until the first-run draft is complete.
     fn setup_incomplete(&self) -> bool {
         !self.preferences.onboarding_complete && self.shell.first_run.enabled
@@ -792,8 +842,8 @@ impl Block {
         self.status = error;
     }
 
-    fn begin_cancellable(&mut self, status: &str) {
-        self.begin(status);
+    fn begin_cancellable(&mut self, status: &str, operation: ui_logging::Operation) {
+        self.begin(status, operation);
         self.operation_cancellable = self.busy;
     }
 
@@ -801,7 +851,7 @@ impl Block {
         self.busy && (self.active_run.is_some() || self.operation_cancellable)
     }
 
-    fn begin(&mut self, status: &str) {
+    fn begin(&mut self, status: &str, operation: ui_logging::Operation) {
         self.operation_cancellable = false;
         self.operation_kind = OperationKind::General;
         if self.engine.is_none() {
@@ -810,6 +860,8 @@ impl Block {
             return;
         }
         self.operation_revision = self.operation_revision.wrapping_add(1);
+        self.logged_operation = Some(operation);
+        ui_logging::operation_started(self.view_id, self.operation_revision, operation);
         self.pending_creation = None;
         if let Some(engine) = &mut self.engine {
             engine.begin_operation(self.operation_revision);
@@ -823,6 +875,31 @@ impl Block {
         self.logs.clear();
         self.status = status.into();
         self.cancel = CancellationToken::new();
+    }
+
+    fn finish_logged_operation(&mut self, outcome: ui_logging::Outcome) {
+        if let Some(operation) = self.logged_operation.take() {
+            ui_logging::operation_finished(
+                self.view_id,
+                self.operation_revision,
+                operation,
+                outcome,
+            );
+        }
+    }
+
+    fn abandon_operation(&mut self, revision: u64) -> bool {
+        if revision != self.operation_revision {
+            return false;
+        }
+        self.finish_logged_operation(ui_logging::Outcome::Cancelled);
+        self.operation_revision = self.operation_revision.wrapping_add(1);
+        if let Some(engine) = &mut self.engine {
+            engine.begin_operation(self.operation_revision);
+        }
+        self.busy = self.active_run.is_some();
+        self.operation_cancellable = false;
+        true
     }
 
     fn instance(&self) -> Option<&Instance> {
@@ -1076,7 +1153,10 @@ impl Block {
             };
             return;
         };
-        self.begin_cancellable("Preparing · validating profile and account");
+        self.begin_cancellable(
+            "Preparing · validating profile and account",
+            ui_logging::Operation::Launch,
+        );
         self.operation_kind = OperationKind::Launch;
         self.play_stop = CancellationToken::new();
         if let Some(engine) = &self.engine {
@@ -1101,7 +1181,8 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return;
         };
-        let field = form.directory.downgrade();
+        let field = form.directory.entity_id();
+        let revision = self.shell.wizard.revision;
         let selection = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -1109,23 +1190,56 @@ impl Block {
             prompt: Some("Choose an installation directory".into()),
         });
         cx.spawn(async move |view, cx| {
-            if let Ok(Ok(Some(paths))) = selection.await
-                && let Some(path) = paths.first()
-            {
-                let _ = view.update(cx, |view, cx| {
-                    if !view.busy
-                        && let Some(Form::Instance(form)) = &view.form
-                        && Some(form.directory.entity_id())
-                            == field.upgrade().map(|field| field.entity_id())
-                    {
-                        form.directory.update(cx, |field, cx| {
-                            field.set_value(&path.display().to_string(), cx);
-                        });
-                    }
-                });
-            }
+            let selection = match selection.await {
+                Ok(Ok(paths)) => Ok(paths.and_then(|paths| paths.into_iter().next())),
+                _ => Err(()),
+            };
+            let _ = view.update(cx, |view, cx| {
+                view.finish_install_browse(field, revision, selection, cx);
+            });
         })
         .detach();
+    }
+
+    fn finish_install_browse(
+        &mut self,
+        field: gpui::EntityId,
+        revision: usize,
+        selection: Result<Option<PathBuf>, ()>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(Form::Instance(form)) = &self.form else {
+            return;
+        };
+        if self.busy
+            || self.shell.wizard.page != Some(WizardPage::Location)
+            || self.shell.wizard.revision != revision
+            || form.directory.entity_id() != field
+        {
+            return;
+        }
+        match selection {
+            Ok(Some(path)) => {
+                form.directory.update(cx, |field, cx| {
+                    field.set_value(&path.display().to_string(), cx);
+                });
+                if self.shell.wizard.error.as_deref() == Some(INSTALL_CHOOSER_ERROR) {
+                    self.shell.wizard.error = None;
+                }
+                if self.shell.first_run.error.as_deref() == Some(INSTALL_CHOOSER_ERROR) {
+                    self.shell.first_run.error = None;
+                }
+                if self.status == INSTALL_CHOOSER_ERROR {
+                    self.status = "Installation folder selected.".into();
+                }
+            }
+            Ok(None) => return,
+            Err(()) => {
+                self.shell.wizard.error = Some(INSTALL_CHOOSER_ERROR.into());
+                self.report(INSTALL_CHOOSER_ERROR.into());
+            }
+        }
+        cx.notify();
     }
 
     fn load_recipe(&mut self, path: PathBuf, launch: bool, cx: &mut Context<'_, Self>) {
@@ -1149,13 +1263,32 @@ impl Block {
             prompt: Some("Select a development launch recipe (.json)".into()),
         });
         cx.spawn(async move |view, cx| {
-            if let Ok(Ok(Some(paths))) = prompt.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = view.update(cx, |view, cx| view.load_recipe(path, false, cx));
-            }
+            let selection = match prompt.await {
+                Ok(Ok(paths)) => Ok(paths.and_then(|paths| paths.into_iter().next())),
+                _ => Err(()),
+            };
+            let _ = view.update(cx, |view, cx| view.finish_recipe_browse(selection, cx));
         })
         .detach();
+    }
+
+    fn finish_recipe_browse(
+        &mut self,
+        selection: Result<Option<PathBuf>, ()>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.busy || self.recipe_load.is_loading() {
+            return;
+        }
+        match selection {
+            Ok(Some(path)) => self.load_recipe(path, false, cx),
+            Ok(None) => return,
+            Err(()) => self.report(
+                "Could not open the recipe chooser. Check your system file picker and try again."
+                    .into(),
+            ),
+        }
+        cx.notify();
     }
 
     fn launch_recipe(&mut self, cx: &mut Context<'_, Self>) {
@@ -1163,7 +1296,10 @@ impl Block {
             return;
         }
         if let Some(recipe) = self.recipe.clone() {
-            self.begin_cancellable("Preparing explicit development recipe");
+            self.begin_cancellable(
+                "Preparing explicit development recipe",
+                ui_logging::Operation::LaunchRecipe,
+            );
             self.operation_kind = OperationKind::Launch;
             if let Some(engine) = &self.engine {
                 engine.launch(recipe, self.cancel.clone());
@@ -1212,8 +1348,9 @@ impl Block {
             || matches!(action, UiAction::SignIn) && self.busy && self.shell.auth.is_none()
             || matches!(action, UiAction::Stop) && !self.can_stop()
             || self.import_action_disabled(&action);
-        let disabled =
-            disabled || matches!(action, UiAction::AuthCancel) && self.auth_save_pending();
+        let disabled = disabled
+            || matches!(action, UiAction::AuthCancel) && self.auth_save_pending()
+            || matches!(action, UiAction::ExportLogs) && self.exporting_logs;
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
         let app_menu = matches!(action, UiAction::Drawer(Some(Drawer::Menu)));
@@ -1229,7 +1366,7 @@ impl Block {
         let id = id.into();
         let visible_label = label.into();
         let on_activate = cx.listener(move |view, (): &(), window, cx| {
-            if view.busy && !Self::available_while_busy(&action) {
+            if view.busy && !view.can_activate(&action) {
                 return;
             }
             if let Some((wizard, color)) = choice {
@@ -1347,10 +1484,20 @@ fn sync_component_theme(palette: Palette, cx: &mut gpui::App) {
 
 impl Render for Block {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.motion
-            .apply_policy(self.motion_preferences().reduced(), cx);
+        self.notify_logging_failure(block_logging::failure().is_some(), cx);
+        let reduced_motion = self.motion_preferences().reduced();
+        self.motion.apply_policy(reduced_motion, cx);
+        self.window_changes.observe(
+            self.view_id,
+            f32::from(window.viewport_size().width),
+            f32::from(window.viewport_size().height),
+            window.scale_factor(),
+            reduced_motion,
+            cx.background_executor().now(),
+        );
         self.prepare_crash_help(window, cx);
         self.sync_provider_drop(window, cx);
+        feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         if let Some(help) = &self.crash_help {
             return div().size_full().child(help.clone()).into_any_element();
         }
@@ -1367,7 +1514,6 @@ impl Render for Block {
             design::MANAGEMENT_FOOTER
         };
         feedback::ToastLayer::reserve_actions(px(action_rail + 12.), window, cx);
-        feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         self.prepare_motion(window, cx);
         let title = self.navigation_title();
         window.set_window_title(
@@ -1781,6 +1927,8 @@ mod tests {
         super::bind_navigation_keys(cx);
         super::Block {
             build_info: super::BuildInfo::default(),
+            view_id: cx.entity_id().as_u64(),
+            window_changes: super::ui_logging::WindowChanges::default(),
             motion: super::transitions::MotionState::default(),
             motion_dirty: true,
             visual_only: false,
@@ -1811,6 +1959,7 @@ mod tests {
             completed: 0,
             operation_kind: super::OperationKind::General,
             operation_revision: 0,
+            logged_operation: None,
             pending_creation: None,
             downloads: None,
             downloads_revision: 0,
@@ -1826,6 +1975,8 @@ mod tests {
             crash_guard: None,
             logs: std::collections::VecDeque::new(),
             show_output: false,
+            exporting_logs: false,
+            log_export_cancel: None,
             command: None,
             show_command: false,
             recipe: None,
@@ -1834,6 +1985,21 @@ mod tests {
             provider_drop: None,
             pending_play: false,
         }
+    }
+
+    #[gpui::test]
+    fn logging_storage_failure_notification_is_shown_only_once(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, test_view);
+        view.update(cx, |view, cx| {
+            assert!(!view.notify_logging_failure(false, cx));
+            assert!(view.notify_logging_failure(true, cx));
+            assert!(!view.notify_logging_failure(true, cx));
+            assert_eq!(view.shell.pending_toasts.len(), 1);
+            assert_eq!(
+                view.shell.pending_toasts[0].message,
+                "Launcher logs are unavailable. Check disk space and permissions."
+            );
+        });
     }
 
     fn click_selector(cx: &mut gpui::VisualTestContext, selector: &'static str) {
@@ -1874,6 +2040,147 @@ mod tests {
             }
             crate::test_support::ensure_live_window(cx);
         }
+    }
+
+    #[gpui::test]
+    fn folder_and_recipe_chooser_failures_are_visible_and_cancellation_is_quiet(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
+            let (view, cx) = crate::test_support::window(cx, test_view);
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.preferences.reduce_motion = true;
+                cx.notify();
+            });
+            cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            click_selector(cx, "create-instance");
+            click_selector(cx, "wizard-component-location");
+            let state = view.update(cx, |view, cx| {
+                let Some(super::Form::Instance(form)) = &view.form else {
+                    return None;
+                };
+                form.directory
+                    .update(cx, |field, cx| field.set_value("/draft/game", cx));
+                Some((form.directory.entity_id(), view.shell.wizard.revision))
+            });
+            let Some((field, revision)) = state else {
+                anyhow::bail!("missing instance draft");
+            };
+            let previous_status = view.read_with(cx, |view, _| view.status.clone());
+            click_selector(cx, "browse-install");
+            assert!(cx.did_prompt_for_paths());
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert_eq!(
+                view.read_with(cx, |view, _| view.status.clone()),
+                previous_status
+            );
+            click_selector(cx, "browse-install");
+            cx.simulate_path_prompt_response(|_| {
+                Some(vec![std::path::PathBuf::from("/chosen/game")])
+            });
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, cx| {
+                matches!(&view.form, Some(super::Form::Instance(form))
+                    if form.directory.read(cx).value() == "/chosen/game")
+            }));
+            view.update(cx, |view, cx| {
+                if let Some(super::Form::Instance(form)) = &view.form {
+                    form.directory
+                        .update(cx, |field, cx| field.set_value("/draft/game", cx));
+                }
+            });
+            view.update(cx, |view, cx| {
+                view.finish_install_browse(field, revision, Err(()), cx)
+            });
+            assert!(crate::test_support::control_bounds(cx, "wizard-location-error").is_some());
+            assert!(view.read_with(cx, |view, cx| {
+                view.status.contains("installation folder chooser")
+                    && matches!(&view.form, Some(super::Form::Instance(form))
+                        if form.directory.read(cx).value() == "/draft/game")
+            }));
+            click_selector(cx, "browse-install");
+            cx.simulate_path_prompt_response(|_| {
+                Some(vec![std::path::PathBuf::from("/chosen/after-retry")])
+            });
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, cx| {
+                view.status == "Installation folder selected."
+                    && view.shell.wizard.error.is_none()
+                    && matches!(&view.form, Some(super::Form::Instance(form))
+                        if form.directory.read(cx).value() == "/chosen/after-retry")
+            }));
+            view.update(cx, |view, cx| {
+                view.router.navigate(super::Tab::Onboarding);
+                view.shell.first_run.enabled = true;
+                view.shell.first_run.stage = super::first_run::Stage::GameWizard;
+                view.finish_install_browse(field, revision, Err(()), cx);
+                assert_eq!(
+                    view.shell.first_run.error.as_deref(),
+                    Some(super::INSTALL_CHOOSER_ERROR)
+                );
+                view.finish_install_browse(
+                    field,
+                    revision,
+                    Ok(Some(std::path::PathBuf::from("/chosen/first-run"))),
+                    cx,
+                );
+                assert!(view.shell.first_run.error.is_none());
+                view.shell.first_run.enabled = false;
+                view.router.navigate(super::Tab::Instances);
+                view.open_game_wizard_page(None, cx);
+                view.open_game_wizard_page(Some(super::WizardPage::Location), cx);
+                view.status = "another wizard section".into();
+                view.finish_install_browse(field, revision, Err(()), cx);
+                assert_eq!(view.status, "another wizard section");
+                view.begin_game_wizard(cx);
+                view.status = "new draft".into();
+                view.finish_install_browse(field, revision, Err(()), cx);
+                assert_eq!(view.status, "new draft");
+            });
+
+            let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
+            let (about, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = test_view(window, cx);
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.preferences.reduce_motion = true;
+                view.router.navigate(super::Tab::About);
+                view.show_output = true;
+                view
+            });
+            cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            cx.run_until_parked();
+            about.update(cx, |view, cx| {
+                view.shell.about_scroll.scroll_to_bottom();
+                cx.notify();
+            });
+            let previous_status = about.read_with(cx, |view, _| view.status.clone());
+            click_selector(cx, "open-recipe");
+            assert!(cx.did_prompt_for_paths());
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert_eq!(
+                about.read_with(cx, |view, _| view.status.clone()),
+                previous_status
+            );
+            about.update(cx, |view, cx| view.finish_recipe_browse(Err(()), cx));
+            assert!(about.read_with(cx, |view, _| {
+                view.status.contains("recipe chooser") && view.recipe.is_none()
+            }));
+            about.update(cx, |view, cx| {
+                view.busy = true;
+                view.status = "another operation".into();
+                view.finish_recipe_browse(Err(()), cx);
+                assert_eq!(view.status, "another operation");
+            });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[gpui::test]

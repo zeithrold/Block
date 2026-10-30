@@ -22,6 +22,9 @@ impl Block {
     /// Drain the engine channel and apply every message that still belongs to the
     /// current operation.
     pub(super) fn poll(&mut self, cx: &mut Context<'_, Self>) {
+        let logging_failed = self.notify_logging_failure(block_logging::failure().is_some(), cx);
+        self.window_changes
+            .flush_size(self.view_id, cx.background_executor().now());
         let mut messages = Vec::new();
         if let Some(receiver) = &mut self.messages {
             while let Ok(message) = receiver.try_recv() {
@@ -47,19 +50,19 @@ impl Block {
             self.completed = tracker.verified();
             true
         });
-        if messages.is_empty() && !download_changed && !toast_expired {
+        if messages.is_empty() && !download_changed && !toast_expired && !logging_failed {
             return;
         }
         self.motion_dirty = true;
         for message in messages {
-            let message = match message {
+            let (message, scoped) = match message {
                 Message::ForOperation { operation, message }
                     if operation == self.operation_revision =>
                 {
-                    *message
+                    (*message, true)
                 }
                 Message::ForOperation { .. } => continue,
-                message => message,
+                message => (message, false),
             };
             match message {
                 Message::GameDiscovery { request, report } => {
@@ -125,6 +128,22 @@ impl Block {
                     self.session_updated(*record);
                     self.start_pending_play(cx);
                 }
+                Message::SessionAccepted { operation, record } => {
+                    if operation == Some(self.operation_revision)
+                        && self.logged_operation == Some(crate::ui_logging::Operation::Launch)
+                    {
+                        if let Some(id) = crate::ui_logging::session_id(&record.context.run_id) {
+                            crate::ui_logging::session_handoff(
+                                self.view_id,
+                                self.operation_revision,
+                                id,
+                            );
+                        }
+                        self.finish_logged_operation(crate::ui_logging::Outcome::Accepted);
+                    }
+                    self.session_updated(*record);
+                    self.start_pending_play(cx);
+                }
                 Message::Crash {
                     report,
                     directory,
@@ -136,7 +155,7 @@ impl Block {
                         guard,
                     });
                 }
-                Message::Finished(result) => self.finish_operation(result, cx),
+                Message::Finished(result) => self.finish_operation(result, scoped, cx),
                 Message::Recipe(result) => self.receive_recipe(result, cx),
             }
         }
@@ -276,7 +295,22 @@ impl Block {
 
     /// Completion epilogue shared by every operation: apply the per-feature
     /// results, report the outcome and drain a queued Play.
-    fn finish_operation(&mut self, result: Result<String, String>, cx: &mut Context<'_, Self>) {
+    fn finish_operation(
+        &mut self,
+        result: Result<String, String>,
+        scoped: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if scoped {
+            let outcome = if result.is_ok() {
+                crate::ui_logging::Outcome::Succeeded
+            } else if self.cancel.is_cancelled() {
+                crate::ui_logging::Outcome::Cancelled
+            } else {
+                crate::ui_logging::Outcome::Failed
+            };
+            self.finish_logged_operation(outcome);
+        }
         self.auth_provider_finished(&result, cx);
         self.providers_finished(&result);
         self.instance_edit_finished(&result, cx);

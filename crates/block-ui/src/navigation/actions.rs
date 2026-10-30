@@ -141,9 +141,13 @@ pub(super) enum UiAction {
     SignOut(String),
     Play,
     Repair,
+    RepairProfile(String),
     Stop,
     ToggleOutput,
     ToggleCommand,
+    OpenLogs,
+    ExportLogs,
+    CancelLogExport,
     OpenRecipe,
     LaunchRecipe,
 }
@@ -354,10 +358,22 @@ impl Block {
             }
             UiAction::SignOut(id) => self.sign_out(id, window, cx),
             UiAction::Play => self.play(cx),
-            UiAction::Repair => self.repair(),
+            UiAction::Repair => {
+                if let Some(id) = self.selected_profile.clone() {
+                    self.repair(&id);
+                }
+            }
+            UiAction::RepairProfile(id) => self.repair(&id),
             UiAction::Stop => self.stop(),
             UiAction::ToggleOutput => self.show_output = !self.show_output,
             UiAction::ToggleCommand => self.show_command = !self.show_command,
+            UiAction::OpenLogs => self.open_launcher_logs(cx),
+            UiAction::ExportLogs => self.export_launcher_logs(cx),
+            UiAction::CancelLogExport => {
+                if let Some(cancel) = &self.log_export_cancel {
+                    cancel.cancel();
+                }
+            }
             UiAction::OpenRecipe => self.open_recipe(cx),
             UiAction::LaunchRecipe => self.launch_recipe(cx),
         }
@@ -472,6 +488,9 @@ impl Block {
                 | UiAction::ReloadLibrary
                 | UiAction::ToggleOutput
                 | UiAction::ToggleCommand
+                | UiAction::OpenLogs
+                | UiAction::ExportLogs
+                | UiAction::CancelLogExport
         )
     }
 
@@ -651,7 +670,10 @@ impl Block {
 
     fn separate_profiles(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.shell.surfaces.close(window, &self.focus, cx);
-        self.begin("Enabling separated profiles");
+        self.begin(
+            "Enabling separated profiles",
+            crate::ui_logging::Operation::SeparateProfiles,
+        );
         if let Some(engine) = &self.engine {
             engine.separate_profiles();
         }
@@ -734,7 +756,10 @@ impl Block {
             .find(|profile| profile.id == id)
             .cloned()
         {
-            self.begin("Copying profile settings");
+            self.begin(
+                "Copying profile settings",
+                crate::ui_logging::Operation::CopyProfile,
+            );
             if let Some(engine) = &self.engine {
                 engine.copy_profile(profile.id, format!("{} copy", profile.name));
             }
@@ -773,7 +798,10 @@ impl Block {
             });
         if let Some(id) = id {
             self.shell.surfaces.close(window, &self.focus, cx);
-            self.begin("Deleting profile metadata");
+            self.begin(
+                "Deleting profile metadata",
+                crate::ui_logging::Operation::DeleteProfile,
+            );
             if let Some(engine) = &self.engine {
                 engine.delete_profile(id);
             }
@@ -783,7 +811,10 @@ impl Block {
     fn sign_out(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
         if let Some(account) = self.accounts.iter().find(|a| account_id(a) == id).cloned() {
             self.shell.surfaces.close(window, &self.focus, cx);
-            self.begin("Removing saved credentials");
+            self.begin(
+                "Removing saved credentials",
+                crate::ui_logging::Operation::RemoveAccount,
+            );
             self.operation_kind = OperationKind::Account;
             if let Some(engine) = &self.engine {
                 engine.sign_out(account);
@@ -791,9 +822,18 @@ impl Block {
         }
     }
 
-    fn repair(&mut self) {
-        if let Some(profile) = self.profile().cloned() {
-            self.begin_cancellable("Repairing installation · verifying shared resources");
+    fn repair(&mut self, id: &str) {
+        if let Some(profile) = self
+            .snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        {
+            self.begin_cancellable(
+                "Repairing installation · verifying shared resources",
+                crate::ui_logging::Operation::Repair,
+            );
             self.operation_kind = OperationKind::Install;
             if let Some(engine) = &self.engine {
                 engine.install(profile.instance_id, profile.target_id, self.cancel.clone());

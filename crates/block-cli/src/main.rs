@@ -18,6 +18,7 @@ use block_launcher::{
     session::OfflineSession,
 };
 use clap::{Parser, Subcommand};
+use tracing::Instrument as _;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -71,6 +72,65 @@ enum Action {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let logging = block_logging::init("cli")
+        .inspect_err(|_| eprintln!("Block: could not initialize local logging."))
+        .ok();
+    let logging_started = logging.is_some();
+    let operation = match &cli.command {
+        Action::Plan { .. } => "plan",
+        Action::Prepare { .. } => "prepare",
+        Action::Launch { .. } => "launch",
+        Action::Execute { .. } => "execute",
+    };
+    tracing::info!(
+        event = "application_started",
+        role = "cli",
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        debug = cfg!(debug_assertions),
+    );
+    let cancel = CancellationToken::new();
+    let started = std::time::Instant::now();
+    let result = run(cli, cancel.clone())
+        .instrument(tracing::info_span!("cli_operation", operation))
+        .await;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.;
+    match &result {
+        _ if cancel.is_cancelled() => {
+            tracing::info!(
+                event = "operation_finished",
+                operation,
+                outcome = "cancelled",
+                elapsed_ms
+            );
+        }
+        Ok(()) => tracing::info!(
+            event = "operation_finished",
+            operation,
+            outcome = "completed",
+            elapsed_ms
+        ),
+        Err(error) => tracing::error!(
+            event = "operation_finished",
+            operation,
+            outcome = "failed",
+            elapsed_ms,
+            error_code = "cli_operation_failed",
+            io_kind = ?error.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+            os_error = error.downcast_ref::<std::io::Error>().and_then(std::io::Error::raw_os_error),
+        ),
+    }
+    tracing::info!(event = "application_stopped", failed = result.is_err());
+    drop(logging);
+    if logging_started && let Some(problem) = block_logging::failure() {
+        eprintln!("Block: {problem}");
+    }
+    result
+}
+
+async fn run(cli: Cli, cancel: CancellationToken) -> anyhow::Result<()> {
+    tracing::info!(event = "operation_started");
     let root = cli.data_dir.map_or_else(
         || {
             directories::ProjectDirs::from("dev", "zeithrold", "Block")
@@ -93,7 +153,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }),
     )?;
-    let cancel = CancellationToken::new();
     let interrupt = cancel.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {

@@ -86,6 +86,114 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     }
 }
 
+#[gpui::test]
+fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
+    cx: &mut TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = crate::engine::Engine::with_root(root.path().to_path_buf())?;
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view.begin_game_wizard(cx);
+            view
+        });
+        cx.simulate_resize(size(px(1100.), px(1300.)));
+        click(cx, "wizard-component-optifine");
+        click(cx, "optifine-select-jar");
+        assert!(cx.did_prompt_for_paths());
+        let (request, field) = view.read_with(cx, |view, _| {
+            let request = view.shell.wizard.optifine_request;
+            let field = match &view.form {
+                Some(Form::Instance(form)) => Some(form.version.entity_id()),
+                _ => None,
+            };
+            (request, field)
+        });
+        let (Some(request), Some(field)) = (request, field) else {
+            anyhow::bail!("missing pending chooser");
+        };
+        view.update(cx, |view, cx| {
+            assert!(
+                view.finish_optifine_browse(request, field, Err(()), cx)
+                    .is_none()
+            );
+        });
+        cx.simulate_path_prompt_response(|_| None);
+        cx.run_until_parked();
+        assert!(crate::test_support::control_bounds(cx, "wizard-optifine-error").is_some());
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
+                .wizard
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("file chooser"))
+                && view.shell.wizard.optifine_request.is_none()
+                && matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none())
+        }));
+
+        click(cx, "optifine-select-jar");
+        let old = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
+        assert!(old.is_some());
+        click(cx, "section-cancel");
+        click(cx, "wizard-component-optifine");
+        click(cx, "optifine-select-jar");
+        let current = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
+        assert!(current.is_some() && current != old);
+        view.update(cx, |view, cx| {
+            if let Some(old) = old {
+                assert!(
+                    view.finish_optifine_browse(old, field, Err(()), cx)
+                        .is_none()
+                );
+            }
+            assert_eq!(view.shell.wizard.optifine_request, current);
+            assert!(view.shell.wizard.error.is_none());
+        });
+        cx.simulate_path_prompt_response(|_| None);
+        cx.run_until_parked();
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.wizard.optifine_request),
+            current
+        );
+        cx.simulate_path_prompt_response(|_| None);
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.wizard.optifine_request.is_none() && view.shell.wizard.error.is_none()
+        }));
+        click(cx, "optifine-select-jar");
+        let request = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
+        let Some(request) = request else {
+            anyhow::bail!("missing pending chooser");
+        };
+        let path = root.path().join("selected.jar");
+        view.update(cx, |view, cx| {
+            assert_eq!(
+                view.finish_optifine_browse(request, field, Ok(Some(path.clone())), cx),
+                Some(path)
+            );
+            view.finish_optifine_import(request, field, Err(anyhow::anyhow!("invalid JAR")), cx);
+        });
+        cx.simulate_path_prompt_response(|_| None);
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.wizard.optifine_request.is_none()
+                && view
+                    .shell
+                    .wizard
+                    .error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("Could not import OptiFine"))
+                && matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none())
+        }));
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
 fn entry(
     id: &str,
     kind: block_launcher::manifest::model::VersionType,

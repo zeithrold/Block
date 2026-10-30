@@ -8,8 +8,9 @@
 )]
 
 use gpui::{
-    AnyElement, App, FocusHandle, InteractiveElement, Interactivity, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
+    AnyElement, App, ClickEvent, FocusHandle, InteractiveElement, Interactivity, IntoElement,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
+    Styled, Window,
 };
 
 #[derive(IntoElement)]
@@ -20,19 +21,22 @@ pub(super) enum Control {
 }
 
 impl Control {
+    /// The click event is forwarded rather than erased because a control may
+    /// need the press geometry or modality to decide whether to activate. The
+    /// primitive still owns role, focus and keyboard activation.
     pub(super) fn button(
         id: SharedString,
         _label: SharedString,
         role: Role,
         disabled: bool,
-        on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
+        on_activate: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self::Button(Box::new(
             gpui_base::Button::new(id)
                 .role(role)
                 .disabled(disabled)
-                .on_click(move |_, window, cx| {
-                    on_activate(&(), window, cx);
+                .on_click(move |event, window, cx| {
+                    on_activate(event, window, cx);
                     cx.stop_propagation();
                 }),
         ))

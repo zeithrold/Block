@@ -382,6 +382,7 @@ impl Block {
                                     UiAction::Drawer(Some(Drawer::Downloads)),
                                     cx,
                                 )
+                                .aria_label("View downloads")
                                 .child(
                                     super::components::progress_ring(
                                         super::components::ProgressState::Indeterminate,
@@ -559,6 +560,7 @@ impl Block {
                         UiAction::Drawer(Some(Drawer::Profiles)),
                         cx,
                     )
+                    .aria_label("Switch game")
                     .absolute()
                     .right_0()
                     .top_0()
@@ -591,7 +593,7 @@ impl Block {
         let name = account.map_or("Welcome to Block", |account| account.player_name.as_str());
         let avatar = account.and_then(|account| self.account_avatars.get(&account_id(account)));
         let has_account = account.is_some();
-        let mut identity = div()
+        let viewport = div()
             .id(if account.is_some() {
                 "home-player"
             } else {
@@ -606,7 +608,13 @@ impl Block {
             })
             .flex_1()
             .min_h_0()
-            .scroll_area(&self.shell.home_scroll, "Player", self.palette, false)
+            .scroll_area(&self.shell.home_scroll, "Player", self.palette, false);
+        // Center within a content-sized child, not the viewport: when content
+        // overflows, its start must remain reachable at the scroll origin.
+        let mut identity = div()
+            .w_full()
+            .min_h_full()
+            .flex_shrink_0()
             .flex()
             .flex_col()
             .items_center()
@@ -627,6 +635,8 @@ impl Block {
                         .gap_2()
                         .child(
                             div()
+                                .id("home-player-name")
+                                .debug_selector(|| "home-player-name".into())
                                 .text_2xl()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .max_w_full()
@@ -660,7 +670,7 @@ impl Block {
                         .text_color(rgb(self.palette.on_primary)),
                 );
         }
-        identity
+        viewport.child(identity)
     }
 
     fn home_avatar(
@@ -882,6 +892,7 @@ impl Block {
             )
             .children(self.can_stop().then(|| {
                 self.button("home-stop", "", UiAction::Stop, cx)
+                    .aria_label("Stop")
                     .child(super::design::Icon::Stop.render(14., self.palette.foreground))
             }))
     }

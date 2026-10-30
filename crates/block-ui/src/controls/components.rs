@@ -24,7 +24,7 @@ use super::{
         BODY_FONT_SIZE, BODY_LINE_HEIGHT, CARD_RADIUS, CONTROL_HEIGHT, CONTROL_RADIUS, FIELD_GAP,
         Icon, SMALL_FONT_SIZE, focus_ring,
     },
-    text_input::TextInput,
+    text_input::{FieldSemantics, TextInput},
 };
 
 /// Informational wizard progress. Completion comes from the caller's real state;
@@ -150,7 +150,15 @@ fn interactive_control(
     let id = id.into();
     let selector = id.to_string();
     control_state(
-        Control::button(id, label, role, !state.interactive(), on_activate),
+        Control::button(
+            id,
+            label,
+            role,
+            !state.interactive(),
+            move |_, window, cx| {
+                on_activate(&(), window, cx);
+            },
+        ),
         state,
     )
     .debug_selector(move || selector)
@@ -428,8 +436,29 @@ pub(super) struct FieldOptions {
 
 /// Preserve the existing input entity and its IME, selection, and clipboard path.
 pub(super) fn field(label: impl Into<SharedString>, input: &Entity<TextInput>) -> Div {
-    let label = label.into();
+    labeled_field(label.into(), input, &FieldOptions::default())
+}
+
+fn labeled_field(label: SharedString, input: &Entity<TextInput>, options: &FieldOptions) -> Div {
+    let description = [options.hint.as_ref(), options.error.as_ref()]
+        .into_iter()
+        .flatten()
+        .map(AsRef::<str>::as_ref)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let semantics = FieldSemantics {
+        label: label.clone(),
+        description: (!description.is_empty()).then(|| description.into()),
+        required: options.required,
+        invalid: options.error.is_some(),
+    };
+    let label = if options.required {
+        format!("{label} *").into()
+    } else {
+        label
+    };
     let input_focus = input.clone();
+    let semantic_input = input.clone();
     div()
         .flex()
         .flex_col()
@@ -452,6 +481,18 @@ pub(super) fn field(label: impl Into<SharedString>, input: &Entity<TextInput>) -
                 .child(label),
         )
         .child(input.clone())
+        .child(
+            gpui::canvas(
+                move |_, _, cx| {
+                    semantic_input.update(cx, |input, cx| {
+                        input.set_field_semantics(semantics, cx);
+                    });
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .inset_0(),
+        )
 }
 
 pub(super) fn field_with(
@@ -460,13 +501,8 @@ pub(super) fn field_with(
     palette: Palette,
     options: FieldOptions,
 ) -> Div {
-    let invalid = options.error.is_some();
-    let semantics = input.clone();
-    let mut label = label.into().to_string();
-    if options.required {
-        label.push_str(" *");
-    }
-    let mut field = field(label, input).text_color(rgb(palette.foreground));
+    let mut field =
+        labeled_field(label.into(), input, &options).text_color(rgb(palette.foreground));
     if let Some(hint) = options.hint {
         field = field.child(
             div()
@@ -489,18 +525,7 @@ pub(super) fn field_with(
                 .child(error),
         );
     }
-    field.child(
-        gpui::canvas(
-            move |_, _, cx| {
-                semantics.update(cx, |input, cx| {
-                    input.set_invalid(invalid, cx);
-                });
-            },
-            |_, (), _, _| {},
-        )
-        .absolute()
-        .inset_0(),
-    )
+    field
 }
 
 pub(super) fn card(palette: Palette) -> Div {

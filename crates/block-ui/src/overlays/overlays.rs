@@ -32,6 +32,7 @@ pub(super) struct Overlays {
     trigger_focus: RefCell<HashMap<&'static str, FocusHandle>>,
     entries: Vec<SurfaceLayer>,
     revision: usize,
+    view_id: Option<u64>,
 }
 
 impl Overlays {
@@ -68,7 +69,22 @@ impl Overlays {
     }
 
     pub(super) fn discard(&mut self) -> Option<Surface> {
-        self.entries.pop().map(|entry| entry.kind)
+        let entry = self.entries.pop()?;
+        self.trace_change(&entry, "closed");
+        Some(entry.kind)
+    }
+
+    fn trace_change(&self, entry: &SurfaceLayer, state: &'static str) {
+        if let Some(view_id) = self.view_id {
+            tracing::debug!(
+                event = "ui.overlay.changed",
+                view_id,
+                overlay = entry.kind.log_label(),
+                overlay_revision = entry.revision,
+                depth = self.entries.len(),
+                state,
+            );
+        }
     }
 
     pub(super) fn open(
@@ -77,6 +93,7 @@ impl Overlays {
         window: &mut Window,
         cx: &mut Context<'_, Block>,
     ) -> bool {
+        self.view_id = Some(cx.entity_id().as_u64());
         if let Some(index) = self
             .entries
             .iter()
@@ -85,7 +102,11 @@ impl Overlays {
             if self.entries[index].kind.overlay().is_some() {
                 // A wizard section can switch pages while its one dialog stays
                 // mounted; keep the logical layer and let the body re-read it.
+                let changed = self.entries[index].kind.log_label() != kind.log_label();
                 self.entries[index].kind = kind;
+                if changed {
+                    self.trace_change(&self.entries[index], "changed");
+                }
                 cx.notify();
             }
             return false;
@@ -105,12 +126,18 @@ impl Overlays {
         if matches!(entry.kind, Surface::Select(_)) {
             focus.focus(window, cx);
             self.entries.push(entry);
+            if let Some(entry) = self.entries.last() {
+                self.trace_change(entry, "opened");
+            }
             return true;
         }
         let Some(presentation) = presentation else {
             return false;
         };
         self.entries.push(entry);
+        if let Some(entry) = self.entries.last() {
+            self.trace_change(entry, "opened");
+        }
         match presentation {
             OverlayPresentation::Dialog => {
                 Self::open_surface_dialog(overlay_kind, revision, window, cx);
@@ -129,6 +156,7 @@ impl Overlays {
         cx: &mut App,
     ) -> Option<Surface> {
         let entry = self.entries.pop()?;
+        self.trace_change(&entry, "closed");
         match entry.kind.overlay() {
             Some(OverlayPresentation::Dialog) => window.close_dialog(cx),
             Some(OverlayPresentation::Sheet)
@@ -162,7 +190,9 @@ impl Overlays {
             .iter()
             .find(|entry| entry.kind.overlay() == Some(OverlayPresentation::Sheet))
             .map(|entry| entry.revision);
-        self.entries.clear();
+        while let Some(entry) = self.entries.pop() {
+            self.trace_change(&entry, "closed");
+        }
         if had_dialog {
             window.close_all_dialogs(cx);
         }
@@ -372,6 +402,7 @@ impl Block {
             return;
         };
         let entry = self.shell.surfaces.entries.remove(index);
+        self.shell.surfaces.trace_change(&entry, "closed");
         match entry.kind {
             Surface::Drawer(Drawer::ImportGames) => self.import_games_closed(window, cx),
             Surface::WizardSection(_) => {
@@ -397,6 +428,28 @@ impl Block {
 }
 
 impl Surface {
+    const fn log_label(&self) -> &'static str {
+        match self {
+            Self::Drawer(Drawer::ImportGames) => "import_games",
+            Self::Drawer(Drawer::Menu) => "menu",
+            Self::Drawer(Drawer::Accounts) => "accounts",
+            Self::Drawer(Drawer::Profiles) => "profiles",
+            Self::Drawer(Drawer::Downloads) => "downloads",
+            Self::DownloadFiles(_) => "download_files",
+            Self::DeleteProfile(_) => "delete_profile",
+            Self::RemoveAccount(_) => "remove_account",
+            Self::RemoveProvider(_) => "remove_provider",
+            Self::SeparateProfiles => "separate_profiles",
+            Self::GamesHelp => "games_help",
+            Self::WizardSection(super::WizardPage::Version) => "wizard_version",
+            Self::WizardSection(super::WizardPage::Loader) => "wizard_loader",
+            Self::WizardSection(super::WizardPage::OptiFine) => "wizard_optifine",
+            Self::WizardSection(super::WizardPage::Location) => "wizard_location",
+            Self::AuthProviderAdd => "auth_provider_add",
+            Self::Select(_) => "select",
+        }
+    }
+
     pub(super) fn purpose(&self) -> String {
         match self {
             Self::Drawer(drawer) => format!("drawer:{drawer:?}"),

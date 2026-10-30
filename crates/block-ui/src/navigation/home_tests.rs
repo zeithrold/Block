@@ -166,6 +166,109 @@ fn queued_launch_keeps_progress_and_primary_action_separate(cx: &mut gpui::TestA
     }
 }
 
+#[gpui::test]
+fn rendered_queue_launch_activates_during_an_install(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
+    configured_home(&view, cx);
+    view.update(cx, |view, cx| {
+        view.busy = true;
+        view.operation_cancellable = true;
+        view.operation_kind = crate::OperationKind::Install;
+        view.status = "Downloading Minecraft resources".into();
+        cx.notify();
+    });
+    frame(cx, 500);
+    let action = crate::test_support::control_bounds(cx, "home-play");
+    assert!(action.is_some(), "the queued launch action is rendered");
+    if let Some(action) = action {
+        cx.simulate_click(action.center(), gpui::Modifiers::none());
+    }
+    assert!(view.read_with(cx, |view, _| {
+        view.pending_play && view.status.starts_with("Launch queued")
+    }));
+    cx.run_until_parked();
+    let identity = cx.debug_bounds("home-player");
+    let name = cx.debug_bounds("home-player-name");
+    assert!(
+        identity.zip(name).is_some_and(|(identity, name)| {
+            name.top() >= identity.top() && name.bottom() <= identity.bottom()
+        }),
+        "the queued status must not clip the player name: {identity:?} {name:?}"
+    );
+    let stop = crate::test_support::control_bounds(cx, "home-stop");
+    assert!(stop.is_some());
+    if let Some(stop) = stop {
+        cx.simulate_click(stop.center(), gpui::Modifiers::none());
+    }
+    assert!(view.read_with(cx, |view, _| {
+        !view.pending_play && view.cancel.is_cancelled()
+    }));
+}
+
+#[gpui::test]
+fn compact_downloading_home_keeps_identity_start_reachable(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
+    configured_home(&view, cx);
+    view.update(cx, |view, cx| {
+        view.busy = true;
+        view.operation_cancellable = true;
+        view.operation_kind = crate::OperationKind::Install;
+        view.status = "Downloading Minecraft resources".into();
+        view.shell
+            .home_scroll
+            .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+        cx.notify();
+    });
+    frame(cx, 500);
+    view.update(cx, |view, cx| {
+        view.shell.home_scroll.scroll_to_bottom();
+        cx.notify();
+    });
+    frame(cx, 0);
+    assert!(
+        view.read_with(cx, |view, _| view.shell.home_scroll.offset().y
+            < gpui::px(0.)),
+        "the compact identity should have scrollable overflow"
+    );
+    let identity = cx.debug_bounds("home-player");
+    if let Some(identity) = identity {
+        cx.simulate_click(
+            gpui::point(
+                identity.left() + gpui::px(4.),
+                identity.top() + gpui::px(4.),
+            ),
+            gpui::Modifiers::none(),
+        );
+    }
+    crate::test_support::press(cx, "home");
+    frame(cx, 0);
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.home_scroll.offset().y),
+        gpui::px(0.),
+        "Home returns the identity viewport to its reachable start"
+    );
+    let identity = cx.debug_bounds("home-player");
+    let name = cx.debug_bounds("home-player-name");
+    let stop = crate::test_support::control_bounds(cx, "home-stop");
+    let primary = crate::test_support::control_bounds(cx, "home-play");
+    assert!(identity.is_some() && name.is_some() && stop.is_some() && primary.is_some());
+    if let (Some(identity), Some(name), Some(stop), Some(primary)) = (identity, name, stop, primary)
+    {
+        assert!(
+            name.top() >= identity.top() && name.bottom() <= identity.bottom(),
+            "the player name must be visible at the top of the identity scroll area: {name:?} {identity:?}"
+        );
+        for (label, action) in [("Stop", stop), ("Queue launch", primary)] {
+            assert!(
+                action.top() >= gpui::px(0.) && action.bottom() <= gpui::px(540.),
+                "{label} must stay reachable: {action:?}"
+            );
+        }
+    }
+}
+
 fn home_action_background(cx: &mut gpui::VisualTestContext) -> gpui::Rgba {
     let bounds = crate::test_support::control_bounds(cx, "home-play");
     assert!(bounds.is_some(), "Home primary action is present");

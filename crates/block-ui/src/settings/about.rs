@@ -159,8 +159,25 @@ impl Block {
                             .flex_wrap()
                             .gap_2()
                             .child(self.about_link("about-source", "View source", REPOSITORY, ButtonVariant::Outline))
-                            .child(self.about_link("about-feedback", "Feedback", FEEDBACK, ButtonVariant::Ghost)),
+                            .child(self.about_link("about-feedback", "Feedback", FEEDBACK, ButtonVariant::Ghost))
+                            .child(self.button("about-open-logs", "Open logs", UiAction::OpenLogs, cx))
+                            .child(self.button(
+                                "about-export-logs",
+                                if self.log_export_cancel.is_some() {
+                                    "Waiting for save dialog…"
+                                } else if self.exporting_logs {
+                                    "Exporting…"
+                                } else {
+                                    "Export logs…"
+                                },
+                                UiAction::ExportLogs,
+                                cx,
+                            ))
+                            .children(self.log_export_cancel.as_ref().map(|_| self.button(
+                                "about-cancel-log-export", "Cancel export", UiAction::CancelLogExport, cx,
+                            ))),
                     )
+                    .child(note("Launcher logs only. Review before sharing."))
                     .child(note("Built with Rust and GPUI. Game errors open Crash help with recovery actions and diagnostic export. You can inspect the current game output below."))
                     .child(note("Brand artwork: Block-Icon, icon-v4. Interface icons: Lucide. Font: Inter.")),
             );
@@ -273,6 +290,98 @@ impl Block {
         self.push_toast("Build information copied".into(), ToastKind::Success);
         cx.notify();
     }
+
+    pub(super) fn open_launcher_logs(&mut self, cx: &Context<'_, Self>) {
+        match block_logging::log_directory() {
+            Ok(directory) => {
+                tracing::info!(event = "ui.logs.open_requested", view_id = self.view_id);
+                cx.open_with_system(&directory);
+            }
+            Err(_) => {
+                tracing::error!(event = "ui.logs.open_unavailable", view_id = self.view_id);
+                self.push_toast("Could not locate launcher logs.".into(), ToastKind::Error);
+            }
+        }
+    }
+
+    pub(super) fn export_launcher_logs(&mut self, cx: &Context<'_, Self>) {
+        if self.exporting_logs {
+            return;
+        }
+        let directory = match block_logging::log_directory() {
+            Ok(directory) => directory,
+            Err(_) => {
+                tracing::error!(event = "ui.logs.export_unavailable", view_id = self.view_id);
+                self.push_toast("Could not locate launcher logs.".into(), ToastKind::Error);
+                return;
+            }
+        };
+        let selection = cx.prompt_for_new_path(&directory, Some("block-launcher-logs.zip"));
+        let cancel = super::CancellationToken::new();
+        self.exporting_logs = true;
+        self.log_export_cancel = Some(cancel.clone());
+        let view_id = self.view_id;
+        tracing::info!(event = "ui.logs.export_started", view_id);
+        cx.spawn(async move |view, cx| {
+            // A picker may wait for the user indefinitely. Race explicit
+            // cancellation, not a deadline that could expire a healthy dialog.
+            let selection = tokio::select! {
+                biased;
+                () = cancel.cancelled() => None,
+                selection = selection => Some(selection),
+            };
+            let (outcome, message, kind) = match selection {
+                Some(Ok(Ok(Some(path)))) => {
+                    // Once writing starts, cancellation is no longer offered.
+                    // A released view must not start an unobserved export.
+                    if view
+                        .update(cx, |view, cx| {
+                            view.log_export_cancel = None;
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move { block_logging::export_launcher_logs(&path) })
+                        .await;
+                    if result.is_ok() {
+                        (
+                            "succeeded",
+                            "Launcher logs exported. Review before sharing.",
+                            ToastKind::Success,
+                        )
+                    } else {
+                        (
+                            "failed",
+                            "Could not export launcher logs. Try a new file name or folder.",
+                            ToastKind::Error,
+                        )
+                    }
+                }
+                None | Some(Ok(Ok(None))) => ("cancelled", "Log export canceled.", ToastKind::Info),
+                Some(Ok(Err(_)) | Err(_)) => (
+                    "failed",
+                    "The log export save dialog could not open.",
+                    ToastKind::Error,
+                ),
+            };
+            if outcome == "failed" {
+                tracing::error!(event = "ui.logs.export_finished", view_id, outcome);
+            } else {
+                tracing::info!(event = "ui.logs.export_finished", view_id, outcome);
+            }
+            let _ = view.update(cx, |view, cx| {
+                view.exporting_logs = false;
+                view.log_export_cancel = None;
+                view.push_toast(message.into(), kind);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
 }
 
 fn abbreviated_identity(identity: &str) -> String {
@@ -352,6 +461,110 @@ mod tests {
         }));
         click(cx, "product-website");
         assert_eq!(cx.opened_url().as_deref(), Some(super::WEBSITE));
+    }
+
+    #[gpui::test]
+    fn log_export_waits_for_a_destination_and_cancellation_clears_busy_state(
+        cx: &mut TestAppContext,
+    ) {
+        assert!(block_logging::log_directory().is_ok());
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(Tab::About);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        click(cx, "about-export-logs");
+        assert!(cx.did_prompt_for_new_path());
+        assert!(view.read_with(cx, |view, _| view.exporting_logs));
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| {
+            !view.exporting_logs
+                && view
+                    .shell
+                    .toast
+                    .as_ref()
+                    .is_some_and(|toast| toast.message == "Log export canceled.")
+        }));
+    }
+
+    #[gpui::test]
+    fn stalled_log_picker_can_be_cancelled_and_its_late_result_cannot_affect_a_retry(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir();
+        assert!(directory.is_ok());
+        let Ok(directory) = directory else {
+            return;
+        };
+        let late_path = directory.path().join("late-export.zip");
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(Tab::About);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        click(cx, "about-export-logs");
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(120));
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| view.exporting_logs));
+        click(cx, "about-cancel-log-export");
+        assert!(!view.read_with(cx, |view, _| view.exporting_logs));
+
+        click(cx, "about-export-logs");
+        cx.simulate_new_path_selection(|_| Some(late_path.clone()));
+        cx.run_until_parked();
+        assert!(!late_path.exists(), "a canceled selection must never write");
+        assert!(view.read_with(cx, |view, _| view.exporting_logs));
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        assert!(!view.read_with(cx, |view, _| view.exporting_logs));
+    }
+
+    #[gpui::test]
+    fn releasing_the_view_abandons_the_picker_without_writing(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir();
+        assert!(directory.is_ok());
+        let Ok(directory) = directory else {
+            return;
+        };
+        let path = directory.path().join("released-view.zip");
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(Tab::About);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        click(cx, "about-export-logs");
+        drop(view);
+        cx.update(|window, _| window.remove_window());
+        cx.simulate_new_path_selection(|_| Some(path.clone()));
+        cx.run_until_parked();
+        assert!(!path.exists(), "a released view must not start an export");
+    }
+
+    #[gpui::test]
+    fn releasing_a_visual_snapshot_does_not_cancel_the_live_log_picker(cx: &mut TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(Tab::About);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        click(cx, "about-export-logs");
+        view.update(cx, |view, cx| {
+            drop(view.visual_snapshot(cx));
+            assert!(
+                view.log_export_cancel
+                    .as_ref()
+                    .is_some_and(|cancel| !cancel.is_cancelled())
+            );
+        });
+        cx.simulate_new_path_selection(|_| None);
+        cx.run_until_parked();
+        assert!(!view.read_with(cx, |view, _| view.exporting_logs));
     }
 
     #[gpui::test]

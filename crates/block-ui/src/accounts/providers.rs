@@ -148,14 +148,7 @@ impl Block {
     pub(super) fn close_providers(&mut self, cx: &mut Context<'_, Self>) {
         if let Some((revision, cancel)) = self.shell.providers.attempt.take() {
             cancel.cancel();
-            if revision == self.operation_revision {
-                self.operation_revision = self.operation_revision.wrapping_add(1);
-                if let Some(engine) = &mut self.engine {
-                    engine.begin_operation(self.operation_revision);
-                }
-                self.busy = self.active_run.is_some();
-                self.operation_cancellable = false;
-            }
+            self.abandon_operation(revision);
         }
         self.shell.providers.visible = false;
         self.shell.providers.form = None;
@@ -360,7 +353,10 @@ impl Block {
         }
         let original = form.original.clone();
         let accepted = form.accepted_address.as_ref() == Some(&address);
-        self.begin_cancellable("Discovering and saving the provider");
+        self.begin_cancellable(
+            "Discovering and saving the provider",
+            super::ui_logging::Operation::SaveProvider,
+        );
         self.operation_kind = super::OperationKind::Account;
         self.shell.providers.attempt = Some((self.operation_revision, self.cancel.clone()));
         self.shell.providers.error = None;
@@ -419,7 +415,10 @@ impl Block {
         }
         self.shell.surfaces.close(window, &self.focus, cx);
         if self.engine.is_some() {
-            self.begin("Removing provider");
+            self.begin(
+                "Removing provider",
+                super::ui_logging::Operation::RemoveProvider,
+            );
             self.operation_kind = super::OperationKind::Account;
             self.shell.providers.attempt = Some((self.operation_revision, self.cancel.clone()));
             if let Some(engine) = &self.engine {

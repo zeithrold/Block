@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 block-download.workspace = true
+tracing.workspace = true
 futures-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true

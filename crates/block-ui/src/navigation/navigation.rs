@@ -165,6 +165,71 @@ pub(super) struct PageSpec {
     pub task: bool,
 }
 
+impl PageSpec {
+    pub(super) const fn page_label(&self) -> &'static str {
+        match self.page {
+            Page::Home => "home",
+            Page::FirstRun => "first_run",
+            Page::Browser => "browser",
+            Page::Providers => "providers",
+            Page::Settings => "settings",
+            Page::About => "about",
+            Page::Authentication => "authentication",
+            Page::GameWizard => "game_wizard",
+        }
+    }
+
+    pub(super) const fn tab_label(&self) -> &'static str {
+        match self.key.tab {
+            Tab::Home => "home",
+            Tab::Onboarding => "onboarding",
+            Tab::Instances => "instances",
+            Tab::Profiles => "profiles",
+            Tab::Accounts => "accounts",
+            Tab::Settings => "settings",
+            Tab::About => "about",
+        }
+    }
+
+    pub(super) const fn frame_label(&self) -> &'static str {
+        match self.frame {
+            FrameClass::Home => "home",
+            FrameClass::Management => "management",
+        }
+    }
+
+    pub(super) const fn detail_label(&self) -> &'static str {
+        match &self.detail {
+            DetailKey::Settings(_) => "settings",
+            DetailKey::Provider(ProviderKey::List) => "provider_list",
+            DetailKey::Provider(ProviderKey::New) => "provider_new",
+            DetailKey::Provider(ProviderKey::Existing(_)) => "provider_existing",
+            DetailKey::Browser {
+                instance_editor: Some(_),
+                ..
+            } => "instance_editor",
+            DetailKey::Browser {
+                profile_form: true, ..
+            } => "profile_editor",
+            DetailKey::Browser { .. } => "browser",
+        }
+    }
+
+    pub(super) const fn wizard_label(&self) -> &'static str {
+        match self.wizard {
+            None => "none",
+            Some(WizardKey::Authentication(AuthStep::Choose)) => "auth_choose",
+            Some(WizardKey::Authentication(AuthStep::SignIn)) => "auth_sign_in",
+            Some(WizardKey::Authentication(AuthStep::Verification)) => "auth_verification",
+            Some(WizardKey::Authentication(AuthStep::Complete)) => "auth_complete",
+            Some(WizardKey::Game(WizardStep::GetStarted, _)) => "game_get_started",
+            Some(WizardKey::Game(WizardStep::Setup, _)) => "game_setup",
+            Some(WizardKey::Game(WizardStep::Profile, _)) => "game_profile",
+            Some(WizardKey::Game(WizardStep::Review, _)) => "game_review",
+        }
+    }
+}
+
 impl Block {
     pub(super) fn page_spec(&self) -> PageSpec {
         let tab = self.router.tab();
@@ -247,7 +312,7 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
-    use super::{Router, Tab, Task};
+    use super::{DetailKey, FrameClass, LayoutKind, Page, PageKey, PageSpec, Router, Tab, Task};
 
     #[test]
     fn setup_guards_regular_destinations_and_cannot_be_replayed_after_completion() {
@@ -277,5 +342,36 @@ mod tests {
         assert_eq!(router.tab(), Tab::Instances);
         assert_eq!(router.current.task, Some(Task::GameWizard));
         assert_eq!(router.auth_return(), None);
+    }
+
+    #[test]
+    fn page_labels_never_include_detail_identity() {
+        let mut spec = PageSpec {
+            page: Page::Browser,
+            key: PageKey {
+                tab: Tab::Profiles,
+                auth: false,
+                task: false,
+                providers: false,
+            },
+            detail: DetailKey::Browser {
+                tab: Tab::Profiles,
+                inspected: Some("private-profile".into()),
+                editor_page: None,
+                profile_form: false,
+                instance_editor: Some("private-instance".into()),
+            },
+            wizard: None,
+            frame: FrameClass::Management,
+            layout: LayoutKind::Management,
+            preset: super::MotionStyle::Navigation,
+            task: false,
+        };
+        assert_eq!(spec.page_label(), "browser");
+        assert_eq!(spec.tab_label(), "profiles");
+        assert_eq!(spec.detail_label(), "instance_editor");
+        assert_eq!(spec.wizard_label(), "none");
+        spec.detail = DetailKey::Provider(super::ProviderKey::Existing(uuid::Uuid::from_u128(42)));
+        assert_eq!(spec.detail_label(), "provider_existing");
     }
 }

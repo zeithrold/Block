@@ -9,6 +9,7 @@ use std::{
 use anyhow::{Context as _, ensure};
 use interprocess::local_socket::{tokio::Listener, traits::tokio::Listener as _};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 
 use super::{RunRecord, RunState, now_ms, storage, wire};
 use crate::{
@@ -53,12 +54,21 @@ fn events(state: &Shared) -> ExecutionSink {
                     record.status = name;
                 }
                 ExecutionEvent::Started { pid } => {
+                    tracing::info!(
+                        event = "game_started",
+                        session_id = %record.context.run_id,
+                        java_pid = pid,
+                    );
                     record.java_pid = Some(pid);
                     record.state = RunState::Running;
                     record.status = format!("Running · Minecraft PID {pid}");
                 }
                 ExecutionEvent::Terminated { outcome } => record.outcome = Some(outcome),
                 ExecutionEvent::CaptureFailed { message } => {
+                    tracing::warn!(
+                        event = "game_output_capture_failed",
+                        session_id = %record.context.run_id,
+                    );
                     if record.capture_warnings.len() < 8 {
                         record.capture_warnings.push(message);
                     }
@@ -105,6 +115,9 @@ async fn serve(
                     "invalid session request"
                 );
                 if request.stop && snapshot(&state)?.is_active() {
+                    if !stop.is_cancelled() {
+                        tracing::info!(event = "game_stop_requested", session_id = %id);
+                    }
                     stop.cancel();
                 }
                 wire::send(&mut connection, &snapshot(&state)?).await
@@ -141,6 +154,10 @@ async fn execute(
             Some(&bootstrap.profile_fingerprint),
         )
         .await?;
+    tracing::info!(
+        event = "session_prepared",
+        session_id = %record.context.run_id,
+    );
     let baseline = crash::snapshot_reports(plan.game_directory()).map_or_else(
         |_| {
             warning(
@@ -362,6 +379,7 @@ pub async fn run_session_host(root: &Path, run_id: &str) -> anyhow::Result<()> {
     record.state = RunState::Preparing;
     record.revision = record.revision.saturating_add(1);
     storage::write_record(&root, &record)?;
+    tracing::info!(event = "supervisor_ready", session_id = run_id);
     let shared = Arc::new(Mutex::new(record));
     let stop = CancellationToken::new();
     let shutdown = CancellationToken::new();
@@ -379,7 +397,9 @@ pub async fn run_session_host(root: &Path, run_id: &str) -> anyhow::Result<()> {
     .await;
     let outcome = match bootstrap {
         Ok(Ok(bootstrap)) if bootstrap.profile_id == snapshot(&shared)?.context.profile_id => {
-            let work = execute(&root, &bootstrap, &shared, &stop);
+            tracing::info!(event = "session_accepted", session_id = run_id);
+            let work = execute(&root, &bootstrap, &shared, &stop)
+                .instrument(tracing::info_span!("game_session", session_id = run_id));
             tokio::pin!(work);
             loop {
                 tokio::select! {
@@ -402,6 +422,12 @@ pub async fn run_session_host(root: &Path, run_id: &str) -> anyhow::Result<()> {
         )?,
     };
     let notify = outcome.should_notify();
+    tracing::info!(
+        event = "session_terminated",
+        session_id = run_id,
+        outcome = ?outcome.kind,
+        exit_code = outcome.code,
+    );
     finish_record(&root, &shared, outcome)?;
     if notify {
         let _ = show_help(&root, run_id).await;

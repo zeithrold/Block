@@ -16,6 +16,8 @@ path = "src/bin/manifest-audit.rs"
 [dependencies]
 anyhow.workspace = true
 block-launcher.workspace = true
+block-logging.workspace = true
+tracing.workspace = true
 clap.workspace = true
 directories.workspace = true
 rayon.workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/block-app", "crates/block-ui", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth", "crates/block-drop"]
+members = ["crates/block-app", "crates/block-ui", "crates/block-download", "crates/block-launcher", "crates/block-cli", "crates/block-auth", "crates/block-drop", "crates/block-logging"]
 default-members = ["crates/block-app"]
 resolver = "3"
 
@@ -31,6 +31,8 @@ sha1 = "0.10"
 tempfile = "3"
 block-download = { path = "crates/block-download" }
 block-launcher = { path = "crates/block-launcher" }
+block-logging = { path = "crates/block-logging" }
+tracing = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std", "process", "sync", "time", "signal", "net"] }
 interprocess = { version = "2.4.6", features = ["tokio"] }
 tokio-util = { version = "0.7", features = ["rt"] }

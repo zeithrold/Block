@@ -403,11 +403,11 @@ impl Block {
         }
     }
 
-    pub(super) fn browse_instance_optifine(&self, cx: &Context<'_, Self>) {
+    pub(super) fn browse_instance_optifine(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;
         }
-        let Some(editor) = &self.shell.instance_editor else {
+        let Some(editor) = &mut self.shell.instance_editor else {
             return;
         };
         if editor.optifine_request.is_some() || !editor.optifine_supported() {
@@ -415,51 +415,87 @@ impl Block {
         }
         let identity = editor.identity().to_owned();
         let target_id = editor.target.id.clone();
+        let field = editor.name.entity_id();
         let Some(engine) = self.engine.clone() else {
             return;
         };
+        let request = uuid::Uuid::new_v4();
+        editor.optifine_request = Some(request);
         let prompt = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some("Select the official OptiFine installer JAR".into()),
         });
+        cx.notify();
         cx.spawn(async move |view, cx| {
-            let Ok(Ok(Some(paths))) = prompt.await else {
-                return;
+            let selection = match prompt.await {
+                Ok(Ok(paths)) => Ok(paths.and_then(|paths| paths.into_iter().next())),
+                _ => Err(()),
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let request = uuid::Uuid::new_v4();
-            let started = view
+            let path = view
                 .update(cx, |view, cx| {
-                    let Some(editor) = &mut view.shell.instance_editor else {
-                        return false;
-                    };
-                    if view.busy
-                        || editor.identity() != identity
-                        || editor.target.id != target_id
-                        || editor.optifine_request.is_some()
-                        || !editor.optifine_supported()
-                    {
-                        return false;
-                    }
-                    editor.optifine_request = Some(request);
-                    editor.optifine_error = None;
-                    cx.notify();
-                    true
+                    view.finish_instance_optifine_browse(
+                        request, field, &identity, &target_id, selection, cx,
+                    )
                 })
-                .unwrap_or(false);
-            if !started {
+                .ok()
+                .flatten();
+            let Some(path) = path else {
                 return;
-            }
+            };
             let result = engine.import_optifine(path).await;
             let _ = view.update(cx, |view, cx| {
                 view.finish_instance_optifine_import(request, &identity, &target_id, result, cx);
             });
         })
         .detach();
+    }
+
+    fn finish_instance_optifine_browse(
+        &mut self,
+        request: uuid::Uuid,
+        field: gpui::EntityId,
+        identity: &str,
+        target_id: &str,
+        selection: Result<Option<PathBuf>, ()>,
+        cx: &mut Context<'_, Self>,
+    ) -> Option<PathBuf> {
+        let Some(editor) = &mut self.shell.instance_editor else {
+            return None;
+        };
+        if editor.optifine_request != Some(request)
+            || editor.name.entity_id() != field
+            || editor.identity() != identity
+            || editor.target.id != target_id
+        {
+            return None;
+        }
+        if self.busy || !editor.optifine_supported() {
+            editor.optifine_request = None;
+            cx.notify();
+            return None;
+        }
+        match selection {
+            Ok(Some(path)) => {
+                editor.optifine_error = None;
+                cx.notify();
+                Some(path)
+            }
+            Ok(None) => {
+                editor.optifine_request = None;
+                cx.notify();
+                None
+            }
+            Err(()) => {
+                editor.optifine_request = None;
+                editor.optifine_error = Some(
+                    "Could not open the OptiFine file chooser. Check your system file picker and try again.".into(),
+                );
+                cx.notify();
+                None
+            }
+        }
     }
 
     fn finish_instance_optifine_import(
@@ -545,9 +581,15 @@ impl Block {
         match editor.configuration(cx) {
             Ok(configuration) => {
                 if optifine_changed {
-                    self.begin_cancellable("Saving instance settings · applying OptiFine");
+                    self.begin_cancellable(
+                        "Saving instance settings · applying OptiFine",
+                        super::ui_logging::Operation::SaveInstance,
+                    );
                 } else {
-                    self.begin("Saving instance settings");
+                    self.begin(
+                        "Saving instance settings",
+                        super::ui_logging::Operation::SaveInstance,
+                    );
                 }
                 if let Some(editor) = &mut self.shell.instance_editor {
                     editor.error = None;
@@ -773,7 +815,7 @@ impl Block {
             }
         }
         let select_label = if pending {
-            "Validating selected JAR…"
+            "Choosing or validating JAR…"
         } else if editor.optifine.is_some() {
             "Replace selected JAR"
         } else {
@@ -820,11 +862,15 @@ impl Block {
         section = section.child(actions);
         if pending {
             section = section.child(note(
-                "Checking the JAR and its declared game compatibility…",
+                "Choose a JAR, then Block checks its declared game compatibility.",
             ));
         }
         if let Some(error) = &editor.optifine_error {
-            section = section.child(note(error.clone()));
+            section = section.child(
+                note(error.clone())
+                    .id("instance-optifine-error")
+                    .debug_selector(|| "instance-optifine-error".into()),
+            );
         }
         section
     }
@@ -898,6 +944,180 @@ mod tests {
         }
         cx.run_until_parked();
         assert!(!view.read_with(cx, |view, _| view.busy));
+    }
+
+    #[gpui::test]
+    fn optifine_chooser_failure_preserves_the_instance_draft_and_ignores_stale_requests(
+        cx: &mut TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_path_buf())?;
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.router.navigate(Tab::Instances);
+                view.snapshot = ready_snapshot();
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view
+            });
+            cx.simulate_resize(size(px(1152.), px(900.)));
+            click(cx, "component-optifine");
+            view.update(cx, |view, cx| {
+                if let Some(editor) = &view.shell.instance_editor {
+                    editor
+                        .name
+                        .update(cx, |field, cx| field.set_value("Unsaved name", cx));
+                }
+            });
+            click(cx, "instance-optifine-select");
+            assert!(cx.did_prompt_for_paths());
+            let state = view.read_with(cx, |view, _| {
+                view.shell.instance_editor.as_ref().and_then(|editor| {
+                    editor.optifine_request.map(|request| {
+                        (
+                            request,
+                            editor.name.entity_id(),
+                            editor.identity().to_owned(),
+                            editor.target.id.clone(),
+                        )
+                    })
+                })
+            });
+            let Some((request, field, identity, target)) = state else {
+                anyhow::bail!("missing pending chooser");
+            };
+            view.update(cx, |view, cx| {
+                assert!(
+                    view.finish_instance_optifine_browse(
+                        request,
+                        field,
+                        &identity,
+                        &target,
+                        Err(()),
+                        cx,
+                    )
+                    .is_none()
+                );
+            });
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert!(crate::test_support::control_bounds(cx, "instance-optifine-error").is_some());
+            assert!(view.read_with(cx, |view, cx| {
+                view.shell.instance_editor.as_ref().is_some_and(|editor| {
+                    editor
+                        .optifine_error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("file chooser"))
+                        && editor.optifine_request.is_none()
+                        && editor.name.read(cx).value() == "Unsaved name"
+                })
+            }));
+
+            click(cx, "instance-optifine-select");
+            let old = view.read_with(cx, |view, _| {
+                view.shell
+                    .instance_editor
+                    .as_ref()
+                    .and_then(|editor| editor.optifine_request)
+            });
+            assert!(old.is_some());
+            click(cx, "cancel-instance-settings");
+            click(cx, "component-optifine");
+            click(cx, "instance-optifine-select");
+            let current = view.read_with(cx, |view, _| {
+                view.shell
+                    .instance_editor
+                    .as_ref()
+                    .and_then(|editor| editor.optifine_request)
+            });
+            assert!(current.is_some() && current != old);
+            view.update(cx, |view, cx| {
+                if let Some(old) = old {
+                    assert!(
+                        view.finish_instance_optifine_browse(
+                            old,
+                            field,
+                            &identity,
+                            &target,
+                            Err(()),
+                            cx,
+                        )
+                        .is_none()
+                    );
+                }
+                assert!(view.shell.instance_editor.as_ref().is_some_and(|editor| {
+                    editor.optifine_request == current && editor.optifine_error.is_none()
+                }));
+            });
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell
+                    .instance_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.optifine_request == current)
+            }));
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.instance_editor.as_ref().is_some_and(|editor| {
+                    editor.optifine_request.is_none() && editor.optifine_error.is_none()
+                })
+            }));
+            click(cx, "instance-optifine-select");
+            let state = view.read_with(cx, |view, _| {
+                view.shell.instance_editor.as_ref().and_then(|editor| {
+                    editor.optifine_request.map(|request| {
+                        (
+                            request,
+                            editor.name.entity_id(),
+                            editor.identity().to_owned(),
+                            editor.target.id.clone(),
+                        )
+                    })
+                })
+            });
+            let Some((request, field, identity, target)) = state else {
+                anyhow::bail!("missing pending chooser");
+            };
+            let path = root.path().join("selected.jar");
+            view.update(cx, |view, cx| {
+                assert_eq!(
+                    view.finish_instance_optifine_browse(
+                        request,
+                        field,
+                        &identity,
+                        &target,
+                        Ok(Some(path.clone())),
+                        cx
+                    ),
+                    Some(path)
+                );
+                view.finish_instance_optifine_import(
+                    request,
+                    &identity,
+                    &target,
+                    Err(anyhow::anyhow!("invalid JAR")),
+                    cx,
+                );
+            });
+            cx.simulate_path_prompt_response(|_| None);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.instance_editor.as_ref().is_some_and(|editor| {
+                    editor.optifine_request.is_none()
+                        && editor
+                            .optifine_error
+                            .as_deref()
+                            .is_some_and(|error| error.contains("Could not import OptiFine"))
+                        && editor.optifine.is_none()
+                })
+            }));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[gpui::test]

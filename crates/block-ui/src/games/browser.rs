@@ -1046,19 +1046,33 @@ impl Block {
                 }
                 footer = footer
                     .child(
-                        self.browser_control(
-                            "edit-profile",
-                            if kind == BrowserKind::Bundled {
-                                "Edit launch settings"
-                            } else {
-                                "Edit Profile"
-                            },
-                            UiAction::EditProfile,
-                            ButtonVariant::Outline,
-                            self.busy,
-                            cx,
-                        )
-                        .track_focus(&self.profile_editor_trigger_focus(cx)),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                self.browser_control(
+                                    "edit-profile",
+                                    if kind == BrowserKind::Bundled {
+                                        "Edit launch settings"
+                                    } else {
+                                        "Edit Profile"
+                                    },
+                                    UiAction::EditProfile,
+                                    ButtonVariant::Outline,
+                                    self.busy,
+                                    cx,
+                                )
+                                .track_focus(&self.profile_editor_trigger_focus(cx)),
+                            )
+                            .child(self.browser_control(
+                                "repair-profile",
+                                "Repair",
+                                UiAction::RepairProfile(profile.id.clone()),
+                                ButtonVariant::Outline,
+                                self.busy,
+                                cx,
+                            )),
                     )
                     .child(self.browser_control(
                         "use-profile",
@@ -1134,7 +1148,14 @@ impl Block {
                 let (message, error) = match &target.status {
                     block_launcher::catalog::InstallStatus::Pending => ("Game files will install when you launch from Home.".to_owned(), false),
                     block_launcher::catalog::InstallStatus::Installing => ("Game files are being installed. Download progress is available on Home.".to_owned(), false),
-                    block_launcher::catalog::InstallStatus::Failed { message } => (format!("Installation failed: {message}. Choose this game, then repair it from Home."), true),
+                    block_launcher::catalog::InstallStatus::Failed { message } => (format!(
+                        "Installation failed: {message}. {}",
+                        if profile.is_some() {
+                            "Repair this game to retry."
+                        } else {
+                            "Open a linked Profile to repair this target."
+                        }
+                    ), true),
                     block_launcher::catalog::InstallStatus::Ready => (String::new(), false),
                 };
                 div().id(gpui::SharedString::from(format!("installation-status-{}", target.id)))

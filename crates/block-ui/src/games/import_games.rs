@@ -485,12 +485,54 @@ impl Block {
         if state.batch != Some(request) {
             return;
         }
+        let was_running = state.running;
         state.running = false;
         for id in &state.submitted {
             state
                 .outcomes
                 .entry(id.clone())
                 .or_insert(Outcome::Cancelled);
+        }
+        if was_running {
+            let saved = state
+                .submitted
+                .iter()
+                .filter(|id| matches!(state.outcomes.get(*id), Some(Outcome::Saved)))
+                .count();
+            let failed = state
+                .submitted
+                .iter()
+                .filter(|id| matches!(state.outcomes.get(*id), Some(Outcome::Failed(_))))
+                .count();
+            let cancelled = state.submitted.len().saturating_sub(saved + failed);
+            let outcome = if state.cancel.is_cancelled() {
+                "cancelled"
+            } else if failed != 0 {
+                "failed"
+            } else {
+                "succeeded"
+            };
+            if outcome == "failed" {
+                tracing::error!(
+                    event = "ui.import.finished",
+                    view_id = self.view_id,
+                    batch_id = %request,
+                    outcome,
+                    saved,
+                    failed,
+                    cancelled,
+                );
+            } else {
+                tracing::info!(
+                    event = "ui.import.finished",
+                    view_id = self.view_id,
+                    batch_id = %request,
+                    outcome,
+                    saved,
+                    failed,
+                    cancelled,
+                );
+            }
         }
         state.page = Page::Results;
     }
@@ -573,6 +615,12 @@ impl Block {
                     state.outcomes.remove(id);
                 }
                 if let Some(engine) = &self.engine {
+                    tracing::info!(
+                        event = "ui.import.started",
+                        view_id = self.view_id,
+                        batch_id = %request,
+                        count = candidates.len(),
+                    );
                     engine.import_games(
                         request,
                         candidates,

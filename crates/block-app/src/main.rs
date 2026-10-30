@@ -2,7 +2,7 @@
 
 mod build_info;
 
-use std::{path::PathBuf, process::ExitCode};
+use std::{cell::RefCell, path::PathBuf, process::ExitCode, rc::Rc};
 
 use anyhow::Context as _;
 use block_launcher::{crash::CrashReport, session_host};
@@ -43,16 +43,61 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    match run(Args::parse()) {
-        Ok(()) => ExitCode::SUCCESS,
+    let args = Args::parse();
+    let informational = args.build_info;
+    #[cfg(debug_assertions)]
+    let informational = informational || args.list_scenarios;
+    let role = if args.supervise.is_some() {
+        "supervisor"
+    } else if args.crash.is_some() {
+        "crash-help"
+    } else {
+        "launcher"
+    };
+    let logging = Rc::new(RefCell::new(if informational {
+        None
+    } else {
+        block_logging::init(role)
+            .inspect_err(|_| eprintln!("Block: could not initialize local logging."))
+            .ok()
+    }));
+    if !informational {
+        tracing::info!(
+            event = "application_started",
+            role,
+            version = env!("CARGO_PKG_VERSION"),
+            os = std::env::consts::OS,
+            arch = std::env::consts::ARCH,
+            debug = cfg!(debug_assertions),
+        );
+    }
+    let result = run(args, logging.clone());
+    match result {
+        Ok(()) => {
+            if logging.borrow().is_some() {
+                tracing::info!(event = "application_stopped", failed = false);
+            }
+            ExitCode::SUCCESS
+        }
         Err(error) => {
+            // Arbitrary error chains can contain paths, URLs or credentials.
+            // Detailed game failures stay in the supervisor's redacted reports.
+            tracing::error!(
+                event = "application_failed",
+                error_code = "operation_failed",
+                io_kind = ?error.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+                os_error = error.downcast_ref::<std::io::Error>().and_then(std::io::Error::raw_os_error),
+            );
             eprintln!("Block could not complete this operation: {error:#}");
+            tracing::info!(event = "application_stopped", failed = true);
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(args: Args) -> anyhow::Result<()> {
+type Logging = Rc<RefCell<Option<block_logging::LogGuard>>>;
+
+fn run(args: Args, logging: Logging) -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     if args.list_scenarios {
         println!("{}", block_ui::SCENARIOS.join("\n"));
@@ -82,7 +127,7 @@ fn run(args: Args) -> anyhow::Result<()> {
             return Ok(());
         };
         let report = session_host::read_crash(&root, id)?;
-        return crash_application(root, report);
+        return crash_application(root, report, logging);
     }
     #[cfg(debug_assertions)]
     let _scenario_directory = args
@@ -105,7 +150,9 @@ fn run(args: Args) -> anyhow::Result<()> {
     gpui_platform::application()
         .with_assets(block_ui::UiAssets)
         .run(move |cx: &mut App| {
+            install_logging_shutdown(cx, logging);
             if let Err(error) = block_ui::load_fonts(cx) {
+                tracing::warn!(event = "bundled_fonts_unavailable");
                 eprintln!("Could not register bundled fonts: {error:#}");
             }
             configure_application(cx);
@@ -124,12 +171,28 @@ fn run(args: Args) -> anyhow::Result<()> {
                     }),
                 },
             ) {
+                tracing::error!(event = "window_open_failed", window = "launcher");
                 eprintln!("Failed to open the Block window: {error:#}");
                 cx.quit();
             }
             cx.activate(true);
         });
     Ok(())
+}
+
+fn install_logging_shutdown(cx: &App, logging: Logging) {
+    // Native Cocoa termination does not unwind main. GPUI's quit callback is
+    // the lifecycle boundary shared by window close, Cmd-Q and OS quit.
+    cx.on_app_quit(move |_| {
+        let logging = logging.clone();
+        async move {
+            // GPUI releases windows before polling quit futures, so their
+            // final operation/view events reach the writer before it drains.
+            tracing::info!(event = "application_stopped");
+            drop(logging.borrow_mut().take());
+        }
+    })
+    .detach();
 }
 
 fn configure_application(cx: &mut App) {
@@ -175,17 +238,20 @@ fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()>
         let view = cx.new(|cx| Block::new(window, cx, options));
         cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
     })?;
+    tracing::info!(event = "window_opened", window = "launcher");
     Ok(())
 }
 
-fn crash_application(root: PathBuf, report: CrashReport) -> anyhow::Result<()> {
+fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> anyhow::Result<()> {
     let directory = session_host::report_directory(&root, &report.context.run_id)?;
     let run_id = report.context.run_id.clone();
     let profile = report.context.profile_id.clone();
     gpui_platform::application()
         .with_assets(block_ui::UiAssets)
         .run(move |cx: &mut App| {
+            install_logging_shutdown(cx, logging);
             if let Err(error) = block_ui::load_fonts(cx) {
+                tracing::warn!(event = "bundled_fonts_unavailable");
                 eprintln!("Could not register bundled fonts: {error:#}");
             }
             configure_application(cx);
@@ -198,7 +264,10 @@ fn crash_application(root: PathBuf, report: CrashReport) -> anyhow::Result<()> {
                 };
                 match open_launcher(cx, options) {
                     Ok(()) => window.remove_window(),
-                    Err(error) => eprintln!("Could not return to the instance: {error:#}"),
+                    Err(error) => {
+                        tracing::error!(event = "window_open_failed", window = "return_to_profile");
+                        eprintln!("Could not return to the instance: {error:#}");
+                    }
                 }
             };
             let options = window_options(cx);
@@ -209,9 +278,11 @@ fn crash_application(root: PathBuf, report: CrashReport) -> anyhow::Result<()> {
                 cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
             }) {
                 Ok(_) => {
+                    tracing::info!(event = "window_opened", window = "crash-help");
                     let _ = session_host::mark_seen(&root, &run_id);
                 }
                 Err(error) => {
+                    tracing::error!(event = "window_open_failed", window = "crash-help");
                     eprintln!("Could not open crash help: {error:#}");
                     cx.quit();
                 }

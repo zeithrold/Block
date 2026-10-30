@@ -17,7 +17,7 @@ The three incorrect light images were replaced at their existing paths. Both the
 
 ## E02: audit semantics before comparing visuals
 
-The versioned registry `docs/visual-review-cases.json` describes all 74 current scenario stems. Source-audited correspondence, different tasks/states and native-only states are explicit. No row claims independently verified full-state parity. The generator uses reference candidates from the registry, detects exact-byte reuse across platforms as well as within each board, validates receipt hashes and keeps missing evidence visible. The combined Markdown includes observed per-artifact receipt metadata separately from registry descriptions; unknown archive fields are not backfilled from current sources.
+The versioned registry `docs/visual-review-cases.json` now maps 72 active native scenario stems and retains six explicitly retired Welcome rows as historical observations. These counts are separate from this E02 checkpoint's archived capture inventory. Source-audited correspondence, different tasks/states and native-only states are explicit. No row claims independently verified full-state parity. The generator uses reference candidates from the registry, detects exact-byte reuse across platforms as well as within each board, validates receipt hashes and keeps missing evidence visible. The combined Markdown includes observed per-artifact receipt metadata separately from registry descriptions; unknown archive fields are not backfilled from current sources.
 
 | Case | Correct comparison scope |
 | --- | --- |
@@ -26,7 +26,7 @@ The versioned registry `docs/visual-review-cases.json` describes all 74 current 
 | `wizard-loader-picker` | Native Vanilla versus archived React Fabric selection; container comparison only. |
 | `wizard-loader-empty` | Native zero compatible builds versus React `zzzz` filtering an existing catalog. The latter is a candidate for `wizard-loader-search-empty`. |
 | `auth-error` | Native expired request versus a closed prototype authorization popup; error hierarchy only. Block cannot reliably infer that an external browser was closed. |
-| Welcome | Native Game → Account → Review versus combined prototype setup; compare task strategy. Prototype `welcome-about/settings/version-picker` recipes do not reach the corresponding native destinations. |
+| Historical Welcome | The archived native Game → Account → Review flow versus combined prototype setup; compare task strategy. Prototype `welcome-about/settings/version-picker` recipes do not reach those archived native destinations. Current `setup-*` states have separate native-only mappings. |
 
 `accounts-list/accounts-detail` and `games-bundled/games-detail` reuse combined master/detail views. The board labels exact-byte duplicates rather than using the scenario count as independent experience coverage. Archive focus, scroll and capture commits remain unknown unless an individual receipt establishes them. Current-source references are not archive provenance.
 

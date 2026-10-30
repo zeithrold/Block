@@ -3,15 +3,15 @@
 //! Modified for Block: styling, safe paint errors, IME offsets, graphemes and horizontal scrolling.
 //! The upstream license is preserved in `../GPUI-LICENSE-APACHE`.
 
-use std::ops::Range;
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InteractiveElement as _,
     IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, ParentElement as _, Pixels, Point, Render, ShapedLine, SharedString, Style,
-    Styled as _, TextRun, UTF16Selection, UnderlineStyle, Window, div, fill, point, px, relative,
-    rgb, rgba, size,
+    PaintQuad, ParentElement as _, Pixels, Point, Render, ShapedLine, SharedString,
+    StatefulInteractiveElement as _, Style, Styled as _, TextRun, UTF16Selection, UnderlineStyle,
+    Window, accesskit, div, fill, point, px, relative, rgb, rgba, size,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -68,6 +68,14 @@ struct EditSnapshot {
     reversed: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct FieldSemantics {
+    pub label: SharedString,
+    pub description: Option<SharedString>,
+    pub required: bool,
+    pub invalid: bool,
+}
+
 #[derive(Debug)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -92,8 +100,9 @@ pub(crate) struct TextInput {
     redo: Vec<EditSnapshot>,
     composition_before: Option<EditSnapshot>,
     read_only: bool,
-    invalid: bool,
     search: bool,
+    frozen: bool,
+    field_semantics: Option<FieldSemantics>,
 }
 
 impl TextInput {
@@ -120,8 +129,9 @@ impl TextInput {
             redo: Vec::new(),
             composition_before: None,
             read_only: false,
-            invalid: false,
             search: false,
+            frozen: false,
+            field_semantics: None,
         }
     }
 
@@ -148,8 +158,9 @@ impl TextInput {
             redo: Vec::new(),
             composition_before: None,
             read_only: self.read_only,
-            invalid: self.invalid,
             search: self.search,
+            frozen: true,
+            field_semantics: self.field_semantics.clone(),
         }
     }
 
@@ -167,9 +178,13 @@ impl TextInput {
         }
     }
 
-    pub(super) fn set_invalid(&mut self, invalid: bool, cx: &mut Context<'_, Self>) {
-        if self.invalid != invalid {
-            self.invalid = invalid;
+    pub(super) fn set_field_semantics(
+        &mut self,
+        semantics: FieldSemantics,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.field_semantics.as_ref() != Some(&semantics) {
+            self.field_semantics = Some(semantics);
             cx.notify();
         }
     }
@@ -457,6 +472,93 @@ impl TextInput {
             .grapheme_indices(true)
             .find_map(|(idx, _)| (idx > offset).then_some(idx))
             .unwrap_or(self.content.len())
+    }
+
+    fn set_accessible_selection(
+        &mut self,
+        selection: &accesskit::TextSelection,
+        run_id: accesskit::NodeId,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.is_composing() || selection.anchor.node != run_id || selection.focus.node != run_id
+        {
+            return;
+        }
+        let byte_offset = |index| {
+            self.content
+                .char_indices()
+                .nth(index)
+                .map(|(offset, _)| offset)
+                .or_else(|| (index == self.content.chars().count()).then_some(self.content.len()))
+        };
+        let (Some(anchor), Some(focus)) = (
+            byte_offset(selection.anchor.character_index),
+            byte_offset(selection.focus.character_index),
+        ) else {
+            return;
+        };
+        let range = anchor.min(focus)..anchor.max(focus);
+        let reversed = focus < anchor;
+        if self.selected_range != range || self.selection_reversed != reversed {
+            self.selected_range = range;
+            self.selection_reversed = reversed;
+            cx.notify();
+        }
+    }
+
+    fn replace_accessible_text(
+        &mut self,
+        text: &str,
+        replace_all: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.read_only || (!replace_all && self.is_composing()) {
+            return;
+        }
+        let range = replace_all.then(|| 0..self.offset_to_utf16(self.content.len()));
+        self.replace_text_in_range(range, text, window, cx);
+    }
+}
+
+fn accessible_text_run(
+    content: &str,
+    selected_range: &Range<usize>,
+    reversed: bool,
+    run_id: accesskit::NodeId,
+) -> (accesskit::Node, accesskit::TextSelection) {
+    let mut run = accesskit::Node::new(accesskit::Role::TextRun);
+    run.set_value(content.to_owned());
+    run.set_character_lengths(
+        content
+            .chars()
+            .map(|character| u8::try_from(character.len_utf8()).unwrap_or(4))
+            .collect::<Vec<_>>(),
+    );
+    let position = |offset| accesskit::TextPosition {
+        node: run_id,
+        character_index: content[..offset].chars().count(),
+    };
+    let start = position(selected_range.start);
+    let end = position(selected_range.end);
+    let (anchor, focus) = if reversed { (end, start) } else { (start, end) };
+    (run, accesskit::TextSelection { anchor, focus })
+}
+
+fn set_accessible_states(
+    node: &mut accesskit::Node,
+    read_only: bool,
+    invalid: bool,
+    required: bool,
+) {
+    if read_only {
+        node.set_read_only();
+    }
+    if invalid {
+        node.set_invalid(accesskit::Invalid::True);
+    }
+    if required {
+        node.set_required();
     }
 }
 
@@ -748,20 +850,27 @@ impl Element for TextElement {
             .shape_line(display_text, font_size, &runs, None);
 
         let cursor_pos = line.x_for_index(cursor);
-        let mut scroll_offset = input.scroll_offset;
-        if cursor_pos - scroll_offset > bounds.size.width - px(2.) {
-            scroll_offset = (cursor_pos - bounds.size.width + px(2.)).max(px(0.));
+        let viewport_width = bounds.size.width.max(px(0.));
+        let max_scroll = (line.width() - viewport_width).max(px(0.));
+        let mut scroll_offset = input.scroll_offset.clamp(px(0.), max_scroll);
+        if cursor_pos - scroll_offset > viewport_width {
+            scroll_offset = (cursor_pos - viewport_width).min(max_scroll);
         } else if cursor_pos < scroll_offset {
-            scroll_offset = cursor_pos;
+            scroll_offset = cursor_pos.max(px(0.));
         }
+        // Keep a caret at the right edge inside the viewport without scrolling
+        // an otherwise fully visible line out of view.
+        let cursor_width = px(2.).min(viewport_width);
+        let cursor_x =
+            (cursor_pos - scroll_offset).clamp(px(0.), (viewport_width - cursor_width).max(px(0.)));
         let origin = point(bounds.left() - scroll_offset, bounds.top());
         let (selection, cursor) = if selected_range.is_empty() {
             (
                 None,
                 Some(fill(
                     Bounds::new(
-                        point(origin.x + cursor_pos, bounds.top()),
-                        size(px(2.), bounds.bottom() - bounds.top()),
+                        point(bounds.left() + cursor_x, bounds.top()),
+                        size(cursor_width, bounds.bottom() - bounds.top()),
                     ),
                     rgb(0x0083_d8b4),
                 )),
@@ -844,20 +953,63 @@ impl Render for TextInput {
             .try_global::<super::Palette>()
             .copied()
             .unwrap_or(super::Palette::LIGHT);
-        let border = if self.invalid {
+        let invalid = self
+            .field_semantics
+            .as_ref()
+            .is_some_and(|field| field.invalid);
+        let border = if invalid {
             palette.destructive
         } else if self.search {
             palette.secondary
         } else {
             palette.input
         };
-        let ring = if self.invalid {
+        let ring = if invalid {
             palette.destructive
         } else {
             palette.ring
         };
-        div()
+        let label = self
+            .field_semantics
+            .as_ref()
+            .map_or_else(|| self.placeholder.clone(), |field| field.label.clone());
+        let description = self
+            .field_semantics
+            .as_ref()
+            .and_then(|field| field.description.clone());
+        let required = self
+            .field_semantics
+            .as_ref()
+            .is_some_and(|field| field.required);
+        let content = self.content.clone();
+        let selection = self.selected_range.clone();
+        let reversed = self.selection_reversed;
+        let read_only = self.read_only;
+        let run_id = Rc::new(Cell::new(None));
+        let selection_run_id = run_id.clone();
+        let selection_input = cx.entity();
+        let mut control = div()
             .id("text-input")
+            .aria_label(label)
+            .aria_value(self.content.clone())
+            .aria_placeholder(self.placeholder.clone())
+            .on_a11y_action(accesskit::Action::SetTextSelection, move |data, _, cx| {
+                if let (Some(accesskit::ActionData::SetTextSelection(selection)), Some(run_id)) =
+                    (data, selection_run_id.get())
+                {
+                    selection_input.update(cx, |input, cx| {
+                        input.set_accessible_selection(selection, run_id, cx);
+                    });
+                }
+            })
+            .a11y_synthetic_children(move |builder| {
+                let id = builder.synthetic_node_id(0_u8);
+                run_id.set(Some(id));
+                let (run, selection) = accessible_text_run(&content, &selection, reversed, id);
+                set_accessible_states(builder.parent_node(), read_only, invalid, required);
+                builder.parent_node().set_text_selection(selection);
+                builder.push_child(id, run);
+            })
             .flex()
             .key_context("TextInput")
             .items_center()
@@ -940,7 +1092,42 @@ impl Render for TextInput {
                     .min_w_0()
                     .h(px(super::design::BODY_LINE_HEIGHT))
                     .child(TextElement { input: cx.entity() }),
-            )
+            );
+        // Outgoing transition copies are visual only. Exposing their inputs
+        // would let accessibility actions edit a discarded snapshot.
+        if !self.frozen {
+            control = control.role(if self.search {
+                accesskit::Role::SearchInput
+            } else {
+                accesskit::Role::TextInput
+            });
+        }
+        if let Some(description) = description {
+            control = control.aria_description(description);
+        }
+        if !self.read_only {
+            let set_value_input = cx.entity();
+            let replace_input = cx.entity();
+            control = control
+                .on_a11y_action(accesskit::Action::SetValue, move |data, window, cx| {
+                    if let Some(accesskit::ActionData::Value(value)) = data {
+                        set_value_input.update(cx, |input, cx| {
+                            input.replace_accessible_text(value, true, window, cx);
+                        });
+                    }
+                })
+                .on_a11y_action(
+                    accesskit::Action::ReplaceSelectedText,
+                    move |data, window, cx| {
+                        if let Some(accesskit::ActionData::Value(value)) = data {
+                            replace_input.update(cx, |input, cx| {
+                                input.replace_accessible_text(value, false, window, cx);
+                            });
+                        }
+                    },
+                );
+        }
+        control
     }
 }
 
@@ -994,7 +1181,377 @@ fn utf16_to_utf8(text: &str, offset: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{EntityInputHandler as _, Focusable as _};
+    use gpui::{
+        AppContext as _, Context, Element as _, Entity, EntityInputHandler as _, Focusable as _,
+        IntoElement, ParentElement as _, Render, Styled as _, Window, accesskit, div, px,
+    };
+
+    struct ResizableInput {
+        input: Entity<super::TextInput>,
+        width: f32,
+    }
+
+    impl Render for ResizableInput {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            div().w(px(self.width)).child(self.input.clone())
+        }
+    }
+
+    struct LabeledInput {
+        input: Entity<super::TextInput>,
+        plain: bool,
+    }
+
+    impl Render for LabeledInput {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            if self.plain {
+                crate::components::field("Plain name", &self.input)
+            } else {
+                crate::components::field_with(
+                    "Launch name",
+                    &self.input,
+                    crate::Palette::LIGHT,
+                    crate::components::FieldOptions {
+                        hint: Some("Shown in the library.".into()),
+                        error: Some("Enter a name.".into()),
+                        required: true,
+                    },
+                )
+            }
+        }
+    }
+
+    fn input_node(
+        input: &Entity<super::TextInput>,
+        cx: &mut gpui::VisualTestContext,
+    ) -> accesskit::Node {
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                let element = input.render(window, cx).into_element();
+                let role = element.a11y_role().unwrap_or(accesskit::Role::Unknown);
+                let mut node = accesskit::Node::new(role);
+                element.write_a11y_info(&mut node);
+                node
+            })
+        })
+    }
+
+    #[gpui::test]
+    fn rendered_input_exposes_text_role_value_and_supported_actions(cx: &mut gpui::TestAppContext) {
+        let (input, cx) =
+            cx.add_window_view(|_, cx| super::TextInput::new("trail", "Find a trail", cx));
+        let node = input_node(&input, cx);
+        assert_eq!(node.role(), accesskit::Role::TextInput);
+        assert_eq!(node.label(), Some("Find a trail"));
+        assert_eq!(node.value(), Some("trail"));
+        assert!(node.supports_action(accesskit::Action::Focus));
+        assert!(node.supports_action(accesskit::Action::SetValue));
+        assert!(node.supports_action(accesskit::Action::ReplaceSelectedText));
+        assert!(node.supports_action(accesskit::Action::SetTextSelection));
+
+        input.update(cx, |input, cx| input.set_search(true, cx));
+        assert_eq!(input_node(&input, cx).role(), accesskit::Role::SearchInput);
+        input.update(cx, |input, cx| input.set_read_only(true, cx));
+        let node = input_node(&input, cx);
+        assert!(node.supports_action(accesskit::Action::Focus));
+        assert!(node.supports_action(accesskit::Action::SetTextSelection));
+        assert!(!node.supports_action(accesskit::Action::SetValue));
+        assert!(!node.supports_action(accesskit::Action::ReplaceSelectedText));
+    }
+
+    #[gpui::test]
+    fn rendered_field_supplies_and_updates_input_semantics(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| LabeledInput {
+            input: cx.new(|cx| super::TextInput::new("trail", "Placeholder", cx)),
+            plain: false,
+        });
+        cx.run_until_parked();
+        let input = view.read_with(cx, |view, _| view.input.clone());
+        let node = input_node(&input, cx);
+        assert_eq!(node.label(), Some("Launch name"));
+        assert_eq!(
+            node.description(),
+            Some("Shown in the library. Enter a name.")
+        );
+        input.read_with(cx, |input, _| {
+            let mut node = accesskit::Node::new(accesskit::Role::TextInput);
+            let flags = input
+                .field_semantics
+                .as_ref()
+                .map(|field| (field.invalid, field.required));
+            assert_eq!(flags, Some((true, true)));
+            if let Some((invalid, required)) = flags {
+                super::set_accessible_states(&mut node, input.read_only, invalid, required);
+            }
+            assert_eq!(node.invalid(), Some(accesskit::Invalid::True));
+            assert!(node.is_required());
+            assert!(!node.is_read_only());
+        });
+
+        view.update(cx, |view, cx| {
+            view.plain = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let node = input_node(&input, cx);
+        assert_eq!(node.label(), Some("Plain name"));
+        assert_eq!(node.description(), None);
+        input.read_with(cx, |input, _| {
+            assert!(
+                input
+                    .field_semantics
+                    .as_ref()
+                    .is_some_and(|field| !field.invalid && !field.required)
+            );
+        });
+        // Repeated redraws must not alternate the plain and validated states.
+        for _ in 0..3 {
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            input.read_with(cx, |input, _| {
+                assert!(
+                    input
+                        .field_semantics
+                        .as_ref()
+                        .is_some_and(|field| !field.invalid && !field.required)
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn accessible_selection_and_edits_use_the_native_editor_state(cx: &mut gpui::TestAppContext) {
+        let (input, cx) = cx.add_window_view(|window, cx| {
+            super::bind_keys(cx);
+            let input = super::TextInput::new("A🧱界Z", "Name", cx);
+            input.focus_handle(cx).focus(window, cx);
+            input
+        });
+        let run_id = accesskit::NodeId(17);
+        let position = |character_index| accesskit::TextPosition {
+            node: run_id,
+            character_index,
+        };
+        let selection = accesskit::TextSelection {
+            anchor: position(3),
+            focus: position(1),
+        };
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.set_accessible_selection(&selection, run_id, cx);
+                let selected = input.selected_text_range(false, window, cx);
+                assert!(
+                    selected.is_some_and(|selected| selected.range == (1..4) && selected.reversed)
+                );
+                let (run, exposed) = super::accessible_text_run(
+                    &input.content,
+                    &input.selected_range,
+                    input.selection_reversed,
+                    run_id,
+                );
+                assert_eq!(run.value(), Some("A🧱界Z"));
+                assert_eq!(run.character_lengths(), &[1, 4, 3, 1]);
+                assert_eq!(exposed, selection);
+                let foreign = accesskit::TextSelection {
+                    anchor: accesskit::TextPosition {
+                        node: accesskit::NodeId(18),
+                        character_index: 0,
+                    },
+                    focus: position(0),
+                };
+                input.set_accessible_selection(&foreign, run_id, cx);
+                assert_eq!(input.selected_range, 1..8);
+                input.replace_accessible_text("旅", false, window, cx);
+                assert_eq!(input.value(), "A旅Z");
+            });
+        });
+        crate::test_support::press(cx, "cmd-z");
+        assert_eq!(input.read_with(cx, |input, _| input.value()), "A🧱界Z");
+        crate::test_support::press(cx, "cmd-shift-z");
+        assert_eq!(input.read_with(cx, |input, _| input.value()), "A旅Z");
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_accessible_text("New\npath", true, window, cx);
+                assert_eq!(input.value(), "New path");
+                assert_eq!(input.selected_range, 8..8);
+            });
+        });
+        crate::test_support::press(cx, "cmd-z");
+        assert_eq!(input.read_with(cx, |input, _| input.value()), "A旅Z");
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.set_read_only(true, cx);
+                let mut node = accesskit::Node::new(accesskit::Role::TextInput);
+                super::set_accessible_states(&mut node, input.read_only, false, false);
+                assert!(node.is_read_only());
+                let selection = accesskit::TextSelection {
+                    anchor: position(0),
+                    focus: position(1),
+                };
+                input.set_accessible_selection(&selection, run_id, cx);
+                assert_eq!(input.selected_range, 0..1);
+                input.replace_accessible_text("changed", false, window, cx);
+                input.replace_accessible_text("changed", true, window, cx);
+                assert_eq!(input.value(), "A旅Z");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn accessible_selection_does_not_interrupt_ime_composition(cx: &mut gpui::TestAppContext) {
+        let (input, cx) = cx.add_window_view(|_, cx| super::TextInput::new("Trail ", "Name", cx));
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.replace_and_mark_text_in_range(None, "中文", Some(1..2), window, cx);
+                let range = input.selected_range.clone();
+                let selection = accesskit::TextSelection {
+                    anchor: accesskit::TextPosition {
+                        node: accesskit::NodeId(1),
+                        character_index: 0,
+                    },
+                    focus: accesskit::TextPosition {
+                        node: accesskit::NodeId(1),
+                        character_index: 0,
+                    },
+                };
+                input.set_accessible_selection(&selection, accesskit::NodeId(1), cx);
+                input.replace_accessible_text("changed", false, window, cx);
+                assert_eq!(input.value(), "Trail 中文");
+                assert_eq!(input.selected_range, range);
+                assert_eq!(input.marked_text_range(window, cx), Some(6..8));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn rendered_input_clamps_scroll_after_narrow_or_zero_width_grows(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for initial_width in [0., 42.] {
+            let (view, cx) = cx.add_window_view(|window, cx| {
+                let input = cx.new(|cx| super::TextInput::new("Harbor trail", "Name", cx));
+                input.read(cx).focus_handle(cx).focus(window, cx);
+                ResizableInput {
+                    input,
+                    width: initial_width,
+                }
+            });
+            cx.run_until_parked();
+            let input = view.read_with(cx, |view, _| view.input.clone());
+            input.read_with(cx, |input, _| {
+                let geometry = input.last_layout.as_ref().zip(input.last_bounds);
+                assert!(geometry.is_some(), "input must be painted");
+                if let Some((line, bounds)) = geometry {
+                    assert!(line.width() > bounds.size.width);
+                    assert!(input.scroll_offset > px(0.));
+                }
+            });
+
+            view.update(cx, |view, cx| {
+                view.width = 400.;
+                cx.notify();
+            });
+            cx.run_until_parked();
+            input.read_with(cx, |input, _| {
+                let geometry = input.last_layout.as_ref().zip(input.last_bounds);
+                assert!(geometry.is_some(), "input must be painted");
+                if let Some((line, bounds)) = geometry {
+                    assert!(line.width() <= bounds.size.width);
+                    assert_eq!(input.scroll_offset, px(0.));
+                    assert_eq!(
+                        bounds.left() + line.x_for_index(0) - input.scroll_offset,
+                        bounds.left()
+                    );
+                    assert!(
+                        bounds.left() + line.x_for_index(input.content.len()) - input.scroll_offset
+                            <= bounds.right()
+                    );
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn rendered_input_keeps_a_long_line_scrolled_to_the_active_caret(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            super::bind_keys(cx);
+            let input = cx.new(|cx| {
+                super::TextInput::new("A very long trail through the mountains", "Name", cx)
+            });
+            input.read(cx).focus_handle(cx).focus(window, cx);
+            ResizableInput { input, width: 42. }
+        });
+        cx.run_until_parked();
+        view.update(cx, |view, cx| {
+            view.width = 150.;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let input = view.read_with(cx, |view, _| view.input.clone());
+        input.read_with(cx, |input, _| {
+            let geometry = input.last_layout.as_ref().zip(input.last_bounds);
+            assert!(geometry.is_some(), "input must be painted");
+            if let Some((line, bounds)) = geometry {
+                assert!(line.width() > bounds.size.width);
+                assert!(input.scroll_offset > px(0.));
+                assert_eq!(input.scroll_offset, line.width() - bounds.size.width);
+                let cursor = line.x_for_index(input.cursor_offset()) - input.scroll_offset;
+                assert!(cursor >= px(0.) && cursor <= bounds.size.width);
+            }
+        });
+        crate::test_support::press(cx, "home");
+        cx.run_until_parked();
+        assert_eq!(input.read_with(cx, |input, _| input.scroll_offset), px(0.));
+        crate::test_support::press(cx, "end");
+        cx.run_until_parked();
+        assert!(input.read_with(cx, |input, _| input.scroll_offset) > px(0.));
+    }
+
+    #[gpui::test]
+    fn rendered_input_preserves_utf16_selection_and_range_bounds_after_growth(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| super::TextInput::new("路 🧱 harbor trail", "Name", cx));
+            input.read(cx).focus_handle(cx).focus(window, cx);
+            ResizableInput { input, width: 42. }
+        });
+        let input = view.read_with(cx, |view, _| view.input.clone());
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.set_selected_text_range(0..4, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        view.update(cx, |view, cx| {
+            view.width = 400.;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                assert_eq!(
+                    input
+                        .selected_text_range(false, window, cx)
+                        .map(|selection| selection.range),
+                    Some(0..4)
+                );
+                assert_eq!(input.scroll_offset, px(0.));
+                let geometry = input.last_layout.as_ref().zip(input.last_bounds);
+                assert!(geometry.is_some(), "input must be painted");
+                if let Some((line, bounds)) = geometry {
+                    let expected_right = bounds.left() + line.x_for_index("路 🧱".len());
+                    let selection_bounds = input.bounds_for_range(0..4, bounds, window, cx);
+                    assert!(selection_bounds.is_some_and(|selection_bounds| {
+                        selection_bounds.left() == bounds.left()
+                            && selection_bounds.right() == expected_right
+                    }));
+                }
+            });
+        });
+    }
 
     #[gpui::test]
     fn retained_input_preserves_editability_appearance_and_owns_independent_state(
@@ -1002,6 +1559,9 @@ mod tests {
     ) {
         let (view, cx) =
             cx.add_window_view(|_, cx| super::TextInput::new("中文 draft", "Name", cx));
+        let frozen = view.update(cx, |input, cx| cx.new(|cx| input.frozen(cx)));
+        assert_eq!(input_node(&view, cx).role(), accesskit::Role::TextInput);
+        assert_eq!(input_node(&frozen, cx).role(), accesskit::Role::Unknown);
         for read_only in [false, true] {
             view.update(cx, |input, cx| {
                 input.set_read_only(read_only, cx);

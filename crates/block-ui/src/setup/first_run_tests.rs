@@ -660,6 +660,96 @@ fn welcome_pointer_events_keep_the_window_alive_and_hit_area_fixed(cx: &mut gpui
 }
 
 #[gpui::test]
+fn welcome_pointer_activation_stays_inside_the_visible_circle(cx: &mut gpui::TestAppContext) {
+    let _system = crate::platform::test_system_motion(false);
+    let result = (|| -> anyhow::Result<()> {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.begin_first_run(cx);
+            view
+        });
+        cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
+        cx.run_until_parked();
+        let button = bounds(cx, "welcome-play")?;
+        // Four pixels inside the square frame's corner is far outside the circle
+        // inscribed in that frame, which is the control's visible shape.
+        let corner = gpui::point(
+            button.origin.x + gpui::px(4.),
+            button.origin.y + gpui::px(4.),
+        );
+        let started = |cx: &mut gpui::VisualTestContext, view: &gpui::Entity<super::Block>| {
+            view.read_with(cx, |view, _| view.shell.first_run.error.is_some())
+        };
+
+        // The engine-free fixture reports the setup-save failure only when Start
+        // actually runs, so this observes activation without persisting a setup.
+        cx.simulate_click(corner, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            !started(cx, &view),
+            "a press inside the square frame but outside the circle must not start setup"
+        );
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.first_run.stage),
+            Stage::Welcome
+        );
+
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            started(cx, &view),
+            "the visible circle must still start setup when pressed"
+        );
+
+        // A press is accepted only when it both starts and ends on the circle.
+        view.update(cx, |view, _| view.shell.first_run.error = None);
+        cx.simulate_mouse_down(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(
+            button.center(),
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        cx.run_until_parked();
+        assert!(
+            !started(cx, &view),
+            "a press that starts outside the circle must not start setup"
+        );
+        cx.simulate_mouse_down(
+            button.center(),
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        cx.simulate_mouse_up(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            !started(cx, &view),
+            "a press that ends outside the circle must not start setup"
+        );
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.first_run.stage),
+            Stage::Welcome
+        );
+
+        // Keyboard activation does not depend on where the pointer rests.
+        view.update(cx, |view, _| view.shell.first_run.error = None);
+        cx.simulate_mouse_move(corner, None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        crate::test_support::press(cx, "enter");
+        cx.run_until_parked();
+        assert!(
+            started(cx, &view),
+            "Enter must start setup while the pointer is outside the circle"
+        );
+        view.update(cx, |view, _| view.shell.first_run.error = None);
+        crate::test_support::press(cx, "space");
+        cx.run_until_parked();
+        assert!(started(cx, &view), "Space must start setup");
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
 fn cancelled_game_wizard_releases_its_click_barrier_before_continue(cx: &mut gpui::TestAppContext) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {

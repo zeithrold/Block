@@ -157,6 +157,246 @@ fn inspection_and_current_disabled_action_do_not_change_home_until_use(cx: &mut 
 }
 
 #[gpui::test]
+fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAppContext) {
+    use std::{
+        io::{Read as _, Write as _},
+        net::TcpListener,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    let result = (|| -> anyhow::Result<()> {
+        for mode in [ProfileMode::Bundled, ProfileMode::Separated] {
+            let proxy = TcpListener::bind("127.0.0.1:0")?;
+            proxy.set_nonblocking(true)?;
+            let proxy_url = format!("http://{}", proxy.local_addr()?);
+            let server = std::thread::spawn(move || -> anyhow::Result<()> {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    match proxy.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false)?;
+                            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+                            let mut bytes = [0; 4096];
+                            let _ = stream.read(&mut bytes)?;
+                            stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;
+                            return Ok(());
+                        }
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+            });
+            let root = tempfile::tempdir()?;
+            let mut preferences = crate::appearance::Preferences::default();
+            preferences.downloads.proxy = block_launcher::ProxyMode::Http { url: proxy_url };
+            preferences.downloads.max_retries = 0;
+            preferences.save(root.path())?;
+            let library = block_launcher::library::Library::new(
+                root.path().to_owned(),
+                Arc::new(|_| {}),
+                Arc::new(|_| {}),
+            )?;
+            let catalog = library.catalog();
+            let (first, chosen) =
+                catalog.create_instance("Home game".into(), "1.20.6".into(), None, None)?;
+            let (damaged, inspected) =
+                catalog.create_instance("Damaged game".into(), "1.20.6".into(), None, None)?;
+            for instance in [&first, &damaged] {
+                let mut target = instance.targets[0].clone();
+                target.status = InstallStatus::Ready;
+                catalog.set_target(&instance.id, &target)?;
+            }
+            let world = damaged.directory.join("saves/Test world/level.dat");
+            let options = damaged.directory.join("options.txt");
+            std::fs::create_dir_all(
+                world
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("world path"))?,
+            )?;
+            std::fs::write(&world, b"world marker")?;
+            std::fs::write(&options, b"configuration marker")?;
+
+            // This Ready target has no installed metadata. The real launch
+            // boundary refuses it and asks for Repair before authentication.
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let refusal = runtime.block_on(library.prepare_launch(
+                &inspected.id,
+                &block_launcher::session::OfflineSession::Offline {
+                    username: "Player".into(),
+                },
+                &block_launcher::CancellationToken::new(),
+                None,
+                None,
+            ));
+            assert!(
+                matches!(refusal, Err(ref error) if error.to_string().contains("choose Repair"))
+            );
+
+            let mut snapshot = catalog.snapshot()?;
+            snapshot.profile_mode = mode;
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let chosen_id = chosen.id.clone();
+            let inspected_id = inspected.id.clone();
+            let first_id = first.id.clone();
+            let damaged_id = damaged.id.clone();
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.snapshot = snapshot;
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.selected_instance = Some(first_id.clone());
+                view.selected_profile = Some(chosen_id.clone());
+                view.shell.games.inspected = Some(inspected_id.clone());
+                view.shell.profiles.inspected = Some(inspected_id.clone());
+                view.router.navigate(if mode == ProfileMode::Bundled {
+                    Tab::Instances
+                } else {
+                    Tab::Profiles
+                });
+                view.initialize_browsers(cx);
+                view
+            });
+            cx.simulate_resize(size(px(960.), px(600.)));
+            cx.run_until_parked();
+            let repair = crate::test_support::control_bounds(cx, "repair-profile");
+            let edit = crate::test_support::control_bounds(cx, "edit-profile");
+            let choose = crate::test_support::control_bounds(cx, "use-profile");
+            assert!(
+                repair
+                    .zip(edit)
+                    .zip(choose)
+                    .is_some_and(|((repair, edit), choose)| {
+                        repair.left() >= edit.right()
+                            && repair.right() <= choose.left()
+                            && repair.bottom() <= px(600.)
+                            && choose.right() <= px(960.)
+                    }),
+                "the repair and existing actions must fit in the compact detail footer: {repair:?} {edit:?} {choose:?}"
+            );
+            click(cx, "repair-profile");
+            assert!(view.read_with(cx, |view, _| view.busy));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while view.read_with(cx, |view, _| view.busy) && Instant::now() < deadline {
+                view.update(cx, Block::poll);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!view.read_with(cx, |view, _| view.busy));
+            server
+                .join()
+                .map_err(|_| anyhow::anyhow!("proxy worker failed"))??;
+            let state = catalog.snapshot()?;
+            assert!(matches!(
+                state.selection(&inspected.id)?.2.status,
+                InstallStatus::Failed { .. }
+            ));
+            assert_eq!(state.selection(&chosen.id)?.2.status, InstallStatus::Ready);
+            assert_eq!(
+                view.read_with(cx, |view, _| view.selected_profile.clone()),
+                Some(chosen_id)
+            );
+            assert_eq!(
+                view.read_with(cx, |view, _| view.selected_instance.clone()),
+                Some(first_id)
+            );
+            assert_eq!(std::fs::read(world)?, b"world marker");
+            assert_eq!(std::fs::read(options)?, b"configuration marker");
+            assert_eq!(state.selection(&inspected.id)?.0.id, damaged_id);
+        }
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn crash_return_reconciles_selection_and_inspection_in_both_modes(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        for mode in [ProfileMode::Bundled, ProfileMode::Separated] {
+            let root = tempfile::tempdir()?;
+            let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
+            let report = block_launcher::crash::CrashReport::new(
+                block_launcher::crash::CrashContext {
+                    run_id: "run-a".into(),
+                    profile_id: "profile-a".into(),
+                    profile_name: "Test profile".into(),
+                    minecraft_version: "1.20.6".into(),
+                    loader: None,
+                },
+                block_launcher::crash::ExitOutcome::start_failed(),
+                "Synthetic start failure",
+                Vec::new(),
+            );
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = fixture(window, cx, mode);
+                view.selected_profile = Some("profile-b".into());
+                view.selected_instance = Some("instance-b".into());
+                view.shell.games.inspected = Some(
+                    if mode == ProfileMode::Bundled {
+                        "profile-b"
+                    } else {
+                        "instance-b"
+                    }
+                    .into(),
+                );
+                view.shell.profiles.inspected = Some("profile-b".into());
+                view.pending_crashes.push_back(crate::PendingCrash {
+                    report,
+                    directory: root.path().to_path_buf(),
+                    guard,
+                });
+                view
+            });
+            cx.simulate_resize(size(px(1152.), px(900.)));
+            click(cx, "crash-return");
+            view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.selected_profile.as_deref(),
+                    Some("profile-a"),
+                    "{mode:?}"
+                );
+                assert_eq!(
+                    view.selected_instance.as_deref(),
+                    Some("instance-a"),
+                    "{mode:?}"
+                );
+                assert_eq!(
+                    view.inspected_instance()
+                        .map(|instance| instance.id.as_str()),
+                    Some("instance-a"),
+                    "{mode:?}"
+                );
+                assert_eq!(
+                    view.inspected_profile().map(|profile| profile.id.as_str()),
+                    Some("profile-a"),
+                    "{mode:?}"
+                );
+            });
+            if mode == ProfileMode::Separated {
+                click(cx, "linked-profile-profile-a");
+            }
+            click(cx, "edit-profile");
+            assert!(
+                view.read_with(cx, |view, _| matches!(
+                    &view.form,
+                    Some(crate::Form::Profile(form)) if form.original.id == "profile-a"
+                )),
+                "Edit must target the requested profile in {mode:?}"
+            );
+        }
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
 fn linked_profile_and_instance_navigation_preserves_selection_and_each_query(
     cx: &mut TestAppContext,
 ) {

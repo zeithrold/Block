@@ -14,8 +14,8 @@ use std::{
 };
 
 use gpui::{
-    App, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _, Point,
-    StatefulInteractiveElement as _, Styled as _, Window, div, point, px, rgb,
+    App, Bounds, ClickEvent, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    Point, StatefulInteractiveElement as _, Styled as _, Window, div, point, px, rgb,
 };
 use gpui_base::motion::{Easing, Interpolate as _, Timing};
 
@@ -56,8 +56,10 @@ struct Visual {
     running: bool,
 }
 
-/// Persistent state for one welcome button. Its root hit area stays fixed
-/// while the inner circle scales visually on hover.
+/// Persistent state for one welcome button. Its frame stays fixed while the
+/// inner circle scales visually on hover; pointer hover and pointer activation
+/// both use the resting circle, so the hover growth never enlarges the region
+/// that can be pressed.
 #[derive(Clone, Debug, Default)]
 pub(super) struct WelcomeButton {
     animation: Rc<RefCell<Animation>>,
@@ -80,14 +82,11 @@ impl WelcomeButton {
         let Some(bounds) = *self.bounds.borrow() else {
             return false;
         };
-        let local = point(
-            (position.x - bounds.origin.x) / px(1.),
-            (position.y - bounds.origin.y) / px(1.),
-        );
+        let local = local_position(bounds, position);
         let mut animation = self.animation.borrow_mut();
         let previous = animation.last_pointer.replace(local);
         let radius = DIAMETER * 0.5;
-        let hovered = !force_exit && (local.x - radius).hypot(local.y - radius) <= radius;
+        let hovered = !force_exit && inside_circle(local);
         if animation.hovered == hovered {
             return false;
         }
@@ -124,6 +123,39 @@ impl WelcomeButton {
                 "width": bounds.size.width / px(1.), "height": bounds.size.height / px(1.),
             })),
         })
+    }
+}
+
+/// A pointer position in the control's local frame.
+fn local_position(bounds: Bounds<gpui::Pixels>, position: Point<gpui::Pixels>) -> Point<f32> {
+    point(
+        (position.x - bounds.origin.x) / px(1.),
+        (position.y - bounds.origin.y) / px(1.),
+    )
+}
+
+/// The control is drawn as the circle inscribed in its square frame. Hover and
+/// pointer activation share this region.
+fn inside_circle(local: Point<f32>) -> bool {
+    let radius = DIAMETER * 0.5;
+    (local.x - radius).hypot(local.y - radius) <= radius
+}
+
+/// Decide whether a native activation is a press on the drawn control.
+///
+/// Keyboard activation and assistive-technology activation carry no pointer
+/// position of their own, so they keep the native behavior. A mouse press has
+/// to start and end on the same circle that drives hover, because a press that
+/// leaves the circle before release is not a press on the control.
+fn activation_inside(event: &ClickEvent, bounds: Option<Bounds<gpui::Pixels>>) -> bool {
+    let Some(bounds) = bounds else {
+        return true;
+    };
+    let inside = |position| inside_circle(local_position(bounds, position));
+    match event {
+        ClickEvent::Keyboard(_) => true,
+        ClickEvent::Mouse(event) => inside(event.down.position) && inside(event.up.position),
+        ClickEvent::Touch(event) => inside(event.position),
     }
 }
 
@@ -245,7 +277,9 @@ fn sample(animation: &mut Animation, now: Instant, preferences: Preferences) -> 
     }
 }
 
-/// Render the native control, preserving the standard button role and activation.
+/// Render the native control, preserving the standard button role and
+/// activation. Pointer activation follows the same circle as hover; keyboard
+/// activation stays unconditional.
 pub(super) fn render<T: 'static>(
     state: &WelcomeButton,
     palette: Palette,
@@ -303,12 +337,17 @@ pub(super) fn render<T: 'static>(
     .absolute()
     .inset_0();
 
+    let activation_bounds = root_bounds;
     crate::base_controls::Control::button(
         "welcome-play".into(),
         "Start setup".into(),
         gpui::Role::Button,
         false,
-        on_activate,
+        move |event, window, cx| {
+            if activation_inside(event, *activation_bounds.borrow()) {
+                on_activate(&(), window, cx);
+            }
+        },
     )
     .aria_label("Start setup")
     .debug_selector(|| "welcome-play".into())

@@ -453,14 +453,7 @@ impl Block {
             && let Some((revision, cancel)) = draft.attempt
         {
             cancel.cancel();
-            if revision == self.operation_revision {
-                self.operation_revision = self.operation_revision.wrapping_add(1);
-                if let Some(engine) = &mut self.engine {
-                    engine.begin_operation(self.operation_revision);
-                }
-                self.busy = self.active_run.is_some();
-                self.operation_cancellable = false;
-            }
+            self.abandon_operation(revision);
         }
         cx.notify();
     }
@@ -575,7 +568,10 @@ impl Block {
             cx.notify();
             return;
         }
-        self.begin_cancellable("Discovering your authentication provider");
+        self.begin_cancellable(
+            "Discovering your authentication provider",
+            super::ui_logging::Operation::DiscoverAuthProvider,
+        );
         self.operation_kind = super::OperationKind::Account;
         if let Some(draft) = self
             .shell
@@ -904,7 +900,10 @@ impl Block {
             else {
                 return;
             };
-            self.begin_cancellable("Selecting your provider character");
+            self.begin_cancellable(
+                "Selecting your provider character",
+                super::ui_logging::Operation::SelectAuthCharacter,
+            );
             self.operation_kind = super::OperationKind::Account;
             if let Some(state) = &mut self.shell.auth {
                 state.error = None;
@@ -943,7 +942,10 @@ impl Block {
             field.update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.abandon_auth_attempt();
-        self.begin_cancellable("Authenticating with your provider");
+        self.begin_cancellable(
+            "Authenticating with your provider",
+            super::ui_logging::Operation::AuthenticateProvider,
+        );
         self.operation_kind = super::OperationKind::Account;
         if let Some(state) = &mut self.shell.auth {
             state.characters.clear();
@@ -1141,13 +1143,7 @@ impl Block {
             .and_then(|state| state.attempt.take());
         if let Some((revision, cancel)) = attempt {
             cancel.cancel();
-            if revision == self.operation_revision {
-                self.operation_revision = self.operation_revision.wrapping_add(1);
-                if let Some(engine) = &mut self.engine {
-                    engine.begin_operation(self.operation_revision);
-                }
-                self.busy = self.active_run.is_some();
-                self.operation_cancellable = false;
+            if self.abandon_operation(revision) {
                 self.status = "Sign-in cancelled. Previously saved accounts are kept.".into();
             }
         }
@@ -1417,7 +1413,10 @@ impl Block {
             return;
         }
         self.abandon_auth_attempt();
-        self.begin_cancellable("Preparing secure Microsoft sign-in");
+        self.begin_cancellable(
+            "Preparing secure Microsoft sign-in",
+            super::ui_logging::Operation::AuthenticateMicrosoft,
+        );
         self.operation_kind = super::OperationKind::Account;
         let Some(state) = &mut self.shell.auth else {
             return;
@@ -1606,7 +1605,10 @@ impl Block {
             cx.notify();
             return;
         }
-        self.begin("Saving your account securely");
+        self.begin(
+            "Saving your account securely",
+            super::ui_logging::Operation::SaveAccount,
+        );
         self.operation_kind = super::OperationKind::Account;
         if let Some(state) = &mut self.shell.auth {
             state.transition(Phase::Saving);

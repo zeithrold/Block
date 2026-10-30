@@ -131,6 +131,10 @@ pub(crate) enum Message {
     Log(String),
     Command(String),
     Session(Box<RunRecord>),
+    SessionAccepted {
+        operation: Option<u64>,
+        record: Box<RunRecord>,
+    },
     Crash {
         report: Box<CrashReport>,
         directory: PathBuf,
@@ -159,7 +163,10 @@ impl From<Sender<Message>> for EventSender {
 impl EventSender {
     fn wrap(&self, message: Message) -> Message {
         // Detached sessions and crash presentation have their own run identity.
-        if matches!(message, Message::Session(_) | Message::Crash { .. }) {
+        if matches!(
+            message,
+            Message::Session(_) | Message::SessionAccepted { .. } | Message::Crash { .. }
+        ) {
             return message;
         }
         match self.operation {
@@ -1310,7 +1317,12 @@ impl Engine {
             send_catalog(&root, &sender).await;
             match result {
                 Ok(record) => {
-                    let _ = sender.send(Message::Session(Box::new(record))).await;
+                    let _ = sender
+                        .send(Message::SessionAccepted {
+                            operation: sender.operation,
+                            record: Box::new(record),
+                        })
+                        .await;
                 }
                 Err(error) => finish(&sender, Err(error)).await,
             }

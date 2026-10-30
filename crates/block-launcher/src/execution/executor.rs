@@ -131,11 +131,13 @@ impl Executor {
         if let JavaExecutable::Local { path } = &plan.command.java {
             probe_java(path, &plan).await?;
         }
+        tracing::debug!(event = "preparation_phase", phase = "download", repair);
         (self.events)(ExecutionEvent::Stage {
             name: "Downloading verified resources".into(),
         });
         self.store.fetch_all(&plan.resources, cancel).await?;
         ensure!(!cancel.is_cancelled(), "preparation cancelled");
+        tracing::debug!(event = "preparation_phase", phase = "materialize", repair);
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
         });
@@ -154,6 +156,7 @@ impl Executor {
         (self.events)(ExecutionEvent::Stage {
             name: "Ready".into(),
         });
+        tracing::debug!(event = "preparation_phase", phase = "ready", session_id = %run_id);
         Ok(PreparedInstance {
             plan,
             root,

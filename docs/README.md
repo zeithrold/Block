@@ -15,6 +15,7 @@ product acceptance or require repeating historical verification.
 
 - [Launch recipes](recipes.md): CLI preparation, execution and compatibility options.
 - [Configuration storage](config-storage.md): data roots and TOML documents.
+- [Logging](logging.md): local launcher diagnostics, filters, retention and export.
 - [Session supervision](session-supervisor.md): process ownership, crash help and recovery.
 - [Authentication](../crates/block-auth/README.md): public-client setup and native credential storage.
 - [Pilot builds](pilot-builds.md): package workflow, build profile and platform limits.
@@ -37,6 +38,7 @@ These documents explain feature decisions and implementation scope. Consult
 
 ### UI and native interaction
 
+- [Whole-product GUI coverage audit](gui-coverage-audit.md): surface inventory, nine-issue repair disposition, native evidence and remaining checks.
 - [Architecture migration verification](architecture-migration-verification.md): crate migration, Welcome retirement, OptiFine entry and page-host checks.
 - [Evidence calibration](evidence-calibration.md): corrected account/scenario captures and comparison semantics.
 - [Visual review cases](visual-review-cases.json): machine-readable scenario/reference mapping used by the review tools.

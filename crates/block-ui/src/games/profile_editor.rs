@@ -747,7 +747,7 @@ impl Block {
         match parse_profile(form, cx) {
             Ok(profile) => {
                 self.shell.editor.error = None;
-                self.begin("Saving profile");
+                self.begin("Saving profile", super::ui_logging::Operation::SaveProfile);
                 self.shell.editor.saving = self.busy;
                 self.shell.editor.save_error = (!self.busy).then(|| "Profile settings could not be saved. Check Block’s data directory and restart.".into());
                 if let Some(engine) = &self.engine {

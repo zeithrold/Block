@@ -160,7 +160,7 @@ impl Block {
         if self.motion_dirty {
             let snapshot = Rc::new(self.visual_snapshot(cx));
             let page = SceneKey::Page(spec.key);
-            let detail = SceneKey::Detail(spec.detail);
+            let detail = SceneKey::Detail(spec.detail.clone());
             let wizard = spec.wizard.map(SceneKey::Wizard);
             let page_changed = self
                 .motion
@@ -177,6 +177,27 @@ impl Block {
                 .detail
                 .current()
                 .is_some_and(|current| current.key != detail);
+            let frame_changed = self
+                .motion
+                .page
+                .current()
+                .is_some_and(|current| current._snapshot.page_spec().frame != spec.frame);
+            if page_changed || detail_changed || wizard_changed || frame_changed {
+                tracing::debug!(
+                    event = "ui.navigation.changed",
+                    view_id = self.view_id,
+                    page = spec.page_label(),
+                    tab = spec.tab_label(),
+                    frame = spec.frame_label(),
+                    detail = spec.detail_label(),
+                    wizard = spec.wizard_label(),
+                    task = spec.task,
+                    page_changed,
+                    detail_changed,
+                    wizard_changed,
+                    frame_changed,
+                );
+            }
             self.motion.page.reconcile(
                 Some(Layer {
                     key: page,
@@ -595,6 +616,8 @@ impl Block {
         });
         Self {
             build_info: self.build_info,
+            view_id: self.view_id,
+            window_changes: super::ui_logging::WindowChanges::default(),
             shell: self.shell.snapshot(cx),
             motion: MotionState {
                 frame: self.motion.frame.frozen(),
@@ -629,6 +652,7 @@ impl Block {
             completed: self.completed,
             operation_kind: self.operation_kind,
             operation_revision: self.operation_revision,
+            logged_operation: None,
             pending_creation: None,
             downloads,
             downloads_revision: self.downloads_revision,
@@ -644,6 +668,11 @@ impl Block {
             crash_guard: None,
             logs: self.logs.clone(),
             show_output: self.show_output,
+            exporting_logs: self.exporting_logs,
+            log_export_cancel: self
+                .log_export_cancel
+                .as_ref()
+                .map(|_| block_launcher::CancellationToken::new()),
             command: self.command.clone(),
             show_command: self.show_command,
             recipe: self.recipe.clone(),

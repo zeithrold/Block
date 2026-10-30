@@ -11,6 +11,18 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import review_cases
 
+# Scenario stems that existed in archived captures but are no longer produced by
+# crates/block-ui/src/runtime/scenarios.rs. Their registry rows remain historical
+# reference observations; they must not satisfy current-scenario coverage.
+RETIRED_NATIVE_STEMS = {
+    "welcome-1",
+    "welcome-2",
+    "welcome-3",
+    "welcome-version-picker",
+    "welcome-settings",
+    "welcome-about",
+}
+
 
 class ReviewCaseTests(unittest.TestCase):
     @staticmethod
@@ -73,6 +85,38 @@ class ReviewCaseTests(unittest.TestCase):
         provider = cases["provider-add"]["reference_audit"]
         self.assertEqual(provider["current_snap_proto_status"], "scripted_capture_but-existing-provider-edit")
         self.assertIn("initialProviders[0]", provider["trigger"])
+
+    def test_active_reviewed_native_stems_cover_current_scenarios_without_retired_states(self):
+        cases = review_cases.load_registry()["cases"]
+        retired_case_ids = {
+            case["case_id"]
+            for case in cases
+            if case["source_provenance"]["native_source"].startswith("retired:")
+        }
+        retired_stems = {
+            stem for case in cases if case["case_id"] in retired_case_ids for stem in case["native_stems"]
+        }
+        self.assertEqual(retired_stems, RETIRED_NATIVE_STEMS)
+        self.assertTrue(retired_stems.isdisjoint(review_cases.scenario_names()))
+        for case in cases:
+            if case["case_id"] in retired_case_ids:
+                self.assertTrue(case["rationale"].startswith("Historical (retired scenario):"), case["case_id"])
+
+        active = [case for case in cases if case["case_id"] not in retired_case_ids]
+        self.assertFalse(any(case["review_status"] == "unreviewed" for case in active))
+        active_stems = {stem for case in active for stem in case["native_stems"]}
+        self.assertEqual(len(active_stems), sum(len(case["native_stems"]) for case in active))
+        self.assertEqual(active_stems, review_cases.scenario_names())
+
+        # The current first-run states are native-only until a React candidate is
+        # actually reviewed; an empty mapping must not invent correspondence.
+        setup_cases = [case for case in active if any(stem.startswith("setup-") for stem in case["native_stems"])]
+        self.assertEqual(
+            {stem for case in setup_cases for stem in case["native_stems"]},
+            {name for name in review_cases.scenario_names() if name.startswith("setup-")},
+        )
+        for case in setup_cases:
+            self.assertEqual(case["reference_candidates"], [], case["case_id"])
 
     def test_exact_filename_candidate_stays_unreviewed_and_duplicate_bytes_do_not_count(self):
         with tempfile.TemporaryDirectory() as temporary:

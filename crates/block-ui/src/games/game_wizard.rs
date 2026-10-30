@@ -516,7 +516,7 @@ impl Block {
             .map(|error| error.to_string())
     }
 
-    pub(super) fn browse_optifine(&self, cx: &Context<'_, Self>) {
+    pub(super) fn browse_optifine(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy
             || self.shell.wizard.optifine_request.is_some()
             || self.shell.wizard.page != Some(WizardPage::OptiFine)
@@ -533,27 +533,77 @@ impl Block {
             return;
         };
         let field = form.version.entity_id();
+        let request = uuid::Uuid::new_v4();
+        self.shell.wizard.optifine_request = Some(request);
         let prompt = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some("Select the official OptiFine installer JAR".into()),
         });
+        cx.notify();
         cx.spawn(async move |view, cx| {
-            let Ok(Ok(Some(paths))) = prompt.await else { return; };
-            let Some(path) = paths.into_iter().next() else { return; };
-            let request = uuid::Uuid::new_v4();
-            let started = view.update(cx, |view, cx| {
-                if view.busy || view.shell.wizard.page != Some(WizardPage::OptiFine) || !matches!(&view.form, Some(Form::Instance(form)) if form.version.entity_id() == field) { return false; }
-                view.shell.wizard.optifine_request = Some(request);
-                view.shell.wizard.clear_error();
-                cx.notify();
-                true
-            }).unwrap_or(false);
-            if !started { return; }
+            let selection = match prompt.await {
+                Ok(Ok(paths)) => Ok(paths.and_then(|paths| paths.into_iter().next())),
+                _ => Err(()),
+            };
+            let path = view
+                .update(cx, |view, cx| {
+                    view.finish_optifine_browse(request, field, selection, cx)
+                })
+                .ok()
+                .flatten();
+            let Some(path) = path else {
+                return;
+            };
             let result = engine.import_optifine(path).await;
-            let _ = view.update(cx, |view, cx| view.finish_optifine_import(request, field, result, cx));
-        }).detach();
+            let _ = view.update(cx, |view, cx| {
+                view.finish_optifine_import(request, field, result, cx)
+            });
+        })
+        .detach();
+    }
+
+    fn finish_optifine_browse(
+        &mut self,
+        request: uuid::Uuid,
+        field: gpui::EntityId,
+        selection: Result<Option<std::path::PathBuf>, ()>,
+        cx: &mut Context<'_, Self>,
+    ) -> Option<std::path::PathBuf> {
+        if self.shell.wizard.optifine_request != Some(request) {
+            return None;
+        }
+        let current = !self.busy
+            && self.shell.wizard.page == Some(WizardPage::OptiFine)
+            && matches!(&self.form, Some(Form::Instance(form))
+                if form.version.entity_id() == field
+                    && matches!(form.loader, LoaderKind::Vanilla | LoaderKind::Forge));
+        if !current {
+            self.shell.wizard.optifine_request = None;
+            cx.notify();
+            return None;
+        }
+        match selection {
+            Ok(Some(path)) => {
+                self.shell.wizard.clear_error();
+                cx.notify();
+                Some(path)
+            }
+            Ok(None) => {
+                self.shell.wizard.optifine_request = None;
+                cx.notify();
+                None
+            }
+            Err(()) => {
+                self.shell.wizard.optifine_request = None;
+                self.shell.wizard.error = Some(
+                    "Could not open the OptiFine file chooser. Check your system file picker and try again.".into(),
+                );
+                cx.notify();
+                None
+            }
+        }
     }
 
     fn finish_optifine_import(
@@ -629,13 +679,20 @@ impl Block {
                 "Download the installer JAR for your Minecraft version from optifine.net, then select it here. Block validates it and performs the remaining installation automatically.",
             ))
             .child(components::button("optifine-official-download", "Open official downloads", self.palette, ButtonVariant::Outline, ControlState::default(), |&(), _, cx| cx.open_url("https://optifine.net/downloads")))
-            .child(self.button("optifine-select-jar", if pending { "Validating selected JAR…" } else { "Select downloaded JAR" }, UiAction::WizardOptiFineFile, cx))
+            .child(components::button(
+                "optifine-select-jar",
+                if pending { "Choosing or validating JAR…" } else { "Select downloaded JAR" },
+                self.palette,
+                ButtonVariant::Outline,
+                ControlState { disabled: self.busy || pending, busy: pending, ..Default::default() },
+                cx.listener(|view, (), window, cx| view.handle(UiAction::WizardOptiFineFile, window, cx)),
+            ))
             .children(form.optifine.as_ref().map(|selected| div().flex().flex_col().gap_2()
                 .child(div().text_sm().child(format!("Selected: {}", selected.version)))
                 .child(note(selected.forge.as_ref().map_or_else(|| "Standalone installation; this release does not declare Forge compatibility.".into(), |version| format!("Standalone or Forge {version}. Other loaders cannot be combined directly."))))
                 .child(self.button("optifine-remove", "Use without OptiFine", UiAction::WizardOptiFineRemove, cx))))
             .children(self.optifine_issue(cx).map(|reason| note(reason)))
-            .children(self.shell.wizard.error.as_ref().map(|reason| note(reason.clone())))
+            .children(self.shell.wizard.error.as_ref().map(|reason| note(reason.clone()).id("wizard-optifine-error").debug_selector(|| "wizard-optifine-error".into())))
             .child(note("No extraction or manual file placement is required. The selected JAR is kept only in your private launcher cache."))
     }
     pub(super) fn set_wizard_error(&mut self, message: String, cx: &gpui::App) {
@@ -1469,7 +1526,10 @@ impl Block {
                 );
                 return;
             };
-            self.begin("Saving your new Profile");
+            self.begin(
+                "Saving your new Profile",
+                super::ui_logging::Operation::CreateProfile,
+            );
             self.mark_creation();
             if let Some(engine) = &self.engine {
                 engine.create_profile_draft(instance, values);
@@ -1482,11 +1542,18 @@ impl Block {
             // never promise preparation this branch does not start: first-run
             // Create only saves the setup, and Finish prepares game files.
             let saves_setup = self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled;
-            self.begin_cancellable(if saves_setup {
-                "Saving your game setup"
-            } else {
-                "Creating your game and preparing verified downloads"
-            });
+            self.begin_cancellable(
+                if saves_setup {
+                    "Saving your game setup"
+                } else {
+                    "Creating your game and preparing verified downloads"
+                },
+                if saves_setup {
+                    super::ui_logging::Operation::SaveSetup
+                } else {
+                    super::ui_logging::Operation::CreateGame
+                },
+            );
             self.mark_creation();
             if let Some(engine) = &self.engine {
                 if saves_setup {
@@ -3259,7 +3326,12 @@ impl Block {
                 "Choose folder…",
                 UiAction::BrowseInstall,
                 cx,
-            ));
+            ))
+            .children(self.shell.wizard.error.as_ref().map(|error| {
+                note(error.clone())
+                    .id("wizard-location-error")
+                    .debug_selector(|| "wizard-location-error".into())
+            }));
         if let Some(profile) = &self.shell.wizard.profile {
             fields = fields.child(self.wizard_runtime_window(profile, cx));
             if self.router.tab() == Tab::Onboarding {
