@@ -59,12 +59,28 @@ fn failed_headless_operation_flushes_safe_structured_events() -> anyhow::Result<
     }
     assert!(!contents.is_empty());
     assert!(contents.ends_with('\n'));
-    for line in contents.lines() {
-        let _: serde_json::Value = serde_json::from_str(line)?;
-    }
+    let events = contents
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
     assert!(contents.contains("application_started"));
     assert!(contents.contains("application_failed"));
     assert!(contents.contains("application_stopped"));
+    let lifecycle = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event["fields"]["event"].as_str(),
+                Some("application_started" | "application_failed" | "application_stopped")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lifecycle.len(), 3);
+    assert_eq!(lifecycle[0]["fields"]["event"], "application_started");
+    assert_eq!(lifecycle[1]["fields"]["event"], "application_failed");
+    assert_eq!(lifecycle[1]["fields"]["error_code"], "operation_failed");
+    assert_eq!(lifecycle[2]["fields"]["event"], "application_stopped");
+    assert_eq!(lifecycle[2]["fields"]["failed"], true);
     assert!(!contents.contains("private-path-sentinel"));
     Ok(())
 }

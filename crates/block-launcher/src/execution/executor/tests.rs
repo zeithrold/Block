@@ -488,6 +488,62 @@ async fn preparation_rejects_instance_symlinks_before_creating_a_lock() -> anyho
     Ok(())
 }
 
+#[tokio::test]
+async fn cancelled_download_phase_preserves_the_prepared_marker() -> anyhow::Result<()> {
+    use std::sync::Mutex;
+
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    let instance = root.join("instances/executor-test");
+    fs::create_dir_all(&instance)?;
+    let marker = instance.join("prepared.lock.json");
+    fs::write(&marker, b"previous preparation")?;
+
+    let mut plan = plan(vec![PrepareAction::Directory {
+        path: "materialized".into(),
+    }]);
+    plan.target = Target::host()?;
+    plan.command.classpath = [
+        "lwjgl-3.3.3-natives-linux-arm64.jar",
+        "lwjgl-3.3.3-natives-windows-arm64.jar",
+        "lwjgl-3.3.3-natives-macos-arm64.jar",
+        "lwjgl-glfw-3.3.3-natives-macos-arm64.jar",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    let stages = Arc::new(Mutex::new(Vec::new()));
+    let captured = stages.clone();
+    let store = Store::new(root.clone(), true, Arc::new(|_| {}))?;
+    let executor = super::Executor::new(
+        store,
+        Arc::new(move |event| {
+            if let super::ExecutionEvent::Stage { name } = event
+                && let Ok(mut stages) = captured.lock()
+            {
+                stages.push(name);
+            }
+        }),
+    );
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let error = executor
+        .prepare(plan, &cancel)
+        .await
+        .err()
+        .context("cancelled preparation succeeded")?;
+    assert_eq!(error.to_string(), "preparation cancelled");
+    assert_eq!(
+        *stages
+            .lock()
+            .map_err(|_| anyhow::anyhow!("stage capture mutex was poisoned"))?,
+        ["Downloading verified resources"]
+    );
+    assert_eq!(fs::read(&marker)?, b"previous preparation");
+    assert!(!root.join("materialized").exists());
+    Ok(())
+}
+
 fn native_java_fixture(root: &Path, mode: &str) -> anyhow::Result<PathBuf> {
     let executable = root.join(format!("fake-java{}", std::env::consts::EXE_SUFFIX));
     let output = std::process::Command::new("rustc")

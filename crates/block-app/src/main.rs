@@ -72,6 +72,12 @@ fn main() -> ExitCode {
         );
     }
     let result = run(args, logging.clone());
+    report_exit(result, &logging)
+}
+
+type Logging = Rc<RefCell<Option<block_logging::LogGuard>>>;
+
+fn report_exit(result: anyhow::Result<()>, logging: &Logging) -> ExitCode {
     match result {
         Ok(()) => {
             if logging.borrow().is_some() {
@@ -94,8 +100,6 @@ fn main() -> ExitCode {
         }
     }
 }
-
-type Logging = Rc<RefCell<Option<block_logging::LogGuard>>>;
 
 fn run(args: Args, logging: Logging) -> anyhow::Result<()> {
     #[cfg(debug_assertions)]

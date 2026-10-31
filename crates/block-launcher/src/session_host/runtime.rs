@@ -353,6 +353,30 @@ fn launch_error(
     Ok(outcome)
 }
 
+async fn execute_accepted(
+    root: &Path,
+    run_id: &str,
+    bootstrap: &wire::Bootstrap,
+    state: &Shared,
+    stop: &CancellationToken,
+) -> anyhow::Result<ExitOutcome> {
+    tracing::info!(event = "session_accepted", session_id = run_id);
+    let work = execute(root, bootstrap, state, stop)
+        .instrument(tracing::info_span!("game_session", session_id = run_id));
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            result = &mut work => break match result {
+                Ok(outcome) => Ok(outcome),
+                Err(error) => launch_error(root, state, Some(bootstrap), &error, stop),
+            },
+            () = tokio::time::sleep(Duration::from_millis(300)) => {
+                if storage::write_record(root, &snapshot(state)?).is_err() { warning(state, "Session status could not be saved"); }
+            }
+        }
+    }
+}
+
 /// Run the headless mode of the same executable, owning exactly one game session.
 /// # Errors
 /// Returns invalid bootstrap, local IPC or persistence failures without logging credentials.
@@ -397,21 +421,7 @@ pub async fn run_session_host(root: &Path, run_id: &str) -> anyhow::Result<()> {
     .await;
     let outcome = match bootstrap {
         Ok(Ok(bootstrap)) if bootstrap.profile_id == snapshot(&shared)?.context.profile_id => {
-            tracing::info!(event = "session_accepted", session_id = run_id);
-            let work = execute(&root, &bootstrap, &shared, &stop)
-                .instrument(tracing::info_span!("game_session", session_id = run_id));
-            tokio::pin!(work);
-            loop {
-                tokio::select! {
-                    result = &mut work => break match result {
-                        Ok(outcome) => outcome,
-                        Err(error) => launch_error(&root, &shared, Some(&bootstrap), &error, &stop)?,
-                    },
-                    () = tokio::time::sleep(Duration::from_millis(300)) => {
-                        if storage::write_record(&root, &snapshot(&shared)?).is_err() { warning(&shared, "Session status could not be saved"); }
-                    }
-                }
-            }
+            execute_accepted(&root, run_id, &bootstrap, &shared, &stop).await?
         }
         _ => launch_error(
             &root,

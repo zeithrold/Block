@@ -79,6 +79,22 @@ fn json_events_have_utc_metadata_fields_and_spans() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn emit_application_events() {
+    tracing::info!(target: "block_launcher::test", "app_info");
+    tracing::debug!(target: "block_launcher::test", "app_debug");
+}
+
+fn emit_dependency_events() {
+    tracing::info!(target: "dependency::test", "dependency_info");
+    tracing::warn!(target: "dependency::test", "dependency_warn");
+    tracing::debug!(target: "dependency::test", "dependency_debug");
+}
+
+fn emit_similar_target_events() {
+    tracing::info!(target: "blocking", "blocking_info");
+    tracing::info!(target: "block_buffer", "block_buffer_info");
+}
+
 fn filtered_messages(specification: Option<&str>) -> anyhow::Result<Vec<String>> {
     let temp = TempDir::new()?;
     let (writer, guard) = worker::start(
@@ -88,13 +104,9 @@ fn filtered_messages(specification: Option<&str>) -> anyhow::Result<Vec<String>>
         Failure::default(),
     )?;
     tracing::subscriber::with_default(subscriber(writer, filter(specification)), || {
-        tracing::info!(target: "block_launcher::test", "app_info");
-        tracing::debug!(target: "block_launcher::test", "app_debug");
-        tracing::info!(target: "dependency::test", "dependency_info");
-        tracing::warn!(target: "dependency::test", "dependency_warn");
-        tracing::debug!(target: "dependency::test", "dependency_debug");
-        tracing::info!(target: "blocking", "blocking_info");
-        tracing::info!(target: "block_buffer", "block_buffer_info");
+        emit_application_events();
+        emit_dependency_events();
+        emit_similar_target_events();
     });
     drop(guard);
     records(temp.path())?

@@ -287,6 +287,17 @@ async fn detached_game_reconnects_stops_and_can_restart_normally() -> anyhow::Re
     let id = record.context.run_id.clone();
     let running = wait_for(&fixture.root, &id, RunState::Running).await?;
     let pid = running.java_pid.context("fixture Java PID missing")?;
+    let prepared_directory = fixture.root.join("instances").join(&fixture.instance.id);
+    let prepared_marker = fs::read_to_string(prepared_directory.join("prepared.lock.json"))?;
+    let prepared_plan: serde_json::Value = serde_json::from_str(&prepared_marker)?;
+    assert_eq!(prepared_plan["instance"], fixture.instance.id);
+    assert_eq!(prepared_plan["version"], "1.20.6");
+    assert!(!prepared_marker.contains(TOKEN));
+    let instance_lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(prepared_directory.join("instance.lock"))?;
+    assert!(fs2::FileExt::try_lock_exclusive(&instance_lock).is_err());
     drop(record);
     drop(running);
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -306,6 +317,8 @@ async fn detached_game_reconnects_stops_and_can_restart_normally() -> anyhow::Re
     );
     assert!(session_host::read_crash(&fixture.root, &id).is_err());
     wait_host_exit(&fixture.root, &id).await?;
+    fs2::FileExt::try_lock_exclusive(&instance_lock)?;
+    drop(instance_lock);
     assert!(!fixture.game.join(".block-session.json").exists());
 
     let restarted = fixture.start().await?;

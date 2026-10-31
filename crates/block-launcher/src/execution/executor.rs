@@ -131,12 +131,7 @@ impl Executor {
         if let JavaExecutable::Local { path } = &plan.command.java {
             probe_java(path, &plan).await?;
         }
-        tracing::debug!(event = "preparation_phase", phase = "download", repair);
-        (self.events)(ExecutionEvent::Stage {
-            name: "Downloading verified resources".into(),
-        });
-        self.store.fetch_all(&plan.resources, cancel).await?;
-        ensure!(!cancel.is_cancelled(), "preparation cancelled");
+        self.download_resources(&plan, cancel, repair).await?;
         tracing::debug!(event = "preparation_phase", phase = "materialize", repair);
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
@@ -163,6 +158,21 @@ impl Executor {
             run_id,
             _lock: lock,
         })
+    }
+
+    async fn download_resources(
+        &self,
+        plan: &ExecutionPlan,
+        cancel: &CancellationToken,
+        repair: bool,
+    ) -> anyhow::Result<()> {
+        tracing::debug!(event = "preparation_phase", phase = "download", repair);
+        (self.events)(ExecutionEvent::Stage {
+            name: "Downloading verified resources".into(),
+        });
+        self.store.fetch_all(&plan.resources, cancel).await?;
+        ensure!(!cancel.is_cancelled(), "preparation cancelled");
+        Ok(())
     }
 
     /// Bind identity after preparation and supervise the actual game process.
