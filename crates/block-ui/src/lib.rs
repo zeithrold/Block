@@ -139,23 +139,49 @@ pub use i18n::{Language, initialize_desktop_locale};
 pub use scenarios::{SCENARIOS, ScenarioOptions};
 pub use window_geometry::{initial_window_bounds, preferred_management_size};
 
-/// Load or initialize the saved desktop language without discarding failures.
-#[must_use]
-pub fn initialize_saved_language(root: &std::path::Path) -> (Language, Option<anyhow::Error>) {
-    let (preferences, error) = Preferences::initialize_language(root, Language::detect());
-    (preferences.language.unwrap_or_default(), error)
+/// The preferences loaded for a standalone desktop window.
+pub struct SavedDesktopPreferences(Preferences);
+
+impl std::fmt::Debug for SavedDesktopPreferences {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SavedDesktopPreferences")
+            .field("language", &self.language())
+            .finish_non_exhaustive()
+    }
 }
 
-/// Register the shared unstyled foundation once before opening product windows.
+impl SavedDesktopPreferences {
+    #[must_use]
+    pub fn language(&self) -> Language {
+        self.0.language.unwrap_or_default()
+    }
+}
+
+/// Load or initialize desktop preferences without discarding failures.
+#[must_use]
+pub fn initialize_saved_desktop_preferences(
+    root: &std::path::Path,
+) -> (SavedDesktopPreferences, Option<anyhow::Error>) {
+    let (preferences, error) = Preferences::initialize_language(root, Language::detect());
+    (SavedDesktopPreferences(preferences), error)
+}
+
+struct UiInitialized;
+impl gpui::Global for UiInitialized {}
+
+/// Register the shared foundation once per application before opening windows.
 pub fn initialize(cx: &mut gpui::App) {
-    if !cx.has_global::<gpui_base::GlobalState>() {
-        gpui_base::init(cx);
+    if cx.has_global::<UiInitialized>() {
+        return;
     }
     // Modal semantics stay in Base Sheet/Dialog. Product drawer motion sits
     // below dialogs, and transient feedback sits above both.
     ProductRoot::register_plugin(cx, drawer::DrawerLayer::new);
+    // Component initialization already registers Base's key bindings.
     gpui_component::init(cx);
     ProductRoot::register_plugin(cx, feedback::ToastLayer::new);
+    cx.set_global(UiInitialized);
 }
 
 fn bind_navigation_keys(cx: &mut gpui::App) {
@@ -842,9 +868,10 @@ impl Block {
         let profile = pending.report.context.profile_id.clone();
         let run = pending.report.context.run_id.clone();
         let language = self.language();
+        let preferences = self.preferences.clone();
         let launcher = cx.weak_entity();
         let view = cx.new(|cx| {
-            CrashView::new(
+            let mut view = CrashView::new(
                 pending.report,
                 pending.directory,
                 language,
@@ -859,7 +886,9 @@ impl Block {
                 },
                 window,
                 cx,
-            )
+            );
+            view.set_preferences(preferences, window, cx);
+            view
         });
         self.crash_guard = Some(pending.guard);
         self.crash_help = Some(view);
@@ -1680,6 +1709,9 @@ impl Render for Block {
         feedback::ToastLayer::set_language(self.language(), window, cx);
         feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         if let Some(help) = &self.crash_help {
+            help.update(cx, |help, cx| {
+                help.set_preferences(self.preferences.clone(), window, cx);
+            });
             return div().size_full().child(help.clone()).into_any_element();
         }
         if self.pending_window_size.take().is_some() {
@@ -2083,6 +2115,40 @@ fn format_arguments(arguments: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{RecipeLoadState, parse_arguments};
+
+    #[gpui::test]
+    fn initialization_registers_input_bindings_once_per_app(cx: &mut gpui::TestAppContext) {
+        fn counts(cx: &gpui::App) -> (usize, usize) {
+            let keymap = cx.key_bindings();
+            let keymap = keymap.borrow();
+            (
+                keymap.bindings().count(),
+                keymap
+                    .bindings()
+                    .filter(|binding| binding.action().as_any().is::<gpui_base::input::Enter>())
+                    .count(),
+            )
+        }
+
+        let other = cx.new_app();
+        let measure = |app: &gpui::TestAppContext| {
+            app.update(|cx| {
+                super::initialize(cx);
+                let initial = counts(cx);
+                super::initialize(cx);
+                super::initialize(cx);
+                (initial, counts(cx))
+            })
+        };
+        let first = measure(cx);
+        let second = measure(&other);
+        let (_, enter_bindings) = first.0;
+        assert_eq!(enter_bindings, 3, "plain, shifted and secondary Enter");
+        assert_eq!(first.0, first.1, "reinitializing must not add bindings");
+        assert_eq!(second.0, second.1);
+        assert_eq!(first.0, second.0, "each App initializes independently");
+    }
+
     #[test]
     fn pending_recipe_blocks_another_import_and_autolaunches_once_after_success() {
         let mut state = RecipeLoadState::default();

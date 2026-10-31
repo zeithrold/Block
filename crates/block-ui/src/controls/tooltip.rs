@@ -9,12 +9,10 @@ use gpui::{
     Window, rgb,
 };
 
-use super::Block;
-
-pub(super) fn trigger<E: gpui::StatefulInteractiveElement>(
+pub(super) fn trigger<E: gpui::StatefulInteractiveElement, T: 'static>(
     control: E,
     text: impl Into<SharedString>,
-    _: &Context<'_, Block>,
+    _: &Context<'_, T>,
 ) -> E {
     let text = text.into();
     control.tooltip(move |_, cx| cx.new(|_| Tip(text.clone())).into())

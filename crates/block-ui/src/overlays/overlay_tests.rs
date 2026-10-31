@@ -834,7 +834,12 @@ fn crash_export_picker_keeps_its_view_when_the_launcher_updates(cx: &mut TestApp
             view.crash_help.as_ref().map(Entity::entity_id)
         });
         assert!(help.is_some());
-        crate::test_support::press(cx, "tab tab enter");
+        let export = crate::test_support::control_bounds(cx, "crash-export");
+        assert!(export.is_some());
+        if let Some(export) = export {
+            cx.simulate_click(export.center(), Modifiers::none());
+        }
+        cx.run_until_parked();
         assert!(cx.did_prompt_for_new_path());
         view.update(cx, |_, cx| cx.notify());
         cx.run_until_parked();

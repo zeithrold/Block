@@ -187,7 +187,6 @@ fn crash_help_preserves_report_actions_in_the_default_window(cx: &mut TestAppCon
         "crash-window-minimize",
         "crash-window-close",
         "crash-return",
-        "crash-open-folder",
         "crash-export",
         "crash-copy",
         "crash-details",
@@ -195,4 +194,8 @@ fn crash_help_preserves_report_actions_in_the_default_window(cx: &mut TestAppCon
     ] {
         inside_viewport(cx, selector);
     }
+    let details = inside_viewport(cx, "crash-details");
+    cx.simulate_click(details.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    inside_viewport(cx, "crash-open-folder");
 }
