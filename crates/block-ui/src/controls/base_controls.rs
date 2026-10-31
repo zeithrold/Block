@@ -20,18 +20,31 @@ pub(super) enum Control {
     Radio(Box<gpui_base::Radio>),
 }
 
+/// The supplied label is the control's accessible name. It is applied through
+/// `aria_label` rather than base's stored `accessibility_label`, which base
+/// renders after the consumer's own `aria_label` and would rename an icon
+/// control the consumer had already named. An empty label adds no name, matching
+/// the visible-text guard in `components::styled_control`.
+fn named<C: StatefulInteractiveElement>(control: C, label: SharedString) -> C {
+    if label.is_empty() {
+        control
+    } else {
+        control.aria_label(label)
+    }
+}
+
 impl Control {
     /// The click event is forwarded rather than erased because a control may
     /// need the press geometry or modality to decide whether to activate. The
     /// primitive still owns role, focus and keyboard activation.
     pub(super) fn button(
         id: SharedString,
-        _label: SharedString,
+        label: SharedString,
         role: Role,
         disabled: bool,
         on_activate: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        Self::Button(Box::new(
+        Self::Button(Box::new(named(
             gpui_base::Button::new(id)
                 .role(role)
                 .disabled(disabled)
@@ -39,17 +52,18 @@ impl Control {
                     on_activate(event, window, cx);
                     cx.stop_propagation();
                 }),
-        ))
+            label,
+        )))
     }
 
     pub(super) fn checkbox(
         id: SharedString,
-        _label: SharedString,
+        label: SharedString,
         checked: bool,
         disabled: bool,
         on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
     ) -> Self {
-        Self::Checkbox(Box::new(
+        Self::Checkbox(Box::new(named(
             gpui_base::Checkbox::new(id)
                 .checked(checked)
                 .disabled(disabled)
@@ -57,23 +71,27 @@ impl Control {
                     on_activate(&(), window, cx);
                     cx.stop_propagation();
                 }),
-        ))
+            label,
+        )))
     }
 
     pub(super) fn radio(
         id: SharedString,
-        _label: SharedString,
+        label: SharedString,
         checked: bool,
         disabled: bool,
         on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
     ) -> Self {
-        let mut radio = gpui_base::Radio::new(id)
-            .checked(checked)
-            .disabled(disabled)
-            .on_change(move |_, _, window, cx| {
-                on_activate(&(), window, cx);
-                cx.stop_propagation();
-            });
+        let mut radio = named(
+            gpui_base::Radio::new(id)
+                .checked(checked)
+                .disabled(disabled)
+                .on_change(move |_, _, window, cx| {
+                    on_activate(&(), window, cx);
+                    cx.stop_propagation();
+                }),
+            label,
+        );
         // Base deliberately emits no change for an already checked radio.
         // Consume its native click at the control boundary so an enclosing
         // actionable row does not mistake that no-op for its own activation.

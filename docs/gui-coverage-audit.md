@@ -5,8 +5,8 @@ Date: 2026-10-30.
 ## Result and scope
 
 The audit identified nine confirmed issue groups. The repair candidate below
-implements all nine within their stated boundaries; full native accessibility
-acceptance remains outstanding. The inventory also has material coverage gaps
+implements all nine within their stated boundaries. The inventory also has
+material coverage gaps
 and superseded evidence. This is not full-product visual acceptance or a claim
 that no other defects exist.
 
@@ -76,8 +76,59 @@ No custom accessibility bridge or dependency patch is included.
 
 Native Windows/macOS, native Wayland, touch and screen-reader acceptance were
 not repeated for this repair. The remaining whole-product review points below,
-including multiple active sessions, import Stop/retry and data-policy journeys,
+including session/modal ownership, import Stop/retry and data-policy journeys,
 remain separate from these nine fixes. No product acceptance marker is promoted.
+
+## Functional follow-up after `985238e`
+
+Windows verification found further issues in actual workflows. The
+[Windows report](windows-amd64-gui-verification.md) identifies the successive
+patches, executables and observations rather than treating the base commit as
+the final tested artifact.
+
+- **Active log sizes:** Windows directory enumeration returned zero for an open
+  segment whose path metadata and readable content had the correct length.
+  Export omitted it and retention underestimated the total. Segment enumeration
+  now queries current path metadata. The unchanged failing Windows tests passed
+  after the fix, and native ZIP export included a nonempty active segment.
+- **Wizard section ownership:** the ordinary wizard and section dialog mounted
+  the same live search entity, causing a native accessibility-frame focus panic.
+  Explicit outer/section rendering and independent viewports remove the second
+  mount while preserving inline validation. Windows replay opened the same
+  dialog, searched and selected a version without the panic. Linux ARM64
+  Xwayland replay exercised Version search/Escape, Configuration with a nested
+  choice, and Loader; captures are under `post-windows-fixes/`.
+- **Fresh import preparation:** overlap-safe selection correctly fell back to a
+  fresh data root's `instances` directory, but the Engine required it to exist.
+  The Engine now validates the selected batch before writes and prepares the
+  library under its storage lease. The original core copy, private staging,
+  source protection and rollback rules remain unchanged. An invalid shared
+  destination rejects the batch rather than allowing an earlier candidate to
+  modify another selected source.
+
+For the import candidate, Main ran `just check` on macOS ARM64 successfully,
+including **379 UI unit tests and 3 framework tests**. Both independent source
+reviews found no concrete issue: one covered filesystem/source safety, the
+other batch persistence, cancellation and rollback. Linux ARM64
+`cargo test --locked -p block-ui engine::tests::` passed **22 tests**, and
+`cargo build --locked -p block-app --bin block` passed.
+
+The Linux import replay used a copied task executable with an adjacent synthetic
+`.minecraft`, a new `--data-dir`, and process-local HOME/XDG directories.
+The fallback parent was absent immediately before Import. The actual Sources
+and Results views showed two candidates and **2/2 Saved**; catalog inspection
+confirmed two Instances and two Profiles, both targets Pending, with matching
+source/destination world, config and options markers. The launcher returned to
+Overview and closed normally. Captures and `checks.txt` are under
+`block-logging-native-20261030T085846Z/fresh-import-parent-native/`.
+Windows separately replayed the original fresh-root path, plus failure/retry
+without duplicating the successful candidate; detailed evidence belongs to its
+report. Neither replay changes product acceptance status.
+
+One separate pre-existing validation follow-up remains recorded: rejecting Done
+for an invalid Configuration folder and then cancelling can leave the discarded
+draft's error on the outer page. It was source-traced during the wizard review
+and was not included in the duplicate-mount repair.
 
 ## Baseline confirmed issues
 
@@ -246,7 +297,7 @@ disposition table above. Historical real-service checks retain their original sc
 | --- | --- | --- |
 | Window and global navigation | Custom title/drag/minimize/close, app menu, Home/management frame, rapid reversal, Settings/About previews | Work-area changes, mixed-DPI monitor movement, strict fixed-size user WM paths; modal versus chrome interaction |
 | Home and selectors | No account/game; Ready/Pending/Installing/Failed; Download/Retry/Launch/Queue/Stop; account/profile sheets; search/empty/unavailable/current choice | G01/G02/G05; real control activation during busy state, not direct handler dispatch |
-| First run | Welcome, resumed Overview, neither/account-only/game-only/both ready, Continue/Finish/Back/Skip and setup-save failure | G04; current setup states missing from the semantic review registry |
+| First run | Welcome, resumed Overview, neither/account-only/game-only/both ready, Continue/Finish/Back/Skip and setup-save failure | G04 disposition above; current setup mappings are restored, while native task transitions still require their own acceptance |
 | Game entry and import | Recommended/custom/existing setup; Sources/List/Progress/Results; unsupported/imported/warning rows, Stop, close, retry remaining | Mixed-success Results and mid-copy Stop→retry→Overview controls/layout; current static import scenarios cover Sources/List only |
 | Account browser | Loading/error/retry/empty/search-empty/list/detail, inspected versus selected identity, provider fallback, removal confirmation | Native confirmed removal/last-account reconciliation on current code; no real identity deletion in this audit |
 | Microsoft authentication | Browser and Device Code, preparing/waiting/expiry/reopen/copy, verify/review/save/failure/back/cancel/method change | Current failure/preflight/expiry layouts and native focus; archived successful sign-in is not visual acceptance |
@@ -259,13 +310,13 @@ disposition table above. Historical real-service checks retain their original sc
 | Game wizard | Bundled two-step and Separated new/existing Instance flow; Setup/Profile/Review; pending/failure; ordinary install versus first-run save-only | Real rendered entry/action chains, especially compact section dialogs rather than direct page assignment |
 | Wizard components | Version catalog/search/snapshots/exact ID/ARM64 restriction; all Loaders and loading/error/no-build/search-empty/delisted states; OptiFine; Location/Java/window | G08; nested section Dialog/select/native chooser cancellation/focus and long-tail scrolling |
 | Download presentation | Overall/current known/unknown totals, verified/cache/retry groups, empty state, drawer and stacked file-detail dialog | Live group changes while details are open; long resource/error strings; keyboard/focus during active updates |
-| Session lifecycle | Pre-handoff, accepted preparation/running, Stop/stopping/failure, exit/crash, monitoring interruption/reconnect, reopen and queued launch | Two accepted active sessions and remaining-session representation after the newest ends; crash arrival while another modal is mounted |
+| Session lifecycle | Pre-handoff, accepted preparation/running, Stop/stopping/failure, exit/crash, monitoring interruption/reconnect, reopen and queued launch | Single-active-run Play gating and Stop target while inspecting another Profile; crash arrival while another modal is mounted |
 | Crash help | Inline and standalone, diagnoses/evidence/details/attachments/truncation, folder/export/copy/return/close and logging notice | G06/G07/G09; long sanitized report, action focus/scroll and native picker error/lifecycle |
 | General and Game settings | Theme/reduced motion preview; Java/memory/window/JVM/snapshots; section Restore, whole-draft Save/Cancel, hidden validation and save failure | Current native keyboard/focus and long-value/small-window presentation; preserve entered draft on every error |
 | Profile mode and network settings | Confirmed one-way conversion; System/Direct/HTTP(S)/SOCKS proxy, limits, connection-test running/result/error and stale-result rejection | Conversion during other operations; unsaved/edited network draft versus in-flight response; real endpoint success has endpoint-only scope |
 | Storage settings | Automatic library/cache paths, read-only view and configuration error; automatic first-run handoff | Path/error visibility and actual current location policy; relocation/cleanup controls are retired, not missing features |
 | About and diagnostics | Build identity, native clipboard/links, output/recipe actions, log directory, export waiting/writing/success/cancel/error/retry and log-storage failure | G08; newest cancellation control's Windows/macOS native focus/layout; disk-write failure distinct from existing-file refusal |
-| Shared controls and feedback | Text/password fields, checkboxes/radio/select/listbox, IME/clipboard/undo, tooltips, validation, toast stack/pause/swipe/exit, sheet/dialog stack/focus | G03/G09; native AX audit, keyboard-only journeys, CJK composition on each relevant backend, high scaling/long names, physical Toast timing |
+| Shared controls and feedback | Text/password fields, checkboxes/radio/select/listbox, IME/clipboard/undo, tooltips, validation, toast stack/pause/swipe/exit, sheet/dialog stack/focus | G03 disposition above; keyboard journeys, CJK composition on each relevant backend, high scaling/long names, physical Toast timing |
 
 Cross-page checks must follow the actual state as well as the page name:
 loading/empty/search-empty/error/retry, dirty/saving/save-failed, disabled versus
@@ -308,8 +359,8 @@ The current static scenario list does not independently seed:
   variants as a complete management-state set.
 - Settings connection-test running/result/error, corrupt Storage presentation,
   or About log-export waiting/writing/failure states.
-- Accepted game running/stopping, monitoring interruption, multiple active
-  sessions, or crash arrival above an existing modal.
+- Accepted game running/stopping, monitoring interruption, active-run controls
+  while inspecting another Profile, or crash arrival above an existing modal.
 
 Some are covered by owner tests, historical native interactions or the recent
 dedicated log-export replay. They can also be reached interactively from other
@@ -317,17 +368,14 @@ scenarios. The omission is that a static screenshot matrix cannot count these
 as independently captured states merely because it covers every registered
 scenario.
 
-### Historical rows do not all describe current GUI behavior
+### Historical evidence reconciled after the audit
 
-- [STATUS Storage relocation/cleanup rows](STATUS.md#L168-L169) describe retired
-  GUI controls. Its [later automatic-storage note](STATUS.md#L227) and current
-  Settings source supersede them.
-- [The retries note](STATUS.md#L167) says 11 was clamped to 10; current settings
-  parsing rejects values above 10.
-- Old Welcome mappings and inline-provider descriptions in the semantic
-  registry still describe the previous flow or a separate OS window.
-- A Storage scenario's semantic description attributes paths to its isolated
-  root, while the [current fixture supplies fixed synthetic paths](../crates/block-ui/src/runtime/scenarios.rs#L437-L445).
+- STATUS now identifies relocation/cleanup observations as historical and the
+  current Storage view as read-only. The historical retry-clamping observation
+  is distinguished from the current rejection rule for values above 10.
+- The registry now marks old Welcome mappings retired, describes the provider
+  dialog as an in-window surface and attributes Storage paths to the fixed
+  synthetic fixture rather than the isolated data root.
 - Historical 142-shot matrices and older test totals are not evidence that
   this candidate's 72 scenarios, new controls and changed layouts are all
   accepted. [Accepted remains Pending](STATUS.md#L224).

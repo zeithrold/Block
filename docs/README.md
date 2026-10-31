@@ -38,6 +38,8 @@ These documents explain feature decisions and implementation scope. Consult
 
 ### UI and native interaction
 
+- [GUI acceptance walkthrough](gui-acceptance.md): numbered human journeys, expected results and remaining service/platform boundaries.
+- [Windows AMD64 GUI verification](windows-amd64-gui-verification.md): partial native workflow evidence, candidate fixes and outstanding checks.
 - [Whole-product GUI coverage audit](gui-coverage-audit.md): surface inventory, nine-issue repair disposition, native evidence and remaining checks.
 - [Architecture migration verification](architecture-migration-verification.md): crate migration, Welcome retirement, OptiFine entry and page-host checks.
 - [Evidence calibration](evidence-calibration.md): corrected account/scenario captures and comparison semantics.

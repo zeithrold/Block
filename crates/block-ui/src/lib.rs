@@ -161,6 +161,7 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Pixels, Render, SharedString,
     Styled as _, WeakEntity, Window, div, px, rgb,
 };
+use gpui_component::WindowExt as _;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
@@ -668,7 +669,14 @@ impl Block {
     }
 
     fn prepare_crash_help(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.crash_help.is_some() {
+        // Do not create the focus-taking view until the current modal has released input.
+        if self.crash_help.is_some()
+            || self.pending_crashes.is_empty()
+            || self.shell.surfaces.is_open()
+            || window.has_active_dialog(cx)
+            || window.has_active_sheet(cx)
+            || drawer::DrawerLayer::is_open(window, cx)
+        {
             return;
         }
         let Some(pending) = self.pending_crashes.pop_front() else {

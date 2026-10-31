@@ -1247,7 +1247,10 @@ pub(super) fn progress_ring(state: ProgressState, palette: Palette) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::{ButtonVariant, ControlState, ProgressState, button, field, initials};
+    use super::{
+        ButtonVariant, ControlState, ProgressState, button, button_role, checkbox, field, initials,
+        radio,
+    };
     use crate::{appearance::Palette, text_input::TextInput};
     use gpui::{
         AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
@@ -1593,6 +1596,151 @@ mod tests {
             assert_eq!(view.read_with(cx, |view, _| view.activations), 3);
             assert_eq!(view.read_with(cx, |view, _| view.ancestor_activations), 0);
         }
+    }
+
+    /// The shared constructors whose accessible names this adapter owns, with
+    /// the consumer-named icon control and the native states it must not
+    /// disturb.
+    struct NamedControls;
+
+    impl Render for NamedControls {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(button(
+                    "named-save",
+                    "Save",
+                    Palette::LIGHT,
+                    ButtonVariant::Primary,
+                    ControlState::default(),
+                    cx.listener(|_, &(): &(), _, _| {}),
+                ))
+                .child(
+                    button(
+                        "named-home",
+                        "",
+                        Palette::LIGHT,
+                        ButtonVariant::Ghost,
+                        ControlState::default(),
+                        cx.listener(|_, &(): &(), _, _| {}),
+                    )
+                    .aria_label("Home"),
+                )
+                .child(
+                    button(
+                        "named-override",
+                        "Start setup",
+                        Palette::LIGHT,
+                        ButtonVariant::Primary,
+                        ControlState::default(),
+                        cx.listener(|_, &(): &(), _, _| {}),
+                    )
+                    .aria_label("Begin Block setup"),
+                )
+                .child(button(
+                    "named-pause",
+                    "Pause",
+                    Palette::LIGHT,
+                    ButtonVariant::Outline,
+                    ControlState {
+                        disabled: true,
+                        ..ControlState::default()
+                    },
+                    cx.listener(|_, &(): &(), _, _| {}),
+                ))
+                .child(checkbox(
+                    "named-remember",
+                    "Remember me",
+                    true,
+                    Palette::LIGHT,
+                    ControlState::default(),
+                    cx.listener(|_, &(): &(), _, _| {}),
+                ))
+                .child(radio(
+                    "named-vanilla",
+                    "Vanilla",
+                    true,
+                    Palette::LIGHT,
+                    ControlState::default(),
+                    cx.listener(|_, &(): &(), _, _| {}),
+                ))
+                .child(button_role(
+                    "setup-skip",
+                    "Skip setup",
+                    Palette::LIGHT,
+                    ButtonVariant::Ghost,
+                    ControlState::default(),
+                    gpui::Role::Button,
+                    cx.listener(|_, &(): &(), _, _| {}),
+                ))
+        }
+    }
+
+    /// The native accessibility node GPUI builds for the rendered control.
+    #[expect(
+        clippy::expect_used,
+        reason = "The fixture paints every control it renders."
+    )]
+    fn control_node(
+        cx: &mut gpui::VisualTestContext,
+        id: &str,
+    ) -> gpui_base::test_support::ElementSnapshot {
+        cx.run_until_parked();
+        let node = cx.update(|window, _| {
+            gpui_base::test_support::find(window, &[], &gpui::ElementId::Name(id.into()))
+        });
+        node.expect("painted control")
+    }
+
+    #[gpui::test]
+    fn rendered_controls_publish_their_supplied_name_and_native_state(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_, cx) = crate::test_support::window(cx, |_, _| NamedControls);
+        let save = control_node(cx, "named-save");
+        assert_eq!(save.role(), Some(gpui::Role::Button), "{save:?}");
+        assert_eq!(save.label(), Some("Save"), "{save:?}");
+        assert_ne!(save.disabled(), Some(true), "{save:?}");
+
+        // An icon control supplies no visible label, so the consumer's own name
+        // must survive the adapter's naming.
+        let home = control_node(cx, "named-home");
+        assert_eq!(home.label(), Some("Home"), "{home:?}");
+
+        // A consumer may also name a labelled control differently; that explicit
+        // name is set after the adapter's.
+        let override_named = control_node(cx, "named-override");
+        assert_eq!(
+            override_named.label(),
+            Some("Begin Block setup"),
+            "{override_named:?}"
+        );
+
+        let pause = control_node(cx, "named-pause");
+        assert_eq!(pause.label(), Some("Pause"), "{pause:?}");
+        assert_eq!(pause.disabled(), Some(true), "{pause:?}");
+
+        let remember = control_node(cx, "named-remember");
+        assert_eq!(remember.role(), Some(gpui::Role::CheckBox), "{remember:?}");
+        assert_eq!(remember.label(), Some("Remember me"), "{remember:?}");
+        assert_eq!(remember.checked(), Some(true), "{remember:?}");
+
+        let vanilla = control_node(cx, "named-vanilla");
+        assert_eq!(vanilla.role(), Some(gpui::Role::RadioButton), "{vanilla:?}");
+        assert_eq!(vanilla.label(), Some("Vanilla"), "{vanilla:?}");
+        assert_eq!(vanilla.checked(), Some(true), "{vanilla:?}");
+    }
+
+    /// Welcome's Skip setup is a shared `button_role` control; Windows UIA found
+    /// it as an unnamed button whose rectangle matched its label.
+    #[gpui::test]
+    fn skip_setup_is_named_by_the_shared_button_constructor(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = crate::test_support::window(cx, |_, _| NamedControls);
+        let skip = control_node(cx, "setup-skip");
+        assert_eq!(skip.role(), Some(gpui::Role::Button), "{skip:?}");
+        assert_eq!(skip.label(), Some("Skip setup"), "{skip:?}");
     }
 
     #[gpui::test]

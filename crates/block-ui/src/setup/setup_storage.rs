@@ -225,13 +225,13 @@ fn protected_location(path: &Path) -> bool {
     })
 }
 
-fn paths_overlap(left: &Path, right: &Path) -> bool {
+pub(super) fn paths_overlap(left: &Path, right: &Path) -> bool {
     let left = comparable_path(left);
     let right = comparable_path(right);
     left.starts_with(&right) || right.starts_with(&left)
 }
 
-fn comparable_path(path: &Path) -> PathBuf {
+pub(super) fn comparable_path(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {

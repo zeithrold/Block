@@ -963,7 +963,7 @@ impl Block {
         // keep the dialog footer outside that fixed content height.
         let section_height = px(520.);
         let (content, section) = match &kind {
-            Surface::WizardSection(_) => (
+            Surface::WizardSection(page) => (
                 div()
                     .min_h_0()
                     .w_full()
@@ -974,7 +974,7 @@ impl Block {
                             .h(section_height)
                             .min_h_0()
                             .w_full()
-                            .child(self.render_game_wizard_transition_body(window, cx)),
+                            .child(self.render_game_wizard_section_body(*page, window, cx)),
                     )
                     .child(
                         super::patterns::management_footer(self.palette)

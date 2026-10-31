@@ -110,16 +110,18 @@ fn default_enabled(metadata: &Metadata<'_>) -> bool {
 /// Returns an error if the operating system cannot provide a base directory.
 pub fn log_directory() -> anyhow::Result<PathBuf> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    if let Some(state) = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from) {
-        if state.is_absolute() {
-            return Ok(state.join("block/logs"));
-        }
+    if let Some(state) = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        return Ok(state.join("block/logs"));
     }
     #[cfg(target_os = "windows")]
-    if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-        if local.is_absolute() {
-            return Ok(local.join("Block/logs"));
-        }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        return Ok(local.join("Block/logs"));
     }
     let directories =
         directories::BaseDirs::new().context("Cannot determine the system log directory.")?;

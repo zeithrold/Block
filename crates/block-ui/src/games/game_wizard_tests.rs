@@ -1141,6 +1141,10 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
             .set_offset(point(px(0.), px(-112.)));
         view.shell
             .wizard
+            .section_scroll
+            .set_offset(point(px(0.), px(-48.)));
+        view.shell
+            .wizard
             .version_scroll
             .set_offset(point(px(0.), px(-64.)));
         if let Some(profile) = &view.shell.wizard.profile {
@@ -1155,6 +1159,10 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
             .set_offset(point(px(0.), px(-8.)));
         view.shell
             .wizard
+            .section_scroll
+            .set_offset(point(px(0.), px(-4.)));
+        view.shell
+            .wizard
             .version_scroll
             .set_offset(point(px(0.), px(-2.)));
         if let Some(profile) = &view.shell.wizard.profile {
@@ -1163,6 +1171,7 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
                 .update(cx, |input, cx| input.set_value("New live name", cx));
         }
         assert_eq!(frozen.body_scroll.offset(), point(px(0.), px(-112.)));
+        assert_eq!(frozen.section_scroll.offset(), point(px(0.), px(-48.)));
         assert_eq!(frozen.version_scroll.offset(), point(px(0.), px(-64.)));
         assert!(
             frozen.reveal.get().is_none(),
@@ -1778,6 +1787,22 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
             view.read_with(cx, |view, _| view.shell.wizard.step),
             WizardStep::Profile
         );
+        view.read_with(cx, |view, _| {
+            assert!(!view.shell.surfaces.is_open());
+            assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
+            assert_eq!(
+                view.page_spec().wizard,
+                Some(crate::navigation::WizardKey::Game(
+                    WizardStep::Profile,
+                    Some(WizardPage::Location)
+                ))
+            );
+        });
+        cx.update(|window, _| {
+            let next = gpui_base::test_support::find_all(window, &[], &"wizard-next".into());
+            assert_eq!(next.len(), 1);
+            assert_eq!(next[0].label(), Some("Done"));
+        });
         assert!(view.read_with(cx, |view, _| {
             view.shell
                 .wizard
@@ -1912,6 +1937,186 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
                 );
             }
         });
+    });
+}
+
+/// Open the real Configuration section over the live setup page.
+fn open_configuration_section(view: &gpui::Entity<crate::Block>, cx: &mut gpui::VisualTestContext) {
+    click(cx, "wizard-component-location");
+    view.read_with(cx, |view, _| {
+        assert!(
+            view.shell.surfaces.top().is_some_and(|layer| matches!(
+                &layer.kind,
+                crate::shell::Surface::WizardSection(WizardPage::Location)
+            )),
+            "the Configuration card must open its own section surface"
+        );
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
+    });
+}
+
+/// Enter a relative installation folder and let the section's own Done reject it.
+fn reject_relative_installation_folder(
+    view: &gpui::Entity<crate::Block>,
+    cx: &mut gpui::VisualTestContext,
+) {
+    open_configuration_section(view, cx);
+    view.update(cx, |view, cx| {
+        if let Some(Form::Instance(form)) = &view.form {
+            form.directory
+                .update(cx, |field, cx| field.set_value("relative-fixture", cx));
+        }
+        cx.notify();
+    });
+    click(cx, "wizard-next");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
+        assert_eq!(view.shell.wizard.error_field, Some(WizardField::Directory));
+        assert!(
+            view.shell
+                .wizard
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("absolute installation folder")),
+            "the section Done must reject the relative folder"
+        );
+    });
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-error").is_some()
+            && crate::test_support::control_bounds(cx, "wizard-location-error").is_some(),
+        "the rejection must be painted in the section"
+    );
+}
+
+/// A cancelled section must leave the outer page with the restored draft and no
+/// trace of the validation that belonged to the discarded edits.
+fn assert_section_cancelled_without_stale_validation(
+    view: &gpui::Entity<crate::Block>,
+    cx: &mut gpui::VisualTestContext,
+) {
+    view.read_with(cx, |view, cx| {
+        assert!(
+            !view.shell.surfaces.is_open(),
+            "the section surface must close"
+        );
+        assert_eq!(view.shell.wizard.page, None, "the outer page is restored");
+        assert!(view.shell.wizard.section_snapshot.is_none());
+        assert!(
+            view.shell.wizard.error.is_none(),
+            "a cancelled draft must not leave its validation on the outer page"
+        );
+        assert!(view.shell.wizard.error_field.is_none());
+        assert!(
+            view.shell.wizard.reveal.get().is_none(),
+            "no pending reveal may survive the cancellation"
+        );
+        assert!(
+            matches!(&view.form, Some(Form::Instance(form))
+            if form.directory.read(cx).value().is_empty()
+                && form.name.read(cx).value() == "Retained game"),
+            "section cancellation restores the checkpoint, not the rejected edits"
+        );
+    });
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-error").is_none(),
+        "the outer page must not paint the cancelled draft's error"
+    );
+}
+
+#[gpui::test]
+fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.snapshot = ready_snapshot();
+        view.snapshot.profile_mode = ProfileMode::Separated;
+        view.versions = vec!["1.21.1".into()];
+        view.begin_game_wizard(cx);
+        if let Some(Form::Instance(form)) = &view.form {
+            form.name
+                .update(cx, |field, cx| field.set_value("Retained game", cx));
+        }
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(900.)));
+    click(cx, "wizard-next");
+    reject_relative_installation_folder(&view, cx);
+    click(cx, "section-cancel");
+    assert_section_cancelled_without_stale_validation(&view, cx);
+    // A valid Configuration opened after the cancellation starts clean and commits.
+    click(cx, "wizard-component-location");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
+        assert!(view.shell.wizard.error.is_none());
+        assert!(view.shell.wizard.reveal.get().is_none());
+    });
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-location-error").is_none(),
+        "a fresh section must not show the discarded draft's error"
+    );
+    click(cx, "wizard-next");
+    view.read_with(cx, |view, _| {
+        assert!(!view.shell.surfaces.is_open());
+        assert_eq!(view.shell.wizard.page, None);
+        assert!(view.shell.wizard.error.is_none());
+    });
+}
+
+#[gpui::test]
+fn configuration_section_escape_discards_the_rejected_validation(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.snapshot = ready_snapshot();
+        view.snapshot.profile_mode = ProfileMode::Separated;
+        view.versions = vec!["1.21.1".into()];
+        view.begin_game_wizard(cx);
+        if let Some(Form::Instance(form)) = &view.form {
+            form.name
+                .update(cx, |field, cx| field.set_value("Retained game", cx));
+        }
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(900.)));
+    click(cx, "wizard-next");
+    reject_relative_installation_folder(&view, cx);
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    assert_section_cancelled_without_stale_validation(&view, cx);
+}
+
+/// Direct wizard state, no surface: validation schedules the reveal and
+/// cancellation must discard it together with the message and field owner.
+#[gpui::test]
+fn wizard_state_section_cancel_discards_validation_and_pending_reveal(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.snapshot = ready_snapshot();
+        view.versions = vec!["1.21.1".into()];
+        view.begin_game_wizard(cx);
+        view
+    });
+    view.update(cx, |view, cx| {
+        view.open_game_wizard_page(Some(WizardPage::Location), cx);
+        if let Some(Form::Instance(form)) = &view.form {
+            form.directory
+                .update(cx, |field, cx| field.set_value("relative-fixture", cx));
+        }
+        assert!(!view.validate_wizard_section(WizardPage::Location, cx));
+        assert_eq!(view.shell.wizard.error_field, Some(WizardField::Directory));
+        assert_eq!(
+            view.shell.wizard.reveal.get(),
+            Some(WizardField::Directory),
+            "validation schedules the reveal for the section"
+        );
+        view.cancel_component_draft(cx);
+        assert_eq!(view.shell.wizard.page, None);
+        assert!(view.shell.wizard.error.is_none());
+        assert!(view.shell.wizard.error_field.is_none());
+        assert_eq!(view.shell.wizard.reveal.get(), None);
+        assert!(matches!(&view.form, Some(Form::Instance(form))
+            if form.directory.read(cx).value().is_empty()));
     });
 }
 
@@ -2176,6 +2381,116 @@ fn loader_empty_error_retry_and_delisted_build_states_cannot_be_committed_as_van
         view.choose_wizard_loader_build("0.30.0".into(), cx);
         assert!(view.validate_instance_draft(cx));
         assert!(view.snapshot.instances.is_empty());
+    });
+}
+
+/// A real Loader section whose official catalog has no build for the chosen
+/// loader and game. The rejected Done must not outlive the cancelled draft.
+#[gpui::test]
+fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut TestAppContext) {
+    use block_launcher::catalog::LoaderKind;
+
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.snapshot = ready_snapshot();
+        view.snapshot.profile_mode = ProfileMode::Separated;
+        view.versions = vec!["1.21.1".into()];
+        view.begin_game_wizard(cx);
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(900.)));
+    click(cx, "wizard-next");
+    click(cx, "wizard-component-loader");
+    view.read_with(cx, |view, _| {
+        assert!(
+            view.shell.surfaces.top().is_some_and(|layer| matches!(
+                &layer.kind,
+                crate::shell::Surface::WizardSection(WizardPage::Loader)
+            )),
+            "the Mod loader card must open its own section surface"
+        );
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
+        assert!(matches!(&view.form, Some(Form::Instance(form))
+            if form.loader == LoaderKind::Vanilla));
+    });
+    // Choose a loader whose official catalog resolves to zero builds through the
+    // existing request boundary; no network or product hook is involved.
+    click(cx, "wizard-loader-fabric");
+    view.update(cx, |view, cx| {
+        let request = view
+            .shell
+            .wizard
+            .loader_catalog
+            .as_ref()
+            .map(|catalog| catalog.request);
+        assert!(
+            request.is_some(),
+            "choosing Fabric must request its catalog"
+        );
+        if let Some(request) = request {
+            view.receive_loader_versions(request, Ok(Vec::new()), cx);
+        }
+        assert!(view.wizard_loader_issue(cx).is_some());
+        assert!(matches!(&view.form, Some(Form::Instance(form))
+            if form.loader == LoaderKind::Fabric && form.loader_version.is_none()));
+    });
+    click(cx, "wizard-next");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
+        assert_eq!(view.shell.wizard.error_field, Some(WizardField::Loader));
+        assert!(
+            view.shell
+                .wizard
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("no official build")),
+            "the section Done must reject the unavailable official catalog"
+        );
+    });
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-error").is_some(),
+        "the rejection must be painted in the section"
+    );
+    click(cx, "section-cancel");
+    view.read_with(cx, |view, _| {
+        assert!(
+            !view.shell.surfaces.is_open(),
+            "the section surface must close"
+        );
+        assert_eq!(view.shell.wizard.page, None, "the outer page is restored");
+        assert!(
+            view.shell.wizard.error.is_none(),
+            "the cancelled loader draft's catalog error must not survive"
+        );
+        assert!(view.shell.wizard.error_field.is_none());
+        assert!(
+            view.shell.wizard.reveal.get().is_none(),
+            "the rejected Loader Done leaves a pending reveal that cancellation must discard"
+        );
+        assert!(matches!(&view.form, Some(Form::Instance(form))
+            if form.loader == LoaderKind::Vanilla && form.loader_version.is_none()));
+        assert!(view.shell.wizard.loader_catalog.is_none());
+        assert!(view.shell.wizard.loader_request.is_none());
+    });
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-error").is_none(),
+        "the outer page must not paint the cancelled loader draft's error"
+    );
+    // Reopening starts from the restored Vanilla checkpoint with no old error.
+    click(cx, "wizard-component-loader");
+    view.read_with(cx, |view, cx| {
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
+        assert!(view.shell.wizard.error.is_none());
+        assert!(view.shell.wizard.reveal.get().is_none());
+        assert!(view.wizard_loader_issue(cx).is_none());
+    });
+    assert!(crate::test_support::control_bounds(cx, "wizard-error").is_none());
+    click(cx, "wizard-next");
+    view.read_with(cx, |view, _| {
+        assert!(!view.shell.surfaces.is_open());
+        assert_eq!(view.shell.wizard.page, None);
+        assert!(view.shell.wizard.error.is_none());
     });
 }
 

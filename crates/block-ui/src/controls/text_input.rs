@@ -44,6 +44,12 @@ struct Home;
 struct End;
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
 #[action(namespace = text_input)]
+struct SelectHome;
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = text_input)]
+struct SelectEnd;
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = text_input)]
 struct ShowCharacterPalette;
 #[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
 #[action(namespace = text_input)]
@@ -285,6 +291,14 @@ impl TextInput {
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<'_, Self>) {
         self.move_to(self.content.len(), cx);
+    }
+
+    fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<'_, Self>) {
+        self.select_to(0, cx);
+    }
+
+    fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<'_, Self>) {
+        self.select_to(self.content.len(), cx);
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1026,6 +1040,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
+            .on_action(cx.listener(Self::select_home))
+            .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::show_character_palette))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
@@ -1151,6 +1167,8 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, Some("TextInput")),
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
+        KeyBinding::new("shift-home", SelectHome, Some("TextInput")),
+        KeyBinding::new("shift-end", SelectEnd, Some("TextInput")),
         KeyBinding::new("cmd-a", SelectAll, Some("TextInput")),
         KeyBinding::new("ctrl-a", SelectAll, Some("TextInput")),
         KeyBinding::new("cmd-v", Paste, Some("TextInput")),
@@ -1469,6 +1487,48 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[gpui::test]
+    fn shift_home_and_end_extend_the_native_selection(cx: &mut gpui::TestAppContext) {
+        let text = "Trail 中文 👩🏽‍💻";
+        let (input, cx) = cx.add_window_view(|window, cx| {
+            super::bind_keys(cx);
+            let input = super::TextInput::new(text, "Name", cx);
+            input.focus_handle(cx).focus(window, cx);
+            input
+        });
+        cx.run_until_parked();
+
+        crate::test_support::press(cx, "home");
+        crate::test_support::press(cx, "shift-end");
+        input.read_with(cx, |input, _| {
+            assert_eq!(input.selected_range, 0..text.len());
+            assert!(!input.selection_reversed);
+            assert_eq!(input.content.as_ref(), text);
+        });
+        crate::test_support::press(cx, "ctrl-c");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some(text.to_owned())
+        );
+
+        crate::test_support::press(cx, "shift-home");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.selected_range.clone()),
+            0..0
+        );
+        crate::test_support::press(cx, "end");
+        crate::test_support::press(cx, "shift-home");
+        input.read_with(cx, |input, _| {
+            assert_eq!(input.selected_range, 0..text.len());
+            assert!(input.selection_reversed);
+        });
+        crate::test_support::press(cx, "shift-end");
+        assert_eq!(
+            input.read_with(cx, |input, _| input.selected_range.clone()),
+            text.len()..text.len()
+        );
     }
 
     #[gpui::test]

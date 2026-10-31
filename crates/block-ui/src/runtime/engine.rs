@@ -321,27 +321,49 @@ impl Engine {
         let root = self.root.clone();
         let sender = self.sender.unscoped();
         self.runtime.spawn(async move {
+            // Every candidate shares this destination. Check the entire
+            // selection before any candidate can write into another source.
+            let overlaps_source = if cancel.is_cancelled() {
+                Ok(false)
+            } else {
+                let check_root = root.clone();
+                let check_parent = parent.clone();
+                let check_candidates = candidates.clone();
+                tokio::task::spawn_blocking(move || {
+                    check_candidates.iter().any(|candidate| {
+                        import_overlaps_source(&check_root, &check_parent, candidate)
+                    })
+                })
+                .await
+                .map_err(|error| format!("Import task failed: {error}"))
+            };
             for candidate in candidates {
                 if cancel.is_cancelled() {
                     break;
                 }
                 let candidate_id = candidate.id.clone();
-                let task_root = root.clone();
-                let task_parent = parent.clone();
-                let task_defaults = defaults.clone();
-                let task_cancel = cancel.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    import_and_save_candidate(
-                        &task_root,
-                        candidate,
-                        &task_parent,
-                        task_defaults,
-                        &task_cancel,
-                    )
-                })
-                .await
-                .map_err(|error| format!("Import task failed: {error}"))
-                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+                let result = match &overlaps_source {
+                    Ok(true) => Err(IMPORT_SOURCE_OVERLAP.to_owned()),
+                    Err(error) => Err(error.clone()),
+                    Ok(false) => {
+                        let task_root = root.clone();
+                        let task_parent = parent.clone();
+                        let task_defaults = defaults.clone();
+                        let task_cancel = cancel.clone();
+                        tokio::task::spawn_blocking(move || {
+                            import_and_save_candidate(
+                                &task_root,
+                                candidate,
+                                &task_parent,
+                                task_defaults,
+                                &task_cancel,
+                            )
+                        })
+                        .await
+                        .map_err(|error| format!("Import task failed: {error}"))
+                        .and_then(|result| result.map_err(|error| format!("{error:#}")))
+                    }
+                };
                 match result {
                     Ok((instance, profile)) => {
                         let _ = sender
@@ -1616,6 +1638,23 @@ async fn send_catalog(root: &Path, sender: &EventSender) {
         .await;
 }
 
+const IMPORT_SOURCE_OVERLAP: &str =
+    "Import destination or launcher data root overlaps a selected source";
+
+fn import_overlaps_source(
+    root: &Path,
+    parent: &Path,
+    candidate: &block_launcher::game_import::GameCandidate,
+) -> bool {
+    let root = super::setup_storage::comparable_path(root);
+    [&candidate.game_directory, &candidate.source_root]
+        .into_iter()
+        .any(|source| {
+            super::setup_storage::paths_overlap(parent, source)
+                || root.starts_with(super::setup_storage::comparable_path(source))
+        })
+}
+
 fn import_and_save_candidate(
     root: &Path,
     candidate: block_launcher::game_import::GameCandidate,
@@ -1635,7 +1674,6 @@ fn import_and_save_candidate(
         .minecraft_version
         .clone()
         .context("Minecraft version could not be resolved from local metadata")?;
-    ensure!(parent.is_dir(), "game destination parent does not exist");
     ensure!(!cancel.is_cancelled(), "Import cancelled");
 
     let loader = match candidate.loader.clone() {
@@ -1677,10 +1715,20 @@ fn import_and_save_candidate(
     if let Some((kind, version)) = &loader {
         configuration.target_id = format!("{}-{version}", kind.name().to_lowercase());
     }
-    // Hold the shared storage lease from before copy publication through the
-    // catalog transaction so relocation cannot race the imported directory.
+    ensure!(
+        !import_overlaps_source(root, parent, &candidate),
+        "{IMPORT_SOURCE_OVERLAP}"
+    );
+    // Hold the shared storage lease from parent preparation through the catalog
+    // transaction so relocation cannot race the imported directory.
     let _storage = block_launcher::storage::acquire(root)?;
     ensure!(!cancel.is_cancelled(), "Import cancelled");
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "Could not create game destination parent {}",
+            parent.display()
+        )
+    })?;
     let destination = parent.join(uuid::Uuid::new_v4().to_string());
     let copied = block_launcher::game_import::copy_candidate(&candidate, &destination, cancel)?;
     if cancel.is_cancelled() {
@@ -2116,8 +2164,12 @@ fn readable_log(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context as _;
     use block_launcher::session::{OfflineSession, SessionProvider as _};
-    use std::time::{Duration, SystemTime};
+    use std::{
+        path::PathBuf,
+        time::{Duration, SystemTime},
+    };
 
     #[test]
     fn provider_persistence_preserves_drafts_duplicates_links_and_corrupt_files()
@@ -2708,45 +2760,63 @@ mod tests {
         Ok((engine, runtime, receiver))
     }
 
+    fn import_candidate(
+        id: &str,
+        name: &str,
+        version: &str,
+        path: &std::path::Path,
+    ) -> block_launcher::game_import::GameCandidate {
+        block_launcher::game_import::GameCandidate {
+            id: id.into(),
+            source: block_launcher::game_import::SourceKind::AdjacentMinecraft,
+            source_root: path.to_owned(),
+            name: name.into(),
+            game_directory: path.to_owned(),
+            configured_version: Some(version.into()),
+            minecraft_version: Some(version.into()),
+            loader: None,
+            latest_release: None,
+            latest_snapshot: None,
+            importable: true,
+            unsupported_reason: None,
+            metadata_warning: None,
+        }
+    }
+
     #[test]
     fn imported_games_commit_independently_and_remain_pending() -> anyhow::Result<()> {
-        use block_launcher::game_import::{GameCandidate, SourceKind};
         let root = tempfile::tempdir()?;
-        let destination_parent = root.path().join("imported");
-        std::fs::create_dir(&destination_parent)?;
+        let data_root = root.path().join("block");
+        let destination_parent = data_root.join("nested/instances");
         let source_one = root.path().join("source-one");
         let source_three = root.path().join("source-three");
-        std::fs::create_dir(&source_one)?;
-        std::fs::create_dir(&source_three)?;
-        std::fs::write(source_one.join("options.txt"), b"one")?;
-        std::fs::write(source_three.join("options.txt"), b"three")?;
-        let candidate =
-            |id: &str, name: &str, version: &str, path: &std::path::Path| GameCandidate {
-                id: id.into(),
-                source: SourceKind::AdjacentMinecraft,
-                source_root: path.to_owned(),
-                name: name.into(),
-                game_directory: path.to_owned(),
-                configured_version: Some(version.into()),
-                minecraft_version: Some(version.into()),
-                loader: None,
-                latest_release: None,
-                latest_snapshot: None,
-                importable: true,
-                unsupported_reason: None,
-                metadata_warning: None,
-            };
-        let first = candidate("one", "Imported One", "1.20.1", &source_one);
-        let mut failed = candidate("failed", "Missing", "1.20.1", &source_one);
+        for (source, marker) in [(&source_one, "one"), (&source_three, "three")] {
+            std::fs::create_dir_all(source.join("saves/Synthetic World"))?;
+            std::fs::create_dir_all(source.join("config"))?;
+            std::fs::write(source.join("options.txt"), marker)?;
+            std::fs::write(source.join("saves/Synthetic World/level.dat"), marker)?;
+            std::fs::write(source.join("config/settings.toml"), marker)?;
+        }
+        let before_one = import_source_tree(&source_one)?;
+        let before_three = import_source_tree(&source_three)?;
+        let first = import_candidate("one", "Imported One", "1.20.1", &source_one);
+        let mut failed = import_candidate("failed", "Missing", "1.20.1", &source_one);
         failed.importable = false;
         failed.unsupported_reason = Some("synthetic unsupported fixture".into());
-        let third = candidate("three", "Imported Three", "1.21.1", &source_three);
-        let (engine, runtime, mut receiver) = fixture_engine(root.path())?;
+        let mut stale = import_candidate(
+            "stale",
+            "Stale",
+            "1.20.1",
+            &root.path().join("removed-game"),
+        );
+        stale.source_root = source_one.clone();
+        let third = import_candidate("three", "Imported Three", "1.21.1", &source_three);
+        let (engine, runtime, mut receiver) = fixture_engine(&data_root)?;
         let request = uuid::Uuid::new_v4();
         engine.import_games(
             request,
-            vec![first, failed, third],
-            destination_parent,
+            vec![first, failed, stale, third],
+            destination_parent.clone(),
             super::GameDefaults::default(),
             super::CancellationToken::new(),
         );
@@ -2779,24 +2849,433 @@ mod tests {
             .await
         })??;
         assert!(finished);
-        assert_eq!(successes.len(), 2);
-        assert_eq!(failures.len(), 1);
+        assert_eq!(successes.len(), 2, "import failures: {failures:?}");
+        assert_eq!(failures.len(), 2);
         assert_eq!(failures[0].0, "failed");
-        let state = super::Catalog::open(root.path())?.snapshot()?;
+        assert!(failures[0].1.contains("synthetic unsupported fixture"));
+        assert_eq!(failures[1].0, "stale");
+        assert!(!failures[1].1.is_empty());
+        let state = super::Catalog::open(&data_root)?.snapshot()?;
         assert_eq!(state.instances.len(), 2);
-        for (_, instance_id, profile_id) in successes {
+        for (candidate_id, instance_id, profile_id) in successes {
+            let (source, name, version) = match candidate_id.as_str() {
+                "one" => (&source_one, "Imported One", "1.20.1"),
+                "three" => (&source_three, "Imported Three", "1.21.1"),
+                _ => anyhow::bail!("unexpected imported candidate: {candidate_id}"),
+            };
             let instance = state
                 .instances
                 .iter()
                 .find(|entry| entry.id == instance_id)
                 .ok_or_else(|| anyhow::anyhow!("imported instance missing from catalog"))?;
-            assert!(instance.directory.join("options.txt").is_file());
+            assert_eq!(instance.name, name);
+            assert_eq!(instance.minecraft_version, version);
+            assert_eq!(
+                instance.directory.parent(),
+                Some(destination_parent.canonicalize()?.as_path())
+            );
+            for path in [
+                "options.txt",
+                "saves/Synthetic World/level.dat",
+                "config/settings.toml",
+            ] {
+                assert_eq!(std::fs::read(source.join(path))?, candidate_id.as_bytes());
+                assert_eq!(
+                    std::fs::read(instance.directory.join(path))?,
+                    candidate_id.as_bytes()
+                );
+            }
+            assert_eq!(instance.targets.len(), 1);
             assert!(instance.targets.iter().all(|target| matches!(
                 &target.status,
                 block_launcher::catalog::InstallStatus::Pending
             )));
             assert_eq!(state.selection(&profile_id)?.0.id, instance_id);
         }
+        assert_eq!(std::fs::read_dir(destination_parent)?.count(), 2);
+        assert_eq!(import_source_tree(&source_one)?, before_one);
+        assert_eq!(import_source_tree(&source_three)?, before_three);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_or_cancelled_import_does_not_prepare_destination() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let candidate = import_candidate("game", "Game", "1.20.1", &source);
+
+        let cancelled_root = temp.path().join("cancelled");
+        let cancel = super::CancellationToken::new();
+        cancel.cancel();
+        let error = super::import_and_save_candidate(
+            &cancelled_root,
+            candidate.clone(),
+            &cancelled_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            &cancel,
+        )
+        .err()
+        .context("a cancelled import should fail")?;
+        assert!(error.to_string().contains("cancelled"));
+        assert!(!cancelled_root.exists());
+
+        let unsupported_root = temp.path().join("unsupported");
+        let mut unsupported = candidate.clone();
+        unsupported.importable = false;
+        unsupported.unsupported_reason = Some("unsupported fixture".into());
+        let error = super::import_and_save_candidate(
+            &unsupported_root,
+            unsupported,
+            &unsupported_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("an unsupported import should fail")?;
+        assert!(error.to_string().contains("unsupported fixture"));
+        assert!(!unsupported_root.exists());
+
+        let missing_version_root = temp.path().join("missing-version");
+        let mut missing_version = candidate;
+        missing_version.minecraft_version = None;
+        let error = super::import_and_save_candidate(
+            &missing_version_root,
+            missing_version,
+            &missing_version_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("an import without a version should fail")?;
+        assert!(error.to_string().contains("Minecraft version"));
+        assert!(!missing_version_root.exists());
+
+        let batch_root = temp.path().join("cancelled-batch");
+        let (engine, runtime, mut receiver) = fixture_engine(&batch_root)?;
+        let request = uuid::Uuid::new_v4();
+        let cancel = super::CancellationToken::new();
+        cancel.cancel();
+        engine.import_games(
+            request,
+            vec![import_candidate("game", "Game", "1.20.1", &source)],
+            batch_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            cancel,
+        );
+        let message = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), receiver.recv()).await
+        })?;
+        assert!(
+            matches!(message, Some(super::Message::GameImportFinished { request: got }) if got == request)
+        );
+        assert!(!batch_root.exists());
+
+        let mut unsupported = import_candidate("game", "Game", "1.20.1", &source);
+        unsupported.importable = false;
+        unsupported.unsupported_reason = Some("unsupported fixture".into());
+        let request = uuid::Uuid::new_v4();
+        engine.import_games(
+            request,
+            vec![unsupported],
+            batch_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            super::CancellationToken::new(),
+        );
+        let (imported, finished) = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                (receiver.recv().await, receiver.recv().await)
+            })
+            .await
+        })?;
+        assert!(matches!(
+            imported,
+            Some(super::Message::GameImported { request: got, result: Err(error), .. })
+                if got == request && error.contains("unsupported fixture")
+        ));
+        assert!(
+            matches!(finished, Some(super::Message::GameImportFinished { request: got }) if got == request)
+        );
+        assert!(!batch_root.exists());
+        assert_eq!(std::fs::read(source.join("options.txt"))?, b"original");
+        Ok(())
+    }
+
+    fn import_source_tree(
+        root: &std::path::Path,
+    ) -> anyhow::Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
+        fn visit(
+            root: &std::path::Path,
+            directory: &std::path::Path,
+            result: &mut Vec<(PathBuf, Option<Vec<u8>>)>,
+        ) -> anyhow::Result<()> {
+            for entry in std::fs::read_dir(directory)? {
+                let path = entry?.path();
+                let relative = path.strip_prefix(root)?.to_owned();
+                if path.is_dir() {
+                    result.push((relative, None));
+                    visit(root, &path, result)?;
+                } else {
+                    result.push((relative, Some(std::fs::read(&path)?)));
+                }
+            }
+            Ok(())
+        }
+
+        let mut result = Vec::new();
+        visit(root, root, &mut result)?;
+        result.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        Ok(result)
+    }
+
+    #[test]
+    fn import_batch_rejects_destination_inside_any_selected_source() -> anyhow::Result<()> {
+        use block_launcher::game_import::{DiscoveryRoots, SourceKind, discover};
+        let temp = tempfile::tempdir()?;
+        let source_a = temp.path().join("adjacent");
+        let source_b = temp.path().join("launcher");
+        for (source, marker) in [(&source_a, "first"), (&source_b, "second")] {
+            std::fs::create_dir_all(source.join("versions/1.20.1"))?;
+            std::fs::write(
+                source.join("versions/1.20.1/1.20.1.json"),
+                br#"{"id":"1.20.1","type":"release","mainClass":"net.minecraft.client.main.Main"}"#,
+            )?;
+            std::fs::create_dir_all(source.join("saves/World"))?;
+            std::fs::create_dir_all(source.join("config"))?;
+            std::fs::write(source.join("saves/World/level.dat"), marker)?;
+            std::fs::write(source.join("config/settings.toml"), marker)?;
+        }
+        std::fs::write(
+            source_b.join("launcher_profiles.json"),
+            br#"{"profiles":{"second":{"name":"Second","lastVersionId":"1.20.1"}}}"#,
+        )?;
+        let before_a = import_source_tree(&source_a)?;
+        let before_b = import_source_tree(&source_b)?;
+        let report = discover(&DiscoveryRoots {
+            adjacent_minecraft: Some(source_a.clone()),
+            official_launcher: Some(source_b.clone()),
+        });
+        assert_eq!(report.candidates.len(), 2);
+        assert!(
+            report
+                .candidates
+                .iter()
+                .all(|candidate| candidate.importable)
+        );
+        assert_eq!(report.candidates[0].source, SourceKind::AdjacentMinecraft);
+        assert_eq!(report.candidates[1].source, SourceKind::OfficialLauncher);
+        let ids = report
+            .candidates
+            .iter()
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let data_root = source_b.join("block");
+        let (engine, runtime, mut receiver) = fixture_engine(&data_root)?;
+        let request = uuid::Uuid::new_v4();
+        engine.import_games(
+            request,
+            report.candidates,
+            data_root.join("instances"),
+            super::GameDefaults::default(),
+            super::CancellationToken::new(),
+        );
+        let failures = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut failures = Vec::new();
+                while let Some(message) = receiver.recv().await {
+                    match message {
+                        super::Message::GameImported {
+                            request: got,
+                            candidate,
+                            result,
+                        } if got == request => {
+                            failures.push((
+                                candidate,
+                                result.err().context("no source may be copied")?,
+                            ));
+                        }
+                        super::Message::GameImportFinished { request: got } if got == request => {
+                            return Ok::<_, anyhow::Error>(failures);
+                        }
+                        _ => {}
+                    }
+                }
+                anyhow::bail!("import batch did not finish")
+            })
+            .await
+        })??;
+        assert_eq!(failures.len(), 2);
+        for ((candidate, error), expected_id) in failures.iter().zip(ids) {
+            assert_eq!(candidate, &expected_id);
+            assert!(error.contains("overlap"), "{error}");
+        }
+        assert!(!data_root.exists());
+        assert_eq!(import_source_tree(&source_a)?, before_a);
+        assert_eq!(import_source_tree(&source_b)?, before_b);
+        Ok(())
+    }
+
+    #[test]
+    fn import_rejects_destination_inside_source_before_acquiring_storage() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let data_root = source.join("block");
+        let error = super::import_and_save_candidate(
+            &data_root,
+            import_candidate("game", "Game", "1.20.1", &source),
+            &data_root.join("nested/instances"),
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("a destination inside the source should fail")?;
+        assert!(error.to_string().contains("overlap"));
+        assert!(!data_root.exists());
+        assert_eq!(std::fs::read(source.join("options.txt"))?, b"original");
+        assert_eq!(std::fs::read_dir(source)?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn import_rejects_destination_inside_discovery_root() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source_root = temp.path().join("launcher");
+        let game = source_root.join("game");
+        std::fs::create_dir_all(&game)?;
+        std::fs::write(game.join("options.txt"), b"original")?;
+        let before = import_source_tree(&source_root)?;
+        let mut candidate = import_candidate("game", "Game", "1.20.1", &game);
+        candidate.source_root = source_root.clone();
+        let data_root = temp.path().join("block");
+        let error = super::import_and_save_candidate(
+            &data_root,
+            candidate,
+            &source_root.join("new-library/instances"),
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("a destination inside the discovery root should fail")?;
+        assert!(error.to_string().contains("overlap"));
+        assert!(!data_root.exists());
+        assert_eq!(import_source_tree(&source_root)?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn import_rejects_data_root_inside_source_even_with_separate_destination() -> anyhow::Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let before = import_source_tree(&source)?;
+        let data_root = source.join("block");
+        let parent = temp.path().join("new-library/instances");
+        let error = super::import_and_save_candidate(
+            &data_root,
+            import_candidate("game", "Game", "1.20.1", &source),
+            &parent,
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("a data root inside the source should fail")?;
+        assert!(error.to_string().contains("overlap"));
+        assert!(!data_root.exists());
+        assert!(!parent.exists());
+        assert_eq!(import_source_tree(&source)?, before);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_rejects_destination_alias_inside_source() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let alias = temp.path().join("source-alias");
+        std::os::unix::fs::symlink(&source, &alias)?;
+        let data_root = temp.path().join("block");
+        let error = super::import_and_save_candidate(
+            &data_root,
+            import_candidate("game", "Game", "1.20.1", &source),
+            &alias.join("nested/instances"),
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("a destination alias inside the source should fail")?;
+        assert!(error.to_string().contains("overlap"));
+        assert!(!data_root.exists());
+        assert!(!source.join("nested").exists());
+        assert_eq!(std::fs::read(source.join("options.txt"))?, b"original");
+        Ok(())
+    }
+
+    #[test]
+    fn import_rejects_file_destination_without_copy_or_catalog_entry() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let destination_root = temp.path().join("destinations");
+        std::fs::create_dir(&destination_root)?;
+        let file = destination_root.join("not-a-directory");
+        std::fs::write(&file, b"keep this file")?;
+        let data_root = temp.path().join("block");
+        for parent in [file.clone(), file.join("nested/instances")] {
+            let error = super::import_and_save_candidate(
+                &data_root,
+                import_candidate("game", "Game", "1.20.1", &source),
+                &parent,
+                super::GameDefaults::default(),
+                &super::CancellationToken::new(),
+            )
+            .err()
+            .context("a file cannot be a destination parent")?;
+            assert!(format!("{error:#}").contains("game destination parent"));
+            assert_eq!(std::fs::read(&file)?, b"keep this file");
+        }
+        assert_eq!(std::fs::read_dir(destination_root)?.count(), 1);
+        assert_eq!(std::fs::read(source.join("options.txt"))?, b"original");
+        assert!(
+            super::Catalog::open(&data_root)?
+                .snapshot()?
+                .instances
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn import_save_failure_removes_the_copied_directory() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source)?;
+        std::fs::write(source.join("options.txt"), b"original")?;
+        let data_root = temp.path().join("block");
+        std::fs::create_dir(&data_root)?;
+        let config = b"[catalog]\nschema_version = 1\n";
+        std::fs::write(data_root.join("block.toml"), config)?;
+        let destination_parent = data_root.join("nested/instances");
+        let error = super::import_and_save_candidate(
+            &data_root,
+            import_candidate("game", "Game", "1.20.1", &source),
+            &destination_parent,
+            super::GameDefaults::default(),
+            &super::CancellationToken::new(),
+        )
+        .err()
+        .context("an invalid catalog should reject the copied game")?;
+        assert!(format!("{error:#}").contains("catalog is invalid"));
+        assert_eq!(std::fs::read(data_root.join("block.toml"))?, config);
+        assert_eq!(std::fs::read(source.join("options.txt"))?, b"original");
+        assert_eq!(std::fs::read_dir(destination_parent)?.count(), 0);
         Ok(())
     }
 

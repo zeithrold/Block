@@ -87,7 +87,9 @@ pub(crate) fn segments(directory: &Path) -> io::Result<Vec<Segment>> {
         if !entry.file_type()?.is_file() {
             continue;
         }
-        let metadata = entry.metadata()?;
+        // Windows directory enumeration can retain a stale size while the
+        // writer is open. Query the file so active segments count in snapshots.
+        let metadata = fs::metadata(entry.path())?;
         segments.push(Segment {
             path: entry.path(),
             name: name.to_owned(),

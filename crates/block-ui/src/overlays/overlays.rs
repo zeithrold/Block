@@ -244,6 +244,7 @@ impl Overlays {
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
                 let body = body.clone();
                 let gate = build_owner.clone();
+                let confirm = build_owner.clone();
                 let dismiss = build_owner.clone();
                 let dialog = if section {
                     dialog
@@ -281,6 +282,21 @@ impl Overlays {
                             let view = view.read(cx);
                             !(view.busy && !view.can_stop())
                         })
+                    })
+                    .on_ok(move |_, window, cx| {
+                        let allowed = confirm.upgrade().is_none_or(|view| {
+                            let view = view.read(cx);
+                            !(view.busy && !view.can_stop())
+                        });
+                        if allowed {
+                            window.close_dialog(cx);
+                            let _ = confirm.update(cx, |view, cx| {
+                                view.dismiss_surface_overlay(revision, window, cx)
+                            });
+                        }
+                        // A permitted dismissal is complete; do not schedule
+                        // a second, delayed focus restoration in the library.
+                        false
                     })
                     .on_close(move |_, window, cx| {
                         let _ = dismiss.update(cx, |view, cx| {

@@ -283,7 +283,7 @@ impl Block {
         } else if matches!(self.form, Some(Form::Instance(_))) {
             Some(WizardKey::Game(
                 self.shell.wizard.step,
-                self.shell.wizard.page,
+                self.wizard_outer_page(),
             ))
         } else {
             None

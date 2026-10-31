@@ -166,11 +166,14 @@ impl DrawerLayer {
             .or_else(|| layer.pending_return.clone())
     }
 
-    #[cfg(test)]
+    /// The drawer owns focus until its deferred return has settled.
     pub(super) fn is_open(window: &Window, cx: &App) -> bool {
         Root::read(window, cx)
             .plugin::<Self>()
-            .is_some_and(|layer| layer.read(cx).active.is_some())
+            .is_some_and(|layer| {
+                let layer = layer.read(cx);
+                layer.active.is_some() || layer.pending_return.is_some()
+            })
     }
 
     fn release(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -321,7 +324,9 @@ impl DrawerLayer {
     /// Finish an exit: drop the presentation and return focus once no dialog
     /// owns it.
     fn retire(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.pending_return = self.active.take().and_then(|active| active.return_focus);
+        let active = self.active.take();
+        let owner = active.as_ref().map(|active| active.owner.clone());
+        self.pending_return = active.and_then(|active| active.return_focus);
         let layer = cx.weak_entity();
         window.defer(cx, move |window, cx| {
             let _ = layer.update(cx, |layer, cx| {
@@ -331,6 +336,14 @@ impl DrawerLayer {
                         && let Some(focus) = focus
                     {
                         focus.focus(window, cx);
+                    }
+                    // A queued crash may take focus only after this return.
+                    if let Some(owner) = owner {
+                        let _ = owner.update(cx, |view, cx| {
+                            if !view.pending_crashes.is_empty() {
+                                cx.notify();
+                            }
+                        });
                     }
                 }
             });

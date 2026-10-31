@@ -78,6 +78,11 @@ pub(super) enum WizardPage {
     Location,
 }
 
+enum WizardBodyOwner {
+    Outer,
+    Section(WizardPage),
+}
+
 #[derive(Debug, Default)]
 pub(super) struct WizardState {
     pub step: WizardStep,
@@ -102,6 +107,7 @@ pub(super) struct WizardState {
     pub existing_instance: Option<String>,
     pub profile: Option<ProfileDraft>,
     pub body_scroll: ScrollHandle,
+    pub section_scroll: ScrollHandle,
     pub rail_scroll: ScrollHandle,
     error_field: Option<WizardField>,
     reveal: Rc<Cell<Option<WizardField>>>,
@@ -393,6 +399,8 @@ impl WizardState {
         version_scroll.set_offset(self.version_scroll.offset());
         let body_scroll = ScrollHandle::new();
         body_scroll.set_offset(self.body_scroll.offset());
+        let section_scroll = ScrollHandle::new();
+        section_scroll.set_offset(self.section_scroll.offset());
         let rail_scroll = ScrollHandle::new();
         rail_scroll.set_offset(self.rail_scroll.offset());
         let loader_scroll = ScrollHandle::new();
@@ -426,6 +434,7 @@ impl WizardState {
             existing_instance: self.existing_instance.clone(),
             profile: self.profile.as_ref().map(|profile| profile.snapshot(cx)),
             body_scroll,
+            section_scroll,
             rail_scroll,
             error_field: self.error_field,
             reveal: Rc::new(Cell::new(None)),
@@ -465,6 +474,7 @@ impl WizardState {
                 profile.options = false;
             }
             self.transition(false);
+            self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
     }
 
@@ -480,20 +490,35 @@ impl WizardState {
                 WizardStep::Setup | WizardStep::GetStarted => WizardStep::GetStarted,
             };
             self.transition(true);
+            self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
     }
 
     pub(super) fn open_page(&mut self, page: Option<WizardPage>) {
+        if self.set_page(page) {
+            self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
+        }
+    }
+
+    fn open_section_page(&mut self, page: Option<WizardPage>) {
+        if self.set_page(page) {
+            self.section_scroll.set_offset(gpui::point(px(0.), px(0.)));
+        }
+    }
+
+    fn set_page(&mut self, page: Option<WizardPage>) -> bool {
         if self.page != page {
             self.page = page;
             self.transition(page.is_none());
+            true
+        } else {
+            false
         }
     }
 
     fn transition(&mut self, backwards: bool) {
         self.backwards = backwards;
         self.revision = self.revision.wrapping_add(1);
-        self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
     }
 }
 
@@ -800,6 +825,20 @@ impl Block {
         input: &Entity<TextInput>,
         hint: Option<&'static str>,
     ) -> gpui::Stateful<gpui::Div> {
+        let section_field = self.wizard_section_page() == Some(WizardPage::Location)
+            && (matches!(
+                field,
+                WizardField::Directory
+                    | WizardField::Java
+                    | WizardField::Width
+                    | WizardField::Height
+            ) || self.router.tab() == Tab::Onboarding
+                && matches!(field, WizardField::Memory | WizardField::Jvm));
+        let scroll = if section_field {
+            &self.shell.wizard.section_scroll
+        } else {
+            &self.shell.wizard.body_scroll
+        };
         patterns::reveal_field(
             components::field_with(
                 label,
@@ -817,7 +856,7 @@ impl Block {
                         .map(|error| error.clone().into()),
                 },
             ),
-            self.shell.wizard.body_scroll.clone(),
+            scroll.clone(),
             self.shell.wizard.reveal.clone(),
             field,
         )
@@ -1007,7 +1046,7 @@ impl Block {
             self.shell.wizard.optifine_request = None;
         }
         self.shell.wizard.clear_error();
-        self.shell.wizard.open_page(page);
+        self.shell.wizard.open_section_page(page);
         if page == Some(WizardPage::Loader) {
             self.load_wizard_loader_versions(false, cx);
         } else if page.is_none() {
@@ -1593,6 +1632,7 @@ impl Block {
     }
 
     pub(super) fn cancel_component_draft(&mut self, cx: &mut Context<'_, Self>) {
+        let section = self.shell.wizard.section_snapshot.is_some();
         if let Some(snapshot) = self.shell.wizard.section_snapshot.take()
             && let Some(Form::Instance(form)) = &mut self.form
         {
@@ -1619,7 +1659,16 @@ impl Block {
                 profile.restore_checkpoint(checkpoint, cx);
             }
         }
-        self.shell.wizard.open_page(None);
+        // A rejected Done leaves its message, field and pending reveal on the
+        // shared wizard error owner. Cancelling the draft discards that
+        // validation together with the edits it described: the restored
+        // checkpoint is valid and the outer page must not inherit the banner.
+        self.shell.wizard.clear_error();
+        if section {
+            self.shell.wizard.open_section_page(None);
+        } else {
+            self.shell.wizard.open_page(None);
+        }
         self.shell.wizard.loader_request = None;
         self.shell.wizard.optifine_request = None;
     }
@@ -1632,14 +1681,15 @@ impl Block {
     ) -> impl IntoElement + use<> {
         let state = &self.shell.wizard;
         let review = state.step == WizardStep::Review;
-        let body = self.game_wizard_transition_body(form, window, cx);
-        let show_back = state.page.is_some()
+        let page = self.wizard_outer_page();
+        let body = self.game_wizard_transition_body(form, WizardBodyOwner::Outer, window, cx);
+        let show_back = page.is_some()
             || if state.separated {
                 state.step != WizardStep::GetStarted
             } else {
                 review
             };
-        let next_label = if state.page.is_some() {
+        let next_label = if page.is_some() {
             "Done"
         } else if review {
             if state.kind == CreationKind::ExistingInstance {
@@ -1650,7 +1700,7 @@ impl Block {
         } else {
             "Continue"
         };
-        let next_action = if review && state.page.is_none() {
+        let next_action = if review && page.is_none() {
             UiAction::SaveInstance
         } else {
             UiAction::WizardNext
@@ -1728,19 +1778,68 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         match &self.form {
-            Some(Form::Instance(form)) => self.game_wizard_transition_body(form, window, cx),
+            Some(Form::Instance(form)) => {
+                self.game_wizard_transition_body(form, WizardBodyOwner::Outer, window, cx)
+            }
             _ => div().into_any_element(),
+        }
+    }
+
+    pub(super) fn render_game_wizard_section_body(
+        &self,
+        page: WizardPage,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        match &self.form {
+            Some(Form::Instance(form)) => {
+                self.game_wizard_transition_body(form, WizardBodyOwner::Section(page), window, cx)
+            }
+            _ => div().into_any_element(),
+        }
+    }
+
+    fn wizard_section_page(&self) -> Option<WizardPage> {
+        self.shell
+            .surfaces
+            .layers()
+            .find_map(|layer| match layer.kind {
+                super::shell::Surface::WizardSection(page) => Some(page),
+                _ => None,
+            })
+    }
+
+    pub(super) fn wizard_outer_page(&self) -> Option<WizardPage> {
+        if self.wizard_section_page().is_some() {
+            None
+        } else {
+            self.shell.wizard.page
         }
     }
 
     fn game_wizard_transition_body(
         &self,
         form: &InstanceForm,
+        owner: WizardBodyOwner,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
-        let body = self.game_wizard_body(form, window, cx);
+        let (page, scroll, id, label) = match owner {
+            WizardBodyOwner::Outer => (
+                self.wizard_outer_page(),
+                &state.body_scroll,
+                "wizard-body",
+                "Game setup",
+            ),
+            WizardBodyOwner::Section(page) => (
+                Some(page),
+                &state.section_scroll,
+                "wizard-section-body",
+                "Game setup section",
+            ),
+        };
+        let body = self.game_wizard_body(form, page, window, cx);
         let body = div()
             .flex()
             .flex_col()
@@ -1748,6 +1847,8 @@ impl Block {
             .child(body)
             .children(state.error.as_ref().map(|error| {
                 div()
+                    .id("wizard-error")
+                    .debug_selector(|| "wizard-error".into())
                     .flex()
                     .items_start()
                     .gap_2()
@@ -1759,33 +1860,24 @@ impl Block {
             .children(self.busy.then(|| note(self.status.clone())))
             .into_any_element();
         div()
-            .id("wizard-body")
-            .debug_selector(|| "wizard-body".into())
+            .id(id)
+            .debug_selector(move || id.into())
             .size_full()
             .min_h_0()
-            .scroll_area(&state.body_scroll, "Game setup", self.palette, false)
+            .scroll_area(scroll, label, self.palette, false)
             .child(div().w_full().max_w(px(608.)).mx_auto().p_8().child(body))
             .into_any_element()
     }
 
-    pub(super) fn game_wizard_body(
+    fn game_wizard_body(
         &self,
         form: &InstanceForm,
+        page: Option<WizardPage>,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
         let review = state.step == WizardStep::Review;
-        let page = state.page.filter(|_| {
-            !self
-                .shell
-                .surfaces
-                .layers()
-                .any(|entry| matches!(entry.kind, super::shell::Surface::WizardSection(_)))
-                || self.shell.surfaces.top().is_some_and(|entry| {
-                    matches!(entry.kind, super::shell::Surface::WizardSection(_))
-                })
-        });
         match page {
             Some(WizardPage::Version) => self.wizard_version(form, cx).into_any_element(),
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
@@ -2012,6 +2104,12 @@ impl Block {
         let Some(profile) = &self.shell.wizard.profile else {
             return div();
         };
+        // First-run Configuration contains these same draft editors. While its
+        // section owns them, keep the disclosure and the rest of the profile
+        // mounted without mounting a second copy of the inputs.
+        let section_owns_advanced = self.router.tab() == Tab::Onboarding
+            && self.shell.wizard.kind == CreationKind::NewInstance
+            && self.wizard_section_page() == Some(WizardPage::Location);
         div()
             .flex()
             .flex_col()
@@ -2067,12 +2165,19 @@ impl Block {
                     "wizard-advanced",
                     &self.shell.wizard.advanced.borrow(),
                     self.motion_preferences(),
-                    self.wizard_profile_advanced(profile, cx).into_any_element(),
+                    if section_owns_advanced {
+                        div().into_any_element()
+                    } else {
+                        self.wizard_profile_advanced(profile, cx).into_any_element()
+                    },
                     window,
                     cx,
                 )
             }))
-            .children((!show_name).then(|| self.wizard_profile_advanced(profile, cx)))
+            .children(
+                (!show_name && !section_owns_advanced)
+                    .then(|| self.wizard_profile_advanced(profile, cx)),
+            )
     }
 
     fn reconcile_wizard_disclosure(&self, cx: &Context<'_, Self>) {
