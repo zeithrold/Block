@@ -7,15 +7,22 @@ use std::time::Duration;
 use gpui::{
     AnyElement, App, Context, CursorStyle, Edges, ElementId, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Render, Styled as _, Subscription, WeakEntity, Window, div, px,
-    rgb,
+    ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Subscription,
+    WeakEntity, Window, div, px, rgb,
 };
 use gpui_base::{
     Root, RootPlugin, Sheet,
     motion::{Easing, Presence, PresencePhase, Spring, Transition, spring},
 };
 
-use super::{Block, appearance::Palette, drawer_gestures::DrawerDrag, shell::Surface};
+use super::{
+    Block,
+    appearance::Palette,
+    components::{self, ButtonSize, ButtonVariant, Control, ControlState},
+    design::{CONTROL_HEIGHT, Icon},
+    drawer_gestures::DrawerDrag,
+    shell::Surface,
+};
 use gpui_component::WindowExt as _;
 
 const DURATION: Duration = Duration::from_millis(450);
@@ -395,13 +402,18 @@ impl DrawerLayer {
                     .bg(rgb(palette.border)),
             );
         let dismiss = frame.owner.clone();
-        let close = gpui_component::button::Button::new("drawer-close")
-            .label("Close")
-            .on_click(move |_, window, cx| {
+        let close = components::button(
+            "drawer-close",
+            "Close",
+            palette,
+            ButtonVariant::Ghost,
+            ControlState::default(),
+            move |_, window, cx| {
                 let _ = dismiss.update(cx, |view, cx| {
                     view.dismiss_surface_overlay(revision, window, cx)
                 });
-            });
+            },
+        );
         let import_back = self.import_header_back(frame, owner, cx);
         let closing = frame.closing;
         let panel = div()
@@ -434,30 +446,33 @@ impl DrawerLayer {
                     .px(px(20.))
                     .pb(px(16.))
                     .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .children(import_back)
+                    .flex_col()
+                    .gap(px(4.))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .min_h(px(CONTROL_HEIGHT))
                             .flex()
-                            .flex_col()
-                            .gap(px(4.))
+                            .items_center()
+                            .gap(px(8.))
+                            .children(import_back)
                             .child(
                                 div()
+                                    .debug_selector(|| "drawer-title".into())
+                                    .flex_1()
+                                    .min_w_0()
                                     .text_lg()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .child(frame.title),
                             )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(rgb(palette.muted))
-                                    .child(frame.description),
-                            ),
+                            .child(close),
                     )
-                    .child(close),
+                    .child(
+                        div()
+                            .debug_selector(|| "drawer-description".into())
+                            .text_sm()
+                            .text_color(rgb(palette.muted))
+                            .child(frame.description),
+                    ),
             )
             .child(
                 div()
@@ -485,25 +500,27 @@ impl DrawerLayer {
         frame: &DrawerFrame,
         owner: &Entity<Block>,
         cx: &App,
-    ) -> Option<gpui::Div> {
-        matches!(
+    ) -> Option<Control> {
+        (matches!(
             frame.kind,
             Surface::Drawer(super::shell::Drawer::ImportGames)
-        )
-        .then(|| {
-            let visible = owner.read(cx).shell.import_games.page == super::import_games::Page::List;
-            let target = owner.downgrade();
-            div().w(px(28.)).flex_shrink_0().children(visible.then(|| {
-                gpui_component::button::Button::new("import-header-back")
-                    .label("←")
-                    .w(px(28.))
-                    .h(px(28.))
-                    .p_0()
-                    .on_click(move |_, window, cx| {
+        ) && owner.read(cx).shell.import_games.page == super::import_games::Page::List)
+            .then(|| {
+                let target = owner.downgrade();
+                components::button_sized(
+                    "import-header-back",
+                    "",
+                    frame.palette,
+                    ButtonVariant::Ghost,
+                    ButtonSize::Icon,
+                    ControlState::default(),
+                    move |_, window, cx| {
                         let _ = target.update(cx, |view, cx| view.import_header_back(window, cx));
-                    })
-            }))
-        })
+                    },
+                )
+                .aria_label("Back to sources")
+                .child(Icon::ChevronLeft.render(16., frame.palette.foreground))
+            })
     }
 
     /// The library sheet: full-window scrim, focus trap and dismissal around the

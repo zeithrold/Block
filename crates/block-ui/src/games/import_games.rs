@@ -805,24 +805,8 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .justify_between()
+                    .justify_end()
                     .items_center()
-                    .child(if interactive {
-                        self.button_with_variant(
-                            "import-sources",
-                            "← Sources",
-                            UiAction::ImportGames(Action::Sources),
-                            ButtonVariant::Ghost,
-                            cx,
-                        )
-                        .into_any_element()
-                    } else {
-                        div()
-                            .text_sm()
-                            .text_color(rgb(self.palette.muted))
-                            .child("← Sources")
-                            .into_any_element()
-                    })
                     .child(if interactive {
                         self.button_with_variant(
                             "import-select-all",

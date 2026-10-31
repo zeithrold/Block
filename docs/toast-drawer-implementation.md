@@ -87,8 +87,10 @@ adaptations are separate from the curve regression checks and desktop review.
 
 ## Drawer behavior
 
-- Account, game/profile and download drawers use the existing single window.
+- Account, profile, download and import drawers use the existing single window.
   Dialogs remain above the drawer; feedback remains above both.
+- Drawers share a title row with a trailing Ghost Close and an optional Ghost
+  Back on the import list. The subtitle aligns with the panel inset on every page.
 - A full-panel Presence transition retains the real content during close.
   Desired selector/download heights are capped at 80% of the client area;
   selector results shrink and scroll while the management action remains visible.

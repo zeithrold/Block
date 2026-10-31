@@ -1,7 +1,12 @@
 //! Pointer, layout and focus regressions against the production drawer host.
 use std::time::Duration;
 
-use crate::{Block, UiAction, shell::Drawer};
+use crate::{
+    Block, UiAction,
+    import_games::Page,
+    shell::{Drawer, Surface},
+};
+use block_launcher::game_import::{DiscoveryReport, GameCandidate, SourceKind};
 use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px, size};
 
 fn fixture(
@@ -45,6 +50,390 @@ fn frame(cx: &mut VisualTestContext, millis: u64) {
 )]
 fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> gpui::Bounds<gpui::Pixels> {
     crate::test_support::control_bounds(cx, selector).expect("drawer control painted")
+}
+
+fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    let position = bounds(cx, selector).center();
+    cx.simulate_click(position, Modifiers::none());
+    cx.run_until_parked();
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "The named header control must be painted."
+)]
+fn control_node(
+    cx: &mut VisualTestContext,
+    id: &'static str,
+) -> gpui_base::test_support::ElementSnapshot {
+    cx.update(|window, _| gpui_base::test_support::find(window, &[], &id.into()))
+        .expect("header control has a native accessibility node")
+}
+
+fn focus_by_tab(cx: &mut VisualTestContext, id: &'static str) {
+    let mut reached = false;
+    for _ in 0..20 {
+        if control_node(cx, id).focused() == Some(true) {
+            reached = true;
+            break;
+        }
+        crate::test_support::press(cx, "tab");
+        cx.run_until_parked();
+    }
+    assert!(reached, "{id} was not reachable by Tab");
+}
+
+fn control_quads(cx: &mut VisualTestContext, selector: &'static str) -> Vec<gpui::Quad> {
+    let bounds = bounds(cx, selector);
+    cx.update(|window, _| {
+        let scale = window.scale_factor();
+        window
+            .painted_quads()
+            .into_iter()
+            .filter(|quad| {
+                (quad.bounds.origin.x.0 - f32::from(bounds.origin.x) * scale).abs() < 0.5
+                    && (quad.bounds.origin.y.0 - f32::from(bounds.origin.y) * scale).abs() < 0.5
+                    && (quad.bounds.size.width.0 - f32::from(bounds.size.width) * scale).abs() < 0.5
+                    && (quad.bounds.size.height.0 - f32::from(bounds.size.height) * scale).abs()
+                        < 0.5
+            })
+            .collect()
+    })
+}
+
+fn matches_rgb(actual: gpui::Rgba, expected: u32) -> bool {
+    let expected = gpui::rgb(expected);
+    (actual.r - expected.r).abs() < 0.001
+        && (actual.g - expected.g).abs() < 0.001
+        && (actual.b - expected.b).abs() < 0.001
+}
+
+fn assert_control_color(cx: &mut VisualTestContext, selector: &'static str, expected: u32) {
+    let painted = control_quads(cx, selector).into_iter().any(|quad| {
+        quad.background
+            .as_solid()
+            .is_some_and(|actual| matches_rgb(actual.to_rgb(), expected))
+    });
+    assert!(painted, "{selector} did not paint the expected color");
+}
+
+fn control_has_ghost_border(
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+    surface: u32,
+) -> bool {
+    control_quads(cx, selector).into_iter().any(|quad| {
+        quad.border_color.a > 0.999
+            && matches_rgb(quad.border_color.to_rgb(), surface)
+            && [
+                quad.border_widths.top,
+                quad.border_widths.right,
+                quad.border_widths.bottom,
+                quad.border_widths.left,
+            ]
+            .into_iter()
+            .all(|width| width.0 > 0.)
+    })
+}
+
+fn import_candidate(id: &str) -> GameCandidate {
+    GameCandidate {
+        id: id.into(),
+        source: SourceKind::OfficialLauncher,
+        source_root: "/synthetic/launcher".into(),
+        name: id.into(),
+        game_directory: format!("/synthetic/{id}").into(),
+        configured_version: Some("1.20.6".into()),
+        minecraft_version: Some("1.20.6".into()),
+        loader: None,
+        latest_release: None,
+        latest_snapshot: None,
+        importable: true,
+        unsupported_reason: None,
+        metadata_warning: None,
+    }
+}
+
+#[gpui::test]
+fn headers_keep_their_text_aligned_without_a_back_action(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    for width in [360., 432.] {
+        cx.simulate_resize(size(px(width), px(768.)));
+        for drawer in [
+            Drawer::Accounts,
+            Drawer::Profiles,
+            Drawer::Downloads,
+            Drawer::ImportGames,
+        ] {
+            act(&view, UiAction::Drawer(Some(drawer)), cx);
+            let panel = bounds(cx, "block-drawer");
+            let title = bounds(cx, "drawer-title");
+            let description = bounds(cx, "drawer-description");
+            let close = bounds(cx, "drawer-close");
+            assert_eq!(
+                title.left(),
+                panel.left() + px(20.),
+                "{drawer:?} title should start at the panel inset"
+            );
+            assert_eq!(
+                description.left(),
+                panel.left() + px(20.),
+                "{drawer:?} description should start at the panel inset"
+            );
+            assert_eq!(close.right(), panel.right() - px(20.));
+            assert!(title.right() <= close.left());
+            assert!(description.top() >= close.bottom());
+            assert!(crate::test_support::control_bounds(cx, "import-header-back").is_none());
+            let node = control_node(cx, "drawer-close");
+            assert_eq!(node.role(), Some(gpui::Role::Button));
+            assert_eq!(node.label(), Some("Close"));
+            act(&view, UiAction::Drawer(None), cx);
+        }
+    }
+}
+
+#[gpui::test]
+fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        view.shell.import_games.selected.insert("one".into());
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page),
+        Page::List
+    );
+
+    let panel = bounds(cx, "block-drawer");
+    let back = bounds(cx, "import-header-back");
+    let title = bounds(cx, "drawer-title");
+    let description = bounds(cx, "drawer-description");
+    let close = bounds(cx, "drawer-close");
+    assert_eq!(back.left(), panel.left() + px(20.));
+    assert_eq!(back.size, size(px(32.), px(32.)));
+    assert!(title.left() >= back.right() + px(8.));
+    assert_eq!(description.left(), panel.left() + px(20.));
+    assert_eq!(back.center().y, close.center().y);
+    assert!(description.top() >= back.bottom());
+    let node = control_node(cx, "import-header-back");
+    assert_eq!(node.role(), Some(gpui::Role::Button));
+    assert_eq!(node.label(), Some("Back to sources"));
+
+    let mut border_failures = Vec::new();
+    for (appearance, palette) in [
+        (crate::Appearance::Light, crate::Palette::LIGHT),
+        (crate::Appearance::Dark, crate::Palette::DARK),
+    ] {
+        view.update(cx, |view, cx| {
+            view.preferences.appearance = appearance;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+        cx.run_until_parked();
+        assert_control_color(cx, "import-copy", palette.primary);
+        for selector in ["drawer-close", "import-header-back"] {
+            cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+            cx.run_until_parked();
+            assert_control_color(cx, selector, palette.background);
+            if !control_has_ghost_border(cx, selector, palette.background) {
+                border_failures.push(format!("{appearance:?} {selector}"));
+            }
+            let position = bounds(cx, selector).center();
+            cx.simulate_mouse_move(position, None, Modifiers::none());
+            cx.run_until_parked();
+            assert_control_color(cx, selector, palette.accent);
+        }
+    }
+    assert!(
+        border_failures.is_empty(),
+        "idle Ghost borders should match the surface: {border_failures:?}"
+    );
+
+    click(cx, "import-header-back");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.page, Page::Sources);
+        assert!(view.shell.import_games.selected.contains("one"));
+        assert!(matches!(
+            view.shell.surfaces.top().map(|entry| &entry.kind),
+            Some(Surface::Drawer(Drawer::ImportGames))
+        ));
+    });
+    assert!(crate::test_support::control_bounds(cx, "import-header-back").is_none());
+    assert_eq!(
+        bounds(cx, "drawer-title").left(),
+        bounds(cx, "block-drawer").left() + px(20.)
+    );
+
+    view.update(cx, |view, cx| {
+        let state = &mut view.shell.import_games;
+        state.page = Page::Results;
+        state.submitted.push("one".into());
+        state.outcomes.insert(
+            "one".into(),
+            crate::import_games::Outcome::Failed("Fixture failure".into()),
+        );
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(crate::test_support::control_bounds(cx, "import-header-back").is_none());
+    assert_eq!(
+        bounds(cx, "drawer-description").left(),
+        bounds(cx, "block-drawer").left() + px(20.)
+    );
+    cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+    cx.run_until_parked();
+    assert_control_color(cx, "import-retry", crate::Palette::DARK.primary);
+    assert_control_color(cx, "import-done", crate::Palette::DARK.primary);
+}
+
+#[gpui::test]
+fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        view.shell.import_games.selected.insert("one".into());
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+
+    assert!(
+        crate::test_support::control_bounds(cx, "import-sources").is_none(),
+        "the header owns the only return action"
+    );
+    let panel = bounds(cx, "block-drawer");
+    assert_eq!(
+        bounds(cx, "import-select-all").right(),
+        panel.right() - px(20.),
+        "bulk selection stays at the trailing edge"
+    );
+    assert_eq!(
+        control_node(cx, "import-select-all").label(),
+        Some("Select all")
+    );
+    click(cx, "import-select-all");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.selected.len(), 2);
+        assert!(view.shell.import_games.selected.contains("one"));
+        assert!(view.shell.import_games.selected.contains("two"));
+    });
+    assert_eq!(
+        control_node(cx, "import-select-all").label(),
+        Some("Clear selection")
+    );
+    click(cx, "import-header-back");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page),
+        Page::Sources
+    );
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.selected.len()),
+        2
+    );
+
+    click(cx, "import-view-OfficialLauncher");
+    assert_eq!(
+        control_node(cx, "import-select-all").label(),
+        Some("Clear selection")
+    );
+    click(cx, "import-select-all");
+    assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
+    assert_eq!(
+        control_node(cx, "import-select-all").label(),
+        Some("Select all")
+    );
+    click(cx, "import-header-back");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page),
+        Page::Sources
+    );
+    assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
+}
+
+#[gpui::test]
+fn import_header_keyboard_back_and_close_preserve_dismissal_policy(cx: &mut TestAppContext) {
+    #[derive(Debug)]
+    enum Dismissal {
+        Pointer,
+        Keyboard,
+        Escape,
+        Backdrop,
+    }
+
+    let (view, cx, _system_motion) = fixture(cx, true);
+    let invoking_focus = cx.update(|window, cx| window.focused(cx));
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    act(
+        &view,
+        UiAction::ImportGames(crate::import_games::Action::View(
+            SourceKind::OfficialLauncher,
+        )),
+        cx,
+    );
+
+    focus_by_tab(cx, "import-header-back");
+    crate::test_support::press(cx, "enter");
+    cx.run_until_parked();
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page),
+        Page::Sources
+    );
+
+    for dismissal in [
+        Dismissal::Pointer,
+        Dismissal::Keyboard,
+        Dismissal::Escape,
+        Dismissal::Backdrop,
+    ] {
+        if !view.read_with(cx, |view, _| view.shell.surfaces.is_open()) {
+            act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+        }
+        let cancel = view.update(cx, |view, cx| {
+            view.shell.import_games.page = Page::Progress;
+            view.shell.import_games.running = true;
+            view.shell.import_games.cancel = block_launcher::CancellationToken::new();
+            cx.notify();
+            view.shell.import_games.cancel.clone()
+        });
+        cx.run_until_parked();
+        assert!(crate::test_support::control_bounds(cx, "import-header-back").is_none());
+        assert!(crate::test_support::control_bounds(cx, "import-stop").is_some());
+        match dismissal {
+            Dismissal::Pointer => click(cx, "drawer-close"),
+            Dismissal::Keyboard => {
+                focus_by_tab(cx, "drawer-close");
+                crate::test_support::press(cx, "space");
+            }
+            Dismissal::Escape => crate::test_support::press(cx, "escape"),
+            Dismissal::Backdrop => {
+                let panel = bounds(cx, "block-drawer");
+                cx.simulate_click(
+                    point(panel.center().x, panel.top() - px(10.)),
+                    Modifiers::none(),
+                );
+            }
+        }
+        cx.run_until_parked();
+        assert!(
+            !view.read_with(cx, |view, _| view.shell.surfaces.is_open()),
+            "{dismissal:?} should dismiss the drawer"
+        );
+        assert!(
+            cancel.is_cancelled(),
+            "{dismissal:?} should cancel the running import"
+        );
+        assert_eq!(cx.update(|window, cx| window.focused(cx)), invoking_focus);
+    }
 }
 
 #[gpui::test]
