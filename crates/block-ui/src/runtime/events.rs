@@ -125,7 +125,7 @@ impl Block {
                 Message::Command(command) => self.command = Some(command),
                 Message::Log(line) => self.push_log(line),
                 Message::Session(record) => {
-                    self.session_updated(*record);
+                    self.session_updated(*record, cx);
                     self.start_pending_play(cx);
                 }
                 Message::SessionAccepted { operation, record } => {
@@ -141,7 +141,7 @@ impl Block {
                         }
                         self.finish_logged_operation(crate::ui_logging::Outcome::Accepted);
                     }
-                    self.session_updated(*record);
+                    self.session_updated(*record, cx);
                     self.start_pending_play(cx);
                 }
                 Message::Crash {
@@ -198,9 +198,9 @@ impl Block {
                 self.shell.profiles.load = browser::CollectionLoad::Ready;
             }
             Err(error) => {
-                self.shell.games.load = browser::CollectionLoad::Failed(error.clone());
-                self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone());
-                self.report(error);
+                self.shell.games.load = browser::CollectionLoad::Failed(error.clone().into());
+                self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone().into());
+                self.report(crate::i18n::UiText::Raw(error));
             }
         }
     }
@@ -211,8 +211,8 @@ impl Block {
         let accounts = match result {
             Ok(accounts) => accounts,
             Err(error) => {
-                self.shell.accounts.load = browser::CollectionLoad::Failed(error.clone());
-                self.report(error);
+                self.shell.accounts.load = browser::CollectionLoad::Failed(error.clone().into());
+                self.report(crate::i18n::UiText::Raw(error));
                 return;
             }
         };
@@ -276,7 +276,7 @@ impl Block {
         let versions = match result {
             Ok(versions) => versions,
             Err(error) => {
-                self.version_load = browser::CollectionLoad::Failed(error.clone());
+                self.version_load = browser::CollectionLoad::Failed(error.clone().into());
                 self.push_log(format!("Version list unavailable: {error}"));
                 return;
             }
@@ -297,7 +297,7 @@ impl Block {
     /// results, report the outcome and drain a queued Play.
     fn finish_operation(
         &mut self,
-        result: Result<String, String>,
+        result: Result<crate::i18n::UiText, String>,
         scoped: bool,
         cx: &mut Context<'_, Self>,
     ) {
@@ -331,10 +331,10 @@ impl Block {
                 }
             }
             Err(_) if self.cancel.is_cancelled() => {
-                self.status = "Cancelled · retry when ready".into();
+                self.status = msg!("runtime.cancelled");
             }
             Err(error) => {
-                self.report(format!("Failed · {error}"));
+                self.report(msg!("runtime.failed", error = error));
             }
         }
         self.start_pending_play(cx);
@@ -345,12 +345,12 @@ impl Block {
         match result {
             Ok(recipe) => {
                 self.recipe = Some(recipe);
-                self.status = "Development recipe loaded · offline identity is explicit".into();
+                self.status = msg!("runtime.recipe_loaded");
                 if launch {
                     self.launch_recipe(cx);
                 }
             }
-            Err(error) => self.report(format!("Invalid recipe: {error}")),
+            Err(error) => self.report(msg!("runtime.invalid_recipe", error = error)),
         }
     }
 }

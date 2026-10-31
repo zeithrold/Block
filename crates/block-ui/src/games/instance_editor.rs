@@ -7,7 +7,7 @@
 
 use super::scroll_area::ScrollAreaExt as _;
 use super::{
-    Block, TextInput, UiAction,
+    Block, Language, TextInput, UiAction,
     components::{self, ButtonVariant, ControlState, FieldOptions},
     input, note, patterns,
 };
@@ -46,6 +46,88 @@ enum Reveal {
     OptiFine,
 }
 
+/// A rejected draft value, kept with the draft until the user fixes the field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Issue {
+    Name,
+    Width,
+    Height,
+    /// A diagnostic about the Java runtime, kept verbatim.
+    Java(String),
+}
+
+impl Issue {
+    const fn field(&self) -> Field {
+        match self {
+            Self::Name => Field::Name,
+            Self::Width => Field::Width,
+            Self::Height => Field::Height,
+            Self::Java(_) => Field::Java,
+        }
+    }
+
+    /// Resolve the message in the language of the view that paints it.
+    fn message(&self, language: Language) -> String {
+        self.text().text(language)
+    }
+
+    fn text(&self) -> crate::i18n::UiText {
+        match self {
+            Self::Name => msg!("games.instance_editor.error.name"),
+            Self::Width => msg!("games.instance_editor.error.width"),
+            Self::Height => msg!("games.instance_editor.error.height"),
+            Self::Java(detail) => crate::i18n::UiText::Raw(detail.clone()),
+        }
+    }
+}
+
+/// Why the last OptiFine selection was not accepted; kept until the next attempt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum OptiFineIssue {
+    /// The system file chooser could not be opened.
+    ChooserUnavailable,
+    /// The selected JAR could not be imported; its diagnostic stays verbatim.
+    ImportFailed(String),
+    /// The JAR declares a different game version or loader; diagnostic verbatim.
+    Rejected(String),
+}
+
+impl OptiFineIssue {
+    /// Resolve the message in the language of the view that paints it.
+    fn message(&self, language: Language) -> String {
+        match self {
+            Self::ChooserUnavailable => tr!(language, "games.optifine.chooser_failed"),
+            Self::ImportFailed(detail) => {
+                tr!(
+                    language,
+                    "games.optifine.import_failed",
+                    error = detail.clone()
+                )
+            }
+            Self::Rejected(detail) => detail.clone(),
+        }
+    }
+}
+
+/// Why the last save attempt did not reach the catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SaveFailure {
+    /// The engine refused to start the save, so the draft stayed editable.
+    Unavailable,
+    /// A diagnostic from the catalog engine, kept verbatim.
+    Reported(String),
+}
+
+impl SaveFailure {
+    /// Resolve the message in the language of the view that paints it.
+    fn message(&self, language: Language) -> String {
+        match self {
+            Self::Unavailable => tr!(language, "games.instance_editor.save_failed"),
+            Self::Reported(detail) => detail.clone(),
+        }
+    }
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "Independent runtime, window editor, fullscreen and save state can coexist."
@@ -65,12 +147,12 @@ pub(super) struct InstanceEditor {
     optifine: Option<Box<OptiFineJar>>,
     /// Import that is currently being validated, so late results can be dropped.
     optifine_request: Option<uuid::Uuid>,
-    optifine_error: Option<String>,
+    optifine_error: Option<OptiFineIssue>,
     /// Focus target of the OptiFine section, set only by the OptiFine entry.
     optifine_focus: Option<FocusHandle>,
     saving: bool,
-    error: Option<(Field, String)>,
-    save_error: Option<String>,
+    error: Option<Issue>,
+    save_error: Option<SaveFailure>,
     scroll: ScrollHandle,
     reveal: Rc<Cell<Option<Reveal>>>,
     return_focus: Option<FocusHandle>,
@@ -136,16 +218,10 @@ impl InstanceEditor {
         }
     }
 
-    fn configuration(
-        &self,
-        cx: &Context<'_, Block>,
-    ) -> Result<InstanceConfiguration, (Field, String)> {
+    fn configuration(&self, cx: &Context<'_, Block>) -> Result<InstanceConfiguration, Issue> {
         let name = self.name.read(cx).value().trim().to_owned();
         if name.is_empty() || name.len() > 160 || name.chars().any(char::is_control) {
-            return Err((
-                Field::Name,
-                "Enter an instance name using printable text".into(),
-            ));
+            return Err(Issue::Name);
         }
         let width = self
             .width
@@ -155,12 +231,7 @@ impl InstanceEditor {
             .parse::<u32>()
             .ok()
             .filter(|value| (320..=16384).contains(value))
-            .ok_or_else(|| {
-                (
-                    Field::Width,
-                    "Window width must be between 320 and 16384 pixels".into(),
-                )
-            })?;
+            .ok_or(Issue::Width)?;
         let height = self
             .height
             .read(cx)
@@ -169,12 +240,7 @@ impl InstanceEditor {
             .parse::<u32>()
             .ok()
             .filter(|value| (240..=16384).contains(value))
-            .ok_or_else(|| {
-                (
-                    Field::Height,
-                    "Window height must be between 240 and 16384 pixels".into(),
-                )
-            })?;
+            .ok_or(Issue::Height)?;
         let runtime = if self.managed {
             RuntimeSelection::Managed
         } else {
@@ -190,7 +256,7 @@ impl InstanceEditor {
         };
         settings
             .validate()
-            .map_err(|error| (Field::Java, error.to_string()))?;
+            .map_err(|error| Issue::Java(error.to_string()))?;
         Ok(InstanceConfiguration { name, settings })
     }
 
@@ -225,6 +291,22 @@ impl InstanceEditor {
 }
 
 impl Block {
+    pub(super) fn refresh_instance_editor_placeholders(
+        &self,
+        language: Language,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(editor) = &self.shell.instance_editor {
+            for (input, key) in [
+                (&editor.name, "games.instance_editor.name"),
+                (&editor.java, "games.java.executable_placeholder"),
+            ] {
+                let placeholder = tr!(language, key);
+                input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+            }
+        }
+    }
+
     pub(super) fn open_instance_editor(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.open_instance_settings(Entry::Name, window, cx);
     }
@@ -271,13 +353,22 @@ impl Block {
             RuntimeSelection::Managed => String::new(),
             RuntimeSelection::Local { java } => java.display().to_string(),
         };
-        let name = input(&original.name, "Instance name", cx);
+        let language = self.language();
+        let name = input(
+            &original.name,
+            &tr!(language, "games.instance_editor.name"),
+            cx,
+        );
         let return_focus = window.focused(cx);
         let mut editor = InstanceEditor {
             original,
             target,
             name,
-            java: input(&java, "Absolute path to Java executable", cx),
+            java: input(
+                &java,
+                &tr!(language, "games.java.executable_placeholder"),
+                cx,
+            ),
             width: input(&settings.width.to_string(), "1280", cx),
             height: input(&settings.height.to_string(), "720", cx),
             managed: matches!(settings.runtime, RuntimeSelection::Managed),
@@ -341,7 +432,7 @@ impl Block {
             if editor
                 .error
                 .as_ref()
-                .is_some_and(|(field, _)| *field == Field::Java)
+                .is_some_and(|issue| issue.field() == Field::Java)
             {
                 editor.error = None;
             }
@@ -372,7 +463,7 @@ impl Block {
             if editor
                 .error
                 .as_ref()
-                .is_some_and(|(field, _)| matches!(field, Field::Width | Field::Height))
+                .is_some_and(|issue| matches!(issue.field(), Field::Width | Field::Height))
             {
                 editor.error = None;
             }
@@ -425,7 +516,7 @@ impl Block {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Select the official OptiFine installer JAR".into()),
+            prompt: Some(tr!(self.language(), "games.optifine.prompt").into()),
         });
         cx.notify();
         cx.spawn(async move |view, cx| {
@@ -489,9 +580,7 @@ impl Block {
             }
             Err(()) => {
                 editor.optifine_request = None;
-                editor.optifine_error = Some(
-                    "Could not open the OptiFine file chooser. Check your system file picker and try again.".into(),
-                );
+                editor.optifine_error = Some(OptiFineIssue::ChooserUnavailable);
                 cx.notify();
                 None
             }
@@ -526,10 +615,12 @@ impl Block {
                     editor.optifine = Some(Box::new(selected));
                     editor.optifine_error = None;
                 }
-                Err(error) => editor.optifine_error = Some(error.to_string()),
+                Err(error) => {
+                    editor.optifine_error = Some(OptiFineIssue::Rejected(error.to_string()))
+                }
             },
             Err(error) => {
-                editor.optifine_error = Some(format!("Could not import OptiFine: {error:#}"));
+                editor.optifine_error = Some(OptiFineIssue::ImportFailed(format!("{error:#}")));
             }
         }
         cx.notify();
@@ -582,18 +673,18 @@ impl Block {
             Ok(configuration) => {
                 if optifine_changed {
                     self.begin_cancellable(
-                        "Saving instance settings · applying OptiFine",
+                        msg!("games.instance_editor.saving_optifine"),
                         super::ui_logging::Operation::SaveInstance,
                     );
                 } else {
                     self.begin(
-                        "Saving instance settings",
+                        msg!("games.instance_editor.saving"),
                         super::ui_logging::Operation::SaveInstance,
                     );
                 }
                 if let Some(editor) = &mut self.shell.instance_editor {
                     editor.error = None;
-                    editor.save_error = (!self.busy).then(|| "Instance settings could not be saved. Check Block’s data directory and restart.".into());
+                    editor.save_error = (!self.busy).then_some(SaveFailure::Unavailable);
                     editor.saving = self.busy;
                     editor.read_only(self.busy, cx);
                 }
@@ -613,9 +704,10 @@ impl Block {
                     }
                 }
             }
-            Err((field, message)) => {
+            Err(issue) => {
+                let field = issue.field();
                 if let Some(editor) = &mut self.shell.instance_editor {
-                    editor.error = Some((field, message.clone()));
+                    editor.error = Some(issue.clone());
                     editor.save_error = None;
                     if matches!(field, Field::Width | Field::Height) {
                         editor.window_custom = true;
@@ -630,7 +722,7 @@ impl Block {
                         .focus_handle(cx)
                         .focus(window, cx);
                 }
-                self.report(message);
+                self.report(issue.text());
             }
         }
         cx.notify();
@@ -638,7 +730,7 @@ impl Block {
 
     pub(super) fn instance_edit_finished(
         &mut self,
-        result: &Result<String, String>,
+        result: &Result<crate::i18n::UiText, String>,
         cx: &mut Context<'_, Self>,
     ) {
         if !self
@@ -652,7 +744,7 @@ impl Block {
         if let Err(error) = result {
             if let Some(editor) = &mut self.shell.instance_editor {
                 editor.saving = false;
-                editor.save_error = Some(error.clone());
+                editor.save_error = Some(SaveFailure::Reported(error.clone()));
                 editor.read_only(false, cx);
             }
         } else if let Some(editor) = self.shell.instance_editor.take() {
@@ -669,28 +761,66 @@ impl Block {
         let Some(editor) = &self.shell.instance_editor else {
             return div().into_any_element();
         };
-        let mut body = div().id(gpui::SharedString::from(format!("instance-editor-body-{}", editor.identity()))).debug_selector(|| "instance-editor-body".into())
-            .flex_1().min_h_0().scroll_area(&editor.scroll, "Instance settings", self.palette, false).p_6().flex().flex_col().gap_5()
-            .child(div().text_2xl().font_weight(gpui::FontWeight::BOLD).child("Instance configuration"))
-            .child(self.instance_field(editor, Field::Name, "Instance name"))
-            .child(note("These defaults apply to Profiles that inherit Instance settings. A Profile’s custom Java keeps priority."))
-            .child(self.product_select_field("instance-runtime", "Java runtime", if editor.managed { "Automatic Java" } else { "Custom executable" }, super::select::ProductChoice::InstanceRuntime, cx));
+        let language = self.language();
+        let mut body = div()
+            .id(gpui::SharedString::from(format!(
+                "instance-editor-body-{}",
+                editor.identity()
+            )))
+            .debug_selector(|| "instance-editor-body".into())
+            .flex_1()
+            .min_h_0()
+            .scroll_area(&editor.scroll, "games.instance_editor", self.palette, false)
+            .p_6()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(
+                div()
+                    .text_2xl()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child(tr!(language, "games.instance_editor.title")),
+            )
+            .child(self.instance_field(
+                editor,
+                Field::Name,
+                tr!(language, "games.instance_editor.name"),
+            ))
+            .child(note(tr!(language, "games.instance_editor.inherit_note")))
+            .child({
+                let runtime = if editor.managed {
+                    tr!(language, "games.java.automatic")
+                } else {
+                    tr!(language, "games.java.custom_executable")
+                };
+                self.product_select_field(
+                    "instance-runtime",
+                    tr!(language, "select.java_runtime"),
+                    &runtime,
+                    super::select::ProductChoice::InstanceRuntime,
+                    cx,
+                )
+            });
         if !editor.managed {
-            body = body.child(self.instance_field(editor, Field::Java, "Java executable"));
+            body = body.child(self.instance_field(
+                editor,
+                Field::Java,
+                tr!(language, "games.java.executable"),
+            ));
         }
         let size = format!(
             "{} × {}{}",
             editor.width.read(cx).value(),
             editor.height.read(cx).value(),
             if editor.window_custom {
-                " · Custom"
+                tr!(language, "games.instance_editor.custom_suffix")
             } else {
-                ""
+                String::new()
             }
         );
         body = body.child(self.product_select_field(
             "instance-window",
-            "Window size",
+            tr!(language, "select.window_size"),
             &size,
             super::select::ProductChoice::InstanceWindow,
             cx,
@@ -701,37 +831,77 @@ impl Block {
                     .flex()
                     .gap_4()
                     .child(
-                        self.instance_field(editor, Field::Width, "Window width (px)")
-                            .flex_1(),
+                        self.instance_field(
+                            editor,
+                            Field::Width,
+                            tr!(language, "games.instance_editor.window_width"),
+                        )
+                        .flex_1(),
                     )
                     .child(
-                        self.instance_field(editor, Field::Height, "Window height (px)")
-                            .flex_1(),
+                        self.instance_field(
+                            editor,
+                            Field::Height,
+                            tr!(language, "games.instance_editor.window_height"),
+                        )
+                        .flex_1(),
                     ),
             );
         }
         body = body
-            .child(components::checkbox("instance-fullscreen", "Start in fullscreen", editor.fullscreen, self.palette,
-                ControlState { disabled: self.busy, ..ControlState::default() },
-                cx.listener(|view, (), window, cx| view.handle(UiAction::InstanceFullscreen, window, cx))))
+            .child(components::checkbox(
+                "instance-fullscreen",
+                tr!(language, "games.instance_editor.fullscreen"),
+                editor.fullscreen,
+                self.palette,
+                ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
+                cx.listener(|view, (), window, cx| {
+                    view.handle(UiAction::InstanceFullscreen, window, cx)
+                }),
+            ))
             .child(self.instance_optifine_section(editor, cx))
-            .child(div().flex().flex_col().gap_2().child("Installation directory").child(note(editor.original.directory.display().to_string()).min_w_0().w_full().truncate())
-                .child(note("This location is read-only. Block chooses storage automatically and existing games stay where they are.")))
-            .children(editor.original.settings.is_none().then(|| note("Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.")))
-            .children(editor.save_error.clone().map(note));
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(tr!(language, "games.instance_editor.directory"))
+                    .child(
+                        note(editor.original.directory.display().to_string())
+                            .min_w_0()
+                            .w_full()
+                            .truncate(),
+                    )
+                    .child(note(tr!(language, "games.instance_editor.directory_note"))),
+            )
+            .children(editor.original.settings.is_none().then(|| {
+                note(tr!(
+                    language,
+                    "games.instance_editor.existing_profiles_note"
+                ))
+            }))
+            .children(
+                editor
+                    .save_error
+                    .as_ref()
+                    .map(|failure| note(failure.message(language))),
+            );
         let footer = patterns::management_footer(self.palette)
             .id("instance-editor-footer")
             .debug_selector(|| "instance-editor-footer".into())
             .justify_end()
             .child(self.button(
                 "cancel-instance-settings",
-                "Cancel",
+                tr!(language, "common.cancel"),
                 UiAction::CancelInstanceSettings,
                 cx,
             ))
             .child(components::button(
                 "save-instance-settings",
-                "Save changes",
+                tr!(language, "games.action.save_changes"),
                 self.palette,
                 ButtonVariant::Primary,
                 ControlState {
@@ -759,20 +929,20 @@ impl Block {
         editor: &InstanceEditor,
         cx: &Context<'_, Self>,
     ) -> gpui::Stateful<gpui::Div> {
+        let language = self.language();
         let mut section = div()
             .flex()
             .flex_col()
             .gap_2()
             .child(div().text_sm().child("OptiFine"))
-            .child(note(
-                "Choose the official OptiFine installer JAR downloaded from optifine.net. Block validates it and applies it to this game when you save.",
-            ));
+            .child(note(tr!(language, "games.optifine.intro")));
         if editor.optifine_supported() {
             section = self.optifine_selection(editor, section, cx);
         } else {
-            section = section.child(note(format!(
-                "OptiFine cannot be combined directly with {}.",
-                editor.target.kind.name()
+            section = section.child(note(tr!(
+                language,
+                "games.optifine.unsupported",
+                loader = editor.target.kind.name()
             )));
             // Without an action to offer, this section is what carries the focus.
             if let Some(focus) = &editor.optifine_focus {
@@ -796,30 +966,38 @@ impl Block {
         mut section: gpui::Div,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
-        section = section.child(note(format!(
-            "Applies to {}.",
-            editor.target.display_name()
+        let language = self.language();
+        section = section.child(note(tr!(
+            language,
+            "games.optifine.applies_to",
+            target = editor.target.display_name()
         )));
         let pending = editor.optifine_request.is_some();
         match &editor.optifine {
             Some(selected) => {
-                section = section.child(note(format!("Selected: OptiFine {}", selected.version)));
+                section = section.child(note(tr!(
+                    language,
+                    "games.optifine.selected",
+                    version = selected.version.as_str()
+                )));
                 if let Some(forge) = &selected.forge {
-                    section = section.child(note(format!(
-                        "This release declares compatibility with Forge {forge}."
+                    section = section.child(note(tr!(
+                        language,
+                        "games.optifine.forge_compat",
+                        forge = forge.as_str()
                     )));
                 }
             }
             None => {
-                section = section.child(note("Not installed."));
+                section = section.child(note(tr!(language, "games.optifine.not_installed")));
             }
         }
         let select_label = if pending {
-            "Choosing or validating JAR…"
+            tr!(language, "games.optifine.choosing")
         } else if editor.optifine.is_some() {
-            "Replace selected JAR"
+            tr!(language, "games.optifine.replace")
         } else {
-            "Select downloaded JAR"
+            tr!(language, "games.optifine.select")
         };
         let mut select = components::button(
             "instance-optifine-select",
@@ -847,7 +1025,7 @@ impl Block {
         if editor.optifine.is_some() {
             actions = actions.child(components::button(
                 "instance-optifine-remove",
-                "Remove OptiFine",
+                tr!(language, "games.optifine.remove"),
                 self.palette,
                 ButtonVariant::Ghost,
                 ControlState {
@@ -861,13 +1039,11 @@ impl Block {
         }
         section = section.child(actions);
         if pending {
-            section = section.child(note(
-                "Choose a JAR, then Block checks its declared game compatibility.",
-            ));
+            section = section.child(note(tr!(language, "games.optifine.pending_help")));
         }
         if let Some(error) = &editor.optifine_error {
             section = section.child(
-                note(error.clone())
+                note(error.message(language))
                     .id("instance-optifine-error")
                     .debug_selector(|| "instance-optifine-error".into()),
             );
@@ -879,13 +1055,13 @@ impl Block {
         &self,
         editor: &InstanceEditor,
         field: Field,
-        label: &'static str,
+        label: impl Into<gpui::SharedString>,
     ) -> gpui::Stateful<gpui::Div> {
         let error = editor
             .error
             .as_ref()
-            .filter(|(invalid, _)| *invalid == field)
-            .map(|(_, message)| message.clone().into());
+            .filter(|issue| issue.field() == field)
+            .map(|issue| issue.message(self.language()).into());
         patterns::reveal_field(
             components::field_with(
                 label,
@@ -909,7 +1085,8 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Block, Tab, UiAction, test_support::ready_snapshot};
+    use super::{Issue, SaveFailure};
+    use crate::{Block, Language, Tab, UiAction, test_support::ready_snapshot};
     use block_launcher::catalog::{Catalog, LoaderKind};
     use gpui::{Focusable as _, TestAppContext, VisualTestContext, px, size};
     use std::{
@@ -1006,11 +1183,9 @@ mod tests {
             assert!(crate::test_support::control_bounds(cx, "instance-optifine-error").is_some());
             assert!(view.read_with(cx, |view, cx| {
                 view.shell.instance_editor.as_ref().is_some_and(|editor| {
-                    editor
-                        .optifine_error
-                        .as_deref()
-                        .is_some_and(|error| error.contains("file chooser"))
-                        && editor.optifine_request.is_none()
+                    editor.optifine_error.as_ref().is_some_and(|error| {
+                        error.message(Language::English).contains("file chooser")
+                    }) && editor.optifine_request.is_none()
                         && editor.name.read(cx).value() == "Unsaved name"
                 })
             }));
@@ -1108,10 +1283,11 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 view.shell.instance_editor.as_ref().is_some_and(|editor| {
                     editor.optifine_request.is_none()
-                        && editor
-                            .optifine_error
-                            .as_deref()
-                            .is_some_and(|error| error.contains("Could not import OptiFine"))
+                        && editor.optifine_error.as_ref().is_some_and(|error| {
+                            error
+                                .message(Language::English)
+                                .contains("Could not import OptiFine")
+                        })
                         && editor.optifine.is_none()
                 })
             }));
@@ -1336,8 +1512,8 @@ mod tests {
                 assert!(
                     editor
                         .optifine_error
-                        .as_deref()
-                        .is_some_and(|error| error.contains("1.21.1")),
+                        .as_ref()
+                        .is_some_and(|error| error.message(Language::English).contains("1.21.1")),
                     "{:?}",
                     editor.optifine_error
                 );
@@ -1587,6 +1763,118 @@ mod tests {
                 .is_some_and(|(section, body)| section.top() >= body.top()
                     && section.bottom() <= body.bottom()),
             "the reason the card entry opened for is inside the viewport: {section:?} {body:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn retained_instance_messages_resolve_in_the_view_language(cx: &mut TestAppContext) {
+        use anyhow::Context as _;
+        let result = (|| -> anyhow::Result<()> {
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.preferences.reduce_motion = true;
+                    view.preferences.language = Some(Language::Japanese);
+                    view.router.navigate(Tab::Instances);
+                    view.snapshot = ready_snapshot();
+                    view.handle(UiAction::EditInstance, window, cx);
+                    if let Some(editor) = &view.shell.instance_editor {
+                        editor
+                            .width
+                            .update(cx, |field, cx| field.set_value("bad", cx));
+                    }
+                    view.handle(UiAction::SaveInstanceSettings, window, cx);
+                });
+            });
+            cx.run_until_parked();
+            view.read_with(cx, |view, _| -> anyhow::Result<()> {
+                let editor = view
+                    .shell
+                    .instance_editor
+                    .as_ref()
+                    .context("draft stays open")?;
+                let issue = editor.error.clone().context("the width is rejected")?;
+                assert_eq!(issue, Issue::Width);
+                assert_eq!(
+                    issue.message(Language::Japanese),
+                    "ウィンドウ幅は 320～16384 ピクセルの範囲で指定してください"
+                );
+                // The draft keeps the reason, not one rendered sentence: another
+                // view language resolves the same failure in its own copy.
+                assert_eq!(
+                    issue.message(Language::English),
+                    "Window width must be between 320 and 16384 pixels"
+                );
+                Ok(())
+            })?;
+
+            // A save that never reaches the engine keeps its own notice the same way.
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    if let Some(editor) = &view.shell.instance_editor {
+                        editor
+                            .width
+                            .update(cx, |field, cx| field.set_value("1280", cx));
+                    }
+                    view.handle(UiAction::SaveInstanceSettings, window, cx);
+                });
+            });
+            cx.run_until_parked();
+            view.read_with(cx, |view, _| -> anyhow::Result<()> {
+                let editor = view
+                    .shell
+                    .instance_editor
+                    .as_ref()
+                    .context("draft stays open")?;
+                let failure = editor
+                    .save_error
+                    .clone()
+                    .context("an engine-less save reports itself")?;
+                assert_eq!(failure, SaveFailure::Unavailable);
+                assert_eq!(
+                    failure.message(Language::Japanese),
+                    "インスタンス設定を保存できませんでした。Block のデータディレクトリを確認して再起動してください。"
+                );
+                assert_eq!(
+                    failure.message(Language::English),
+                    "Instance settings could not be saved. Check Block’s data directory and restart."
+                );
+                Ok(())
+            })?;
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn japanese_instance_editor_keeps_its_fields_and_actions(cx: &mut TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.simulate_resize(size(px(1152.), px(540.)));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.preferences.language = Some(Language::Japanese);
+                view.router.navigate(Tab::Instances);
+                view.snapshot = ready_snapshot();
+                view.handle(UiAction::EditInstance, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        for selector in [
+            "instance-field-Name",
+            "instance-optifine",
+            "cancel-instance-settings",
+            "save-instance-settings",
+        ] {
+            assert!(
+                cx.debug_bounds(selector).is_some(),
+                "{selector} did not paint in Japanese"
+            );
+        }
+        let footer = cx.debug_bounds("instance-editor-footer");
+        assert!(
+            footer.is_some_and(|footer| footer.bottom() <= px(540.) && footer.right() <= px(1152.)),
+            "the Japanese footer stays inside the window: {footer:?}"
         );
     }
 }

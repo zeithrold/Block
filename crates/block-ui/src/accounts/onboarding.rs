@@ -17,13 +17,11 @@ impl Block {
         let mut preferences = self.preferences.clone();
         preferences.onboarding_complete = true;
         let Some(engine) = &self.engine else {
-            self.report(
-                "Setup could not be saved. Check Block's data directory and restart.".into(),
-            );
+            self.report(msg!("accounts.onboarding.save_missing"));
             return false;
         };
         if let Err(error) = preferences.save(&engine.root) {
-            self.report(format!("Could not finish setup: {error}"));
+            self.report(msg!("accounts.onboarding.finish_failed", error = error));
             return false;
         }
         if let Some(engine) = &self.engine {
@@ -44,7 +42,7 @@ impl Block {
         self.pending_window_size = None;
         self.shell.revision = self.shell.revision.wrapping_add(1);
         self.push_toast(
-            "Setup saved · Continue on Home".into(),
+            msg!("accounts.onboarding.saved_toast"),
             super::feedback::ToastKind::Success,
         );
         true

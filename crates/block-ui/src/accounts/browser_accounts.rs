@@ -4,27 +4,33 @@ use block_auth::{Account, AccountProvider};
 use gpui::{ParentElement as _, Styled as _, div, rgb};
 
 use super::{Block, RowIcon, account_id, components::BadgeVariant, note};
+use crate::authentication::provider_label;
 
 impl Block {
     pub(super) fn account_details(&self, account: &Account, current: bool) -> gpui::Div {
+        let language = self.language();
         let id = account_id(account);
         let (authentication, identity, credentials) = match account.provider {
             AccountProvider::Microsoft => (
-                "Ownership rechecked at launch",
-                "A Microsoft identity for Minecraft: Java Edition.",
-                "Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store.",
+                tr!(language, "accounts.details.authentication.microsoft"),
+                tr!(language, "accounts.details.identity.microsoft"),
+                tr!(language, "accounts.details.credentials.microsoft"),
             ),
             AccountProvider::Authlib => (
-                "External authentication provider",
-                "An identity issued by an external authentication provider.",
-                "Provider credentials must be verified before launch. Access and client tokens belong in your system credential store.",
+                tr!(language, "accounts.details.authentication.authlib"),
+                tr!(language, "accounts.details.identity.authlib"),
+                tr!(language, "accounts.details.credentials.authlib"),
             ),
             AccountProvider::Offline => (
-                "Local identity; no online authorization",
-                "A local player identity for offline play.",
-                "The UUID is derived from the exact player name. No credentials are stored. This identity cannot access authenticated online services.",
+                tr!(language, "accounts.details.authentication.offline"),
+                tr!(language, "accounts.details.identity.offline"),
+                tr!(language, "accounts.details.credentials.offline"),
             ),
         };
+        let player_name = tr!(language, "accounts.details.player_name");
+        let account_type = tr!(language, "accounts.details.account_type");
+        let authentication_label = tr!(language, "accounts.details.authentication");
+        let environment = tr!(language, "accounts.details.environment");
         div()
             .flex()
             .flex_col()
@@ -37,12 +43,15 @@ impl Block {
                 current,
             ))
             .child(Self::detail_metadata(
-                "Account details",
+                &tr!(language, "accounts.details.title"),
                 &[
-                    ("Player name", account.player_name.clone()),
-                    ("Account type", account.provider.label().into()),
-                    ("Authentication", authentication.into()),
-                    ("Environment", "Minecraft: Java Edition".into()),
+                    (player_name.as_str(), account.player_name.clone()),
+                    (
+                        account_type.as_str(),
+                        provider_label(language, account.provider),
+                    ),
+                    (authentication_label.as_str(), authentication),
+                    (environment.as_str(), "Minecraft: Java Edition".into()),
                 ],
             ))
             .child(
@@ -63,19 +72,23 @@ impl Block {
     }
 
     fn account_provider_details(&self, account: &Account) -> gpui::Div {
+        let language = self.language();
+        let name = tr!(language, "accounts.details.provider_name");
+        let api = tr!(language, "accounts.details.provider_api");
+        let linked_account = tr!(language, "accounts.details.provider_account");
         Self::detail_metadata(
-            "Provider",
+            &tr!(language, "accounts.details.provider"),
             &[
-                ("Name", self.account_authority(account)),
+                (name.as_str(), self.account_authority(account)),
                 (
-                    "API address",
+                    api.as_str(),
                     self.account_provider(account).map_or_else(
-                        || "Provider unavailable".into(),
+                        || tr!(language, "accounts.details.provider_unavailable"),
                         |provider| provider.api_url.clone(),
                     ),
                 ),
                 (
-                    "Account",
+                    linked_account.as_str(),
                     account
                         .authlib
                         .as_ref()

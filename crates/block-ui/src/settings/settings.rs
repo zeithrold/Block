@@ -7,7 +7,7 @@
 use super::scroll_area::ScrollAreaExt as _;
 use std::{cell::Cell, fmt, path::PathBuf, rc::Rc};
 
-use anyhow::{Context as _, ensure};
+use anyhow::ensure;
 use block_launcher::{
     DownloadOptions, ProxyMode,
     catalog::{
@@ -17,14 +17,15 @@ use block_launcher::{
 };
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, ScrollHandle, Styled as _, Window, div, point, px, rgb,
+    ParentElement as _, ScrollHandle, SharedString, Styled as _, Window, div, point, px, rgb,
 };
 use serde::{Deserialize, Serialize};
 
 use super::components::{ControlState, FieldOptions};
 use super::design::Icon;
 use super::{
-    Appearance, Block, Preferences, Tab, TextInput, UiAction, components, input, note, patterns,
+    Appearance, Block, Language, Preferences, Tab, TextInput, UiAction, components, input, note,
+    patterns,
 };
 
 pub(super) const WINDOW_PRESETS: [(u32, u32); 3] = [(854, 480), (1280, 720), (1920, 1080)];
@@ -141,36 +142,101 @@ impl SettingsField {
 #[derive(Clone, Debug)]
 pub(super) struct SettingsError {
     pub field: Option<SettingsField>,
-    pub message: String,
+    message: SettingsMessage,
 }
 
-impl SettingsError {
-    fn at(field: SettingsField, message: impl fmt::Display) -> Self {
-        Self {
-            field: Some(field),
-            message: message.to_string(),
+/// Retained settings feedback is stored as product identity and translated
+/// only when it is rendered, so a later language switch never leaves an older
+/// language frozen in the draft.
+#[derive(Clone, Debug)]
+enum SettingsMessage {
+    /// Product-authored message with no interpolation.
+    Product(&'static str),
+    /// Product-authored message carrying one diagnostic argument.
+    Detail(&'static str, String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SettingsNotice {
+    Saved,
+    DefaultsRestored,
+}
+
+impl SettingsNotice {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Saved => "settings.notice.saved",
+            Self::DefaultsRestored => "settings.notice.defaults_restored",
         }
     }
 }
 
-impl fmt::Display for SettingsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.message.fmt(f)
+impl SettingsError {
+    fn at(field: SettingsField, key: &'static str) -> Self {
+        Self {
+            field: Some(field),
+            message: SettingsMessage::Product(key),
+        }
+    }
+
+    fn detail(field: SettingsField, key: &'static str, detail: impl fmt::Display) -> Self {
+        Self {
+            field: Some(field),
+            message: SettingsMessage::Detail(key, detail.to_string()),
+        }
+    }
+
+    fn save(detail: String) -> Self {
+        Self {
+            field: None,
+            message: SettingsMessage::Detail("settings.error.save", detail),
+        }
+    }
+
+    pub(super) fn message(&self, language: Language) -> String {
+        self.text().text(language)
+    }
+
+    fn text(&self) -> crate::i18n::UiText {
+        match &self.message {
+            SettingsMessage::Product(key) => msg!(key),
+            SettingsMessage::Detail(key, detail) => msg!(key, detail = detail),
+        }
     }
 }
-
-impl std::error::Error for SettingsError {}
 
 /// Effective on-disk locations shown by the read-only Storage page.
 #[derive(Clone, Debug)]
 pub(super) struct StorageState {
-    pub paths: Result<StoragePaths, String>,
+    pub paths: Result<StoragePaths, StorageProblem>,
+}
+
+/// Why the Storage page cannot show effective locations.
+#[derive(Clone, Debug)]
+pub(super) enum StorageProblem {
+    /// Block has not reached the point where its data root is available.
+    Unavailable,
+    /// A storage document owned outside the settings view is unreadable.
+    Unreadable(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct StoragePaths {
     pub library: PathBuf,
     pub cache: PathBuf,
+}
+
+impl StorageProblem {
+    fn message(&self, language: Language) -> String {
+        match self {
+            Self::Unavailable => tr!(language, "settings.storage.unavailable"),
+            Self::Unreadable(detail) => tr!(
+                language,
+                "settings.storage.unreadable",
+                detail = detail.as_str()
+            ),
+        }
+    }
 }
 
 impl Default for StorageState {
@@ -204,7 +270,7 @@ pub(super) struct SettingsDraft {
     pub reduce_motion: bool,
     pub page: u8,
     pub error: Option<SettingsError>,
-    pub notice: Option<String>,
+    pub notice: Option<SettingsNotice>,
     heading: FocusHandle,
     scroll: ScrollHandle,
     navigation_scroll: ScrollHandle,
@@ -222,6 +288,17 @@ impl fmt::Debug for SettingsDraft {
 }
 
 impl SettingsDraft {
+    pub(super) fn refresh_placeholders(&self, language: Language, cx: &mut Context<'_, Block>) {
+        for (input, key) in [
+            (&self.java, "settings.placeholder.java"),
+            (&self.jvm, "settings.placeholder.jvm"),
+            (&self.rate, "settings.placeholder.rate"),
+        ] {
+            let placeholder = tr!(language, key);
+            input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+        }
+    }
+
     /// Independent display state for an inert outgoing transition. Inputs and
     /// scroll/focus handles are copied; live draft observers are not attached.
     pub(super) fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
@@ -248,7 +325,7 @@ impl SettingsDraft {
             reduce_motion: self.reduce_motion,
             page: self.page,
             error: self.error.clone(),
-            notice: self.notice.clone(),
+            notice: self.notice,
             heading: cx.focus_handle(),
             scroll,
             navigation_scroll,
@@ -259,6 +336,7 @@ impl SettingsDraft {
     pub(super) fn new(preferences: &Preferences, cx: &mut Context<'_, Block>) -> Self {
         let game = &preferences.game;
         let downloads = &preferences.downloads;
+        let language = preferences.language.unwrap_or_default();
         let (proxy_mode, proxy_url) = match &downloads.proxy {
             ProxyMode::System => (0, ""),
             ProxyMode::Direct => (1, ""),
@@ -267,17 +345,21 @@ impl SettingsDraft {
         let scroll = ScrollHandle::new();
         let draft = Self {
             memory: input(&components::memory_gb_text(game.memory_mib), "2", cx),
-            java: input(&game.java, "Automatic · leave empty", cx),
+            java: input(&game.java, &tr!(language, "settings.placeholder.java"), cx),
             java_automatic: game.java.is_empty(),
             window_custom: !WINDOW_PRESETS.contains(&(game.width, game.height)),
-            jvm: input(&game.jvm_arguments, "Leave empty to use defaults", cx),
+            jvm: input(
+                &game.jvm_arguments,
+                &tr!(language, "settings.placeholder.jvm"),
+                cx,
+            ),
             width: input(&game.width.to_string(), "1280", cx),
             height: input(&game.height.to_string(), "720", cx),
             concurrent: input(&downloads.max_concurrent.to_string(), "8", cx),
             retries: input(&downloads.max_retries.to_string(), "2", cx),
             rate: input(
                 &format_rate(downloads.bytes_per_second),
-                "0 · Unlimited",
+                &tr!(language, "settings.placeholder.rate"),
                 cx,
             ),
             proxy_url: input(proxy_url, "http://127.0.0.1:8080", cx),
@@ -398,13 +480,13 @@ impl SettingsDraft {
             if path.is_empty() {
                 return Err(SettingsError::at(
                     SettingsField::Java,
-                    "Choose an absolute Java executable path, or use Automatic Java",
+                    "settings.error.java_path",
                 ));
             }
             path
         };
         let memory_mib = components::parse_memory_gb(&self.memory.read(cx).value())
-            .map_err(|message| SettingsError::at(SettingsField::Memory, message))?;
+            .map_err(|error| SettingsError::at(SettingsField::Memory, error.key()))?;
         let game = GameDefaults {
             memory_mib,
             java,
@@ -412,32 +494,32 @@ impl SettingsDraft {
             width: number(
                 &self.width,
                 SettingsField::Width,
-                "Window width must be a whole number",
+                "settings.error.width_number",
                 cx,
             )?,
             height: number(
                 &self.height,
                 SettingsField::Height,
-                "Window height must be a whole number",
+                "settings.error.height_number",
                 cx,
             )?,
             fullscreen: self.fullscreen,
             show_snapshots: self.show_snapshots,
         };
-        for (valid, field, message) in [
+        for (valid, field, key) in [
             (
                 (320..=16384).contains(&game.width),
                 SettingsField::Width,
-                "Window width must be between 320 and 16384 pixels",
+                "settings.error.width_range",
             ),
             (
                 (240..=16384).contains(&game.height),
                 SettingsField::Height,
-                "Window height must be between 240 and 16384 pixels",
+                "settings.error.height_range",
             ),
         ] {
             if !valid {
-                return Err(SettingsError::at(field, message));
+                return Err(SettingsError::at(field, key));
             }
         }
         GameDefaults {
@@ -445,9 +527,15 @@ impl SettingsDraft {
             ..GameDefaults::default()
         }
         .validate()
-        .map_err(|error| SettingsError::at(SettingsField::Java, error))?;
-        game.validate()
-            .map_err(|error| SettingsError::at(SettingsField::Jvm, error))?;
+        .map_err(|error| {
+            SettingsError::detail(SettingsField::Java, "settings.error.java", error)
+        })?;
+        super::parse_arguments(&game.jvm_arguments).map_err(|_| {
+            SettingsError::at(SettingsField::Jvm, "common.arguments_unclosed_quote")
+        })?;
+        game.validate().map_err(|error| {
+            SettingsError::detail(SettingsField::Jvm, "settings.error.jvm", error)
+        })?;
         Ok(game)
     }
 
@@ -455,38 +543,41 @@ impl SettingsDraft {
         let concurrent = number(
             &self.concurrent,
             SettingsField::Concurrent,
-            "Concurrent downloads must be a whole number",
+            "settings.error.concurrent_number",
             cx,
         )?;
         let retries = number(
             &self.retries,
             SettingsField::Retries,
-            "Retries must be a whole number",
+            "settings.error.retries_number",
             cx,
         )?;
         if !(1..=16).contains(&concurrent) {
             return Err(SettingsError::at(
                 SettingsField::Concurrent,
-                "Choose between 1 and 16 parallel downloads.",
+                "settings.error.concurrent_range",
             ));
         }
         if retries > 10 {
             return Err(SettingsError::at(
                 SettingsField::Retries,
-                "download retries must be 0..=10",
+                "settings.error.retries_range",
             ));
         }
         let rate = parse_rate(&self.rate.read(cx).value())
-            .map_err(|error| SettingsError::at(SettingsField::Rate, error))?;
+            .map_err(|error| SettingsError::at(SettingsField::Rate, error.key()))?;
         let proxy = match self.proxy_mode {
             0 => ProxyMode::System,
             1 => ProxyMode::Direct,
-            2 => ProxyMode::manual(self.proxy_url.read(cx).value().trim().into())
-                .map_err(|error| SettingsError::at(SettingsField::ProxyUrl, error))?,
+            2 => ProxyMode::manual(self.proxy_url.read(cx).value().trim().into()).map_err(
+                |error| {
+                    SettingsError::detail(SettingsField::ProxyUrl, "settings.error.proxy", error)
+                },
+            )?,
             _ => {
                 return Err(SettingsError::at(
                     SettingsField::ProxyUrl,
-                    "Choose System, Direct, or Manual proxy",
+                    "settings.error.proxy_mode",
                 ));
             }
         };
@@ -496,9 +587,9 @@ impl SettingsDraft {
             bytes_per_second: rate,
             proxy,
         };
-        downloads
-            .validate()
-            .map_err(|error| SettingsError::at(SettingsField::ProxyUrl, error))?;
+        downloads.validate().map_err(|error| {
+            SettingsError::detail(SettingsField::ProxyUrl, "settings.error.downloads", error)
+        })?;
         Ok(downloads)
     }
 
@@ -544,14 +635,14 @@ impl SettingsDraft {
             _ => return,
         }
         self.error = None;
-        self.notice = Some("Defaults restored in this section. Save changes to keep them.".into());
+        self.notice = Some(SettingsNotice::DefaultsRestored);
     }
 }
 
 fn number<T: std::str::FromStr>(
     input: &Entity<TextInput>,
     field: SettingsField,
-    message: &'static str,
+    key: &'static str,
     cx: &gpui::App,
 ) -> Result<T, SettingsError> {
     input
@@ -559,34 +650,60 @@ fn number<T: std::str::FromStr>(
         .value()
         .trim()
         .parse()
-        .map_err(|_| SettingsError::at(field, message))
+        .map_err(|_| SettingsError::at(field, key))
 }
 
+/// Why an editable download rate cannot be used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RateError {
+    Format,
+    TooLarge,
+}
+
+impl RateError {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Format => "settings.error.rate_format",
+            Self::TooLarge => "settings.error.rate_large",
+        }
+    }
+}
+
+impl fmt::Display for RateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&tr!(Language::English, self.key()))
+    }
+}
+
+impl std::error::Error for RateError {}
+
 /// Decimal MB/s, with at most six fractional digits, maps exactly to whole bytes.
-fn parse_rate(value: &str) -> anyhow::Result<Option<u64>> {
+fn parse_rate(value: &str) -> Result<Option<u64>, RateError> {
     let value = value.trim();
     if value.is_empty() {
         return Ok(None);
     }
     let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
-    ensure!(
-        !whole.is_empty()
-            && whole.bytes().all(|byte| byte.is_ascii_digit())
-            && fraction.bytes().all(|byte| byte.is_ascii_digit())
-            && fraction.len() <= 6,
-        "Use a non-negative MB/s value with at most six decimal places"
-    );
-    let whole: u64 = whole.parse().context("Download speed is too large")?;
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.len() > 6
+    {
+        return Err(RateError::Format);
+    }
+    let whole: u64 = whole.parse().map_err(|_| RateError::TooLarge)?;
     let fractional: u64 = if fraction.is_empty() {
         0
     } else {
-        fraction.parse()?
+        fraction.parse().map_err(|_| RateError::TooLarge)?
     };
-    let scale = 10u64.pow(u32::try_from(6 - fraction.len())?);
+    let scale = 10u64
+        .checked_pow(u32::try_from(6 - fraction.len()).map_err(|_| RateError::TooLarge)?)
+        .ok_or(RateError::TooLarge)?;
     let bytes = whole
         .checked_mul(1_000_000)
         .and_then(|value| value.checked_add(fractional * scale))
-        .context("Download speed is too large")?;
+        .ok_or(RateError::TooLarge)?;
     Ok((bytes != 0).then_some(bytes))
 }
 
@@ -669,7 +786,7 @@ impl Block {
 
     pub(super) fn open_settings(&mut self, cx: &mut Context<'_, Self>) {
         self.shell.storage.paths = self.engine.as_ref().map_or_else(
-            || Err("Storage locations are unavailable until Block finishes starting.".into()),
+            || Err(StorageProblem::Unavailable),
             |engine| {
                 block_launcher::storage::Locations::load(&engine.root)
                     .and_then(|locations| {
@@ -679,7 +796,7 @@ impl Block {
                             cache: validated.cache(&engine.root),
                         })
                     })
-                    .map_err(|error| format!("{error:#}"))
+                    .map_err(|error| StorageProblem::Unreadable(format!("{error:#}")))
             },
         );
         let mut draft = SettingsDraft::new(&self.saved_preferences, cx);
@@ -719,19 +836,34 @@ impl Block {
         cx.notify();
     }
 
-    pub(super) fn reset_settings(&mut self, cx: &mut Context<'_, Self>) {
-        if let Some(draft) = &mut self.settings_form {
-            draft.restore_page(cx);
-            self.preferences.appearance = draft.appearance;
-            self.preferences.reduce_motion = draft.reduce_motion;
+    pub(super) fn reset_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(draft) = &mut self.settings_form else {
+            return;
+        };
+        draft.restore_page(cx);
+        let page = draft.page;
+        self.preferences.appearance = draft.appearance;
+        self.preferences.reduce_motion = draft.reduce_motion;
+        if page == 0 {
+            // Restoring General selects a concrete English choice instead of
+            // re-running operating-system detection on the next start.
+            self.preferences.language = Some(Language::English);
         }
+        self.refresh_language(window, cx);
+        cx.notify();
     }
 
     pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let parsed = self
-            .settings_form
-            .as_ref()
-            .map(|draft| draft.parse(&self.saved_preferences, cx));
+        let parsed = self.settings_form.as_ref().map(|draft| {
+            draft
+                .parse(&self.saved_preferences, cx)
+                .map(|mut preferences| {
+                    // The language is a live preview owned by the view, not by a
+                    // draft input, so it is committed from the current preview.
+                    preferences.language = self.preferences.language;
+                    preferences
+                })
+        });
         let Some(parsed) = parsed else {
             return;
         };
@@ -740,33 +872,24 @@ impl Block {
                 let result = self
                     .engine
                     .as_ref()
-                    .context("Settings could not be saved: engine unavailable")
+                    .ok_or_else(|| anyhow::anyhow!("Block's data directory is unavailable"))
                     .and_then(|engine| preferences.save(&engine.root));
                 match result {
                     Ok(()) => {
-                        let page = self.settings_form.as_ref().map_or(0, |draft| draft.page);
                         self.preferences.clone_from(&preferences);
                         self.saved_preferences = preferences;
-                        self.open_settings(cx);
                         if let Some(draft) = &mut self.settings_form {
-                            draft.page = page;
-                            draft.notice = Some(
-                                "Settings saved. New game defaults apply to new setups.".into(),
-                            );
+                            draft.error = None;
+                            draft.notice = Some(SettingsNotice::Saved);
                         }
-                        self.status = "Settings saved · game defaults apply to new games".into();
+                        self.status = msg!("settings.status.saved");
                         if let Some(engine) = &self.engine {
                             engine.load_versions();
                         }
                     }
-                    Err(error) => self.settings_failure(
-                        SettingsError {
-                            field: None,
-                            message: format!("Could not save settings: {error:#}"),
-                        },
-                        window,
-                        cx,
-                    ),
+                    Err(error) => {
+                        self.settings_failure(SettingsError::save(format!("{error:#}")), window, cx)
+                    }
                 }
             }
             Err(error) => self.settings_failure(error, window, cx),
@@ -779,7 +902,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.report(format!("Could not save settings: {}", error.message));
+        self.report(error.text());
         if let Some(draft) = &mut self.settings_form {
             if let Some(field) = error.field {
                 if matches!(field, SettingsField::Width | SettingsField::Height) {
@@ -831,13 +954,39 @@ impl Block {
 
     fn settings_navigation(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
-        let dirty = draft.is_dirty(&self.saved_preferences, cx);
+        let language = self.language();
+        let dirty = self.settings_dirty(draft, cx);
         let categories = [
-            (0, "general", "General", Icon::System),
-            (1, "game", "Game defaults", Icon::Settings),
-            (2, "profiles", "Profile mode", Icon::Games),
-            (3, "downloads", "Downloads & network", Icon::Download),
-            (4, "storage", "Storage", Icon::Folder),
+            (
+                0,
+                "general",
+                tr!(language, "settings.navigation.general"),
+                Icon::System,
+            ),
+            (
+                1,
+                "game",
+                tr!(language, "settings.navigation.game"),
+                Icon::Settings,
+            ),
+            (
+                2,
+                "profiles",
+                tr!(language, "settings.navigation.profiles"),
+                Icon::Games,
+            ),
+            (
+                3,
+                "downloads",
+                tr!(language, "settings.navigation.downloads"),
+                Icon::Download,
+            ),
+            (
+                4,
+                "storage",
+                tr!(language, "settings.navigation.storage"),
+                Icon::Folder,
+            ),
         ];
         div()
             .size_full()
@@ -851,7 +1000,7 @@ impl Block {
                     .min_h_0()
                     .scroll_area(
                         &draft.navigation_scroll,
-                        "Settings categories",
+                        "settings.categories",
                         self.palette,
                         false,
                     )
@@ -896,39 +1045,54 @@ impl Block {
                 patterns::management_footer(self.palette)
                     .justify_center()
                     .child(note(if dirty {
-                        "Unsaved changes"
+                        tr!(language, "settings.navigation.unsaved")
                     } else {
-                        "No unsaved changes"
+                        tr!(language, "settings.navigation.saved")
                     })),
             )
     }
 
+    /// The language preview lives in the view rather than a draft input, so a
+    /// language-only change still enables Save and is reported as unsaved.
+    fn settings_dirty(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> bool {
+        self.preferences.language != self.saved_preferences.language
+            || draft.is_dirty(&self.saved_preferences, cx)
+    }
+
     fn settings_detail(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
+        let language = self.language();
         let (title, description) = match page {
             1 => (
-                "Game defaults",
-                "A comfortable starting point for new game setups.",
+                tr!(language, "settings.page.game.title"),
+                tr!(language, "settings.page.game.description"),
             ),
             2 => (
-                "Profile mode",
-                "Choose how Instances and Profiles work together.",
+                tr!(language, "settings.page.profiles.title"),
+                tr!(language, "settings.page.profiles.description"),
             ),
             3 => (
-                "Downloads & network",
-                "Control download limits and connection preferences.",
+                tr!(language, "settings.page.downloads.title"),
+                tr!(language, "settings.page.downloads.description"),
             ),
             4 => (
-                "Storage",
-                "Block chooses where games and downloads live automatically.",
+                tr!(language, "settings.page.storage.title"),
+                tr!(language, "settings.page.storage.description"),
             ),
-            _ => ("General", "Make Block feel at home."),
+            _ => (
+                tr!(language, "settings.page.general.title"),
+                tr!(language, "settings.page.general.description"),
+            ),
         };
         let feedback = draft
             .error
             .as_ref()
-            .map(|error| (error.message.clone(), true))
-            .or_else(|| draft.notice.clone().map(|message| (message, false)));
+            .map(|error| (error.message(language), true))
+            .or_else(|| {
+                draft
+                    .notice
+                    .map(|notice| (tr!(language, notice.key()), false))
+            });
         let body = self.settings_section_body(draft, cx);
         div()
             .size_full()
@@ -942,7 +1106,7 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .scroll_area(&draft.scroll, "Settings fields", self.palette, false)
+                    .scroll_area(&draft.scroll, "settings.fields", self.palette, false)
                     .child(
                         div()
                             .mx_auto()
@@ -989,20 +1153,26 @@ impl Block {
 
     fn settings_footer(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let page = draft.page;
-        let dirty = draft.is_dirty(&self.saved_preferences, cx);
+        let language = self.language();
+        let dirty = self.settings_dirty(draft, cx);
         let close = UiAction::Tab(Tab::Home);
         let mut footer = patterns::management_footer(self.palette).justify_between();
         if page == 4 {
             return footer
-                .child(note("Locations are managed automatically.").flex_1())
-                .child(self.button("cancel-preferences", "Close", close, cx));
+                .child(note(tr!(language, "settings.storage.footer")).flex_1())
+                .child(self.button(
+                    "cancel-preferences",
+                    tr!(language, "common.close"),
+                    close,
+                    cx,
+                ));
         }
         if page == 2 {
-            footer = footer.child(note("Mode changes apply immediately.").flex_1());
+            footer = footer.child(note(tr!(language, "settings.profile_mode.footer")).flex_1());
         } else {
             footer = footer.child(self.button(
                 "reset-preferences",
-                "Restore defaults",
+                tr!(language, "settings.restore_defaults"),
                 UiAction::ResetPreferences,
                 cx,
             ));
@@ -1011,10 +1181,15 @@ impl Block {
             div()
                 .flex()
                 .gap_2()
-                .child(self.button("cancel-preferences", "Cancel", close, cx))
+                .child(self.button(
+                    "cancel-preferences",
+                    tr!(language, "common.cancel"),
+                    close,
+                    cx,
+                ))
                 .child(components::button(
                     "save-preferences",
-                    "Save changes",
+                    tr!(language, "settings.save_changes"),
                     self.palette,
                     components::ButtonVariant::Primary,
                     ControlState {
@@ -1033,7 +1208,7 @@ impl Block {
     fn settings_control(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         checked: bool,
         action: UiAction,
         cx: &Context<'_, Self>,
@@ -1052,21 +1227,22 @@ impl Block {
         &self,
         draft: &SettingsDraft,
         field: SettingsField,
-        label: &'static str,
-        hint: Option<&'static str>,
+        label: impl Into<SharedString>,
+        hint: Option<SharedString>,
     ) -> gpui::Stateful<gpui::Div> {
+        let language = self.language();
         let error = draft
             .error
             .as_ref()
             .filter(|error| error.field == Some(field))
-            .map(|error| error.message.clone().into());
+            .map(|error| error.message(language).into());
         patterns::reveal_field(
             components::field_with(
                 label,
                 draft.input(field),
                 self.palette,
                 FieldOptions {
-                    hint: hint.map(Into::into),
+                    hint,
                     error,
                     required: false,
                 },
@@ -1075,9 +1251,7 @@ impl Block {
             draft.reveal.clone(),
             field,
         )
-        .id(gpui::SharedString::from(format!(
-            "settings-field-{field:?}"
-        )))
+        .id(SharedString::from(format!("settings-field-{field:?}")))
         .debug_selector(move || format!("settings-field-{field:?}"))
     }
 
@@ -1112,10 +1286,11 @@ impl Block {
     }
 
     fn settings_memory_field(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let value = components::parse_memory_gb(&draft.memory.read(cx).value()).ok();
         let composing = draft.memory.read(cx).is_composing();
         let friendly = value.map_or_else(
-            || "Choose a memory limit between 1 and 32 GB.".to_owned(),
+            || tr!(language, "settings.game.memory.invalid"),
             components::memory_label,
         );
 
@@ -1157,8 +1332,8 @@ impl Block {
             .child(self.settings_field(
                 draft,
                 SettingsField::Memory,
-                "Default memory (GB)",
-                Some("Allowed: 1–32 GB. Step: 1 GB. Arrow Up/Down adjusts the focused value."),
+                tr!(language, "settings.game.memory.label"),
+                Some(tr!(language, "settings.game.memory.hint").into()),
             ))
             .child(
                 div()
@@ -1184,81 +1359,251 @@ impl Block {
     }
 
     fn settings_appearance(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let appearance = match draft.appearance {
-            Appearance::System => "Follow system",
-            Appearance::Light => "Light",
-            Appearance::Dark => "Dark",
+            Appearance::System => tr!(language, "settings.appearance.system"),
+            Appearance::Light => tr!(language, "settings.appearance.light"),
+            Appearance::Dark => tr!(language, "settings.appearance.dark"),
         };
-        div().flex().flex_col().gap_6()
-            .child(self.product_select_field("settings-appearance", "Appearance", appearance, super::select::ProductChoice::Appearance, cx))
-            .child(div().flex().flex_col().gap_2()
-                .child(self.settings_control("reduce-motion", "Reduce animations", draft.reduce_motion, UiAction::ReduceMotion, cx))
-                .child(note("Use simpler transitions throughout Block. Your system’s reduced-motion preference is always respected.")))
-            .child(note("Appearance previews immediately. Save changes keeps this choice; Cancel restores your saved appearance."))
+        div()
+            .flex()
+            .flex_col()
+            .gap_6()
+            .child(self.settings_language(cx))
+            .child(self.product_select_field(
+                "settings-appearance",
+                tr!(language, "select.appearance"),
+                &appearance,
+                super::select::ProductChoice::Appearance,
+                cx,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(self.settings_control(
+                        "reduce-motion",
+                        tr!(language, "settings.reduce_motion.label"),
+                        draft.reduce_motion,
+                        UiAction::ReduceMotion,
+                        cx,
+                    ))
+                    .child(note(tr!(language, "settings.reduce_motion.hint"))),
+            )
+            .child(note(tr!(language, "settings.preview.hint")))
+    }
+
+    /// The live language preview on the General page.
+    ///
+    fn settings_language(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.product_select_field(
+                "settings-language",
+                tr!(language, "settings.language.label"),
+                language.self_name(),
+                super::select::ProductChoice::Language,
+                cx,
+            ))
+            .child(note(tr!(language, "settings.language.hint")))
     }
 
     fn settings_fields(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let java = if draft.java_automatic {
-            "Automatic Java"
+            tr!(language, "settings.game.java.automatic")
         } else {
-            "Custom executable"
+            tr!(language, "settings.game.java.custom")
         };
-        let window = format!(
-            "{} × {}{}",
-            draft.width.read(cx).value(),
-            draft.height.read(cx).value(),
-            if draft.window_custom {
-                " · Custom"
-            } else {
-                ""
-            }
-        );
-        div().flex().flex_col().gap_5()
-            .child(note("Defaults apply to new Instances and Profiles. Existing setups keep their current settings.").p_3().rounded_lg().bg(rgb(self.palette.secondary)))
-            .child(div().flex().gap_4().child(self.settings_memory_field(draft, cx).flex_1())
-                .child(self.product_select_field("settings-default-java", "Default Java runtime", java, super::select::ProductChoice::DefaultJava, cx).flex_1()))
-            .children((!draft.java_automatic).then(|| self.settings_field(draft, SettingsField::Java, "Java executable path", Some("Absolute path to the Java executable used for new games."))))
-            .child(self.product_select_field("settings-default-window", "Default window size", &window, super::select::ProductChoice::DefaultWindow, cx))
-            .children(draft.window_custom.then(|| div().flex().gap_4().child(self.settings_field(draft, SettingsField::Width, "Window width (px)", Some("Allowed: 320–16384 pixels.")).flex_1())
-                .child(self.settings_field(draft, SettingsField::Height, "Window height (px)", Some("Allowed: 240–16384 pixels.")).flex_1())))
-            .child(self.settings_control("settings-fullscreen", "Start games in fullscreen", draft.fullscreen, UiAction::SetFullscreen, cx))
-            .child(self.settings_field(draft, SettingsField::Jvm, "Default extra JVM arguments", Some("Memory is set above. Leave empty unless you need additional launch arguments.")))
-            .child(self.settings_control("settings-snapshots", "Include snapshot versions", draft.show_snapshots, UiAction::ShowSnapshots, cx))
+        let width = draft.width.read(cx).value();
+        let height = draft.height.read(cx).value();
+        let window = if draft.window_custom {
+            tr!(
+                language,
+                "settings.game.window.custom",
+                width = width.as_str(),
+                height = height.as_str()
+            )
+        } else {
+            tr!(
+                language,
+                "settings.game.window.size",
+                width = width.as_str(),
+                height = height.as_str()
+            )
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(
+                note(tr!(language, "settings.game.note"))
+                    .p_3()
+                    .rounded_lg()
+                    .bg(rgb(self.palette.secondary)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .child(self.settings_memory_field(draft, cx).flex_1())
+                    .child(
+                        self.product_select_field(
+                            "settings-default-java",
+                            tr!(language, "select.default_java"),
+                            &java,
+                            super::select::ProductChoice::DefaultJava,
+                            cx,
+                        )
+                        .flex_1(),
+                    ),
+            )
+            .children((!draft.java_automatic).then(|| {
+                self.settings_field(
+                    draft,
+                    SettingsField::Java,
+                    tr!(language, "settings.game.java.path.label"),
+                    Some(tr!(language, "settings.game.java.path.hint").into()),
+                )
+            }))
+            .child(self.product_select_field(
+                "settings-default-window",
+                tr!(language, "select.default_window"),
+                &window,
+                super::select::ProductChoice::DefaultWindow,
+                cx,
+            ))
+            .children(draft.window_custom.then(|| {
+                div()
+                    .flex()
+                    .gap_4()
+                    .child(
+                        self.settings_field(
+                            draft,
+                            SettingsField::Width,
+                            tr!(language, "settings.game.window.width.label"),
+                            Some(tr!(language, "settings.game.window.width.hint").into()),
+                        )
+                        .flex_1(),
+                    )
+                    .child(
+                        self.settings_field(
+                            draft,
+                            SettingsField::Height,
+                            tr!(language, "settings.game.window.height.label"),
+                            Some(tr!(language, "settings.game.window.height.hint").into()),
+                        )
+                        .flex_1(),
+                    )
+            }))
+            .child(self.settings_control(
+                "settings-fullscreen",
+                tr!(language, "settings.game.fullscreen.label"),
+                draft.fullscreen,
+                UiAction::SetFullscreen,
+                cx,
+            ))
+            .child(self.settings_field(
+                draft,
+                SettingsField::Jvm,
+                tr!(language, "settings.game.jvm.label"),
+                Some(tr!(language, "settings.game.jvm.hint").into()),
+            ))
+            .child(self.settings_control(
+                "settings-snapshots",
+                tr!(language, "settings.game.snapshots.label"),
+                draft.show_snapshots,
+                UiAction::ShowSnapshots,
+                cx,
+            ))
     }
 
     fn settings_downloads(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        div().flex().flex_col().gap_5()
-            .child(div().flex().gap_4().child(self.settings_field(draft, SettingsField::Concurrent, "Parallel downloads", Some("1–16 active object transfers.")).flex_1())
-                .child(self.settings_field(draft, SettingsField::Retries, "Retry count", Some("0–10 additional attempts.")).flex_1()))
-            .child(self.settings_field(draft, SettingsField::Rate, "Download speed limit (MB/s)", Some("0 or empty means unlimited. 1 MB/s = 1,000,000 bytes/s; metadata is not throttled.")))
-            .child(self.product_select_field("settings-proxy", "Proxy", match draft.proxy_mode {
-                1 => "Direct connection", 2 => "Manual proxy", _ => "Use system proxy",
-            }, super::select::ProductChoice::Proxy, cx))
-            .children((draft.proxy_mode == 2).then(|| self.settings_field(draft, SettingsField::ProxyUrl, "Proxy address", Some("HTTP, HTTPS and SOCKS5 URLs are supported. Use socks5h:// to resolve hostnames through the proxy. Credentials are unsupported."))))
+        let language = self.language();
+        let proxy = match draft.proxy_mode {
+            1 => tr!(language, "settings.downloads.proxy.direct"),
+            2 => tr!(language, "settings.downloads.proxy.manual"),
+            _ => tr!(language, "settings.downloads.proxy.system"),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .child(
+                        self.settings_field(
+                            draft,
+                            SettingsField::Concurrent,
+                            tr!(language, "settings.downloads.concurrent.label"),
+                            Some(tr!(language, "settings.downloads.concurrent.hint").into()),
+                        )
+                        .flex_1(),
+                    )
+                    .child(
+                        self.settings_field(
+                            draft,
+                            SettingsField::Retries,
+                            tr!(language, "settings.downloads.retries.label"),
+                            Some(tr!(language, "settings.downloads.retries.hint").into()),
+                        )
+                        .flex_1(),
+                    ),
+            )
+            .child(self.settings_field(
+                draft,
+                SettingsField::Rate,
+                tr!(language, "settings.downloads.rate.label"),
+                Some(tr!(language, "settings.downloads.rate.hint").into()),
+            ))
+            .child(self.product_select_field(
+                "settings-proxy",
+                tr!(language, "select.proxy"),
+                &proxy,
+                super::select::ProductChoice::Proxy,
+                cx,
+            ))
+            .children((draft.proxy_mode == 2).then(|| {
+                self.settings_field(
+                    draft,
+                    SettingsField::ProxyUrl,
+                    tr!(language, "settings.downloads.proxy_url.label"),
+                    Some(tr!(language, "settings.downloads.proxy_url.hint").into()),
+                )
+            }))
             .child(self.render_connection_test(cx))
     }
 
     fn settings_storage(&self) -> gpui::Div {
-        let mut content = div().flex().flex_col().gap_5().child(note(
-            "Portable builds keep games beside the app; installed builds use the global app-data folder. These locations are chosen automatically and cannot be changed here.",
-        ));
+        let language = self.language();
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(note(tr!(language, "settings.storage.note")));
         match &self.shell.storage.paths {
             Ok(paths) => {
                 content = content
                     .child(self.storage_location_row(
                         "settings-storage-library",
-                        "Game storage",
+                        tr!(language, "settings.storage.library"),
                         &paths.library,
                     ))
                     .child(self.storage_location_row(
                         "settings-storage-cache",
-                        "Download cache",
+                        tr!(language, "settings.storage.cache"),
                         &paths.cache,
                     ));
             }
             Err(error) => {
                 content = content.child(
-                    note(error.clone())
+                    note(error.message(language))
                         .id("settings-storage-error")
                         .debug_selector(|| "settings-storage-error".into())
                         .text_color(rgb(self.palette.destructive)),
@@ -1272,7 +1617,7 @@ impl Block {
     fn storage_location_row(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         path: &std::path::Path,
     ) -> gpui::Div {
         div()
@@ -1283,7 +1628,7 @@ impl Block {
                 div()
                     .text_sm()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(label),
+                    .child(label.into()),
             )
             .child(
                 div()
@@ -1301,6 +1646,7 @@ impl Block {
     }
 
     fn settings_profile_mode(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let separated = self.snapshot.profile_mode == ProfileMode::Separated;
         let card = |title, description, active| {
             components::card(self.palette)
@@ -1317,15 +1663,52 @@ impl Block {
                 )
                 .child(note(description))
                 .children(active.then(|| {
-                    components::badge("Current", self.palette, components::BadgeVariant::Secondary)
+                    components::badge(
+                        tr!(language, "settings.profile_mode.current"),
+                        self.palette,
+                        components::BadgeVariant::Secondary,
+                    )
                 }))
         };
-        div().flex().flex_col().gap_4()
-            .child(div().flex().gap_3().child(card("Bundled Profile", "Recommended for beginners. One Instance has one Profile and its own launch preferences.", !separated).flex_1())
-                .child(card("Separated Profile", "Reuse an Instance across several Profiles with independent accounts, memory and JVM arguments.", separated).flex_1()))
-            .child(note(if separated { "Your existing setups are preserved. Returning to Bundled is unavailable, including through Restore defaults." }
-                else { "You can switch to Separated Profile once. Existing Instances, Profiles and files stay in place. This cannot be reversed." }))
-            .children((!separated).then(|| self.button("separate-profiles", "Switch to Separated Profile…", UiAction::ConfirmSeparate(true), cx)))
+        let mode_note = if separated {
+            tr!(language, "settings.profile_mode.note_separated")
+        } else {
+            tr!(language, "settings.profile_mode.note_bundled")
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(
+                        card(
+                            tr!(language, "settings.profile_mode.bundled.title"),
+                            tr!(language, "settings.profile_mode.bundled.description"),
+                            !separated,
+                        )
+                        .flex_1(),
+                    )
+                    .child(
+                        card(
+                            tr!(language, "settings.profile_mode.separated.title"),
+                            tr!(language, "settings.profile_mode.separated.description"),
+                            separated,
+                        )
+                        .flex_1(),
+                    ),
+            )
+            .child(note(mode_note))
+            .children((!separated).then(|| {
+                self.button(
+                    "separate-profiles",
+                    tr!(language, "settings.profile_mode.switch"),
+                    UiAction::ConfirmSeparate(true),
+                    cx,
+                )
+            }))
     }
 }
 
@@ -1403,6 +1786,7 @@ mod tests {
                     draft.page == 1 && draft.memory.read(cx).value() == "not-a-number"
                 }) && view
                     .status
+                    .text(crate::Language::English)
                     .contains("Choose a memory limit between 1 and 32 GB.")
             }));
             let status = cx.debug_bounds("settings-field-Memory");
@@ -1427,6 +1811,7 @@ mod tests {
                     draft.page == 3 && draft.concurrent.read(cx).value() == "0"
                 }) && view
                     .status
+                    .text(crate::Language::English)
                     .contains("Choose between 1 and 16 parallel downloads.")
             }));
             assert!(cx.debug_bounds("settings-status").is_some());

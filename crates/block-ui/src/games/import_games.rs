@@ -26,6 +26,7 @@ use super::{
     scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
 };
+use crate::Language;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Page {
@@ -155,7 +156,7 @@ pub(super) struct State {
     pub source_scroll: ScrollHandle,
     pub list_scroll: ScrollHandle,
     motion: RefCell<SourceListMotion>,
-    pub error: Option<String>,
+    pub error: Option<crate::i18n::UiText>,
 }
 
 impl Default for State {
@@ -275,33 +276,39 @@ impl State {
         }
         self.report = Some(report);
     }
-    pub(super) fn chrome(&self) -> (&'static str, &'static str, f32) {
+    /// The sheet header copy for the current page.
+    pub(super) fn chrome(&self, language: Language) -> (String, String, f32) {
         match self.page {
-            Page::Sources => ("Import games", "Choose a source.", 550.),
+            Page::Sources => (
+                tr!(language, "surface.import_games"),
+                tr!(language, "import.header.choose"),
+                550.,
+            ),
             Page::List => (
-                source_name(self.source),
-                "Select games to copy.",
+                source_label(self.source, language),
+                tr!(language, "import.header.select"),
                 (260. + self.candidates(self.source).len() as f32 * 74.).min(620.),
             ),
             Page::Progress => (
-                "Importing games",
-                "Completed games are saved individually.",
+                tr!(language, "import.header.importing"),
+                tr!(language, "import.header.saved_individually"),
                 540.,
             ),
             Page::Results => (
-                "Import results",
-                "Review the games added to Block.",
+                tr!(language, "import.header.results"),
+                tr!(language, "import.header.review"),
                 (260. + self.submitted.len() as f32 * 74.).min(620.),
             ),
         }
     }
 }
 
-fn source_name(source: SourceKind) -> &'static str {
-    match source {
-        SourceKind::AdjacentMinecraft => "This folder · .minecraft",
-        SourceKind::OfficialLauncher => "Minecraft Launcher",
-    }
+fn source_label(source: SourceKind, language: Language) -> String {
+    let key = match source {
+        SourceKind::AdjacentMinecraft => "import.source.adjacent",
+        SourceKind::OfficialLauncher => "import.source.launcher",
+    };
+    tr!(language, key)
 }
 
 fn discovery_roots() -> DiscoveryRoots {
@@ -398,7 +405,7 @@ impl Block {
             }
         } else {
             self.shell.import_games.discovery = None;
-            self.shell.import_games.error = Some("Block's data directory is unavailable.".into());
+            self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
         }
         self.shell
             .surfaces
@@ -630,8 +637,7 @@ impl Block {
                     );
                 } else {
                     self.shell.import_games.running = false;
-                    self.shell.import_games.error =
-                        Some("Block's data directory is unavailable.".into());
+                    self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
                 }
             }
             Action::Stop => {
@@ -668,36 +674,42 @@ impl Block {
         interactive: bool,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
+        let language = self.language();
         let mut body = div().flex().flex_col().gap_3();
         if state.discovery.is_some() {
-            body = body.child(note("Looking for existing games…"));
+            body = body.child(note(tr!(language, "import.searching")));
         }
         for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher] {
             let candidates = state.candidates(source);
             let count = candidates.len();
             let summary = match count {
-                0 => "No games found.".to_owned(),
+                0 => tr!(language, "import.source.none"),
                 1 => {
                     let candidate = candidates[0];
-                    format!(
-                        "1 game · {} · {} · {}",
-                        candidate.name,
-                        candidate
-                            .minecraft_version
-                            .as_deref()
-                            .unwrap_or("Unknown version"),
-                        candidate.loader.as_ref().map_or(
-                            "Unknown loader".to_owned(),
-                            |loader| format!("{:?}", loader.kind)
-                        )
+                    let unknown_version = tr!(language, "import.unknownVersion");
+                    let version = candidate
+                        .minecraft_version
+                        .as_deref()
+                        .unwrap_or(&unknown_version);
+                    let loader = candidate.loader.as_ref().map_or_else(
+                        || tr!(language, "import.unknownLoader"),
+                        |loader| format!("{:?}", loader.kind),
+                    );
+                    tr!(
+                        language,
+                        "import.source.one",
+                        name = candidate.name,
+                        version = version,
+                        loader = loader
                     )
                 }
-                _ => format!("{count} games found"),
+                _ => tr!(language, "import.source.many", count = count),
             };
             let source_path = state
                 .report
                 .as_ref()
                 .and_then(|report| report.sources.iter().find(|item| item.kind == source));
+            let label = source_label(source, language);
             let mut row = div()
                 .rounded_lg()
                 .border_1()
@@ -713,7 +725,7 @@ impl Block {
                 .child(if interactive {
                     self.button_with_variant(
                         format!("import-source-{source:?}"),
-                        source_name(source),
+                        label.clone(),
                         UiAction::ImportGames(Action::Source(source)),
                         ButtonVariant::Ghost,
                         cx,
@@ -734,7 +746,7 @@ impl Block {
                         .w_full()
                         .py_2()
                         .text_sm()
-                        .child(source_name(source))
+                        .child(label)
                         .into_any_element()
                 })
                 .child(note(summary));
@@ -746,14 +758,18 @@ impl Block {
                         .child(source_path.root.display().to_string()),
                 );
                 if let Some(warning) = &source_path.warning {
-                    row = row.child(note(warning.clone()));
+                    row = row.child(note(tr!(
+                        language,
+                        "common.diagnostic_detail",
+                        detail = warning
+                    )));
                 }
             }
             if count > 1 {
                 row = row.child(if interactive {
                     self.button_with_variant(
                         format!("import-view-{source:?}"),
-                        format!("View {count} games →"),
+                        tr!(language, "import.viewCount", count = count),
                         UiAction::ImportGames(Action::View(source)),
                         ButtonVariant::Ghost,
                         cx,
@@ -763,18 +779,22 @@ impl Block {
                     div()
                         .text_sm()
                         .text_color(rgb(self.palette.muted))
-                        .child(format!("View {count} games"))
+                        .child(tr!(language, "import.viewCountPlain", count = count))
                         .into_any_element()
                 });
             } else if count == 1
                 && let Some(reason) = &candidates[0].unsupported_reason
             {
-                row = row.child(note(reason.clone()));
+                row = row.child(note(tr!(
+                    language,
+                    "import.cannot_import_detail",
+                    detail = reason
+                )));
             }
             body = body.child(row);
         }
         if let Some(error) = &state.error {
-            body = body.child(note(error.clone()));
+            body = body.child(note(error.text(language)));
         }
         body.into_any_element()
     }
@@ -794,10 +814,16 @@ impl Block {
             })
             .collect::<Vec<_>>();
         let all_selected = state.all_selected();
+        let language = self.language();
         let selected_count = eligible
             .iter()
             .filter(|candidate| state.selected.contains(&candidate.id))
             .count();
+        let selection_label = if all_selected {
+            tr!(language, "import.select.clear")
+        } else {
+            tr!(language, "import.select.all")
+        };
         let mut body = div()
             .flex()
             .flex_col()
@@ -810,11 +836,7 @@ impl Block {
                     .child(if interactive {
                         self.button_with_variant(
                             "import-select-all",
-                            if all_selected {
-                                "Clear selection"
-                            } else {
-                                "Select all"
-                            },
+                            selection_label.clone(),
                             UiAction::ImportGames(Action::All),
                             ButtonVariant::Ghost,
                             cx,
@@ -824,17 +846,17 @@ impl Block {
                         div()
                             .text_sm()
                             .text_color(rgb(self.palette.muted))
-                            .child(if all_selected {
-                                "Clear selection"
-                            } else {
-                                "Select all"
-                            })
+                            .child(selection_label)
                             .into_any_element()
                     }),
             )
-            .child(note(format!("{selected_count} selected")));
+            .child(note(tr!(
+                language,
+                "import.selectedCount",
+                count = selected_count
+            )));
         if candidates.is_empty() {
-            body = body.child(note("No games were found for this source."));
+            body = body.child(note(tr!(language, "import.list.empty")));
         }
         for candidate in candidates {
             let saved = matches!(state.outcomes.get(&candidate.id), Some(Outcome::Saved));
@@ -859,20 +881,24 @@ impl Block {
                 }),
             );
             let status = if saved {
-                "Imported".to_owned()
+                tr!(language, "import.status.imported")
             } else if let Some(reason) = &candidate.unsupported_reason {
-                reason.clone()
+                tr!(language, "import.cannot_import_detail", detail = reason)
             } else {
-                format!(
-                    "{} · {}",
-                    candidate
-                        .minecraft_version
-                        .as_deref()
-                        .unwrap_or("Unknown version"),
-                    candidate
-                        .loader
-                        .as_ref()
-                        .map_or("Vanilla".to_owned(), |loader| format!("{:?}", loader.kind))
+                let unknown_version = tr!(language, "import.unknownVersion");
+                let version = candidate
+                    .minecraft_version
+                    .as_deref()
+                    .unwrap_or(&unknown_version);
+                let loader = candidate.loader.as_ref().map_or_else(
+                    || tr!(language, "import.status.vanilla"),
+                    |loader| format!("{:?}", loader.kind),
+                );
+                tr!(
+                    language,
+                    "import.status.version",
+                    version = version,
+                    loader = loader
                 )
             };
             body = body.child(
@@ -887,24 +913,31 @@ impl Block {
                     .child(note(status)),
             );
             if let Some(warning) = &candidate.metadata_warning {
-                body = body.child(note(warning.clone()));
+                body = body.child(note(tr!(
+                    language,
+                    "common.diagnostic_detail",
+                    detail = warning
+                )));
             }
         }
         if let Some(error) = &state.error {
-            body = body.child(note(error.clone()));
+            body = body.child(note(error.text(language)));
         }
         body.into_any_element()
     }
 
     fn render_progress_results(&self, state: &State) -> gpui::AnyElement {
+        let language = self.language();
         let count = state
             .submitted
             .iter()
             .filter(|id| matches!(state.outcomes.get(*id), Some(Outcome::Saved)))
             .count();
-        let mut body = div().flex().flex_col().gap_2().child(note(format!(
-            "{count} of {} games imported",
-            state.submitted.len()
+        let mut body = div().flex().flex_col().gap_2().child(note(tr!(
+            language,
+            "import.progress.summary",
+            count = count,
+            total = state.submitted.len()
         )));
         for id in &state.submitted {
             let candidate = state.report.as_ref().and_then(|report| {
@@ -913,12 +946,15 @@ impl Block {
                     .iter()
                     .find(|candidate| &candidate.id == id)
             });
-            let label = candidate.map_or("Game", |candidate| candidate.name.as_str());
+            let fallback = tr!(language, "import.label.game");
+            let label = candidate.map_or(fallback.as_str(), |candidate| candidate.name.as_str());
             let status = match state.outcomes.get(id) {
-                Some(Outcome::Saved) => "Saved".to_owned(),
-                Some(Outcome::Failed(error)) => error.clone(),
-                Some(Outcome::Cancelled) => "Not imported".into(),
-                None => "Waiting for copy".into(),
+                Some(Outcome::Saved) => tr!(language, "import.status.saved"),
+                Some(Outcome::Failed(error)) => {
+                    tr!(language, "import.failed_detail", detail = error)
+                }
+                Some(Outcome::Cancelled) => tr!(language, "import.status.notImported"),
+                None => tr!(language, "import.status.waiting"),
             };
             body = body.child(
                 div()
@@ -930,7 +966,7 @@ impl Block {
             );
         }
         if let Some(error) = &state.error {
-            body = body.child(note(error.clone()));
+            body = body.child(note(error.text(language)));
         }
         body.into_any_element()
     }
@@ -941,6 +977,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.import_games;
+        let language = self.language();
         let mut running_motion = false;
         let body = match state.page {
             Page::Sources | Page::List => {
@@ -952,12 +989,12 @@ impl Block {
                 let source = div()
                     .id("import-sources-content")
                     .size_full()
-                    .scroll_area(&state.source_scroll, "Game sources", self.palette, false)
+                    .scroll_area(&state.source_scroll, "import.sources", self.palette, false)
                     .child(self.render_sources(state, state.page == Page::Sources, cx));
                 let list = div()
                     .id("import-list-content")
                     .size_full()
-                    .scroll_area(&state.list_scroll, "Detected games", self.palette, false)
+                    .scroll_area(&state.list_scroll, "import.list", self.palette, false)
                     .child(self.render_list(state, state.page == Page::List, cx));
                 div()
                     .id("import-games-body")
@@ -994,7 +1031,7 @@ impl Block {
                 .id("import-games-body")
                 .flex_1()
                 .min_h_0()
-                .scroll_area(&state.scroll, "Import results", self.palette, false)
+                .scroll_area(&state.scroll, "import.results", self.palette, false)
                 .child(self.render_progress_results(state))
                 .into_any_element(),
         };
@@ -1006,16 +1043,16 @@ impl Block {
             footer = footer
                 .child(self.button(
                     "import-stop",
-                    "Stop import",
+                    tr!(language, "import.footer.stop"),
                     UiAction::ImportGames(Action::Stop),
                     cx,
                 ))
-                .child(note("Completed games stay saved."));
+                .child(note(tr!(language, "import.footer.completedStay")));
         } else if state.page == Page::Results {
             if !state.pending().is_empty() {
                 footer = footer.child(self.button_with_variant(
                     "import-retry",
-                    "Retry remaining games",
+                    tr!(language, "import.footer.retry"),
                     UiAction::ImportGames(Action::Retry),
                     ButtonVariant::Primary,
                     cx,
@@ -1023,7 +1060,7 @@ impl Block {
             }
             footer = footer.child(self.button_with_variant(
                 "import-done",
-                "Continue setup",
+                tr!(language, "import.footer.continue"),
                 UiAction::ImportGames(Action::Done),
                 ButtonVariant::Primary,
                 cx,
@@ -1032,9 +1069,10 @@ impl Block {
             let pending = state.pending();
             let n = pending.len();
             if n > 0 {
-                let destination = format!(
-                    "Copy to: {}",
-                    self.proposed_import_parent(&pending).display()
+                let destination = tr!(
+                    language,
+                    "import.footer.destination",
+                    path = self.proposed_import_parent(&pending).display()
                 );
                 footer = footer.child(super::tooltip::trigger(
                     div()
@@ -1047,11 +1085,18 @@ impl Block {
                     destination,
                     cx,
                 ));
-                footer = footer.child(note("Original files stay in place."));
+                footer = footer.child(note(tr!(language, "import.footer.originalFiles")));
             }
             footer = footer.child(self.button_with_variant(
                 "import-copy",
-                format!("Import {n} {}", if n == 1 { "game" } else { "games" }),
+                {
+                    let import_key = if n == 1 {
+                        "import.footer.importOne"
+                    } else {
+                        "import.footer.importMany"
+                    };
+                    tr!(language, import_key, count = n)
+                },
                 UiAction::ImportGames(Action::Import),
                 ButtonVariant::Primary,
                 cx,
@@ -1059,7 +1104,7 @@ impl Block {
             if state.page == Page::Sources {
                 footer = footer.child(self.button_with_variant(
                     "import-new",
-                    "Create a new game",
+                    tr!(language, "import.footer.newGame"),
                     UiAction::ImportGames(Action::New),
                     ButtonVariant::Ghost,
                     cx,
@@ -1104,6 +1149,38 @@ mod tests {
             unsupported_reason: (!importable).then(|| "unsupported fixture".into()),
             metadata_warning: None,
         }
+    }
+
+    #[test]
+    fn import_copy_resolves_per_language_and_keeps_arguments() {
+        assert_eq!(
+            source_label(SourceKind::AdjacentMinecraft, Language::English),
+            "This folder · .minecraft"
+        );
+        assert_eq!(
+            source_label(SourceKind::AdjacentMinecraft, Language::SimplifiedChinese),
+            "当前文件夹 · .minecraft"
+        );
+        assert_eq!(
+            source_label(SourceKind::OfficialLauncher, Language::Japanese),
+            "Minecraft ランチャー"
+        );
+        assert_eq!(
+            tr!(Language::English, "import.footer.importOne", count = 1),
+            "Import 1 game"
+        );
+        assert_eq!(
+            tr!(
+                Language::SimplifiedChinese,
+                "import.footer.importMany",
+                count = 3
+            ),
+            "导入 3 个游戏"
+        );
+        assert_eq!(
+            tr!(Language::Japanese, "import.source.many", count = 3),
+            "3 件のゲームが見つかりました"
+        );
     }
 
     #[test]

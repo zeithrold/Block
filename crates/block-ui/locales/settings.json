@@ -1,0 +1,638 @@
+{
+  "_version": 2,
+  "settings.navigation.general": {
+    "en": "General",
+    "zh-Hans": "常规",
+    "ja": "一般"
+  },
+  "settings.navigation.game": {
+    "en": "Game defaults",
+    "zh-Hans": "游戏默认设置",
+    "ja": "ゲームの既定値"
+  },
+  "settings.navigation.profiles": {
+    "en": "Profile mode",
+    "zh-Hans": "配置模式",
+    "ja": "プロファイルモード"
+  },
+  "settings.navigation.downloads": {
+    "en": "Downloads & network",
+    "zh-Hans": "下载与网络",
+    "ja": "ダウンロードとネットワーク"
+  },
+  "settings.navigation.storage": {
+    "en": "Storage",
+    "zh-Hans": "存储",
+    "ja": "ストレージ"
+  },
+  "settings.navigation.unsaved": {
+    "en": "Unsaved changes",
+    "zh-Hans": "有未保存的更改",
+    "ja": "保存されていない変更があります"
+  },
+  "settings.navigation.saved": {
+    "en": "No unsaved changes",
+    "zh-Hans": "没有未保存的更改",
+    "ja": "保存されていない変更はありません"
+  },
+  "settings.categories": {
+    "en": "Settings categories",
+    "zh-Hans": "设置分类",
+    "ja": "設定カテゴリ"
+  },
+  "settings.fields": {
+    "en": "Settings fields",
+    "zh-Hans": "设置选项",
+    "ja": "設定項目"
+  },
+  "settings.page.general.title": {
+    "en": "General",
+    "zh-Hans": "常规",
+    "ja": "一般"
+  },
+  "settings.page.general.description": {
+    "en": "Make Block feel at home.",
+    "zh-Hans": "让 Block 更符合你的习惯。",
+    "ja": "Block を使いやすくカスタマイズします。"
+  },
+  "settings.page.game.title": {
+    "en": "Game defaults",
+    "zh-Hans": "游戏默认设置",
+    "ja": "ゲームの既定値"
+  },
+  "settings.page.game.description": {
+    "en": "A comfortable starting point for new game setups.",
+    "zh-Hans": "为新游戏设置提供舒适的起点。",
+    "ja": "新しいゲーム設定の快適な開始点です。"
+  },
+  "settings.page.profiles.title": {
+    "en": "Profile mode",
+    "zh-Hans": "配置模式",
+    "ja": "プロファイルモード"
+  },
+  "settings.page.profiles.description": {
+    "en": "Choose how Instances and Profiles work together.",
+    "zh-Hans": "选择实例与配置如何协同工作。",
+    "ja": "インスタンスとプロファイルの連携方法を選択します。"
+  },
+  "settings.page.downloads.title": {
+    "en": "Downloads & network",
+    "zh-Hans": "下载与网络",
+    "ja": "ダウンロードとネットワーク"
+  },
+  "settings.page.downloads.description": {
+    "en": "Control download limits and connection preferences.",
+    "zh-Hans": "控制下载限制和连接偏好。",
+    "ja": "ダウンロード制限と接続設定を管理します。"
+  },
+  "settings.page.storage.title": {
+    "en": "Storage",
+    "zh-Hans": "存储",
+    "ja": "ストレージ"
+  },
+  "settings.page.storage.description": {
+    "en": "Block chooses where games and downloads live automatically.",
+    "zh-Hans": "Block 会自动选择游戏和下载的存放位置。",
+    "ja": "Block はゲームとダウンロードの保存場所を自動で選択します。"
+  },
+  "settings.language.label": {
+    "en": "Language",
+    "zh-Hans": "语言",
+    "ja": "言語"
+  },
+  "settings.language.hint": {
+    "en": "Applies immediately. Save changes keeps this language; Cancel restores your saved language.",
+    "zh-Hans": "立即生效。保存更改会保留此语言；取消会恢复已保存的语言。",
+    "ja": "すぐに反映されます。「変更を保存」でこの言語を保持し、キャンセルすると保存済みの言語に戻ります。"
+  },
+  "settings.appearance.system": {
+    "en": "Follow system",
+    "zh-Hans": "跟随系统",
+    "ja": "システムに合わせる"
+  },
+  "settings.appearance.light": {
+    "en": "Light",
+    "zh-Hans": "浅色",
+    "ja": "ライト"
+  },
+  "settings.appearance.dark": {
+    "en": "Dark",
+    "zh-Hans": "深色",
+    "ja": "ダーク"
+  },
+  "settings.reduce_motion.label": {
+    "en": "Reduce animations",
+    "zh-Hans": "减少动画",
+    "ja": "アニメーションを減らす"
+  },
+  "settings.reduce_motion.hint": {
+    "en": "Use simpler transitions throughout Block. Your system’s reduced-motion preference is always respected.",
+    "zh-Hans": "在整个 Block 中使用更简单的过渡动画。始终遵循系统的减少动态效果设置。",
+    "ja": "Block 全体でよりシンプルなトランジションを使用します。システムの「視差効果を減らす」設定は常に尊重されます。"
+  },
+  "settings.preview.hint": {
+    "en": "Appearance and language preview immediately. Save changes keeps these choices; Cancel restores your saved ones.",
+    "zh-Hans": "外观和语言会立即预览。保存更改会保留这些选择；取消会恢复已保存的选择。",
+    "ja": "外観と言語はすぐにプレビューされます。「変更を保存」で選択内容が保持され、キャンセルすると保存済みの内容に戻ります。"
+  },
+  "settings.save_changes": {
+    "en": "Save changes",
+    "zh-Hans": "保存更改",
+    "ja": "変更を保存"
+  },
+  "settings.restore_defaults": {
+    "en": "Restore defaults",
+    "zh-Hans": "恢复默认设置",
+    "ja": "既定値に戻す"
+  },
+  "settings.notice.saved": {
+    "en": "Settings saved. New game defaults apply to new setups.",
+    "zh-Hans": "设置已保存。新的游戏默认值会应用到新设置。",
+    "ja": "設定を保存しました。新しいゲームの既定値は新しいセットアップに適用されます。"
+  },
+  "settings.notice.defaults_restored": {
+    "en": "Defaults restored in this section. Save changes to keep them.",
+    "zh-Hans": "已恢复此部分的默认设置。保存更改以保留它们。",
+    "ja": "このセクションの既定値を復元しました。保持するには変更を保存してください。"
+  },
+  "settings.status.saved": {
+    "en": "Settings saved · game defaults apply to new games",
+    "zh-Hans": "设置已保存 · 游戏默认值会应用到新游戏",
+    "ja": "設定を保存しました · ゲームの既定値は新しいゲームに適用されます"
+  },
+  "settings.placeholder.java": {
+    "en": "Automatic · leave empty",
+    "zh-Hans": "自动 · 留空",
+    "ja": "自動 · 空欄可"
+  },
+  "settings.placeholder.jvm": {
+    "en": "Leave empty to use defaults",
+    "zh-Hans": "留空以使用默认值",
+    "ja": "空欄の場合は既定値を使用"
+  },
+  "settings.placeholder.rate": {
+    "en": "0 · Unlimited",
+    "zh-Hans": "0 · 不限速",
+    "ja": "0 · 無制限"
+  },
+  "settings.game.note": {
+    "en": "Defaults apply to new Instances and Profiles. Existing setups keep their current settings.",
+    "zh-Hans": "默认值会应用于新的实例和配置。现有设置保留当前设置。",
+    "ja": "既定値は新しいインスタンスとプロファイルに適用されます。既存の設定は現在の内容を保持します。"
+  },
+  "settings.game.memory.label": {
+    "en": "Default memory (GB)",
+    "zh-Hans": "默认内存（GB）",
+    "ja": "既定のメモリ（GB）"
+  },
+  "settings.game.memory.hint": {
+    "en": "Allowed: 1–32 GB. Step: 1 GB. Arrow Up/Down adjusts the focused value.",
+    "zh-Hans": "允许范围：1–32 GB。步进：1 GB。上下方向键可调整当前值。",
+    "ja": "範囲: 1～32 GB。刻み: 1 GB。矢印キーの上下で値を調整できます。"
+  },
+  "settings.game.memory.invalid": {
+    "en": "Choose a memory limit between 1 and 32 GB.",
+    "zh-Hans": "请选择 1 到 32 GB 之间的内存限制。",
+    "ja": "メモリ制限は 1～32 GB の範囲で選択してください。"
+  },
+  "settings.game.java.automatic": {
+    "en": "Automatic Java",
+    "zh-Hans": "自动 Java",
+    "ja": "自動 Java"
+  },
+  "settings.game.java.custom": {
+    "en": "Custom executable",
+    "zh-Hans": "自定义可执行文件",
+    "ja": "カスタム実行ファイル"
+  },
+  "settings.game.java.path.label": {
+    "en": "Java executable path",
+    "zh-Hans": "Java 可执行文件路径",
+    "ja": "Java 実行ファイルのパス"
+  },
+  "settings.game.java.path.hint": {
+    "en": "Absolute path to the Java executable used for new games.",
+    "zh-Hans": "新游戏使用的 Java 可执行文件的绝对路径。",
+    "ja": "新しいゲームで使用する Java 実行ファイルの絶対パス。"
+  },
+  "settings.game.window.size": {
+    "en": "%{width} × %{height}",
+    "zh-Hans": "%{width} × %{height}",
+    "ja": "%{width} × %{height}"
+  },
+  "settings.game.window.custom": {
+    "en": "%{width} × %{height} · Custom",
+    "zh-Hans": "%{width} × %{height} · 自定义",
+    "ja": "%{width} × %{height} · カスタム"
+  },
+  "settings.game.window.width.label": {
+    "en": "Window width (px)",
+    "zh-Hans": "窗口宽度（px）",
+    "ja": "ウィンドウ幅（px）"
+  },
+  "settings.game.window.width.hint": {
+    "en": "Allowed: 320–16384 pixels.",
+    "zh-Hans": "允许范围：320–16384 像素。",
+    "ja": "範囲: 320～16384 ピクセル。"
+  },
+  "settings.game.window.height.label": {
+    "en": "Window height (px)",
+    "zh-Hans": "窗口高度（px）",
+    "ja": "ウィンドウ高さ（px）"
+  },
+  "settings.game.window.height.hint": {
+    "en": "Allowed: 240–16384 pixels.",
+    "zh-Hans": "允许范围：240–16384 像素。",
+    "ja": "範囲: 240～16384 ピクセル。"
+  },
+  "settings.game.fullscreen.label": {
+    "en": "Start games in fullscreen",
+    "zh-Hans": "以全屏启动游戏",
+    "ja": "ゲームを全画面で起動"
+  },
+  "settings.game.jvm.label": {
+    "en": "Default extra JVM arguments",
+    "zh-Hans": "默认额外 JVM 参数",
+    "ja": "既定の追加 JVM 引数"
+  },
+  "settings.game.jvm.hint": {
+    "en": "Memory is set above. Leave empty unless you need additional launch arguments.",
+    "zh-Hans": "内存已在上方设置。除非需要额外的启动参数，否则请留空。",
+    "ja": "メモリは上で設定します。追加の起動引数が必要な場合を除き、空欄のままにしてください。"
+  },
+  "settings.game.snapshots.label": {
+    "en": "Include snapshot versions",
+    "zh-Hans": "包含快照版本",
+    "ja": "スナップショットバージョンを含める"
+  },
+  "settings.downloads.concurrent.label": {
+    "en": "Parallel downloads",
+    "zh-Hans": "并行下载数",
+    "ja": "同時ダウンロード数"
+  },
+  "settings.downloads.concurrent.hint": {
+    "en": "1–16 active object transfers.",
+    "zh-Hans": "1–16 个活动对象传输。",
+    "ja": "同時に転送するオブジェクト数は 1～16 です。"
+  },
+  "settings.downloads.retries.label": {
+    "en": "Retry count",
+    "zh-Hans": "重试次数",
+    "ja": "再試行回数"
+  },
+  "settings.downloads.retries.hint": {
+    "en": "0–10 additional attempts.",
+    "zh-Hans": "0–10 次额外尝试。",
+    "ja": "追加で 0～10 回試行します。"
+  },
+  "settings.downloads.rate.label": {
+    "en": "Download speed limit (MB/s)",
+    "zh-Hans": "下载速度限制（MB/s）",
+    "ja": "ダウンロード速度制限（MB/s）"
+  },
+  "settings.downloads.rate.hint": {
+    "en": "0 or empty means unlimited. 1 MB/s = 1,000,000 bytes/s; metadata is not throttled.",
+    "zh-Hans": "0 或留空表示不限速。1 MB/s = 1,000,000 字节/秒；元数据不受限速。",
+    "ja": "0 または空欄は無制限です。1 MB/s = 1,000,000 バイト/秒。メタデータは制限されません。"
+  },
+  "settings.downloads.proxy.system": {
+    "en": "Use system proxy",
+    "zh-Hans": "使用系统代理",
+    "ja": "システムプロキシを使用"
+  },
+  "settings.downloads.proxy.direct": {
+    "en": "Direct connection",
+    "zh-Hans": "直接连接",
+    "ja": "直接接続"
+  },
+  "settings.downloads.proxy.manual": {
+    "en": "Manual proxy",
+    "zh-Hans": "手动代理",
+    "ja": "手動プロキシ"
+  },
+  "settings.downloads.proxy_url.label": {
+    "en": "Proxy address",
+    "zh-Hans": "代理地址",
+    "ja": "プロキシアドレス"
+  },
+  "settings.downloads.proxy_url.hint": {
+    "en": "HTTP, HTTPS and SOCKS5 URLs are supported. Use socks5h:// to resolve hostnames through the proxy. Credentials are unsupported.",
+    "zh-Hans": "支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。不支持凭据。",
+    "ja": "HTTP、HTTPS、SOCKS5 の URL に対応しています。ホスト名をプロキシ経由で解決するには socks5h:// を使用してください。認証情報には対応していません。"
+  },
+  "settings.storage.note": {
+    "en": "Portable builds keep games beside the app; installed builds use the global app-data folder. These locations are chosen automatically and cannot be changed here.",
+    "zh-Hans": "便携版将游戏保存在应用旁边；安装版使用全局应用数据文件夹。这些位置由 Block 自动选择，无法在此更改。",
+    "ja": "ポータブル版ではゲームをアプリの隣に保存し、インストール版ではグローバルのアプリデータフォルダーを使用します。保存場所は自動で選択され、ここでは変更できません。"
+  },
+  "settings.storage.library": {
+    "en": "Game storage",
+    "zh-Hans": "游戏存储",
+    "ja": "ゲームの保存場所"
+  },
+  "settings.storage.cache": {
+    "en": "Download cache",
+    "zh-Hans": "下载缓存",
+    "ja": "ダウンロードキャッシュ"
+  },
+  "settings.storage.unavailable": {
+    "en": "Storage locations are unavailable until Block finishes starting.",
+    "zh-Hans": "在 Block 完成启动之前，存储位置不可用。",
+    "ja": "Block の起動が完了するまで、保存場所を利用できません。"
+  },
+  "settings.storage.unreadable": {
+    "en": "Storage locations could not be read: %{detail}",
+    "zh-Hans": "无法读取存储位置：%{detail}",
+    "ja": "保存場所を読み込めませんでした: %{detail}"
+  },
+  "settings.storage.footer": {
+    "en": "Locations are managed automatically.",
+    "zh-Hans": "存储位置由 Block 自动管理。",
+    "ja": "保存場所は自動で管理されます。"
+  },
+  "settings.profile_mode.bundled.title": {
+    "en": "Bundled Profile",
+    "zh-Hans": "内置配置",
+    "ja": "同梱プロファイル"
+  },
+  "settings.profile_mode.bundled.description": {
+    "en": "Recommended for beginners. One Instance has one Profile and its own launch preferences.",
+    "zh-Hans": "推荐新手使用。一个实例有一个配置及其独立的启动偏好。",
+    "ja": "初心者におすすめです。1 つのインスタンスに 1 つのプロファイルと独自の起動設定があります。"
+  },
+  "settings.profile_mode.separated.title": {
+    "en": "Separated Profile",
+    "zh-Hans": "分离配置",
+    "ja": "分離プロファイル"
+  },
+  "settings.profile_mode.separated.description": {
+    "en": "Reuse an Instance across several Profiles with independent accounts, memory and JVM arguments.",
+    "zh-Hans": "在多个配置间复用同一个实例，各自拥有独立的账户、内存和 JVM 参数。",
+    "ja": "1 つのインスタンスを複数のプロファイルで再利用し、アカウント、メモリ、JVM 引数を個別に設定できます。"
+  },
+  "settings.profile_mode.current": {
+    "en": "Current",
+    "zh-Hans": "当前",
+    "ja": "現在"
+  },
+  "settings.profile_mode.note_separated": {
+    "en": "Your existing setups are preserved. Returning to Bundled is unavailable, including through Restore defaults.",
+    "zh-Hans": "现有设置会保留。无法返回内置模式，包括通过恢复默认设置。",
+    "ja": "既存の設定は保持されます。既定値の復元を含め、同梱モードには戻せません。"
+  },
+  "settings.profile_mode.note_bundled": {
+    "en": "You can switch to Separated Profile once. Existing Instances, Profiles and files stay in place. This cannot be reversed.",
+    "zh-Hans": "你可以切换到分离配置一次。现有的实例、配置和文件保持不变。此操作无法撤销。",
+    "ja": "分離プロファイルには一度だけ切り替えられます。既存のインスタンス、プロファイル、ファイルはそのまま残ります。この操作は元に戻せません。"
+  },
+  "settings.profile_mode.switch": {
+    "en": "Switch to Separated Profile…",
+    "zh-Hans": "切换到分离配置…",
+    "ja": "分離プロファイルに切り替える…"
+  },
+  "settings.profile_mode.footer": {
+    "en": "Mode changes apply immediately.",
+    "zh-Hans": "模式更改会立即生效。",
+    "ja": "モードの変更はすぐに反映されます。"
+  },
+  "settings.error.java_path": {
+    "en": "Choose an absolute Java executable path, or use Automatic Java",
+    "zh-Hans": "请选择 Java 可执行文件的绝对路径，或使用自动 Java",
+    "ja": "Java 実行ファイルの絶対パスを選択するか、自動 Java を使用してください"
+  },
+  "settings.error.width_number": {
+    "en": "Window width must be a whole number",
+    "zh-Hans": "窗口宽度必须是整数",
+    "ja": "ウィンドウ幅は整数で指定してください"
+  },
+  "settings.error.height_number": {
+    "en": "Window height must be a whole number",
+    "zh-Hans": "窗口高度必须是整数",
+    "ja": "ウィンドウ高さは整数で指定してください"
+  },
+  "settings.error.width_range": {
+    "en": "Window width must be between 320 and 16384 pixels",
+    "zh-Hans": "窗口宽度必须在 320 到 16384 像素之间",
+    "ja": "ウィンドウ幅は 320～16384 ピクセルの範囲で指定してください"
+  },
+  "settings.error.height_range": {
+    "en": "Window height must be between 240 and 16384 pixels",
+    "zh-Hans": "窗口高度必须在 240 到 16384 像素之间",
+    "ja": "ウィンドウ高さは 240～16384 ピクセルの範囲で指定してください"
+  },
+  "settings.error.concurrent_number": {
+    "en": "Concurrent downloads must be a whole number",
+    "zh-Hans": "并行下载数必须是整数",
+    "ja": "同時ダウンロード数は整数で指定してください"
+  },
+  "settings.error.retries_number": {
+    "en": "Retries must be a whole number",
+    "zh-Hans": "重试次数必须是整数",
+    "ja": "再試行回数は整数で指定してください"
+  },
+  "settings.error.concurrent_range": {
+    "en": "Choose between 1 and 16 parallel downloads.",
+    "zh-Hans": "请选择 1 到 16 个并行下载。",
+    "ja": "同時ダウンロード数は 1～16 で選択してください。"
+  },
+  "settings.error.retries_range": {
+    "en": "download retries must be 0..=10",
+    "zh-Hans": "下载重试次数必须为 0..=10",
+    "ja": "ダウンロードの再試行回数は 0..=10 で指定してください"
+  },
+  "settings.error.proxy_mode": {
+    "en": "Choose System, Direct, or Manual proxy",
+    "zh-Hans": "请选择系统、直接或手动代理",
+    "ja": "システム、直接、手動プロキシのいずれかを選択してください"
+  },
+  "settings.error.rate_format": {
+    "en": "Use a non-negative MB/s value with at most six decimal places",
+    "zh-Hans": "请输入非负的 MB/s 数值，最多六位小数",
+    "ja": "小数点以下 6 桁以内の負でない MB/s 値を入力してください"
+  },
+  "settings.error.rate_large": {
+    "en": "Download speed is too large",
+    "zh-Hans": "下载速度过大",
+    "ja": "ダウンロード速度が大きすぎます"
+  },
+  "settings.error.memory": {
+    "en": "The memory limit isn't usable: %{detail}",
+    "zh-Hans": "此内存限制不可用：%{detail}",
+    "ja": "このメモリ制限は使用できません: %{detail}"
+  },
+  "settings.error.java": {
+    "en": "Java runtime settings are invalid: %{detail}",
+    "zh-Hans": "Java 运行时设置无效：%{detail}",
+    "ja": "Java ランタイムの設定が無効です: %{detail}"
+  },
+  "settings.error.jvm": {
+    "en": "JVM arguments are invalid: %{detail}",
+    "zh-Hans": "JVM 参数无效：%{detail}",
+    "ja": "JVM 引数が無効です: %{detail}"
+  },
+  "settings.error.proxy": {
+    "en": "Proxy settings are invalid: %{detail}",
+    "zh-Hans": "代理设置无效：%{detail}",
+    "ja": "プロキシ設定が無効です: %{detail}"
+  },
+  "settings.error.downloads": {
+    "en": "Download settings are invalid: %{detail}",
+    "zh-Hans": "下载设置无效：%{detail}",
+    "ja": "ダウンロード設定が無効です: %{detail}"
+  },
+  "settings.error.save": {
+    "en": "Could not save settings: %{detail}",
+    "zh-Hans": "无法保存设置：%{detail}",
+    "ja": "設定を保存できませんでした: %{detail}"
+  },
+  "setup.welcome.title": {
+    "en": "Welcome Back",
+    "zh-Hans": "欢迎回来",
+    "ja": "おかえりなさい"
+  },
+  "setup.welcome.subtitle": {
+    "en": "Add an account and set up a game.",
+    "zh-Hans": "添加账户并设置游戏。",
+    "ja": "アカウントを追加してゲームをセットアップしましょう。"
+  },
+  "setup.welcome.start": {
+    "en": "Start setup",
+    "zh-Hans": "开始设置",
+    "ja": "セットアップを開始"
+  },
+  "setup.welcome.skip": {
+    "en": "Skip setup",
+    "zh-Hans": "跳过设置",
+    "ja": "セットアップをスキップ"
+  },
+  "setup.language.label": {
+    "en": "Language",
+    "zh-Hans": "语言",
+    "ja": "言語"
+  },
+  "setup.language.description": {
+    "en": "Choose the language for Block.",
+    "zh-Hans": "选择 Block 的语言。",
+    "ja": "Block の言語を選択してください。"
+  },
+  "setup.overview.title": {
+    "en": "Two steps and you're ready",
+    "zh-Hans": "两步即可开始",
+    "ja": "2 ステップで準備完了"
+  },
+  "setup.overview.description": {
+    "en": "Add an account and a game to finish setup.",
+    "zh-Hans": "添加账户和游戏以完成设置。",
+    "ja": "アカウントとゲームを追加してセットアップを完了します。"
+  },
+  "setup.account.title": {
+    "en": "Account",
+    "zh-Hans": "账户",
+    "ja": "アカウント"
+  },
+  "setup.account.sign_in": {
+    "en": "Sign in to your Minecraft account.",
+    "zh-Hans": "登录你的 Minecraft 账户。",
+    "ja": "Minecraft アカウントでサインインしてください。"
+  },
+  "setup.game.title": {
+    "en": "Game",
+    "zh-Hans": "游戏",
+    "ja": "ゲーム"
+  },
+  "setup.game.saved_one": {
+    "en": "%{count} game saved",
+    "zh-Hans": "已保存 %{count} 个游戏",
+    "ja": "%{count} 個のゲームを保存済み"
+  },
+  "setup.game.saved_other": {
+    "en": "%{count} games saved",
+    "zh-Hans": "已保存 %{count} 个游戏",
+    "ja": "%{count} 個のゲームを保存済み"
+  },
+  "setup.game.none": {
+    "en": "Create a game or import an existing one.",
+    "zh-Hans": "创建一个游戏或导入现有游戏。",
+    "ja": "ゲームを作成するか、既存のゲームをインポートしてください。"
+  },
+  "setup.game.saved_badge": {
+    "en": "Saved",
+    "zh-Hans": "已保存",
+    "ja": "保存済み"
+  },
+  "setup.footer.continue": {
+    "en": "Continue",
+    "zh-Hans": "继续",
+    "ja": "続行"
+  },
+  "setup.footer.finish": {
+    "en": "Finish",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "setup.game_choice.title": {
+    "en": "Set up a game",
+    "zh-Hans": "设置游戏",
+    "ja": "ゲームをセットアップ"
+  },
+  "setup.game_choice.description": {
+    "en": "Use the current release of Minecraft, or choose its version and components.",
+    "zh-Hans": "使用当前版本的 Minecraft，或选择其版本和组件。",
+    "ja": "現在の Minecraft リリースを使用するか、バージョンとコンポーネントを選択します。"
+  },
+  "setup.game_choice.recommended_title": {
+    "en": "Recommended setup",
+    "zh-Hans": "推荐设置",
+    "ja": "おすすめのセットアップ"
+  },
+  "setup.game_choice.recommended_fallback": {
+    "en": "Stable Vanilla Minecraft · automatic Java",
+    "zh-Hans": "稳定版原版 Minecraft · 自动 Java",
+    "ja": "安定版バニラ Minecraft · 自動 Java"
+  },
+  "setup.game_choice.recommended": {
+    "en": "Minecraft %{version} · Vanilla · automatic Java",
+    "zh-Hans": "Minecraft %{version} · 原版 · 自动 Java",
+    "ja": "Minecraft %{version} · バニラ · 自動 Java"
+  },
+  "setup.game_choice.custom_title": {
+    "en": "Custom setup",
+    "zh-Hans": "自定义设置",
+    "ja": "カスタムセットアップ"
+  },
+  "setup.game_choice.custom_description": {
+    "en": "Choose the Minecraft version, loader and game settings.",
+    "zh-Hans": "选择 Minecraft 版本、加载器和游戏设置。",
+    "ja": "Minecraft のバージョン、ローダー、ゲーム設定を選択します。"
+  },
+  "setup.game_choice.import": {
+    "en": "Import existing games",
+    "zh-Hans": "导入现有游戏",
+    "ja": "既存のゲームをインポート"
+  },
+  "setup.game_choice.reload": {
+    "en": "Reload versions",
+    "zh-Hans": "重新加载版本",
+    "ja": "バージョンを再読み込み"
+  },
+  "setup.notice.install_chooser": {
+    "en": "Could not open the installation folder chooser. Check your system file picker and try again.",
+    "zh-Hans": "无法打开安装文件夹选择器。请检查系统的文件选择器后重试。",
+    "ja": "インストールフォルダーの選択画面を開けませんでした。システムのファイル選択画面を確認して、もう一度お試しください。"
+  },
+  "setup.notice.versions": {
+    "en": "Load the Minecraft version list before using recommended setup. You can retry or use custom setup.",
+    "zh-Hans": "使用推荐设置前请先加载 Minecraft 版本列表。你可以重试或使用自定义设置。",
+    "ja": "おすすめのセットアップを使用する前に、Minecraft のバージョン一覧を読み込んでください。再試行するか、カスタムセットアップを使用できます。"
+  },
+  "setup.notice.progress": {
+    "en": "Could not save setup progress: %{detail}",
+    "zh-Hans": "无法保存设置进度：%{detail}",
+    "ja": "セットアップの進行状況を保存できませんでした: %{detail}"
+  },
+  "setup.notice.language": {
+    "en": "Block could not save the language choice, so it may not persist after restart: %{detail}",
+    "zh-Hans": "Block 无法保存语言选择，因此重启后可能无法保留：%{detail}",
+    "ja": "言語の選択を保存できなかったため、再起動後は保持されない可能性があります: %{detail}"
+  }
+}

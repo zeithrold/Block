@@ -412,3 +412,52 @@ fn profile_memory_validation_uses_gb_and_enforces_the_one_to_thirty_two_gb_bound
         });
     });
 }
+
+#[gpui::test]
+fn japanese_profile_editor_keeps_its_fields_and_actions(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.preferences.language = Some(crate::Language::Japanese);
+            view.router.navigate(Tab::Instances);
+            view.snapshot = ready_snapshot();
+            view.handle(UiAction::EditProfile, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    for selector in [
+        "profile-field-Name",
+        "profile-field-Server",
+        "edit-profile-appearance",
+        "edit-profile-launch",
+        "edit-profile-data",
+        "cancel-profile",
+        "save-profile",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "{selector} did not paint in Japanese"
+        );
+    }
+    let save = cx.debug_bounds("save-profile");
+    assert!(
+        save.is_some_and(|save| save.bottom() <= px(720.) && save.right() <= px(1152.)),
+        "the Japanese save action stays inside the window: {save:?}"
+    );
+    // The semantic pages still open behind the localized triggers.
+    click(cx, "edit-profile-launch");
+    for selector in [
+        "profile-field-Memory",
+        "profile-field-Jvm",
+        "profile-field-Game",
+        "profile-inherit-runtime",
+        "profile-inherit-window",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "{selector} did not paint in Japanese"
+        );
+    }
+}

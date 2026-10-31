@@ -185,7 +185,11 @@ fn rendered_queue_launch_activates_during_an_install(cx: &mut gpui::TestAppConte
         cx.simulate_click(action.center(), gpui::Modifiers::none());
     }
     assert!(view.read_with(cx, |view, _| {
-        view.pending_play && view.status.starts_with("Launch queued")
+        view.pending_play
+            && view
+                .status
+                .text(crate::Language::English)
+                .starts_with("Launch queued")
     }));
     cx.run_until_parked();
     let identity = cx.debug_bounds("home-player");

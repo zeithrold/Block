@@ -62,19 +62,25 @@ impl BuildInfo {
 
 impl Block {
     pub(super) fn render_about(&self, cx: &Context<'_, Self>) -> super::page_host::ManagementSlots {
+        let language = self.language();
         let brand = self.about_brand();
         let body = self.about_body(cx);
         let footer = patterns::management_footer(self.palette)
             .id("about-footer")
             .debug_selector(|| "about-footer".into())
             .justify_between()
-            .child(self.about_link("product-website", "Website", WEBSITE, ButtonVariant::Ghost))
+            .child(self.about_link(
+                "product-website",
+                tr!(language, "about.website"),
+                WEBSITE,
+                ButtonVariant::Ghost,
+            ))
             .child(self.button(
                 "show-output",
                 if self.show_output {
-                    "Hide output"
+                    tr!(language, "about.hide_output")
                 } else {
-                    "View output"
+                    tr!(language, "about.view_output")
                 },
                 UiAction::ToggleOutput,
                 cx,
@@ -119,17 +125,23 @@ impl Block {
                 self.palette,
                 BadgeVariant::Secondary,
             ))
-            .child(note("One block at a time."))
+            .child(note(tr!(self.language(), "about.tagline")))
     }
 
     fn about_body(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        let language = self.language();
         let mut body = div()
             .id("about-body")
             .debug_selector(|| "about-body".into())
             .flex_1()
             .min_w_0()
             .min_h_0()
-            .scroll_area(&self.shell.about_scroll, "About Block", self.palette, false)
+            .scroll_area(
+                &self.shell.about_scroll,
+                "about.scroll",
+                self.palette,
+                false,
+            )
             .child(
                 div()
                     .debug_selector(|| "about-scroll-content".into())
@@ -143,14 +155,14 @@ impl Block {
                             .flex()
                             .flex_col()
                             .gap_3()
-                            .child(note("MINECRAFT: JAVA EDITION LAUNCHER"))
+                            .child(note(tr!(language, "about.eyebrow")))
                             .child(
                                 div()
                                     .text_size(px(24.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child("Made for your next world."),
+                                    .child(tr!(language, "about.headline")),
                             )
-                            .child(note("A quiet home for your accounts, games, and the way you play. Built around persistent Instances and the Profiles that make them yours.")),
+                            .child(note(tr!(language, "about.intro"))),
                     )
                     .child(self.about_build_information(cx))
                     .child(
@@ -158,28 +170,48 @@ impl Block {
                             .flex()
                             .flex_wrap()
                             .gap_2()
-                            .child(self.about_link("about-source", "View source", REPOSITORY, ButtonVariant::Outline))
-                            .child(self.about_link("about-feedback", "Feedback", FEEDBACK, ButtonVariant::Ghost))
-                            .child(self.button("about-open-logs", "Open logs", UiAction::OpenLogs, cx))
+                            .child(self.about_link(
+                                "about-source",
+                                tr!(language, "about.view_source"),
+                                REPOSITORY,
+                                ButtonVariant::Outline,
+                            ))
+                            .child(self.about_link(
+                                "about-feedback",
+                                tr!(language, "about.feedback"),
+                                FEEDBACK,
+                                ButtonVariant::Ghost,
+                            ))
+                            .child(self.button(
+                                "about-open-logs",
+                                tr!(language, "about.open_logs"),
+                                UiAction::OpenLogs,
+                                cx,
+                            ))
                             .child(self.button(
                                 "about-export-logs",
                                 if self.log_export_cancel.is_some() {
-                                    "Waiting for save dialog…"
+                                    tr!(language, "about.waiting_for_picker")
                                 } else if self.exporting_logs {
-                                    "Exporting…"
+                                    tr!(language, "about.exporting")
                                 } else {
-                                    "Export logs…"
+                                    tr!(language, "about.export_logs")
                                 },
                                 UiAction::ExportLogs,
                                 cx,
                             ))
-                            .children(self.log_export_cancel.as_ref().map(|_| self.button(
-                                "about-cancel-log-export", "Cancel export", UiAction::CancelLogExport, cx,
-                            ))),
+                            .children(self.log_export_cancel.as_ref().map(|_| {
+                                self.button(
+                                    "about-cancel-log-export",
+                                    tr!(language, "about.cancel_export"),
+                                    UiAction::CancelLogExport,
+                                    cx,
+                                )
+                            })),
                     )
-                    .child(note("Launcher logs only. Review before sharing."))
-                    .child(note("Built with Rust and GPUI. Game errors open Crash help with recovery actions and diagnostic export. You can inspect the current game output below."))
-                    .child(note("Brand artwork: Block-Icon, icon-v4. Interface icons: Lucide. Font: Inter.")),
+                    .child(note(tr!(language, "about.logs_only_note")))
+                    .child(note(tr!(language, "about.crash_help_note")))
+                    .child(note(tr!(language, "about.credits"))),
             );
         if self.show_output {
             body = body.child(
@@ -198,14 +230,14 @@ impl Block {
                             .gap_2()
                             .child(self.button(
                                 "open-recipe",
-                                "Open development recipe…",
+                                tr!(language, "about.open_recipe"),
                                 UiAction::OpenRecipe,
                                 cx,
                             ))
                             .children(self.recipe.as_ref().map(|_| {
                                 self.button(
                                     "launch-recipe",
-                                    "Launch development recipe",
+                                    tr!(language, "about.launch_recipe"),
                                     UiAction::LaunchRecipe,
                                     cx,
                                 )
@@ -218,18 +250,22 @@ impl Block {
 
     fn about_build_information(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
         let info = self.build_info;
+        let language = self.language();
         let rows = [
-            ("Version", info.version.to_owned()),
-            ("Platform", format!("{} / {}", info.os, info.arch)),
+            (tr!(language, "about.version"), info.version.to_owned()),
             (
-                "Source commit",
-                info.source_commit
-                    .map_or_else(|| "Not recorded in this build".into(), abbreviated_identity),
+                tr!(language, "about.platform"),
+                format!("{} / {}", info.os, info.arch),
             ),
             (
-                "Source fingerprint",
+                tr!(language, "about.source_commit"),
+                info.source_commit
+                    .map_or_else(|| tr!(language, "about.not_recorded"), abbreviated_identity),
+            ),
+            (
+                tr!(language, "about.source_fingerprint"),
                 info.source_sha256
-                    .map_or_else(|| "Not recorded in this build".into(), abbreviated_identity),
+                    .map_or_else(|| tr!(language, "about.not_recorded"), abbreviated_identity),
             ),
         ];
         div()
@@ -240,34 +276,64 @@ impl Block {
             .flex_col()
             .gap_4()
             .child(
-                div().flex().items_center().justify_between().gap_3()
-                    .child(div().text_sm().font_weight(gpui::FontWeight::MEDIUM).child("Build information"))
-                    .child(super::tooltip::trigger(components::button(
-                        "about-copy-build", "Copy", self.palette,
-                        ButtonVariant::Ghost, ControlState::default(),
-                        cx.listener(|view, (), _, cx| view.copy_build_information(cx)),
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(tr!(language, "about.build_information")),
                     )
-                        .child(Icon::Copy.render(14., self.palette.muted)), "Copy build information", cx)),
+                    .child(super::tooltip::trigger(
+                        components::button(
+                            "about-copy-build",
+                            tr!(language, "about.copy"),
+                            self.palette,
+                            ButtonVariant::Ghost,
+                            ControlState::default(),
+                            cx.listener(|view, (), _, cx| view.copy_build_information(cx)),
+                        )
+                        .child(Icon::Copy.render(14., self.palette.muted)),
+                        tr!(language, "about.copy_build_information"),
+                        cx,
+                    )),
             )
             .child(
-                div().flex().flex_wrap().gap_y_4().children(rows.into_iter().map(|(label, value)| {
-                    div().w(relative(0.5))
-                        .min_w_0().pr_3().flex().flex_col().gap_1()
-                        .child(div().text_xs().text_color(rgb(self.palette.muted)).child(label))
-                        .child(div().text_sm().child(value))
-                })),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_y_4()
+                    .children(rows.into_iter().map(|(label, value)| {
+                        div()
+                            .w(relative(0.5))
+                            .min_w_0()
+                            .pr_3()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(rgb(self.palette.muted))
+                                    .child(label),
+                            )
+                            .child(div().text_sm().child(value))
+                    })),
             )
             .child(note(if info.source_sha256.is_some() {
-                "Copy build information to include the complete source identity in a report."
+                tr!(language, "about.copy_note_stamped")
             } else {
-                "This local build has no recorded source fingerprint. Copying build information preserves that fact."
+                tr!(language, "about.copy_note_local")
             }))
     }
 
     fn about_link(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: String,
         url: &'static str,
         variant: ButtonVariant,
     ) -> impl IntoElement + use<> {
@@ -287,7 +353,7 @@ impl Block {
 
     fn copy_build_information(&mut self, cx: &mut Context<'_, Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(self.build_info.diagnostic_text()));
-        self.push_toast("Build information copied".into(), ToastKind::Success);
+        self.push_toast(msg!("about.build_information_copied"), ToastKind::Success);
         cx.notify();
     }
 
@@ -299,7 +365,7 @@ impl Block {
             }
             Err(_) => {
                 tracing::error!(event = "ui.logs.open_unavailable", view_id = self.view_id);
-                self.push_toast("Could not locate launcher logs.".into(), ToastKind::Error);
+                self.push_toast(msg!("logs.directory_unavailable"), ToastKind::Error);
             }
         }
     }
@@ -312,7 +378,7 @@ impl Block {
             Ok(directory) => directory,
             Err(_) => {
                 tracing::error!(event = "ui.logs.export_unavailable", view_id = self.view_id);
-                self.push_toast("Could not locate launcher logs.".into(), ToastKind::Error);
+                self.push_toast(msg!("logs.directory_unavailable"), ToastKind::Error);
                 return;
             }
         };
@@ -330,6 +396,8 @@ impl Block {
                 () = cancel.cancelled() => None,
                 selection = selection => Some(selection),
             };
+            // The message is resolved where it is shown, so a language chosen
+            // while the picker or export runs still names the result.
             let (outcome, message, kind) = match selection {
                 Some(Ok(Ok(Some(path)))) => {
                     // Once writing starts, cancellation is no longer offered.
@@ -348,25 +416,15 @@ impl Block {
                         .spawn(async move { block_logging::export_launcher_logs(&path) })
                         .await;
                     if result.is_ok() {
-                        (
-                            "succeeded",
-                            "Launcher logs exported. Review before sharing.",
-                            ToastKind::Success,
-                        )
+                        ("succeeded", "logs.exported", ToastKind::Success)
                     } else {
-                        (
-                            "failed",
-                            "Could not export launcher logs. Try a new file name or folder.",
-                            ToastKind::Error,
-                        )
+                        ("failed", "logs.export_failed", ToastKind::Error)
                     }
                 }
-                None | Some(Ok(Ok(None))) => ("cancelled", "Log export canceled.", ToastKind::Info),
-                Some(Ok(Err(_)) | Err(_)) => (
-                    "failed",
-                    "The log export save dialog could not open.",
-                    ToastKind::Error,
-                ),
+                None | Some(Ok(Ok(None))) => ("cancelled", "logs.export_canceled", ToastKind::Info),
+                Some(Ok(Err(_)) | Err(_)) => {
+                    ("failed", "logs.picker_unavailable", ToastKind::Error)
+                }
             };
             if outcome == "failed" {
                 tracing::error!(event = "ui.logs.export_finished", view_id, outcome);
@@ -376,7 +434,7 @@ impl Block {
             let _ = view.update(cx, |view, cx| {
                 view.exporting_logs = false;
                 view.log_export_cancel = None;
-                view.push_toast(message.into(), kind);
+                view.push_toast(msg!(message), kind);
                 cx.notify();
             });
         })
@@ -398,6 +456,13 @@ mod tests {
     use super::BuildInfo;
     use crate::Tab;
     use gpui::{TestAppContext, VisualTestContext, point, px, size};
+
+    /// The native accessibility name of a painted control, which is also the
+    /// label the product passes for that action.
+    fn control_label(cx: &mut VisualTestContext, id: &'static str) -> Option<String> {
+        cx.update(|window, _| gpui_base::test_support::find(window, &[], &id.into()))
+            .and_then(|node| node.label().map(str::to_owned))
+    }
 
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
@@ -454,10 +519,9 @@ mod tests {
             Some(view.read_with(cx, |view, _| view.build_info.diagnostic_text()))
         );
         assert!(view.read_with(cx, |view, _| {
-            view.shell
-                .toast
-                .as_ref()
-                .is_some_and(|toast| toast.message == "Build information copied")
+            view.shell.toast.as_ref().is_some_and(|toast| {
+                toast.message.text(crate::Language::English) == "Build information copied"
+            })
         }));
         click(cx, "product-website");
         assert_eq!(cx.opened_url().as_deref(), Some(super::WEBSITE));
@@ -481,11 +545,9 @@ mod tests {
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
             !view.exporting_logs
-                && view
-                    .shell
-                    .toast
-                    .as_ref()
-                    .is_some_and(|toast| toast.message == "Log export canceled.")
+                && view.shell.toast.as_ref().is_some_and(|toast| {
+                    toast.message.text(crate::Language::English) == "Log export canceled."
+                })
         }));
     }
 
@@ -627,5 +689,74 @@ mod tests {
             }
             click(cx, "show-output");
         }
+    }
+
+    /// About is product text: the saved language decides every printed label,
+    /// while English stays exactly the previous wording.
+    #[gpui::test]
+    fn about_labels_resolve_in_the_saved_language(cx: &mut TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(Tab::About);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        cx.simulate_resize(size(px(960.), px(600.)));
+        cx.run_until_parked();
+        assert_eq!(
+            control_label(cx, "show-output").as_deref(),
+            Some("View output")
+        );
+        assert_eq!(
+            control_label(cx, "about-open-logs").as_deref(),
+            Some("Open logs")
+        );
+        for (language, output, logs, source) in [
+            (
+                crate::Language::SimplifiedChinese,
+                "查看输出",
+                "打开日志",
+                "查看源码",
+            ),
+            (
+                crate::Language::Japanese,
+                "出力を表示",
+                "ログを開く",
+                "ソースを表示",
+            ),
+        ] {
+            view.update(cx, |view, cx| {
+                view.preferences.language = Some(language);
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                control_label(cx, "show-output").as_deref(),
+                Some(output),
+                "{}",
+                language.code()
+            );
+            assert_eq!(
+                control_label(cx, "about-open-logs").as_deref(),
+                Some(logs),
+                "{}",
+                language.code()
+            );
+            assert_eq!(
+                control_label(cx, "about-source").as_deref(),
+                Some(source),
+                "{}",
+                language.code()
+            );
+        }
+        view.update(cx, |view, cx| {
+            view.preferences.language = Some(crate::Language::English);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            control_label(cx, "show-output").as_deref(),
+            Some("View output")
+        );
     }
 }

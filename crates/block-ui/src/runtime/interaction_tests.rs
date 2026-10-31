@@ -80,7 +80,64 @@ fn late_operation_cannot_close_a_new_draft_or_replace_the_current_status(
     view.update(cx, Block::poll);
     assert!(view.read_with(cx, |view, _| view.form.is_some()
         && view.busy
-        && view.status == "Current task"));
+        && view.status.text(crate::Language::English) == "Current task"));
+}
+
+#[gpui::test]
+fn completion_and_toast_keep_their_identity_across_language_changes(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    view.update(cx, |view, _| {
+        view.operation_revision = 2;
+        view.busy = true;
+        view.messages = Some(receiver);
+    });
+    assert!(
+        sender
+            .try_send(Message::ForOperation {
+                operation: 1,
+                message: Box::new(Message::Finished(Ok(msg!("completion.profile_deleted")))),
+            })
+            .is_ok()
+    );
+    assert!(
+        sender
+            .try_send(Message::ForOperation {
+                operation: 2,
+                message: Box::new(Message::Finished(Ok(msg!(
+                    "completion.provider_saved",
+                    name = "Example"
+                )))),
+            })
+            .is_ok()
+    );
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(
+                UiAction::SetLanguage(crate::Language::SimplifiedChinese),
+                window,
+                cx,
+            );
+            view.poll(cx);
+            assert_eq!(
+                view.status.text(view.language()),
+                "认证提供者 Example 已保存"
+            );
+            assert_eq!(view.status.key(), Some("completion.provider_saved"));
+            let toast = view.shell.toast.as_ref().map(|toast| toast.message.clone());
+            view.handle(UiAction::SetLanguage(crate::Language::Japanese), window, cx);
+            assert_eq!(
+                view.status.text(view.language()),
+                "プロバイダー Example を保存しました"
+            );
+            assert_eq!(
+                toast
+                    .map(|message| message.text(view.language()))
+                    .as_deref(),
+                Some("プロバイダー Example を保存しました")
+            );
+        });
+    });
 }
 
 #[gpui::test]
@@ -138,6 +195,7 @@ fn games_route_during_setup_keeps_the_setup_page_with_a_status(cx: &mut gpui::Te
             assert!(view.shell.toast.as_ref().is_some_and(|toast| {
                 toast
                     .message
+                    .text(crate::Language::English)
                     .contains("Finish setup or choose Skip setup to continue.")
             }));
             assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Keep setup"));

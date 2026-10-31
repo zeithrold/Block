@@ -3,7 +3,7 @@
     clippy::redundant_pub_crate,
     reason = "Selectors are internal to the product shell."
 )]
-use super::{Block, Form, Tab, UiAction, design::Icon, shell::Surface};
+use super::{Block, Form, Language, Tab, UiAction, design::Icon, shell::Surface};
 use block_launcher::catalog::{DataPolicy, ProfileColor, ProfileIcon};
 use gpui::{
     App, Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
@@ -20,6 +20,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProductChoice {
     AuthProvider,
+    Language,
     Appearance,
     Proxy,
     DefaultJava,
@@ -76,7 +77,8 @@ pub(super) struct SelectChoice<A> {
 
 #[derive(Clone, Debug)]
 pub(super) struct SelectState<A> {
-    pub title: String,
+    /// Semantic catalog key; the label is resolved whenever the popup paints.
+    title: &'static str,
     pub choices: Vec<SelectChoice<A>>,
     pub anchor: Point<Pixels>,
     pub width: Pixels,
@@ -120,6 +122,7 @@ impl SelectIdentity {
 #[derive(Clone, Copy)]
 struct AppMenuItem {
     id: &'static str,
+    /// Semantic catalog key; a displayed label is never a logical identity.
     label: &'static str,
     tab: Tab,
     icon: Icon,
@@ -127,37 +130,42 @@ struct AppMenuItem {
 const APP_MENU: [AppMenuItem; 5] = [
     AppMenuItem {
         id: "menu-home",
-        label: "Home",
+        label: "menu.home",
         tab: Tab::Home,
         icon: Icon::Home,
     },
     AppMenuItem {
         id: "menu-accounts",
-        label: "Accounts",
+        label: "menu.accounts",
         tab: Tab::Accounts,
         icon: Icon::Account,
     },
     AppMenuItem {
         id: "menu-games",
-        label: "Games",
+        label: "menu.games",
         tab: Tab::Instances,
         icon: Icon::Games,
     },
     AppMenuItem {
         id: "menu-settings",
-        label: "Settings",
+        label: "menu.settings",
         tab: Tab::Settings,
         icon: Icon::Settings,
     },
     AppMenuItem {
         id: "menu-about",
-        label: "About",
+        label: "menu.about",
         tab: Tab::About,
         icon: Icon::Info,
     },
 ];
 
 impl<A> SelectState<A> {
+    /// The selector's own name in the language of the view that presents it.
+    pub(super) fn title(&self, language: Language) -> String {
+        tr!(language, self.title)
+    }
+
     fn typeahead(&mut self, text: &str, now: Instant) -> Option<usize> {
         if self
             .typed_at
@@ -189,6 +197,71 @@ impl<A> SelectState<A> {
 }
 
 impl Block {
+    /// Refresh only option labels, retaining the popup, active row and focus.
+    pub(super) fn refresh_select_language(&mut self, cx: &mut Context<'_, Self>) {
+        let identity = self
+            .shell
+            .surfaces
+            .top()
+            .and_then(|layer| match &layer.kind {
+                Surface::Select(state) => Some(state.identity.clone()),
+                _ => None,
+            });
+        let Some(identity) = identity else {
+            return;
+        };
+        let language = self.language();
+        let labels: Option<Vec<String>> = match identity {
+            SelectIdentity::Product(kind) => self
+                .product_choices(kind, cx)
+                .map(|(_, choices)| choices.into_iter().map(|choice| choice.label).collect()),
+            SelectIdentity::AppMenu
+            | SelectIdentity::ProfileActions(_)
+            | SelectIdentity::Appearance { .. } => {
+                self.shell
+                    .surfaces
+                    .top()
+                    .and_then(|layer| match &layer.kind {
+                        Surface::Select(state) => Some(
+                            state
+                                .choices
+                                .iter()
+                                .map(|choice| match &choice.action {
+                                    UiAction::CopyProfileId(_) => {
+                                        tr!(language, "choice.copy_settings")
+                                    }
+                                    UiAction::DeleteProfileId(_) => {
+                                        tr!(language, "choice.delete_from_library")
+                                    }
+                                    UiAction::ProfileIcon(icon)
+                                    | UiAction::WizardProfileIcon(icon) => {
+                                        crate::i18n::profile_icon_name(language, *icon)
+                                    }
+                                    UiAction::ProfileColor(color)
+                                    | UiAction::WizardProfileColor(color) => {
+                                        crate::i18n::profile_color_name(language, *color)
+                                    }
+                                    action => app_menu_item(action).map_or_else(
+                                        || choice.label.clone(),
+                                        |item| tr!(language, item.label),
+                                    ),
+                                })
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+            }
+        };
+        if let (Some(labels), Some(layer)) = (labels, self.shell.surfaces.top_mut())
+            && let Surface::Select(state) = &mut layer.kind
+            && state.choices.len() == labels.len()
+        {
+            for (choice, label) in state.choices.iter_mut().zip(labels) {
+                choice.label = label;
+            }
+        }
+    }
+
     fn can_open_select(&self, identity: &SelectIdentity) -> bool {
         (!self.busy || Self::available_while_busy(&identity.action()))
             && !self.shell.surfaces.layers().any(|layer| {
@@ -237,18 +310,40 @@ impl Block {
         kind: ProductChoice,
         cx: &Context<'_, Self>,
     ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
+        let language = self.language();
         match kind {
+            ProductChoice::Language => {
+                let setup =
+                    self.shell.surfaces.layers().any(|layer| {
+                        matches!(layer.kind, Surface::Drawer(super::Drawer::Language))
+                    });
+                Some((
+                    "settings.language.label",
+                    Language::ALL
+                        .into_iter()
+                        .map(|choice| SelectChoice {
+                            label: choice.self_name().to_owned(),
+                            selected: choice == language,
+                            action: if setup {
+                                UiAction::FirstRun(super::first_run::Action::Language(choice))
+                            } else {
+                                UiAction::SetLanguage(choice)
+                            },
+                        })
+                        .collect(),
+                ))
+            }
             ProductChoice::AuthProvider => {
                 let choices = self.auth_provider_choices();
-                (!choices.is_empty()).then_some(("Authentication provider", choices))
+                (!choices.is_empty()).then_some(("select.auth_provider", choices))
             }
             ProductChoice::ProfileRuntime => {
                 let Some(Form::Profile(form)) = &self.form else {
                     return None;
                 };
                 Some((
-                    "Java runtime",
-                    runtime_choices(form.managed, UiAction::ProfileRuntimeAutomatic),
+                    "select.java_runtime",
+                    runtime_choices(language, form.managed, UiAction::ProfileRuntimeAutomatic),
                 ))
             }
             ProductChoice::ProfileDataPolicy => {
@@ -256,14 +351,14 @@ impl Block {
                     return None;
                 };
                 Some((
-                    "Game data",
+                    "select.game_data",
                     [
-                        ("Isolated profile directory", DataPolicy::Isolated),
-                        ("Shared Instance directory", DataPolicy::Shared),
+                        ("choice.data_isolated", DataPolicy::Isolated),
+                        ("choice.data_shared", DataPolicy::Shared),
                     ]
                     .into_iter()
                     .map(|(label, value)| SelectChoice {
-                        label: label.into(),
+                        label: tr!(language, label),
                         selected: form.original.data_policy == value,
                         action: UiAction::ProfileDataPolicy(value),
                     })
@@ -271,8 +366,9 @@ impl Block {
                 ))
             }
             ProductChoice::InstanceRuntime => Some((
-                "Java runtime",
+                "select.java_runtime",
                 runtime_choices(
+                    language,
                     self.instance_runtime_automatic()?,
                     UiAction::InstanceRuntimeAutomatic,
                 ),
@@ -280,8 +376,9 @@ impl Block {
             ProductChoice::InstanceWindow => {
                 let (width, height, custom) = self.instance_window_values(cx)?;
                 Some((
-                    "Window size",
+                    "select.window_size",
                     window_choices(
+                        language,
                         &width,
                         &height,
                         custom,
@@ -293,15 +390,16 @@ impl Block {
             ProductChoice::WizardRuntime => {
                 let profile = self.shell.wizard.profile.as_ref()?;
                 Some((
-                    "Java runtime",
-                    runtime_choices(profile.managed, UiAction::WizardRuntime),
+                    "select.java_runtime",
+                    runtime_choices(language, profile.managed, UiAction::WizardRuntime),
                 ))
             }
             ProductChoice::WizardWindow => {
                 let profile = self.shell.wizard.profile.as_ref()?;
                 Some((
-                    "Window size",
+                    "select.window_size",
                     window_choices(
+                        language,
                         &profile.width.read(cx).value(),
                         &profile.height.read(cx).value(),
                         profile.window_custom,
@@ -320,44 +418,50 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
         let draft = self.settings_form.as_ref()?;
+        let language = self.language();
         Some(match kind {
             ProductChoice::Appearance => (
-                "Appearance",
+                "select.appearance",
                 [
-                    ("Follow system", super::Appearance::System),
-                    ("Light", super::Appearance::Light),
-                    ("Dark", super::Appearance::Dark),
+                    ("choice.appearance_system", super::Appearance::System),
+                    ("choice.appearance_light", super::Appearance::Light),
+                    ("choice.appearance_dark", super::Appearance::Dark),
                 ]
                 .into_iter()
                 .map(|(label, value)| SelectChoice {
-                    label: label.into(),
+                    label: tr!(language, label),
                     selected: draft.appearance == value,
                     action: UiAction::SetAppearance(value),
                 })
                 .collect(),
             ),
             ProductChoice::Proxy => (
-                "Proxy",
+                "select.proxy",
                 [
-                    ("Use system proxy", 0),
-                    ("Direct connection", 1),
-                    ("Manual proxy", 2),
+                    ("choice.proxy_system", 0),
+                    ("choice.proxy_direct", 1),
+                    ("choice.proxy_manual", 2),
                 ]
                 .into_iter()
                 .map(|(label, mode)| SelectChoice {
-                    label: label.into(),
+                    label: tr!(language, label),
                     selected: draft.proxy_mode == mode,
                     action: UiAction::ProxyMode(mode),
                 })
                 .collect(),
             ),
             ProductChoice::DefaultJava => (
-                "Default Java runtime",
-                runtime_choices(draft.java_automatic, UiAction::DefaultJavaAutomatic),
+                "select.default_java",
+                runtime_choices(
+                    language,
+                    draft.java_automatic,
+                    UiAction::DefaultJavaAutomatic,
+                ),
             ),
             ProductChoice::DefaultWindow => (
-                "Default window size",
+                "select.default_window",
                 window_choices(
+                    language,
                     &draft.width.read(cx).value(),
                     &draft.height.read(cx).value(),
                     draft.window_custom,
@@ -366,6 +470,7 @@ impl Block {
                 ),
             ),
             ProductChoice::AuthProvider
+            | ProductChoice::Language
             | ProductChoice::ProfileRuntime
             | ProductChoice::ProfileDataPolicy
             | ProductChoice::InstanceRuntime
@@ -378,7 +483,7 @@ impl Block {
     pub(super) fn product_select_field(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<gpui::SharedString>,
         value: &str,
         kind: ProductChoice,
         cx: &Context<'_, Self>,
@@ -446,6 +551,7 @@ impl Block {
                 }))
                 .child(div().flex_1().min_w_0().text_ellipsis().child(value.to_owned()))
                 .child(Icon::Selector.render(14., self.palette.muted)));
+        let label: gpui::SharedString = label.into();
         div()
             .min_w_0()
             .flex()
@@ -462,7 +568,7 @@ impl Block {
 
     fn open_select_at(
         &mut self,
-        title: &str,
+        title: &'static str,
         choices: Vec<SelectChoice<UiAction>>,
         identity: SelectIdentity,
         anchor: Option<Bounds<Pixels>>,
@@ -493,7 +599,7 @@ impl Block {
         let focus = cx.focus_handle().tab_stop(true);
         self.shell.surfaces.open(
             Surface::Select(SelectState {
-                title: title.into(),
+                title,
                 choices,
                 menu,
                 active,
@@ -532,6 +638,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let language = self.language();
         let appearance = if wizard {
             self.wizard_appearance()
         } else if let Some(Form::Profile(form)) = &self.form {
@@ -543,7 +650,7 @@ impl Block {
             ProfileColor::ALL
                 .into_iter()
                 .map(|value| SelectChoice {
-                    label: value.label().to_owned(),
+                    label: crate::i18n::profile_color_name(language, value),
                     selected: value == appearance.color,
                     action: if wizard {
                         UiAction::WizardProfileColor(value)
@@ -556,7 +663,7 @@ impl Block {
             ProfileIcon::ALL
                 .into_iter()
                 .map(|value| SelectChoice {
-                    label: value.label().to_owned(),
+                    label: crate::i18n::profile_icon_name(language, value),
                     selected: value == appearance.icon,
                     action: if wizard {
                         UiAction::WizardProfileIcon(value)
@@ -568,9 +675,9 @@ impl Block {
         };
         self.open_select_at(
             if color {
-                "Profile color"
+                "select.profile_color"
             } else {
-                "Profile icon"
+                "select.profile_icon"
             },
             choices,
             SelectIdentity::Appearance { wizard, color },
@@ -589,22 +696,23 @@ impl Block {
         let Some(profile) = self.inspected_profile() else {
             return;
         };
+        let language = self.language();
         let id = profile.id.clone();
         let mut choices = Vec::new();
         if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Separated {
             choices.push(SelectChoice {
-                label: "Copy settings".into(),
+                label: tr!(language, "choice.copy_settings"),
                 selected: false,
                 action: UiAction::CopyProfileId(id.clone()),
             });
         }
         choices.push(SelectChoice {
-            label: "Delete from library".into(),
+            label: tr!(language, "choice.delete_from_library"),
             selected: false,
             action: UiAction::DeleteProfileId(id.clone()),
         });
         self.open_select_at(
-            "Profile actions",
+            "select.profile_actions",
             choices,
             SelectIdentity::ProfileActions(id),
             anchor,
@@ -624,6 +732,7 @@ impl Block {
         } else {
             self.router.tab()
         };
+        let language = self.language();
         let choices = APP_MENU
             .into_iter()
             .filter(|item| {
@@ -633,13 +742,13 @@ impl Block {
                     || matches!(item.tab, Tab::Settings | Tab::About)
             })
             .map(|item| SelectChoice {
-                label: item.label.into(),
+                label: tr!(language, item.label),
                 selected: item.tab == current,
                 action: UiAction::Tab(item.tab),
             })
             .collect();
         self.open_select_at(
-            "Block menu",
+            "surface.menu",
             choices,
             SelectIdentity::AppMenu,
             anchor,
@@ -840,20 +949,25 @@ fn app_menu_item(action: &UiAction) -> Option<&'static AppMenuItem> {
 }
 
 fn runtime_choices(
+    language: Language,
     automatic: bool,
     action: impl Fn(bool) -> UiAction,
 ) -> Vec<SelectChoice<UiAction>> {
-    [("Automatic Java", true), ("Custom executable", false)]
-        .into_iter()
-        .map(|(label, value)| SelectChoice {
-            label: label.into(),
-            selected: automatic == value,
-            action: action(value),
-        })
-        .collect()
+    [
+        ("choice.java_automatic", true),
+        ("choice.java_custom", false),
+    ]
+    .into_iter()
+    .map(|(label, value)| SelectChoice {
+        label: tr!(language, label),
+        selected: automatic == value,
+        action: action(value),
+    })
+    .collect()
 }
 
 fn window_choices(
+    language: Language,
     width: &str,
     height: &str,
     custom: bool,
@@ -873,7 +987,7 @@ fn window_choices(
         })
         .collect();
     choices.push(SelectChoice {
-        label: "Custom size…".into(),
+        label: tr!(language, "choice.custom_size"),
         selected: custom,
         action: custom_action,
     });

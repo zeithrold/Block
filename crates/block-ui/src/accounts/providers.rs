@@ -12,6 +12,7 @@ use gpui::{
 
 use super::{
     Block, Tab, TextInput, UiAction,
+    authentication::AccountMessage,
     components::{self, ButtonVariant, ControlState, FieldOptions},
     input, note, patterns,
     scroll_area::ScrollAreaExt as _,
@@ -27,7 +28,7 @@ pub(super) struct State {
     form: Option<ProviderForm>,
     list_scroll: ScrollHandle,
     body_scroll: ScrollHandle,
-    error: Option<String>,
+    error: Option<AccountMessage>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
 }
 
@@ -48,6 +49,22 @@ pub(super) enum ProviderKey {
 }
 
 impl State {
+    pub(super) fn refresh_placeholders(
+        &self,
+        language: crate::Language,
+        cx: &mut Context<'_, Block>,
+    ) {
+        if let Some(query) = &self.query {
+            let placeholder = tr!(language, "accounts.providers.search.placeholder");
+            query.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+        }
+        if let Some(form) = &self.form {
+            let placeholder = tr!(language, "accounts.providers.name.placeholder");
+            form.name
+                .update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+        }
+    }
+
     pub(super) fn motion_key(&self) -> ProviderKey {
         self.form.as_ref().map_or_else(
             || ProviderKey::List,
@@ -138,8 +155,15 @@ impl Block {
         if self.router.tab() != Tab::Accounts {
             return;
         }
+        let language = self.language();
+        let placeholder = tr!(language, "accounts.providers.search.placeholder");
         if self.shell.providers.query.is_none() {
-            self.shell.providers.query = Some(input("", "Search providers…", cx));
+            self.shell.providers.query = Some(input("", &placeholder, cx));
+        }
+        // A retained search field keeps its draft and IME session; only its
+        // placeholder follows the current language.
+        if let Some(query) = &self.shell.providers.query {
+            query.update(cx, |field, cx| field.set_placeholder(&placeholder, cx));
         }
         self.shell.providers.visible = true;
         cx.notify();
@@ -174,7 +198,7 @@ impl Block {
         }
         let name = input(
             original.as_ref().map_or("", |p| p.name.as_str()),
-            "Your community server",
+            &tr!(self.language(), "accounts.providers.name.placeholder"),
             cx,
         );
         let address = input(
@@ -258,7 +282,7 @@ impl Block {
         }
     }
 
-    pub(super) fn providers_finished(&mut self, result: &Result<String, String>) {
+    pub(super) fn providers_finished(&mut self, result: &Result<crate::i18n::UiText, String>) {
         if self
             .shell
             .providers
@@ -267,7 +291,10 @@ impl Block {
             .is_some_and(|(revision, _)| *revision == self.operation_revision)
         {
             self.shell.providers.attempt = None;
-            self.shell.providers.error = result.as_ref().err().cloned();
+            self.shell.providers.error = result
+                .as_ref()
+                .err()
+                .map(|error| AccountMessage::diagnostic(error.clone()));
         }
     }
 
@@ -303,7 +330,9 @@ impl Block {
                 }
                 self.shell.providers.error = None;
             }
-            Err(error) => self.shell.providers.error = Some(error.to_string()),
+            Err(error) => {
+                self.shell.providers.error = Some(AccountMessage::diagnostic(error.to_string()));
+            }
         }
         cx.notify();
     }
@@ -331,18 +360,19 @@ impl Block {
         let address = form.address.read(cx).value().trim().to_owned();
         let parsed = ProviderAddress::parse(&address);
         let error = if name.is_empty() {
-            Some("Enter a provider name.".into())
+            Some(AccountMessage::product("accounts.providers.error.name"))
         } else if let Err(error) = &parsed {
-            Some(error.to_string())
+            Some(AccountMessage::diagnostic(error.to_string()))
         } else if parsed.as_ref().is_ok_and(|p| p.insecure)
             && form.accepted_address.as_ref() != Some(&address)
         {
-            Some(block_auth::AuthError::InsecureProvider.to_string())
+            Some(AccountMessage::diagnostic(
+                block_auth::AuthError::InsecureProvider.to_string(),
+            ))
         } else if self.engine.is_none() {
-            Some(
-                "Provider saving is unavailable. Check the data directory and restart Block."
-                    .into(),
-            )
+            Some(AccountMessage::product(
+                "accounts.providers.error.save_unavailable",
+            ))
         } else {
             None
         };
@@ -354,7 +384,7 @@ impl Block {
         let original = form.original.clone();
         let accepted = form.accepted_address.as_ref() == Some(&address);
         self.begin_cancellable(
-            "Discovering and saving the provider",
+            msg!("accounts.providers.status.discovering"),
             super::ui_logging::Operation::SaveProvider,
         );
         self.operation_kind = super::OperationKind::Account;
@@ -387,9 +417,8 @@ impl Block {
             return;
         }
         if self.provider_links(&id) > 0 {
-            self.shell.providers.error = Some(
-                "This provider is used by saved accounts. Remove those accounts first.".into(),
-            );
+            self.shell.providers.error =
+                Some(AccountMessage::product("accounts.providers.error.linked"));
         } else if self
             .shell
             .providers
@@ -416,7 +445,7 @@ impl Block {
         self.shell.surfaces.close(window, &self.focus, cx);
         if self.engine.is_some() {
             self.begin(
-                "Removing provider",
+                msg!("accounts.providers.status.removing"),
                 super::ui_logging::Operation::RemoveProvider,
             );
             self.operation_kind = super::OperationKind::Account;
@@ -425,8 +454,9 @@ impl Block {
                 engine.remove_provider(id);
             }
         } else {
-            self.shell.providers.error =
-                Some("Provider removal is unavailable. Restart Block.".into());
+            self.shell.providers.error = Some(AccountMessage::product(
+                "accounts.providers.error.remove_unavailable",
+            ));
         }
         cx.notify();
     }
@@ -457,6 +487,7 @@ impl Block {
         &self,
         cx: &Context<'_, Self>,
     ) -> super::page_host::ManagementSlots {
+        let language = self.language();
         let state = &self.shell.providers;
         let query = state.query.as_ref().map_or_else(String::new, |field| {
             field.read(cx).value().trim().to_lowercase()
@@ -525,22 +556,22 @@ impl Block {
             );
         }
         if !state.loaded {
-            rows = rows.child(note("Loading saved providers…"));
+            rows = rows.child(note(tr!(language, "accounts.providers.loading")));
         } else if state.load_error.is_some() && state.records.is_empty() {
-            rows = rows.child(note("Saved providers could not be loaded."));
+            rows = rows.child(note(tr!(language, "accounts.providers.load_failed")));
         } else if state.records.is_empty() {
-            rows = rows.child(note("No providers saved."));
+            rows = rows.child(note(tr!(language, "accounts.providers.empty")));
         } else if !state.records.iter().any(|p| {
             format!("{} {}", p.name, p.api_url)
                 .to_lowercase()
                 .contains(&query)
         }) {
-            rows = rows.child(note("No providers found."));
+            rows = rows.child(note(tr!(language, "accounts.providers.none_found")));
         }
         if let Some(error) = &state.load_error {
             rows = rows.child(note(error.clone())).child(self.provider_button(
                 "providers-reload",
-                "Try again",
+                tr!(language, "accounts.providers.reload"),
                 UiAction::ReloadLibrary,
                 self.busy,
                 ButtonVariant::Outline,
@@ -560,11 +591,15 @@ impl Block {
                     .flex_col()
                     .gap_4()
                     .child(note(if !state.loaded {
-                        "Your providers".into()
+                        tr!(language, "accounts.providers.rail.title")
                     } else if state.load_error.is_some() {
-                        "Your providers · unavailable".into()
+                        tr!(language, "accounts.providers.rail.unavailable")
                     } else {
-                        format!("Your providers · {}", state.records.len())
+                        tr!(
+                            language,
+                            "accounts.providers.rail.count",
+                            count = state.records.len()
+                        )
                     }))
                     .child(
                         div()
@@ -592,14 +627,19 @@ impl Block {
                     .flex_1()
                     .min_h_0()
                     .id("provider-list-scroll")
-                    .scroll_area(&state.list_scroll, "Providers", self.palette, false)
+                    .scroll_area(
+                        &state.list_scroll,
+                        "accounts.providers.list",
+                        self.palette,
+                        false,
+                    )
                     .p_3()
                     .child(rows),
             )
             .child(
                 patterns::management_footer(self.palette).child(self.provider_button(
                     "providers-back",
-                    "Back to accounts",
+                    tr!(language, "accounts.providers.back"),
                     UiAction::ProvidersBack,
                     false,
                     ButtonVariant::Ghost,
@@ -613,88 +653,23 @@ impl Block {
     }
 
     pub(super) fn provider_editor(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let mut content = div().p_8().flex().flex_col().gap_6();
         let mut footer = patterns::management_footer(self.palette).justify_between();
         if let Some(form) = &self.shell.providers.form {
             let address = form.address.read(cx).value();
             let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);
-            let header_icon = form
-                .original
-                .as_ref()
-                .and_then(|provider| self.provider_icons.get(&provider.id.to_string()));
-            content = content
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_4()
-                        .child(components::provider_icon(
-                            &form.name.read(cx).value(),
-                            header_icon,
-                            self.palette,
-                            36.,
-                        ))
-                        .child(patterns::page_heading(
-                            if form.original.is_some() {
-                                "Provider details"
-                            } else {
-                                "Add a provider"
-                            },
-                            "Authlib-Injector · Custom authentication",
-                        )),
-                )
-                .child(components::field_with(
-                    "Display name",
-                    &form.name,
-                    self.palette,
-                    FieldOptions {
-                        required: true,
-                        ..FieldOptions::default()
-                    },
-                ))
-                .child(components::field_with(
-                    "Server API address or quick link",
-                    &form.address,
-                    self.palette,
-                    FieldOptions {
-                        required: true,
-                        ..FieldOptions::default()
-                    },
-                ));
+            content = self.provider_form_fields(content, form, cx);
             if insecure {
-                content = content.child(components::card(self.palette)
-                    .child(note("This provider uses HTTP. An unencrypted connection can expose your account and password. Use HTTPS whenever possible."))
-                    .child(components::checkbox("provider-http-consent","I understand and want to use this HTTP provider.",form.accepted_address.as_deref()==Some(address.trim()),self.palette,ControlState {disabled:self.busy,..ControlState::default()},cx.listener(|view,(),window,cx|view.handle(UiAction::ProviderConsent,window,cx)))));
+                content = content.child(self.provider_http_consent(form, &address, cx));
             }
-            content = content.child(note("Addresses without a scheme use HTTPS. Identify normalizes a quick link or selects an already saved provider."))
-                .child(self.provider_button("provider-identify","Identify address",UiAction::ProviderIdentify,self.busy,ButtonVariant::Outline,cx));
+            content = self.provider_identify_section(content, cx);
             if let Some(original) = &form.original {
                 let links = self.provider_links(&original.id.to_string());
-                content = content
-                    .child(note(format!(
-                        "{} linked accounts · API metadata cached",
-                        links
-                    )))
-                    .child(note(format!(
-                        "Server: {}",
-                        original
-                            .metadata
-                            .server_name
-                            .as_deref()
-                            .unwrap_or(&original.name)
-                    )))
-                    .child(note(format!(
-                        "Skin domains: {}",
-                        original.metadata.skin_domains.join(", ")
-                    )));
-                if links > 0 {
-                    content = content.child(note(
-                        "The API address is locked while accounts use this provider.",
-                    ));
-                }
+                content = content.children(provider_saved_notes(original, links, language));
                 footer = footer.child(self.provider_button(
                     "provider-remove",
-                    "Remove",
+                    tr!(language, "accounts.providers.remove"),
                     UiAction::ProviderRemoveRequest(original.id.to_string()),
                     self.busy || links > 0,
                     ButtonVariant::Ghost,
@@ -706,9 +681,9 @@ impl Block {
             footer = footer.child(self.provider_button(
                 "provider-save",
                 if form.original.is_some() {
-                    "Save changes"
+                    tr!(language, "accounts.providers.save_changes")
                 } else {
-                    "Add provider"
+                    tr!(language, "accounts.providers.add")
                 },
                 UiAction::ProviderSave,
                 self.busy || insecure && form.accepted_address.as_deref() != Some(address.trim()),
@@ -718,21 +693,30 @@ impl Block {
         } else {
             content = content
                 .child(patterns::page_heading(
-                    "Your authentication providers",
-                    "Choose a provider or add a server API address. Block discovers its API and caches real metadata.",
+                    tr!(language, "accounts.providers.empty_title"),
+                    tr!(language, "accounts.providers.empty_description"),
                 ))
-                .child(self.provider_button("provider-new","Add provider",UiAction::ProviderAdd,self.busy,ButtonVariant::Primary,cx));
+                .child(self.provider_button(
+                    "provider-new",
+                    tr!(language, "accounts.providers.add"),
+                    UiAction::ProviderAdd,
+                    self.busy,
+                    ButtonVariant::Primary,
+                    cx,
+                ));
         }
         if let Some(error) = &self.shell.providers.error {
-            content = content.child(note(error.clone()).text_color(rgb(self.palette.destructive)));
+            content = content
+                .child(note(error.render(language)).text_color(rgb(self.palette.destructive)));
         }
         if self.shell.providers.attempt.is_some() && self.busy {
             content = content
                 .child(components::progress(
                     components::ProgressState::Indeterminate,
                     self.palette,
+                    tr!(language, "common.in_progress"),
                 ))
-                .child(note(self.status.clone()));
+                .child(note(self.status.text(self.language())));
         }
         div()
             .size_full()
@@ -748,7 +732,7 @@ impl Block {
                     .id("provider-editor-scroll")
                     .scroll_area(
                         &self.shell.providers.body_scroll,
-                        "Provider details",
+                        "accounts.providers.details",
                         self.palette,
                         false,
                     )
@@ -756,6 +740,130 @@ impl Block {
             )
             .child(footer)
     }
+
+    /// The provider's icon and heading above its editable name and address fields.
+    fn provider_form_fields(
+        &self,
+        content: gpui::Div,
+        form: &ProviderForm,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        let language = self.language();
+        let header_icon = form
+            .original
+            .as_ref()
+            .and_then(|provider| self.provider_icons.get(&provider.id.to_string()));
+        content
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_4()
+                    .child(components::provider_icon(
+                        &form.name.read(cx).value(),
+                        header_icon,
+                        self.palette,
+                        36.,
+                    ))
+                    .child(patterns::page_heading(
+                        if form.original.is_some() {
+                            tr!(language, "accounts.providers.details.title")
+                        } else {
+                            tr!(language, "accounts.providers.add.title")
+                        },
+                        tr!(language, "accounts.providers.subtitle"),
+                    )),
+            )
+            .child(components::field_with(
+                tr!(language, "accounts.providers.name.label"),
+                &form.name,
+                self.palette,
+                FieldOptions {
+                    required: true,
+                    ..FieldOptions::default()
+                },
+            ))
+            .child(components::field_with(
+                tr!(language, "accounts.providers.address.label"),
+                &form.address,
+                self.palette,
+                FieldOptions {
+                    required: true,
+                    ..FieldOptions::default()
+                },
+            ))
+    }
+
+    /// The consent card that an insecure provider address requires before it can be saved.
+    fn provider_http_consent(
+        &self,
+        form: &ProviderForm,
+        address: &str,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        let language = self.language();
+        components::card(self.palette)
+            .child(note(tr!(language, "accounts.providers.http_note")))
+            .child(components::checkbox(
+                "provider-http-consent",
+                tr!(language, "accounts.providers.http_consent"),
+                form.accepted_address.as_deref() == Some(address.trim()),
+                self.palette,
+                ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
+                cx.listener(|view, (), window, cx| {
+                    view.handle(UiAction::ProviderConsent, window, cx)
+                }),
+            ))
+    }
+
+    /// The identify action, which reads the provider an address names.
+    fn provider_identify_section(&self, content: gpui::Div, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        content
+            .child(note(tr!(language, "accounts.providers.identify_note")))
+            .child(self.provider_button(
+                "provider-identify",
+                tr!(language, "accounts.providers.identify"),
+                UiAction::ProviderIdentify,
+                self.busy,
+                ButtonVariant::Outline,
+                cx,
+            ))
+    }
+}
+
+/// The notes describing the metadata a saved provider keeps immutable.
+fn provider_saved_notes(
+    original: &AuthlibProvider,
+    links: usize,
+    language: crate::Language,
+) -> Vec<gpui::AnyElement> {
+    let mut notes = vec![
+        note(tr!(language, "accounts.providers.links", count = links)).into_any_element(),
+        note(tr!(
+            language,
+            "accounts.providers.server",
+            name = original
+                .metadata
+                .server_name
+                .as_deref()
+                .unwrap_or(&original.name)
+        ))
+        .into_any_element(),
+        note(tr!(
+            language,
+            "accounts.providers.skins",
+            domains = original.metadata.skin_domains.join(", ")
+        ))
+        .into_any_element(),
+    ];
+    if links > 0 {
+        notes.push(note(tr!(language, "accounts.providers.address_locked")).into_any_element());
+    }
+    notes
 }
 
 #[cfg(test)]
@@ -791,13 +899,9 @@ mod tests {
             cx.update(|_, cx| {
                 view.update(cx, |view, cx| {
                     view.save_provider(cx);
-                    assert!(
-                        view.shell
-                            .providers
-                            .error
-                            .as_ref()
-                            .is_some_and(|error| error.contains("HTTP"))
-                    );
+                    assert!(view.shell.providers.error.as_ref().is_some_and(|error| {
+                        error.render(crate::Language::English).contains("HTTP")
+                    }));
                     view.consent_provider(cx);
                     assert!(
                         view.shell
@@ -880,6 +984,92 @@ mod tests {
                     assert!(view.busy && !view.cancel.is_cancelled());
                 })
             });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "The fixture paints every control it inspects."
+    )]
+    fn control_node(
+        cx: &mut gpui::VisualTestContext,
+        id: &'static str,
+    ) -> gpui_base::test_support::ElementSnapshot {
+        cx.run_until_parked();
+        cx.update(|window, _| {
+            gpui_base::test_support::find(window, &[], &gpui::ElementId::Name(id.into()))
+        })
+        .expect("painted control")
+    }
+
+    #[gpui::test]
+    fn provider_management_renders_the_view_language_and_keeps_retained_drafts(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let provider = fixture_provider(false)?;
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.preferences.language = Some(crate::Language::Japanese);
+                view
+            });
+            cx.update(|_, cx| {
+                view.update(cx, |view, cx| {
+                    view.router.navigate(Tab::Accounts);
+                    view.shell.providers.records = vec![provider.clone()];
+                    view.shell.providers.loaded = true;
+                    view.open_providers(cx);
+                    view.edit_provider(Some(&provider.id.to_string()), cx);
+                    if let Some(form) = &view.shell.providers.form {
+                        form.name
+                            .update(cx, |field, cx| field.set_value("Draft community", cx));
+                    }
+                });
+            });
+            assert_eq!(
+                control_node(cx, "providers-back").label(),
+                Some("アカウントに戻る")
+            );
+            assert_eq!(
+                control_node(cx, "provider-save").label(),
+                Some("変更を保存")
+            );
+
+            // The retained search editor and the draft stay in place across a
+            // language change while their presentation follows the language.
+            let query = view.read_with(cx, |view, _| {
+                view.shell
+                    .providers
+                    .query
+                    .as_ref()
+                    .map(|field| field.entity_id())
+            });
+            cx.update(|_, cx| {
+                view.update(cx, |view, cx| {
+                    view.preferences.language = Some(crate::Language::SimplifiedChinese);
+                    view.open_providers(cx);
+                });
+            });
+            assert_eq!(
+                view.read_with(cx, |view, _| view
+                    .shell
+                    .providers
+                    .query
+                    .as_ref()
+                    .map(|field| field.entity_id())),
+                query
+            );
+            assert!(view.read_with(cx, |view, cx| {
+                view.shell
+                    .providers
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.name.read(cx).value() == "Draft community")
+            }));
+            assert_eq!(control_node(cx, "providers-back").label(), Some("返回账户"));
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");

@@ -1,0 +1,808 @@
+{
+  "_version": 2,
+  "games.browser.title.accounts": {
+    "en": "Your accounts",
+    "zh-Hans": "你的账户",
+    "ja": "あなたのアカウント"
+  },
+  "games.browser.title.games": {
+    "en": "Your games",
+    "zh-Hans": "你的游戏",
+    "ja": "あなたのゲーム"
+  },
+  "games.browser.title.instances": {
+    "en": "Instances",
+    "zh-Hans": "实例",
+    "ja": "インスタンス"
+  },
+  "games.browser.title.profiles": {
+    "en": "Profiles",
+    "zh-Hans": "配置",
+    "ja": "プロファイル"
+  },
+  "games.browser.search.accounts": {
+    "en": "Search accounts…",
+    "zh-Hans": "搜索账户…",
+    "ja": "アカウントを検索…"
+  },
+  "games.browser.search.games": {
+    "en": "Search games…",
+    "zh-Hans": "搜索游戏…",
+    "ja": "ゲームを検索…"
+  },
+  "games.browser.search.instances": {
+    "en": "Search Instances…",
+    "zh-Hans": "搜索实例…",
+    "ja": "インスタンスを検索…"
+  },
+  "games.browser.search.profiles": {
+    "en": "Search Profiles…",
+    "zh-Hans": "搜索配置…",
+    "ja": "プロファイルを検索…"
+  },
+  "games.browser.empty.accounts": {
+    "en": "No accounts yet.",
+    "zh-Hans": "尚无账户。",
+    "ja": "アカウントはまだありません。"
+  },
+  "games.browser.empty.games": {
+    "en": "No games yet.",
+    "zh-Hans": "尚无游戏。",
+    "ja": "ゲームはまだありません。"
+  },
+  "games.browser.empty.instances": {
+    "en": "No Instances yet.",
+    "zh-Hans": "尚无实例。",
+    "ja": "インスタンスはまだありません。"
+  },
+  "games.browser.empty.profiles": {
+    "en": "No Profiles yet.",
+    "zh-Hans": "尚无配置。",
+    "ja": "プロファイルはまだありません。"
+  },
+  "games.browser.no_match.accounts": {
+    "en": "No accounts found. Try another search.",
+    "zh-Hans": "未找到账户。请尝试其他搜索条件。",
+    "ja": "アカウントが見つかりません。別の検索語をお試しください。"
+  },
+  "games.browser.no_match.games": {
+    "en": "No games found. Try another search.",
+    "zh-Hans": "未找到游戏。请尝试其他搜索条件。",
+    "ja": "ゲームが見つかりません。別の検索語をお試しください。"
+  },
+  "games.browser.no_match.instances": {
+    "en": "No Instances found. Try another search.",
+    "zh-Hans": "未找到实例。请尝试其他搜索条件。",
+    "ja": "インスタンスが見つかりません。別の検索語をお試しください。"
+  },
+  "games.browser.no_match.profiles": {
+    "en": "No Profiles found. Try another search.",
+    "zh-Hans": "未找到配置。请尝试其他搜索条件。",
+    "ja": "プロファイルが見つかりません。別の検索語をお試しください。"
+  },
+  "games.browser.count.accounts": {
+    "en": "%{count} accounts",
+    "zh-Hans": "%{count} 个账户",
+    "ja": "%{count} 件のアカウント"
+  },
+  "games.browser.count.games": {
+    "en": "%{count} games",
+    "zh-Hans": "%{count} 个游戏",
+    "ja": "%{count} 件のゲーム"
+  },
+  "games.browser.count.instances": {
+    "en": "%{count} Instances",
+    "zh-Hans": "%{count} 个实例",
+    "ja": "%{count} 件のインスタンス"
+  },
+  "games.browser.count.profiles": {
+    "en": "%{count} Profiles",
+    "zh-Hans": "%{count} 个配置",
+    "ja": "%{count} 件のプロファイル"
+  },
+  "games.browser.loading_records": {
+    "en": "Loading saved records…",
+    "zh-Hans": "正在加载已保存的记录…",
+    "ja": "保存された記録を読み込み中…"
+  },
+  "games.browser.records_scroll": {
+    "en": "Library records",
+    "zh-Hans": "库记录",
+    "ja": "ライブラリの記録"
+  },
+  "games.browser.details_scroll": {
+    "en": "Library details",
+    "zh-Hans": "库详情",
+    "ja": "ライブラリの詳細"
+  },
+  "games.browser.help": {
+    "en": "What’s the difference?",
+    "zh-Hans": "有什么区别？",
+    "ja": "違いは何ですか？"
+  },
+  "games.browser.instance_unavailable": {
+    "en": "Instance unavailable",
+    "zh-Hans": "实例不可用",
+    "ja": "インスタンスを利用できません"
+  },
+  "games.browser.instance": {
+    "en": "Instance",
+    "zh-Hans": "实例",
+    "ja": "インスタンス"
+  },
+  "games.browser.profile": {
+    "en": "Profile",
+    "zh-Hans": "配置",
+    "ja": "プロファイル"
+  },
+  "games.browser.in_use": {
+    "en": "In use",
+    "zh-Hans": "使用中",
+    "ja": "使用中"
+  },
+  "games.mode.bundled": {
+    "en": "Bundled",
+    "zh-Hans": "捆绑",
+    "ja": "同梱"
+  },
+  "games.mode.separated": {
+    "en": "Separated",
+    "zh-Hans": "分离",
+    "ja": "分離"
+  },
+  "games.mode.bundled_profile": {
+    "en": "Bundled Profile",
+    "zh-Hans": "捆绑配置",
+    "ja": "同梱プロファイル"
+  },
+  "games.mode.separated_profile": {
+    "en": "Separated Profile",
+    "zh-Hans": "分离配置",
+    "ja": "分離プロファイル"
+  },
+  "games.action.add_account": {
+    "en": "Add account",
+    "zh-Hans": "添加账户",
+    "ja": "アカウントを追加"
+  },
+  "games.action.create_profile": {
+    "en": "Create Profile",
+    "zh-Hans": "创建配置",
+    "ja": "プロファイルを作成"
+  },
+  "games.action.create_game_setup": {
+    "en": "Create game setup",
+    "zh-Hans": "创建游戏环境",
+    "ja": "ゲーム環境を作成"
+  },
+  "games.action.create_game": {
+    "en": "Create game",
+    "zh-Hans": "创建游戏",
+    "ja": "ゲームを作成"
+  },
+  "games.action.try_again": {
+    "en": "Try again",
+    "zh-Hans": "重试",
+    "ja": "再試行"
+  },
+  "games.action.authlib_providers": {
+    "en": "Authlib providers",
+    "zh-Hans": "Authlib 提供方",
+    "ja": "Authlib プロバイダー"
+  },
+  "games.action.new_profile": {
+    "en": "New Profile",
+    "zh-Hans": "新建配置",
+    "ja": "新しいプロファイル"
+  },
+  "games.action.remove_account": {
+    "en": "Remove account",
+    "zh-Hans": "移除账户",
+    "ja": "アカウントを削除"
+  },
+  "games.action.use_account": {
+    "en": "Use account",
+    "zh-Hans": "使用此账户",
+    "ja": "このアカウントを使用"
+  },
+  "games.action.current_account": {
+    "en": "Current account",
+    "zh-Hans": "当前账户",
+    "ja": "現在のアカウント"
+  },
+  "games.action.edit_profile": {
+    "en": "Edit Profile",
+    "zh-Hans": "编辑配置",
+    "ja": "プロファイルを編集"
+  },
+  "games.action.edit_launch_settings": {
+    "en": "Edit launch settings",
+    "zh-Hans": "编辑启动设置",
+    "ja": "起動設定を編集"
+  },
+  "games.action.repair": {
+    "en": "Repair",
+    "zh-Hans": "修复",
+    "ja": "修復"
+  },
+  "games.action.use_profile": {
+    "en": "Use Profile",
+    "zh-Hans": "使用此配置",
+    "ja": "このプロファイルを使用"
+  },
+  "games.action.current_profile": {
+    "en": "Current Profile",
+    "zh-Hans": "当前配置",
+    "ja": "現在のプロファイル"
+  },
+  "games.action.use_game": {
+    "en": "Use game",
+    "zh-Hans": "使用此游戏",
+    "ja": "このゲームを使用"
+  },
+  "games.action.current_game": {
+    "en": "Current game",
+    "zh-Hans": "当前游戏",
+    "ja": "現在のゲーム"
+  },
+  "games.action.save_changes": {
+    "en": "Save changes",
+    "zh-Hans": "保存更改",
+    "ja": "変更を保存"
+  },
+  "games.action.done": {
+    "en": "Done",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "games.detail.installation": {
+    "en": "Installation",
+    "zh-Hans": "安装",
+    "ja": "インストール"
+  },
+  "games.install.pending": {
+    "en": "Game files will install when you launch from Home.",
+    "zh-Hans": "从主页启动时将安装游戏文件。",
+    "ja": "ホームから起動するとゲームファイルがインストールされます。"
+  },
+  "games.install.installing": {
+    "en": "Game files are being installed. Download progress is available on Home.",
+    "zh-Hans": "正在安装游戏文件。可在主页查看下载进度。",
+    "ja": "ゲームファイルをインストールしています。ダウンロードの進行状況はホームで確認できます。"
+  },
+  "games.install.failed_repair": {
+    "en": "Installation failed: %{message}. Repair this game to retry.",
+    "zh-Hans": "安装失败：%{message}。修复此游戏后重试。",
+    "ja": "インストールに失敗しました: %{message}。このゲームを修復して再試行してください。"
+  },
+  "games.install.failed_open_profile": {
+    "en": "Installation failed: %{message}. Open a linked Profile to repair this target.",
+    "zh-Hans": "安装失败：%{message}。请打开关联的配置来修复此目标。",
+    "ja": "インストールに失敗しました: %{message}。リンクされたプロファイルを開いてこのターゲットを修復してください。"
+  },
+  "games.components.mod_loader": {
+    "en": "Mod loader",
+    "zh-Hans": "模组加载器",
+    "ja": "Mod ローダー"
+  },
+  "games.components.instance_settings": {
+    "en": "Instance settings",
+    "zh-Hans": "实例设置",
+    "ja": "インスタンス設定"
+  },
+  "games.components.fixed_at_creation": {
+    "en": "Fixed at creation",
+    "zh-Hans": "创建后固定",
+    "ja": "作成時に固定"
+  },
+  "games.components.editable_in_settings": {
+    "en": "Editable in Instance settings",
+    "zh-Hans": "可在实例设置中编辑",
+    "ja": "インスタンス設定で変更できます"
+  },
+  "games.components.not_installed": {
+    "en": "Not installed",
+    "zh-Hans": "未安装",
+    "ja": "未インストール"
+  },
+  "games.components.fixed_note": {
+    "en": "Minecraft version and mod loader are fixed. Create a new Instance for a different game setup.",
+    "zh-Hans": "Minecraft 版本与模组加载器已固定。如需其他游戏环境，请新建实例。",
+    "ja": "Minecraft のバージョンと Mod ローダーは固定です。別のゲーム環境には新しいインスタンスを作成してください。"
+  },
+  "games.instance.used_by_one": {
+    "en": "Used by 1 Profile",
+    "zh-Hans": "被 1 个配置使用",
+    "ja": "1 件のプロファイルで使用中"
+  },
+  "games.instance.used_by_many": {
+    "en": "Used by %{count} Profiles",
+    "zh-Hans": "被 %{count} 个配置使用",
+    "ja": "%{count} 件のプロファイルで使用中"
+  },
+  "games.instance.game_instance": {
+    "en": "Game Instance",
+    "zh-Hans": "游戏实例",
+    "ja": "ゲームインスタンス"
+  },
+  "games.instance.shared_files": {
+    "en": "Shared game files and components",
+    "zh-Hans": "共享游戏文件与组件",
+    "ja": "ゲームファイルとコンポーネントを共有"
+  },
+  "games.instance.no_launch_target": {
+    "en": "No launch target",
+    "zh-Hans": "没有启动目标",
+    "ja": "起動ターゲットがありません"
+  },
+  "games.launch.settings": {
+    "en": "Launch settings",
+    "zh-Hans": "启动设置",
+    "ja": "起動設定"
+  },
+  "games.launch.server": {
+    "en": "Server",
+    "zh-Hans": "服务器",
+    "ja": "サーバー"
+  },
+  "games.launch.choose_in_game": {
+    "en": "Choose in game",
+    "zh-Hans": "在游戏中选择",
+    "ja": "ゲーム内で選択"
+  },
+  "games.launch.connect_automatically": {
+    "en": "Connect automatically",
+    "zh-Hans": "自动连接",
+    "ja": "自動接続"
+  },
+  "games.launch.no_automatic_connection": {
+    "en": "No automatic connection",
+    "zh-Hans": "不自动连接",
+    "ja": "自動接続なし"
+  },
+  "games.launch.memory": {
+    "en": "Memory",
+    "zh-Hans": "内存",
+    "ja": "メモリ"
+  },
+  "games.launch.maximum_allocation": {
+    "en": "Maximum allocation",
+    "zh-Hans": "最大分配",
+    "ja": "最大割り当て"
+  },
+  "games.launch.jvm_arguments": {
+    "en": "JVM arguments",
+    "zh-Hans": "JVM 参数",
+    "ja": "JVM 引数"
+  },
+  "games.launch.default_arguments": {
+    "en": "Default arguments",
+    "zh-Hans": "默认参数",
+    "ja": "既定の引数"
+  },
+  "games.empty_state.loading_title": {
+    "en": "Loading your library",
+    "zh-Hans": "正在加载你的库",
+    "ja": "ライブラリを読み込み中"
+  },
+  "games.empty_state.failed_title": {
+    "en": "Your library could not be loaded",
+    "zh-Hans": "无法加载你的库",
+    "ja": "ライブラリを読み込めませんでした"
+  },
+  "games.empty_state.title": {
+    "en": "Your next adventure starts here",
+    "zh-Hans": "你的下一次冒险从这里开始",
+    "ja": "次の冒険はここから始まります"
+  },
+  "games.empty_state.loading_body": {
+    "en": "Reading saved records from this data directory.",
+    "zh-Hans": "正在从此数据目录读取已保存的记录。",
+    "ja": "このデータディレクトリから保存済みの記録を読み込んでいます。"
+  },
+  "games.empty_state.failed_body": {
+    "en": "Try again to read your saved records. Existing data has not been changed.",
+    "zh-Hans": "请重试读取已保存的记录。现有数据未被更改。",
+    "ja": "保存済みの記録を読み込むには再試行してください。既存のデータは変更されていません。"
+  },
+  "games.empty_state.accounts_body": {
+    "en": "Add an account to get ready to play.",
+    "zh-Hans": "添加账户即可开始游玩。",
+    "ja": "アカウントを追加してプレイの準備をしましょう。"
+  },
+  "games.empty_state.games_body": {
+    "en": "Create a game setup to get ready to play.",
+    "zh-Hans": "创建游戏环境即可开始游玩。",
+    "ja": "ゲーム環境を作成してプレイの準備をしましょう。"
+  },
+  "games.help.intro": {
+    "en": "An Instance fixes the game version and mod loader. A Profile stores your launch preferences.",
+    "zh-Hans": "实例固定游戏版本与模组加载器。配置保存你的启动偏好。",
+    "ja": "インスタンスはゲームのバージョンと Mod ローダーを固定します。プロファイルは起動設定を保存します。"
+  },
+  "games.help.scroll": {
+    "en": "Instances and Profiles",
+    "zh-Hans": "实例与配置",
+    "ja": "インスタンスとプロファイル"
+  },
+  "games.help.instance_body": {
+    "en": "Minecraft version and mod loader are fixed at creation. Its game folder and installation settings belong to this game setup.",
+    "zh-Hans": "Minecraft 版本与模组加载器在创建时固定。其游戏文件夹与安装设置属于此游戏环境。",
+    "ja": "Minecraft のバージョンと Mod ローダーは作成時に固定されます。ゲームフォルダーとインストール設定はこのゲーム環境に属します。"
+  },
+  "games.help.bundled_body": {
+    "en": "Every Instance has exactly one Profile. Games shows them together in one list.",
+    "zh-Hans": "每个实例恰好对应一个配置。游戏页会将它们显示在同一列表中。",
+    "ja": "各インスタンスにはプロファイルが 1 つだけあります。ゲームではそれらを 1 つのリストにまとめて表示します。"
+  },
+  "games.help.separated_body": {
+    "en": "Several Profiles can share one Instance, with independent accounts, memory and JVM arguments. You can convert from Bundled once; it cannot be reversed.",
+    "zh-Hans": "多个配置可以共用一个实例，各自拥有独立的账户、内存与 JVM 参数。可以从捆绑模式转换一次；此操作不可撤销。",
+    "ja": "複数のプロファイルが 1 つのインスタンスを共有でき、アカウント、メモリ、JVM 引数はそれぞれ独立します。同梱からは一度だけ変換でき、元に戻すことはできません。"
+  },
+  "games.help.current_mode": {
+    "en": "Current mode: %{mode} Profile",
+    "zh-Hans": "当前模式：%{mode}配置",
+    "ja": "現在のモード: %{mode}プロファイル"
+  },
+  "games.instance_editor.title": {
+    "en": "Instance configuration",
+    "zh-Hans": "实例配置",
+    "ja": "インスタンス構成"
+  },
+  "games.instance_editor.name": {
+    "en": "Instance name",
+    "zh-Hans": "实例名称",
+    "ja": "インスタンス名"
+  },
+  "games.instance_editor.inherit_note": {
+    "en": "These defaults apply to Profiles that inherit Instance settings. A Profile’s custom Java keeps priority.",
+    "zh-Hans": "这些默认值适用于继承实例设置的配置。配置自定义的 Java 仍然优先。",
+    "ja": "これらの既定値はインスタンス設定を継承するプロファイルに適用されます。プロファイルのカスタム Java が優先されます。"
+  },
+  "games.instance_editor.window_size": {
+    "en": "Window size",
+    "zh-Hans": "窗口大小",
+    "ja": "ウィンドウサイズ"
+  },
+  "games.instance_editor.custom_suffix": {
+    "en": " · Custom",
+    "zh-Hans": " · 自定义",
+    "ja": " · カスタム"
+  },
+  "games.instance_editor.window_width": {
+    "en": "Window width (px)",
+    "zh-Hans": "窗口宽度（像素）",
+    "ja": "ウィンドウ幅 (px)"
+  },
+  "games.instance_editor.window_height": {
+    "en": "Window height (px)",
+    "zh-Hans": "窗口高度（像素）",
+    "ja": "ウィンドウ高さ (px)"
+  },
+  "games.instance_editor.fullscreen": {
+    "en": "Start in fullscreen",
+    "zh-Hans": "以全屏启动",
+    "ja": "全画面で起動"
+  },
+  "games.instance_editor.directory": {
+    "en": "Installation directory",
+    "zh-Hans": "安装目录",
+    "ja": "インストール先ディレクトリ"
+  },
+  "games.instance_editor.directory_note": {
+    "en": "This location is read-only. Block chooses storage automatically and existing games stay where they are.",
+    "zh-Hans": "此位置为只读。Block 会自动选择存储位置，现有游戏保持原位。",
+    "ja": "この場所は読み取り専用です。Block が保存先を自動で選択し、既存のゲームは現在の場所に残ります。"
+  },
+  "games.instance_editor.existing_profiles_note": {
+    "en": "Existing Profiles keep their current Java and window choices. Enable inheritance in a Profile to use these Instance defaults.",
+    "zh-Hans": "现有配置保留当前的 Java 与窗口设置。在配置中启用继承即可使用这些实例默认值。",
+    "ja": "既存のプロファイルは現在の Java とウィンドウ設定を維持します。インスタンスの既定値を使うにはプロファイルで継承を有効にしてください。"
+  },
+  "games.instance_editor.saving": {
+    "en": "Saving instance settings",
+    "zh-Hans": "正在保存实例设置",
+    "ja": "インスタンス設定を保存中"
+  },
+  "games.instance_editor.saving_optifine": {
+    "en": "Saving instance settings · applying OptiFine",
+    "zh-Hans": "正在保存实例设置 · 应用 OptiFine",
+    "ja": "インスタンス設定を保存中 · OptiFine を適用"
+  },
+  "games.instance_editor.save_failed": {
+    "en": "Instance settings could not be saved. Check Block’s data directory and restart.",
+    "zh-Hans": "无法保存实例设置。请检查 Block 的数据目录并重新启动。",
+    "ja": "インスタンス設定を保存できませんでした。Block のデータディレクトリを確認して再起動してください。"
+  },
+  "games.instance_editor.error.name": {
+    "en": "Enter an instance name using printable text",
+    "zh-Hans": "请使用可打印字符输入实例名称",
+    "ja": "インスタンス名は印刷可能な文字で入力してください"
+  },
+  "games.instance_editor.error.width": {
+    "en": "Window width must be between 320 and 16384 pixels",
+    "zh-Hans": "窗口宽度必须在 320 到 16384 像素之间",
+    "ja": "ウィンドウ幅は 320～16384 ピクセルの範囲で指定してください"
+  },
+  "games.instance_editor.error.height": {
+    "en": "Window height must be between 240 and 16384 pixels",
+    "zh-Hans": "窗口高度必须在 240 到 16384 像素之间",
+    "ja": "ウィンドウ高さは 240～16384 ピクセルの範囲で指定してください"
+  },
+  "games.optifine.intro": {
+    "en": "Choose the official OptiFine installer JAR downloaded from optifine.net. Block validates it and applies it to this game when you save.",
+    "zh-Hans": "选择从 optifine.net 下载的官方 OptiFine 安装 JAR。Block 会校验它，并在保存时应用到本游戏。",
+    "ja": "optifine.net からダウンロードした公式 OptiFine インストーラー JAR を選択してください。Block が検証し、保存時にこのゲームへ適用します。"
+  },
+  "games.optifine.prompt": {
+    "en": "Select the official OptiFine installer JAR",
+    "zh-Hans": "选择官方 OptiFine 安装 JAR",
+    "ja": "公式 OptiFine インストーラー JAR を選択"
+  },
+  "games.optifine.unsupported": {
+    "en": "OptiFine cannot be combined directly with %{loader}.",
+    "zh-Hans": "OptiFine 无法与 %{loader} 直接组合。",
+    "ja": "OptiFine は %{loader} と直接組み合わせることはできません。"
+  },
+  "games.optifine.applies_to": {
+    "en": "Applies to %{target}.",
+    "zh-Hans": "应用于 %{target}。",
+    "ja": "%{target} に適用されます。"
+  },
+  "games.optifine.selected": {
+    "en": "Selected: OptiFine %{version}",
+    "zh-Hans": "已选择：OptiFine %{version}",
+    "ja": "選択中: OptiFine %{version}"
+  },
+  "games.optifine.forge_compat": {
+    "en": "This release declares compatibility with Forge %{forge}.",
+    "zh-Hans": "此版本声明兼容 Forge %{forge}。",
+    "ja": "このリリースは Forge %{forge} との互換性を宣言しています。"
+  },
+  "games.optifine.not_installed": {
+    "en": "Not installed.",
+    "zh-Hans": "未安装。",
+    "ja": "インストールされていません。"
+  },
+  "games.optifine.choosing": {
+    "en": "Choosing or validating JAR…",
+    "zh-Hans": "正在选择或校验 JAR…",
+    "ja": "JAR を選択または検証中…"
+  },
+  "games.optifine.replace": {
+    "en": "Replace selected JAR",
+    "zh-Hans": "替换所选 JAR",
+    "ja": "選択した JAR を置き換え"
+  },
+  "games.optifine.select": {
+    "en": "Select downloaded JAR",
+    "zh-Hans": "选择已下载的 JAR",
+    "ja": "ダウンロードした JAR を選択"
+  },
+  "games.optifine.remove": {
+    "en": "Remove OptiFine",
+    "zh-Hans": "移除 OptiFine",
+    "ja": "OptiFine を削除"
+  },
+  "games.optifine.pending_help": {
+    "en": "Choose a JAR, then Block checks its declared game compatibility.",
+    "zh-Hans": "选择 JAR 后，Block 会检查其声明的游戏兼容性。",
+    "ja": "JAR を選択すると、Block が宣言されたゲーム互換性を確認します。"
+  },
+  "games.optifine.chooser_failed": {
+    "en": "Could not open the OptiFine file chooser. Check your system file picker and try again.",
+    "zh-Hans": "无法打开 OptiFine 文件选择器。请检查系统文件选择器后重试。",
+    "ja": "OptiFine のファイル選択画面を開けませんでした。システムのファイル選択画面を確認して再試行してください。"
+  },
+  "games.optifine.import_failed": {
+    "en": "Could not import OptiFine: %{error}",
+    "zh-Hans": "无法导入 OptiFine：%{error}",
+    "ja": "OptiFine をインポートできませんでした: %{error}"
+  },
+  "games.profile_editor.scroll": {
+    "en": "Profile settings",
+    "zh-Hans": "配置设置",
+    "ja": "プロファイル設定"
+  },
+  "games.profile_editor.name": {
+    "en": "Name",
+    "zh-Hans": "名称",
+    "ja": "名前"
+  },
+  "games.profile_editor.server": {
+    "en": "Server address (optional)",
+    "zh-Hans": "服务器地址（可选）",
+    "ja": "サーバーアドレス (任意)"
+  },
+  "games.profile_editor.appearance": {
+    "en": "Appearance",
+    "zh-Hans": "外观",
+    "ja": "外観"
+  },
+  "games.profile_editor.appearance_title": {
+    "en": "Profile appearance",
+    "zh-Hans": "配置外观",
+    "ja": "プロファイルの外観"
+  },
+  "games.profile_editor.data_and_account": {
+    "en": "Data and account",
+    "zh-Hans": "数据与账户",
+    "ja": "データとアカウント"
+  },
+  "games.profile_editor.draft_note": {
+    "en": "Changes stay in this draft until you save.",
+    "zh-Hans": "在你保存之前，更改只保留在此草稿中。",
+    "ja": "保存するまで変更はこの下書きに保持されます。"
+  },
+  "games.profile_editor.game_data": {
+    "en": "Game data",
+    "zh-Hans": "游戏数据",
+    "ja": "ゲームデータ"
+  },
+  "games.profile_editor.data_isolated": {
+    "en": "Isolated profile directory",
+    "zh-Hans": "独立配置目录",
+    "ja": "分離プロファイルディレクトリ"
+  },
+  "games.profile_editor.data_shared": {
+    "en": "Shared Instance directory",
+    "zh-Hans": "共享实例目录",
+    "ja": "共有インスタンスディレクトリ"
+  },
+  "games.profile_editor.data_note": {
+    "en": "Isolated uses this profile's own directory. Shared uses the Instance game directory. Changing policy selects a directory and preserves all existing files.",
+    "zh-Hans": "独立模式使用此配置自己的目录；共享模式使用实例的游戏目录。更改策略时会选择目录，并保留所有现有文件。",
+    "ja": "分離ではこのプロファイル専用のディレクトリを使用します。共有ではインスタンスのゲームディレクトリを使用します。ポリシーを変更するとディレクトリが選択され、既存のファイルはすべて保持されます。"
+  },
+  "games.profile_editor.use_current_account": {
+    "en": "Use current account",
+    "zh-Hans": "使用当前账户",
+    "ja": "現在のアカウントを使用"
+  },
+  "games.profile_editor.inherit_runtime": {
+    "en": "Use this Instance’s Java setting",
+    "zh-Hans": "使用此实例的 Java 设置",
+    "ja": "このインスタンスの Java 設定を使用"
+  },
+  "games.profile_editor.inherit_window": {
+    "en": "Use this Instance’s window size and fullscreen setting",
+    "zh-Hans": "使用此实例的窗口大小与全屏设置",
+    "ja": "このインスタンスのウィンドウサイズと全画面設定を使用"
+  },
+  "games.profile_editor.custom_java_note": {
+    "en": "Custom Java takes precedence over Instance inheritance.",
+    "zh-Hans": "自定义 Java 优先于实例继承。",
+    "ja": "カスタム Java はインスタンスの継承より優先されます。"
+  },
+  "games.profile_editor.instance_window": {
+    "en": "Instance window · %{width} × %{height}",
+    "zh-Hans": "实例窗口 · %{width} × %{height}",
+    "ja": "インスタンスのウィンドウ · %{width} × %{height}"
+  },
+  "games.profile_editor.fullscreen_suffix": {
+    "en": " · Fullscreen",
+    "zh-Hans": " · 全屏",
+    "ja": " · 全画面"
+  },
+  "games.profile_editor.inheritance_unavailable": {
+    "en": "Set this Instance’s settings before enabling inheritance. Existing Profile parameters stay in use.",
+    "zh-Hans": "请先设置此实例的设置，再启用继承。现有配置参数将继续使用。",
+    "ja": "継承を有効にする前に、このインスタンスの設定を行ってください。既存のプロファイルのパラメーターは引き続き使用されます。"
+  },
+  "games.profile_editor.window_inheritance_note": {
+    "en": "Instance window values replace width, height and fullscreen flags when launching. Other game arguments are preserved.",
+    "zh-Hans": "启动时，实例窗口值将替换宽度、高度与全屏标记。其他游戏参数保持不变。",
+    "ja": "起動時には、インスタンスのウィンドウ値が幅、高さ、全画面フラグを置き換えます。その他のゲーム引数は保持されます。"
+  },
+  "games.profile_editor.memory": {
+    "en": "Maximum memory (GB)",
+    "zh-Hans": "最大内存（GB）",
+    "ja": "最大メモリ (GB)"
+  },
+  "games.profile_editor.jvm": {
+    "en": "Additional JVM arguments",
+    "zh-Hans": "附加 JVM 参数",
+    "ja": "追加の JVM 引数"
+  },
+  "games.profile_editor.game": {
+    "en": "Additional game arguments",
+    "zh-Hans": "附加游戏参数",
+    "ja": "追加のゲーム引数"
+  },
+  "games.profile_editor.arguments_note": {
+    "en": "Separate arguments with spaces. Put values containing spaces in double quotes.",
+    "zh-Hans": "参数之间用空格分隔。包含空格的值请放在双引号中。",
+    "ja": "引数はスペースで区切ります。スペースを含む値は二重引用符で囲んでください。"
+  },
+  "games.profile_editor.launch_target": {
+    "en": "Launch target",
+    "zh-Hans": "启动目标",
+    "ja": "起動ターゲット"
+  },
+  "games.profile_editor.default_account_group": {
+    "en": "Default launch account",
+    "zh-Hans": "默认启动账户",
+    "ja": "既定の起動アカウント"
+  },
+  "games.profile_editor.connect": {
+    "en": "Connect to this server automatically on launch",
+    "zh-Hans": "启动时自动连接到此服务器",
+    "ja": "起動時にこのサーバーへ自動接続"
+  },
+  "games.profile_editor.server_unsupported": {
+    "en": "This version’s client does not accept an automatic server connection. The address can still be saved.",
+    "zh-Hans": "此版本的客户端不接受自动服务器连接。地址仍可保存。",
+    "ja": "このバージョンのクライアントは自動サーバー接続に対応していません。アドレスは保存できます。"
+  },
+  "games.profile_editor.server_unknown": {
+    "en": "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.",
+    "zh-Hans": "地址可以保存。在该版本的官方清单可用之前，自动连接不可用。",
+    "ja": "アドレスは保存できます。このバージョンの公式マニフェストが利用可能になるまで、自動接続は使用できません。"
+  },
+  "games.profile_editor.saving": {
+    "en": "Saving profile",
+    "zh-Hans": "正在保存配置",
+    "ja": "プロファイルを保存中"
+  },
+  "games.profile_editor.save_failed": {
+    "en": "Profile settings could not be saved. Check Block’s data directory and restart.",
+    "zh-Hans": "无法保存配置设置。请检查 Block 的数据目录并重新启动。",
+    "ja": "プロファイル設定を保存できませんでした。Block のデータディレクトリを確認して再起動してください。"
+  },
+  "games.profile_editor.error.name": {
+    "en": "Enter a profile name",
+    "zh-Hans": "请输入配置名称",
+    "ja": "プロファイル名を入力してください"
+  },
+  "games.profile_editor.error.name_length": {
+    "en": "Use a profile name of at most 160 UTF-8 bytes without control characters",
+    "zh-Hans": "配置名称最多 160 个 UTF-8 字节，且不能包含控制字符",
+    "ja": "プロファイル名は UTF-8 で 160 バイト以内にし、制御文字を含めないでください"
+  },
+  "games.profile_editor.name_placeholder": {
+    "en": "Profile name",
+    "zh-Hans": "配置名称",
+    "ja": "プロファイル名"
+  },
+  "games.profile_editor.jvm_placeholder": {
+    "en": "Optional JVM arguments",
+    "zh-Hans": "可选的 JVM 参数",
+    "ja": "任意の JVM 引数"
+  },
+  "games.profile_editor.game_placeholder": {
+    "en": "Optional game arguments",
+    "zh-Hans": "可选的游戏参数",
+    "ja": "任意のゲーム引数"
+  },
+  "games.java.automatic": {
+    "en": "Automatic Java",
+    "zh-Hans": "自动 Java",
+    "ja": "自動 Java"
+  },
+  "games.java.custom": {
+    "en": "Custom Java",
+    "zh-Hans": "自定义 Java",
+    "ja": "カスタム Java"
+  },
+  "games.java.executable": {
+    "en": "Java executable",
+    "zh-Hans": "Java 可执行文件",
+    "ja": "Java 実行ファイル"
+  },
+  "games.java.executable_placeholder": {
+    "en": "Absolute path to Java executable",
+    "zh-Hans": "Java 可执行文件的绝对路径",
+    "ja": "Java 実行ファイルの絶対パス"
+  },
+  "games.java.custom_executable": {
+    "en": "Custom executable",
+    "zh-Hans": "自定义可执行文件",
+    "ja": "カスタム実行ファイル"
+  },
+  "games.java.runtime": {
+    "en": "Java runtime",
+    "zh-Hans": "Java 运行时",
+    "ja": "Java ランタイム"
+  }
+}

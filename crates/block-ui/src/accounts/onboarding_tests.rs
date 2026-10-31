@@ -129,28 +129,31 @@ fn late_session_then_catalog_keeps_first_run_and_game_wizard_drafts(cx: &mut Tes
                     Some(crate::Form::Instance(form)) => Some(form.name.entity_id()),
                     _ => None,
                 };
-                view.session_updated(block_launcher::session_host::RunRecord {
-                    schema_version: 1,
-                    context: block_launcher::crash::CrashContext {
-                        run_id: "synthetic-observed-run".into(),
-                        profile_id: "profile-a".into(),
-                        profile_name: "Observed profile".into(),
-                        minecraft_version: "1.20.6".into(),
-                        loader: None,
+                view.session_updated(
+                    block_launcher::session_host::RunRecord {
+                        schema_version: 1,
+                        context: block_launcher::crash::CrashContext {
+                            run_id: "synthetic-observed-run".into(),
+                            profile_id: "profile-a".into(),
+                            profile_name: "Observed profile".into(),
+                            minecraft_version: "1.20.6".into(),
+                            loader: None,
+                        },
+                        instance_id: "instance-a".into(),
+                        game_directory: std::env::temp_dir().join("block-ui-observer-fixture-only"),
+                        supervisor_pid: None,
+                        java_pid: None,
+                        state: block_launcher::session_host::RunState::Running,
+                        outcome: None,
+                        status: "Running · independent game session".into(),
+                        revision: 1,
+                        recent_output: vec!["Observed session output".into()],
+                        capture_warnings: Vec::new(),
+                        started_at_unix_ms: 1,
+                        finished_at_unix_ms: None,
                     },
-                    instance_id: "instance-a".into(),
-                    game_directory: std::env::temp_dir().join("block-ui-observer-fixture-only"),
-                    supervisor_pid: None,
-                    java_pid: None,
-                    state: block_launcher::session_host::RunState::Running,
-                    outcome: None,
-                    status: "Running · independent game session".into(),
-                    revision: 1,
-                    recent_output: vec!["Observed session output".into()],
-                    capture_warnings: Vec::new(),
-                    started_at_unix_ms: 1,
-                    finished_at_unix_ms: None,
-                });
+                    cx,
+                );
                 assert_eq!(view.router.tab(), tab);
                 assert!(view.busy && view.active_run.is_some());
                 assert!(view.pending_profile.is_some());

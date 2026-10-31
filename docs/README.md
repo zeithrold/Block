@@ -15,6 +15,7 @@ product acceptance or require repeating historical verification.
 
 - [Launch recipes](recipes.md): CLI preparation, execution and compatibility options.
 - [Configuration storage](config-storage.md): data roots and TOML documents.
+- [Desktop language](i18n.md): first-start language selection, translation ownership and verification.
 - [Logging](logging.md): local launcher diagnostics, filters, retention and export.
 - [Session supervision](session-supervisor.md): process ownership, crash help and recovery.
 - [Authentication](../crates/block-auth/README.md): public-client setup and native credential storage.

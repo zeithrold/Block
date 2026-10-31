@@ -7,6 +7,8 @@ use std::path::Path;
 use gpui::{Global, WindowAppearance};
 use serde::{Deserialize, Serialize};
 
+use crate::Language;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum Appearance {
     #[default]
@@ -21,6 +23,7 @@ pub(super) struct Preferences {
     pub appearance: Appearance,
     pub reduce_motion: bool,
     pub onboarding_complete: bool,
+    pub language: Option<Language>,
     pub game: super::settings::GameDefaults,
     pub downloads: block_launcher::DownloadOptions,
 }
@@ -46,6 +49,52 @@ impl Preferences {
         self.validate()?;
         let _storage = block_launcher::storage::acquire(root)?;
         super::global_config::update(root, |config| config.preferences = self.clone())
+    }
+
+    /// Detect the product language once, before the first paint.
+    ///
+    /// A stored choice always wins over the operating-system preference;
+    /// an unknown stored code already fails closed to English in [`Language`].
+    /// Only a missing choice is detected and persisted. A document that cannot
+    /// be read is reported and deliberately left untouched instead of being
+    /// replaced, and a failed write keeps the detected language usable for this
+    /// session while returning the failure to the caller.
+    pub(super) fn initialize_language(
+        root: &Path,
+        detected: Language,
+    ) -> (Self, Option<anyhow::Error>) {
+        let mut preferences = match Self::load(root) {
+            Ok(preferences) => preferences,
+            Err(error) => return (Self::default(), Some(error)),
+        };
+        if preferences.language.is_some() {
+            return (preferences, None);
+        }
+        let (language, error) = match Self::save_missing_language(root, detected) {
+            Ok(language) => (language, None),
+            Err(error) => (detected, Some(error)),
+        };
+        preferences.language = Some(language);
+        (preferences, error)
+    }
+
+    /// Persist one concrete choice without replacing any other preference.
+    pub(super) fn persist_language(root: &Path, language: Language) -> anyhow::Result<()> {
+        let _storage = block_launcher::storage::acquire(root)?;
+        super::global_config::update(root, |config| {
+            config.preferences.language = Some(language);
+        })
+    }
+
+    /// Store the detected language only while the document still has no choice,
+    /// so a concurrent writer's explicit selection is never overwritten.
+    fn save_missing_language(root: &Path, language: Language) -> anyhow::Result<Language> {
+        let _storage = block_launcher::storage::acquire(root)?;
+        let mut selected = language;
+        super::global_config::update(root, |config| {
+            selected = *config.preferences.language.get_or_insert(language);
+        })?;
+        Ok(selected)
     }
 
     pub(super) fn validate(&self) -> anyhow::Result<()> {
@@ -151,7 +200,10 @@ impl Palette {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{Appearance, Preferences};
+    use crate::Language;
 
     #[test]
     fn preferences_survive_replacement_and_reject_corruption() -> anyhow::Result<()> {
@@ -218,6 +270,131 @@ mod tests {
             loaded.save(root.path())?;
             assert_eq!(Preferences::load(root.path())?.game.memory_mib, expected);
         }
+        Ok(())
+    }
+
+    /// Seed one document that already holds the sections a language write must
+    /// never replace: accounts, providers and an unknown top-level section.
+    fn seed_foreign_sections(
+        root: &Path,
+    ) -> anyhow::Result<(block_auth::Account, block_auth::AuthlibProvider)> {
+        std::fs::write(
+            root.join(crate::global_config::FILE),
+            "[other]\nkept = true\n",
+        )?;
+        let account = block_auth::Account {
+            reference: block_auth::AccountRef {
+                player_id: "00000000-0000-4000-8000-000000000001".parse()?,
+            },
+            provider: block_auth::AccountProvider::Offline,
+            player_name: "Player".into(),
+            client_id: String::new(),
+            credential_ref: String::new(),
+            authlib: None,
+        };
+        let provider = block_auth::AuthlibProvider {
+            id: uuid::Uuid::new_v4(),
+            name: "Community".into(),
+            api_url: "https://example.invalid/api".into(),
+            allow_http: false,
+            metadata: block_auth::ProviderMetadata {
+                server_name: None,
+                icon_url: String::new(),
+                skin_domains: Vec::new(),
+                signature_public_key: String::new(),
+            },
+            metadata_json: "{}".into(),
+        };
+        crate::global_config::update(root, |config| {
+            config.accounts = vec![account.clone()];
+            config.providers = vec![provider.clone()];
+        })?;
+        Ok((account, provider))
+    }
+
+    #[test]
+    fn first_startup_detects_and_persists_language_without_replacing_other_sections()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (account, provider) = seed_foreign_sections(root.path())?;
+
+        let (preferences, error) =
+            Preferences::initialize_language(root.path(), Language::Japanese);
+
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(preferences.language, Some(Language::Japanese));
+        let document = crate::global_config::read(root.path())?.unwrap_or_default();
+        assert_eq!(document.preferences.language, Some(Language::Japanese));
+        assert_eq!(document.accounts, vec![account]);
+        assert_eq!(document.providers, vec![provider]);
+        let text = std::fs::read_to_string(root.path().join(crate::global_config::FILE))?;
+        assert!(text.contains("[other]"), "{text}");
+        assert!(text.contains("kept"), "{text}");
+        Ok(())
+    }
+
+    #[test]
+    fn stored_language_defeats_an_operating_system_change_and_is_not_rewritten()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join(crate::global_config::FILE);
+        let (first, error) =
+            Preferences::initialize_language(root.path(), Language::SimplifiedChinese);
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(first.language, Some(Language::SimplifiedChinese));
+        let written = std::fs::read(&path)?;
+
+        let (second, error) = Preferences::initialize_language(root.path(), Language::Japanese);
+
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(second.language, Some(Language::SimplifiedChinese));
+        assert_eq!(std::fs::read(&path)?, written);
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_stored_language_is_english_and_a_corrupt_document_is_preserved() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join(crate::global_config::FILE);
+        std::fs::write(&path, "[preferences]\nlanguage = \"fr\"\n")?;
+        let unknown = std::fs::read(&path)?;
+
+        let (preferences, error) =
+            Preferences::initialize_language(root.path(), Language::Japanese);
+
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(preferences.language, Some(Language::English));
+        assert_eq!(std::fs::read(&path)?, unknown);
+
+        std::fs::write(&path, b"[preferences]\nlanguage = ")?;
+        let corrupt = std::fs::read(&path)?;
+        let (preferences, error) =
+            Preferences::initialize_language(root.path(), Language::Japanese);
+        assert!(error.is_some(), "a corrupt document must be reported");
+        assert_eq!(preferences, Preferences::default());
+        assert_eq!(std::fs::read(&path)?, corrupt);
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_startup_save_reports_the_error_and_keeps_the_detected_language()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        // A corrupt storage configuration rejects the data-root lease, so the
+        // language write cannot start and must not touch either document.
+        std::fs::write(root.path().join("block.toml"), b"not = [valid")?;
+
+        let (preferences, error) =
+            Preferences::initialize_language(root.path(), Language::Japanese);
+
+        assert!(error.is_some(), "the unavailable lease must be reported");
+        assert_eq!(preferences.language, Some(Language::Japanese));
+        assert!(!root.path().join(crate::global_config::FILE).exists());
+        assert_eq!(
+            std::fs::read(root.path().join("block.toml"))?,
+            b"not = [valid"
+        );
         Ok(())
     }
 }

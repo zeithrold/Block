@@ -234,9 +234,6 @@ impl WindowChanges {
 pub(super) struct FailureNotice(pub bool);
 impl gpui::Global for FailureNotice {}
 
-pub(super) const FAILURE_MESSAGE: &str =
-    "Launcher logs are unavailable. Check disk space and permissions.";
-
 pub(super) fn claim_failure_notice(failed: bool, cx: &mut gpui::App) -> bool {
     let notice = cx.default_global::<FailureNotice>();
     if !failed || notice.0 {
@@ -640,6 +637,9 @@ mod tests {
             Some("cancelled")
         );
         assert!(!format!("{events:?}").contains("private error"));
-        assert!(view.read_with(cx, |view, _| view.status == "Cancelled · retry when ready"));
+        assert!(
+            view.read_with(cx, |view, _| view.status.text(crate::Language::English)
+                == "Cancelled · retry when ready")
+        );
     }
 }

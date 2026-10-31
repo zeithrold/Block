@@ -17,11 +17,45 @@ use gpui::{
 };
 
 use super::{
-    Block, Tab, UiAction, account_id,
+    Block, Language, Tab, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState, ProgressState},
     design::Icon,
     note, patterns,
 };
+
+/// A retained account-surface message.
+///
+/// Product text keeps its semantic key, so every render resolves it in the
+/// view's current language, including after a language change. Diagnostics from
+/// the authentication backend stay verbatim.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AccountMessage {
+    Product(&'static str),
+    Detail(&'static str, String),
+    Diagnostic(String),
+}
+
+impl AccountMessage {
+    pub(crate) const fn product(key: &'static str) -> Self {
+        Self::Product(key)
+    }
+
+    pub(crate) fn diagnostic(text: impl Into<String>) -> Self {
+        Self::Diagnostic(text.into())
+    }
+
+    pub(crate) fn detail(key: &'static str, text: impl Into<String>) -> Self {
+        Self::Detail(key, text.into())
+    }
+
+    pub(crate) fn render(&self, language: Language) -> String {
+        match self {
+            Self::Product(key) => tr!(language, *key),
+            Self::Detail(key, detail) => tr!(language, *key, detail = detail),
+            Self::Diagnostic(text) => tr!(language, "common.diagnostic_detail", detail = text),
+        }
+    }
+}
 
 #[derive(IntoElement)]
 struct ProviderPassword {
@@ -137,12 +171,50 @@ pub(crate) struct AuthProviderDraft {
     pub(crate) address: gpui::Entity<super::TextInput>,
     pub(crate) observed_address: String,
     pub(crate) accepted_http: Option<String>,
-    pub(crate) error: Option<String>,
+    pub(crate) error: Option<AccountMessage>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     saved: Option<uuid::Uuid>,
 }
 
 impl AuthWizard {
+    pub(super) fn refresh_placeholders(
+        &self,
+        language: Language,
+        window: &mut Window,
+        cx: &mut Context<'_, Block>,
+    ) {
+        for (input, key) in [
+            (
+                self.username.as_ref(),
+                "accounts.auth.offline.name.placeholder",
+            ),
+            (self.login.as_ref(), "accounts.auth.login.placeholder"),
+        ] {
+            if let Some(input) = input {
+                let placeholder = tr!(language, key);
+                input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+            }
+        }
+        if let Some(password) = &self.password {
+            let placeholder = tr!(language, "accounts.auth.password.placeholder");
+            password.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx)
+            });
+        }
+        if let Some(draft) = &self.provider_draft {
+            for (input, key) in [
+                (&draft.name, "accounts.auth.provider_add.name.placeholder"),
+                (
+                    &draft.address,
+                    "accounts.auth.provider_add.address.placeholder",
+                ),
+            ] {
+                let placeholder = tr!(language, key);
+                input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+            }
+        }
+    }
+
     /// Whether the Add-provider page currently owns a draft (drop-zone lifetime).
     pub(super) fn is_provider_drafting(&self) -> bool {
         self.provider_draft.is_some()
@@ -175,7 +247,7 @@ pub(super) struct AuthWizard {
     other_sign_in_options: bool,
     browser_url: Option<String>,
     prepared_account: Option<Account>,
-    error: Option<String>,
+    error: Option<AccountMessage>,
     return_size: Size<Pixels>,
     return_window: Option<gpui::AnyWindowHandle>,
     focus: Option<FocusHandle>,
@@ -238,7 +310,7 @@ impl AuthWizard {
                 });
             }
             if name == "auth-offline-error" {
-                self.error = Some("Use 1–16 ASCII letters, numbers, or underscores.".into());
+                self.error = Some(AccountMessage::product("accounts.auth.error.offline_name"));
             }
         }
         if name.starts_with("auth-authlib-") {
@@ -304,7 +376,7 @@ impl AuthWizard {
             self.browser_url = Some("https://www.microsoft.com/link".into());
         }
         if name == "auth-error" {
-            self.error = Some("The authorization request expired. Try signing in again.".into());
+            self.error = Some(sign_in_error("The authorization request expired."));
         }
     }
     pub(super) fn snapshot(&self, cx: &Context<'_, Block>) -> Self {
@@ -354,15 +426,18 @@ impl AuthWizard {
         self.phase = phase;
     }
 
-    fn failed(&mut self, error: &str) {
+    fn failed(&mut self, error: AccountMessage) {
         self.browser_url = None;
         self.device_code = None;
-        self.error = Some(if self.provider == AccountProvider::Offline {
-            "The local identity could not be saved. Check the data directory and try adding it again. Previously saved accounts are kept.".into()
-        } else if self.provider == AccountProvider::Authlib {
-            error.to_owned()
-        } else {
-            sign_in_error(error)
+        self.error = Some(match self.provider {
+            AccountProvider::Offline => {
+                AccountMessage::product("accounts.auth.error.offline_save_failed")
+            }
+            AccountProvider::Authlib => error,
+            AccountProvider::Microsoft => match error {
+                AccountMessage::Diagnostic(raw) => sign_in_error(&raw),
+                product => product,
+            },
         });
         self.body_scroll.set_offset(point(px(0.), px(0.)));
         self.transition(Phase::Failed);
@@ -406,7 +481,12 @@ impl Block {
             .as_ref()
             .is_some_and(|s| s.provider_draft.is_none())
         {
-            let address = super::input("", "Server API address or Authlib quick link", cx);
+            let language = self.language();
+            let address = super::input(
+                "",
+                &tr!(language, "accounts.auth.provider_add.address.placeholder"),
+                cx,
+            );
             cx.observe(&address, |view, field, cx| {
                 let value = field.read(cx).value();
                 if let Some(draft) = view
@@ -426,7 +506,11 @@ impl Block {
             .detach();
             let draft = AuthProviderDraft {
                 id: uuid::Uuid::new_v4(),
-                name: super::input("", "Your community server", cx),
+                name: super::input(
+                    "",
+                    &tr!(language, "accounts.auth.provider_add.name.placeholder"),
+                    cx,
+                ),
                 address,
                 observed_address: String::new(),
                 accepted_http: None,
@@ -482,7 +566,7 @@ impl Block {
                     draft.accepted_http = None;
                     draft.error = None;
                 }
-                Err(error) => draft.error = Some(error.to_string()),
+                Err(error) => draft.error = Some(AccountMessage::diagnostic(error.to_string())),
             }
         }
         cx.notify();
@@ -531,7 +615,7 @@ impl Block {
                     .as_mut()
                     .and_then(|s| s.provider_draft.as_mut())
                 {
-                    draft.error = Some(error.to_string());
+                    draft.error = Some(AccountMessage::diagnostic(error.to_string()));
                 }
                 cx.notify();
                 return;
@@ -556,20 +640,17 @@ impl Block {
                 .as_mut()
                 .and_then(|s| s.provider_draft.as_mut())
             {
-                draft.error = Some(
-                    if name.is_empty() {
-                        "Enter a provider display name."
-                    } else {
-                        "Confirm the HTTP warning for this address."
-                    }
-                    .into(),
-                );
+                draft.error = Some(if name.is_empty() {
+                    AccountMessage::product("accounts.auth.error.provider_display_name")
+                } else {
+                    AccountMessage::product("accounts.auth.error.provider_http_confirm")
+                });
             }
             cx.notify();
             return;
         }
         self.begin_cancellable(
-            "Discovering your authentication provider",
+            msg!("accounts.auth.status.discovering_provider"),
             super::ui_logging::Operation::DiscoverAuthProvider,
         );
         self.operation_kind = super::OperationKind::Account;
@@ -589,8 +670,8 @@ impl Block {
         if let Some(engine) = &self.engine {
             engine.save_provider(None, name, address.url, accepted, self.cancel.clone());
         } else {
-            self.auth_provider_finished(
-                &Err("Provider setup is unavailable: engine unavailable".into()),
+            self.fail_auth_provider(
+                AccountMessage::product("accounts.auth.error.provider_setup_unavailable"),
                 cx,
             );
         }
@@ -630,21 +711,31 @@ impl Block {
 
     pub(super) fn auth_provider_finished(
         &mut self,
-        result: &Result<String, String>,
+        result: &Result<crate::i18n::UiText, String>,
         cx: &mut Context<'_, Self>,
     ) {
-        if let Some(draft) = self
+        if let Err(error) = result {
+            self.fail_auth_provider(AccountMessage::diagnostic(error.clone()), cx);
+        }
+    }
+
+    /// Release the Add-provider draft after its attempt failed.
+    fn fail_auth_provider(&mut self, error: AccountMessage, cx: &mut Context<'_, Self>) {
+        let revision = self.operation_revision;
+        let Some(draft) = self
             .shell
             .auth
             .as_mut()
             .and_then(|s| s.provider_draft.as_mut())
-            && draft
-                .attempt
-                .as_ref()
-                .is_some_and(|(revision, _)| *revision == self.operation_revision)
-            && let Err(error) = result
+        else {
+            return;
+        };
+        if draft
+            .attempt
+            .as_ref()
+            .is_some_and(|(attempt, _)| *attempt == revision)
         {
-            draft.error = Some(error.clone());
+            draft.error = Some(error);
             draft.attempt = None;
             for field in [&draft.name, &draft.address] {
                 field.update(cx, |field, cx| field.set_read_only(false, cx));
@@ -715,13 +806,14 @@ impl Block {
                 .iter()
                 .find(|p| p.api_url == a.url)
         });
+        let language = self.language();
         let mut form = div()
             .flex()
             .flex_col()
             .gap_4()
             .child(patterns::page_heading(
-                "Add a provider",
-                "Enter the server details or paste an Authlib quick link.",
+                tr!(language, "accounts.auth.provider_add.title"),
+                tr!(language, "accounts.auth.provider_add.description"),
             ))
             .child(super::attach_provider_drop_bounds(
                 div().child(
@@ -739,15 +831,17 @@ impl Block {
                         .items_center()
                         .gap_1()
                         .child(Icon::ExternalLink.render(20., self.palette.muted))
-                        .child(div().text_sm().child("Drop an Authlib quick link here"))
-                        .child(note(
-                            "You can also paste the link into the server address field.",
-                        )),
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(tr!(language, "accounts.auth.provider_add.drop")),
+                        )
+                        .child(note(tr!(language, "accounts.auth.provider_add.drop_note"))),
                 ),
                 cx.entity().downgrade(),
             ))
             .child(components::field_with(
-                "Display name",
+                tr!(language, "accounts.auth.provider_add.name.label"),
                 &draft.name,
                 self.palette,
                 components::FieldOptions {
@@ -756,7 +850,7 @@ impl Block {
                 },
             ))
             .child(components::field_with(
-                "Server API address",
+                tr!(language, "accounts.auth.provider_add.address.label"),
                 &draft.address,
                 self.palette,
                 components::FieldOptions {
@@ -766,7 +860,7 @@ impl Block {
             ))
             .child(self.auth_button(
                 "auth-provider-identify",
-                "Recognize address",
+                tr!(language, "accounts.auth.provider_add.identify"),
                 UiAction::AuthProviderIdentify,
                 ButtonVariant::Outline,
                 ControlState {
@@ -776,54 +870,72 @@ impl Block {
                 cx,
             ));
         if let Some(provider) = existing {
-            form = form.child(note(format!(
-                "Already saved as {}. Select it without creating a duplicate.",
-                provider.name
+            form = form.child(note(tr!(
+                language,
+                "accounts.auth.provider_add.existing",
+                name = provider.name
             )));
         }
         if let Some(address) = &parsed
             && address.insecure
         {
-            form=form.child(note("HTTP sends your password and tokens without encryption. Continue only if you trust this address and network."))
-                .child(components::checkbox("auth-provider-http","I accept the HTTP risk for this address",draft.accepted_http.as_deref()==Some(address.url.as_str()),self.palette,ControlState{disabled:self.busy,..Default::default()},cx.listener(|view,(),window,cx|view.handle(UiAction::AuthProviderConsent,window,cx))));
+            form = form
+                .child(note(tr!(language, "accounts.auth.provider_add.http_note")))
+                .child(components::checkbox(
+                    "auth-provider-http",
+                    tr!(language, "accounts.auth.http_consent"),
+                    draft.accepted_http.as_deref() == Some(address.url.as_str()),
+                    self.palette,
+                    ControlState {
+                        disabled: self.busy,
+                        ..Default::default()
+                    },
+                    cx.listener(|view, (), window, cx| {
+                        view.handle(UiAction::AuthProviderConsent, window, cx)
+                    }),
+                ));
         }
-        form.children(draft.error.as_ref().map(|error| note(error.clone())))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(self.auth_button(
-                        "auth-provider-cancel",
-                        "Cancel",
-                        UiAction::AuthProviderCancel,
-                        ButtonVariant::Ghost,
-                        ControlState::default(),
-                        cx,
-                    ))
-                    .child(self.auth_button(
-                        "auth-provider-save",
-                        if existing.is_some() {
-                            "Use saved provider"
-                        } else {
-                            "Add and select"
-                        },
-                        UiAction::AuthProviderSave,
-                        ButtonVariant::Primary,
-                        ControlState {
-                            busy: draft.attempt.is_some(),
-                            disabled: self.busy
-                                || existing.is_none()
-                                    && parsed.as_ref().is_some_and(|a| {
-                                        a.insecure
-                                            && draft.accepted_http.as_deref()
-                                                != Some(a.url.as_str())
-                                    }),
-                            ..Default::default()
-                        },
-                        cx,
-                    )),
-            )
+        form.children(
+            draft
+                .error
+                .as_ref()
+                .map(|error| note(error.render(language))),
+        )
+        .child(
+            div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .child(self.auth_button(
+                    "auth-provider-cancel",
+                    tr!(language, "common.cancel"),
+                    UiAction::AuthProviderCancel,
+                    ButtonVariant::Ghost,
+                    ControlState::default(),
+                    cx,
+                ))
+                .child(self.auth_button(
+                    "auth-provider-save",
+                    if existing.is_some() {
+                        tr!(language, "accounts.auth.provider_add.use_saved")
+                    } else {
+                        tr!(language, "accounts.auth.provider_add.add")
+                    },
+                    UiAction::AuthProviderSave,
+                    ButtonVariant::Primary,
+                    ControlState {
+                        busy: draft.attempt.is_some(),
+                        disabled: self.busy
+                            || existing.is_none()
+                                && parsed.as_ref().is_some_and(|a| {
+                                    a.insecure
+                                        && draft.accepted_http.as_deref() != Some(a.url.as_str())
+                                }),
+                        ..Default::default()
+                    },
+                    cx,
+                )),
+        )
     }
 
     pub(super) fn account_provider(
@@ -841,11 +953,11 @@ impl Block {
     pub(super) fn account_authority(&self, account: &Account) -> String {
         if account.provider == AccountProvider::Authlib {
             self.account_provider(account).map_or_else(
-                || "Missing provider".into(),
+                || tr!(self.language(), "accounts.auth.provider.missing"),
                 |provider| provider.name.clone(),
             )
         } else {
-            account.provider.label().into()
+            provider_label(self.language(), account.provider)
         }
     }
     fn start_external_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -864,7 +976,9 @@ impl Block {
             .cloned()
         else {
             if let Some(state) = &mut self.shell.auth {
-                state.failed("Choose a saved authentication provider first.");
+                state.failed(AccountMessage::product(
+                    "accounts.auth.error.choose_provider",
+                ));
             }
             cx.notify();
             return;
@@ -875,9 +989,9 @@ impl Block {
                     field.update(cx, |input, cx| input.set_value("", window, cx));
                 }
                 state.accepted_http = None;
-                state.failed(
-                    "The provider address changed. Choose it again and re-enter your password.",
-                );
+                state.failed(AccountMessage::product(
+                    "accounts.auth.provider.address_changed",
+                ));
             }
             cx.notify();
             return;
@@ -886,9 +1000,9 @@ impl Block {
             && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
         {
             if let Some(state) = &mut self.shell.auth {
-                state.failed(
-                    "Confirm the HTTP warning for this provider before sending your password.",
-                );
+                state.failed(AccountMessage::product(
+                    "accounts.auth.error.provider_http_before_send",
+                ));
             }
             cx.notify();
             return;
@@ -901,7 +1015,7 @@ impl Block {
                 return;
             };
             self.begin_cancellable(
-                "Selecting your provider character",
+                msg!("accounts.auth.status.selecting_character"),
                 super::ui_logging::Operation::SelectAuthCharacter,
             );
             self.operation_kind = super::OperationKind::Account;
@@ -925,9 +1039,9 @@ impl Block {
             .map_or_else(String::new, |field| field.read(cx).value().to_string());
         if login.is_empty() || password.is_empty() {
             if let Some(state) = &mut self.shell.auth {
-                state.failed(
-                    "Enter your provider account and password. The password is never saved.",
-                );
+                state.failed(AccountMessage::product(
+                    "accounts.auth.error.provider_credentials",
+                ));
             }
             cx.notify();
             return;
@@ -943,7 +1057,7 @@ impl Block {
         }
         self.abandon_auth_attempt();
         self.begin_cancellable(
-            "Authenticating with your provider",
+            msg!("accounts.auth.status.authenticating"),
             super::ui_logging::Operation::AuthenticateProvider,
         );
         self.operation_kind = super::OperationKind::Account;
@@ -954,7 +1068,9 @@ impl Block {
             state.error = None;
             state.attempt = Some((self.operation_revision, self.cancel.clone()));
             if !self.busy {
-                state.failed("External sign-in could not start: engine unavailable");
+                state.failed(AccountMessage::product(
+                    "accounts.auth.error.provider_start",
+                ));
             } else {
                 state.transition(Phase::Preparing);
             }
@@ -1144,7 +1260,7 @@ impl Block {
         if let Some((revision, cancel)) = attempt {
             cancel.cancel();
             if self.abandon_operation(revision) {
-                self.status = "Sign-in cancelled. Previously saved accounts are kept.".into();
+                self.status = msg!("accounts.auth.status.cancelled");
             }
         }
         if let Some(engine) = &self.engine {
@@ -1296,10 +1412,11 @@ impl Block {
             return;
         }
         let focus = cx.focus_handle();
+        let language = self.language();
         let password = cx.new(|cx| {
             gpui_base::input::InputState::new(window, cx)
                 .masked(true)
-                .placeholder("Your provider password")
+                .placeholder(tr!(language, "accounts.auth.password.placeholder"))
                 .validate(|value, _| value.len() <= 4096)
         });
         cx.observe(&password, |_, _, cx| cx.notify()).detach();
@@ -1336,8 +1453,16 @@ impl Block {
         )
         .detach();
         let wizard = AuthWizard {
-            username: Some(super::input("", "Your player name", cx)),
-            login: Some(super::input("", "Email or username", cx)),
+            username: Some(super::input(
+                "",
+                &tr!(language, "accounts.auth.offline.name.placeholder"),
+                cx,
+            )),
+            login: Some(super::input(
+                "",
+                &tr!(language, "accounts.auth.login.placeholder"),
+                cx,
+            )),
             password: Some(password),
             external_provider: self.shell.providers.records.first().map(|p| p.id),
             external_api: self
@@ -1404,7 +1529,7 @@ impl Block {
                         state.transition(Phase::Complete);
                     }
                     Err(error) => {
-                        state.error = Some(error.to_string());
+                        state.error = Some(AccountMessage::diagnostic(error.to_string()));
                         state.transition(Phase::Failed);
                     }
                 }
@@ -1414,7 +1539,7 @@ impl Block {
         }
         self.abandon_auth_attempt();
         self.begin_cancellable(
-            "Preparing secure Microsoft sign-in",
+            msg!("accounts.auth.status.preparing"),
             super::ui_logging::Operation::AuthenticateMicrosoft,
         );
         self.operation_kind = super::OperationKind::Account;
@@ -1428,7 +1553,9 @@ impl Block {
         state.prepared_account = None;
         state.error = None;
         if !self.busy {
-            state.failed("Secure sign-in could not start: engine unavailable");
+            state.failed(AccountMessage::product(
+                "accounts.auth.error.microsoft_start",
+            ));
             cx.notify();
             return;
         }
@@ -1491,7 +1618,7 @@ impl Block {
             state.device_code = None;
             state.transition(Phase::Verifying);
         }
-        self.status = auth_stage_label(progress).into();
+        self.status = msg!(auth_stage_key(progress));
     }
 
     pub(super) fn reopen_auth(&self, cx: &Context<'_, Self>) {
@@ -1530,7 +1657,7 @@ impl Block {
         }
     }
 
-    pub(super) fn auth_finished(&mut self, result: &Result<String, String>) {
+    pub(super) fn auth_finished(&mut self, result: &Result<crate::i18n::UiText, String>) {
         if let Some(state) = &mut self.shell.auth
             && (state.phase.pending() || state.phase == Phase::Saving)
         {
@@ -1540,11 +1667,13 @@ impl Block {
                         && !state.characters.is_empty()
                         && state.phase == Phase::Verifying =>
                 {
-                    state.error = Some(error.clone());
+                    state.error = Some(AccountMessage::diagnostic(error.clone()));
                     state.transition(Phase::Characters);
                 }
-                Err(error) => state.failed(error),
-                Ok(_) => state.failed("Sign-in ended without an identity confirmation"),
+                Err(error) => state.failed(AccountMessage::diagnostic(error.clone())),
+                Ok(_) => state.failed(AccountMessage::product(
+                    "accounts.auth.error.ended_without_identity",
+                )),
             }
         }
     }
@@ -1600,13 +1729,15 @@ impl Block {
         };
         if self.engine.is_none() {
             if let Some(state) = &mut self.shell.auth {
-                state.failed("Secure account saving is unavailable: engine unavailable");
+                state.failed(AccountMessage::product(
+                    "accounts.auth.error.save_unavailable",
+                ));
             }
             cx.notify();
             return;
         }
         self.begin(
-            "Saving your account securely",
+            msg!("accounts.auth.status.saving"),
             super::ui_logging::Operation::SaveAccount,
         );
         self.operation_kind = super::OperationKind::Account;
@@ -1683,7 +1814,7 @@ impl Block {
         }
         self.selected_account = Some(id.clone());
         self.shell.accounts.inspected = Some(id);
-        self.status = format!("{} is saved and ready to use", account.player_name);
+        self.status = msg!("accounts.auth.status.saved", name = account.player_name);
         self.close_auth_context(window, cx);
     }
 
@@ -1763,7 +1894,7 @@ impl Block {
             .min_w_0()
             .scroll_area(
                 &state.body_scroll,
-                "Authentication steps",
+                "accounts.auth.body",
                 self.palette,
                 false,
             )
@@ -1776,6 +1907,7 @@ impl Block {
         &self,
         state: &AuthWizard,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
+        let language = self.language();
         let mut rail = div()
             .id("auth-rail")
             .w(px(super::design::SIDEBAR_WIDTH))
@@ -1784,7 +1916,7 @@ impl Block {
             .min_h_0()
             .scroll_area(
                 &state.rail_scroll,
-                "Account setup navigation",
+                "accounts.auth.rail",
                 self.palette,
                 false,
             )
@@ -1795,47 +1927,67 @@ impl Block {
             .border_r_1()
             .border_color(rgb(self.palette.border))
             .bg(rgb(self.palette.sidebar))
-            .child(div().text_sm().child("Account setup"));
-        let steps = [
-            ("Account type", "Choose how to sign in"),
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr!(language, "accounts.auth.setup.title")),
+            );
+        let entries = [
             (
-                "Sign in",
-                if state.provider == AccountProvider::Offline {
-                    "Choose a local player name"
-                } else if state.provider == AccountProvider::Authlib {
-                    "Your provider account"
-                } else {
-                    "Continue with Microsoft"
+                tr!(language, "accounts.auth.step.type.title"),
+                tr!(language, "accounts.auth.step.type.description"),
+            ),
+            (
+                tr!(language, "accounts.auth.step.sign_in.title"),
+                match state.provider {
+                    AccountProvider::Offline => {
+                        tr!(language, "accounts.auth.step.sign_in.offline")
+                    }
+                    AccountProvider::Authlib => {
+                        tr!(language, "accounts.auth.step.sign_in.authlib")
+                    }
+                    AccountProvider::Microsoft => {
+                        tr!(language, "accounts.auth.step.sign_in.microsoft")
+                    }
                 },
             ),
             (
-                "Verification",
-                if state.provider == AccountProvider::Offline {
-                    "Validate the local identity"
-                } else if state.provider == AccountProvider::Authlib {
-                    "Select your provider character"
-                } else {
-                    "Ownership and player profile"
+                tr!(language, "accounts.auth.step.verification.title"),
+                match state.provider {
+                    AccountProvider::Offline => {
+                        tr!(language, "accounts.auth.step.verification.offline")
+                    }
+                    AccountProvider::Authlib => {
+                        tr!(language, "accounts.auth.step.verification.authlib")
+                    }
+                    AccountProvider::Microsoft => {
+                        tr!(language, "accounts.auth.step.verification.microsoft")
+                    }
                 },
             ),
-            ("Complete", "Review and save your account"),
-        ]
-        .map(|(title, description)| components::StepperStep {
-            title,
-            description,
-            complete: match title {
-                "Account type" => state.phase != Phase::Choose,
-                "Sign in" => matches!(
-                    state.phase,
-                    Phase::Verifying | Phase::Characters | Phase::Complete
-                ),
-                "Verification" => {
-                    matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved)
-                }
-                "Complete" => state.phase == Phase::Saved,
-                _ => false,
-            },
-        });
+            (
+                tr!(language, "accounts.auth.step.complete.title"),
+                tr!(language, "accounts.auth.step.complete.description"),
+            ),
+        ];
+        let steps = entries
+            .iter()
+            .enumerate()
+            .map(|(index, (title, description))| components::StepperStep {
+                title,
+                description,
+                complete: match index {
+                    0 => state.phase != Phase::Choose,
+                    1 => matches!(
+                        state.phase,
+                        Phase::Verifying | Phase::Characters | Phase::Complete
+                    ),
+                    2 => matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved),
+                    3 => state.phase == Phase::Saved,
+                    _ => false,
+                },
+            })
+            .collect::<Vec<_>>();
         rail = rail.child(components::stepper(
             "auth-steps",
             "Account setup steps",
@@ -1843,91 +1995,23 @@ impl Block {
             state.phase.step().index(),
             self.palette,
         ));
-        rail.child(div().flex_1()).child(note(format!(
-            "Step {} of 4",
-            state.phase.step().index() + 1
+        rail.child(div().flex_1()).child(note(tr!(
+            language,
+            "accounts.auth.step.progress",
+            step = state.phase.step().index() + 1
         )))
     }
 
+    /// The localized heading for the sign-in step the wizard is on.
+    fn auth_heading(&self, state: &AuthWizard) -> (String, String) {
+        let language = self.language();
+        let (title, description) = auth_heading_keys(state);
+        (tr!(language, title), tr!(language, description))
+    }
+
     fn auth_body(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
-        let (title, description) = match state.phase {
-            Phase::Choose => (
-                "Add an account",
-                "Choose an account you own to play Minecraft: Java Edition.",
-            ),
-            Phase::Information => (
-                if state.provider == AccountProvider::Offline {
-                    "Your local player"
-                } else if state.provider == AccountProvider::Authlib {
-                    "Sign in to your provider"
-                } else {
-                    "Sign in with Microsoft"
-                },
-                if state.provider == AccountProvider::Offline {
-                    "Choose a name for local play without an authentication service."
-                } else if state.provider == AccountProvider::Authlib {
-                    "Choose your server and enter its account credentials."
-                } else {
-                    "Choose browser sign-in or enter a device code on another device."
-                },
-            ),
-            Phase::Preparing => (
-                "Preparing secure sign-in",
-                if state.provider == AccountProvider::Authlib {
-                    "Block is authenticating with your selected provider."
-                } else {
-                    "Block is requesting a real Microsoft authorization session."
-                },
-            ),
-            Phase::Waiting if state.method == Method::Device => (
-                "Approve your device code",
-                "Open Microsoft's website on this or another device and enter the code below.",
-            ),
-            Phase::Waiting => (
-                "Continue in your browser",
-                "Complete Microsoft sign-in and return here. This window can stay open.",
-            ),
-            Phase::Verifying => (
-                "Verifying your account",
-                if state.provider == AccountProvider::Authlib {
-                    "Block is assigning the selected character through your provider."
-                } else {
-                    "Block is checking Java Edition ownership and resolving your player profile."
-                },
-            ),
-            Phase::Characters => (
-                "Choose your character",
-                "These characters were returned by your authentication provider.",
-            ),
-            Phase::Failed if state.provider == AccountProvider::Offline => (
-                "Check your player name",
-                "Use 1–16 ASCII letters, numbers, or underscores. Your saved accounts are unchanged.",
-            ),
-            Phase::Failed => (
-                "Sign-in needs your attention",
-                "Your existing saved accounts are kept. You can try again.",
-            ),
-            Phase::Complete => (
-                "Your account is ready",
-                if state.provider == AccountProvider::Offline {
-                    "Your local identity is valid. Finish saves it; closing discards this preparation."
-                } else {
-                    "Your identity is verified. Finish saves this account securely; closing discards this preparation."
-                },
-            ),
-            Phase::Saving => (
-                "Saving your account",
-                if state.provider == AccountProvider::Offline {
-                    "Block is saving the local identity. This finishes even if you close the window."
-                } else {
-                    "Block is saving the refresh credential and account metadata. This finishes even if you close the window."
-                },
-            ),
-            Phase::Saved => (
-                "Account saved",
-                "Your account is saved securely. Returning to the launcher.",
-            ),
-        };
+        let language = self.language();
+        let (title, description) = self.auth_heading(state);
         let mut body = div().min_w_0().flex().flex_col().gap_6().child(
             div()
                 .flex()
@@ -1971,38 +2055,42 @@ impl Block {
                         ))
                         .child(note(character.id.to_string()));
                 }
-                body.child(choices)
-                    .children(state.error.as_ref().map(|error| note(error.clone())))
+                body.child(choices).children(
+                    state
+                        .error
+                        .as_ref()
+                        .map(|error| note(error.render(language))),
+                )
             }
             Phase::Failed if state.provider == AccountProvider::Offline => body
                 .child(self.auth_information(state, cx))
-                .children(state.error.clone().map(|error| {
+                .children(state.error.as_ref().map(|error| {
                     div()
                         .text_sm()
                         .text_color(rgb(self.palette.destructive))
-                        .child(error)
+                        .child(error.render(language))
                 })),
             Phase::Failed => body.child(self.auth_information(state, cx)).child(
                 components::card(self.palette)
                     .border_color(rgb(self.palette.destructive))
                     .child(Icon::Error.render(24., self.palette.destructive))
-                    .child(note(state.error.clone().unwrap_or_else(|| {
-                        "Sign-in could not finish. Try again.".into()
-                    }))),
+                    .child(note(state.error.as_ref().map_or_else(
+                        || tr!(language, "accounts.auth.error.fallback"),
+                        |error| error.render(language),
+                    ))),
             ),
             Phase::Complete | Phase::Saved => body.child(self.auth_complete(state)),
             Phase::Saving => body.child(components::progress(
                 ProgressState::Indeterminate,
                 self.palette,
+                tr!(language, "common.in_progress"),
             )),
         };
         body.children(
             (self.busy
                 && !state.phase.pending()
                 && !matches!(state.phase, Phase::Saving | Phase::Saved))
-            .then(|| {
-                note("Finish the current launcher task before starting or saving this sign-in.")
-            }),
+            .then(|| note(tr!(language, "accounts.auth.busy_notice"))),
         )
     }
 
@@ -2010,14 +2098,15 @@ impl Block {
     /// alternatives stay behind one disclosure, and the option the user already
     /// selected never disappears when the disclosure is collapsed.
     fn auth_choices(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let mut choices = div()
             .flex()
             .flex_col()
             .gap_4()
             .child(self.auth_provider_choice(
                 "auth-microsoft",
-                "Microsoft account",
-                "Sign in securely in your browser. Block never asks for your Microsoft password.",
+                tr!(language, "accounts.auth.provider.microsoft.label"),
+                tr!(language, "accounts.auth.provider.microsoft.description"),
                 AccountProvider::Microsoft,
                 state.provider,
                 cx,
@@ -2028,8 +2117,8 @@ impl Block {
         if state.other_sign_in_options || state.provider == AccountProvider::Authlib {
             choices = choices.child(self.auth_provider_choice(
                 "auth-authlib",
-                "Authlib-Injector",
-                "A community authentication provider. Its account and password are separate from Microsoft.",
+                tr!(language, "accounts.auth.provider.authlib.label"),
+                tr!(language, "accounts.auth.provider.authlib.description"),
                 AccountProvider::Authlib,
                 state.provider,
                 cx,
@@ -2038,8 +2127,8 @@ impl Block {
         if state.other_sign_in_options || state.provider == AccountProvider::Offline {
             choices = choices.child(self.auth_provider_choice(
                 "auth-offline",
-                "Offline Mode",
-                "A local player identity. Does not grant access to authenticated online services.",
+                tr!(language, "accounts.auth.provider.offline.label"),
+                tr!(language, "accounts.auth.provider.offline.description"),
                 AccountProvider::Offline,
                 state.provider,
                 cx,
@@ -2050,9 +2139,9 @@ impl Block {
                 self.auth_button(
                     "auth-other-options",
                     if state.other_sign_in_options {
-                        "Hide other sign-in options"
+                        tr!(language, "accounts.auth.other.hide")
                     } else {
-                        "Other sign-in options"
+                        tr!(language, "accounts.auth.other.show")
                     },
                     UiAction::AuthOtherOptions,
                     ButtonVariant::Outline,
@@ -2063,14 +2152,14 @@ impl Block {
                 // the disclosure's current state from this flag.
                 .aria_expanded(state.other_sign_in_options),
             )
-            .child(note("Finish saves the account securely on this device."))
+            .child(note(tr!(language, "accounts.auth.choices.note")))
     }
 
     fn auth_provider_choice(
         &self,
         id: &'static str,
-        label: &'static str,
-        description: &'static str,
+        label: impl Into<gpui::SharedString>,
+        description: impl Into<gpui::SharedString>,
         provider: AccountProvider,
         selected: AccountProvider,
         cx: &Context<'_, Self>,
@@ -2090,6 +2179,7 @@ impl Block {
     }
 
     fn auth_information(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         if state.provider == AccountProvider::Authlib {
             let provider = self
                 .shell
@@ -2097,6 +2187,10 @@ impl Block {
                 .records
                 .iter()
                 .find(|p| Some(p.id) == state.external_provider);
+            let picker_value = provider.map_or_else(
+                || tr!(language, "accounts.auth.provider.picker.empty"),
+                |provider| provider.name.clone(),
+            );
             let mut card = components::card(self.palette)
                 .gap_3()
                 .child(
@@ -2106,8 +2200,8 @@ impl Block {
                         .gap_2()
                         .child(div().flex_1().min_w_0().child(self.product_select_field(
                             "auth-provider-picker",
-                            "Authentication provider",
-                            provider.map_or("Choose a server", |p| p.name.as_str()),
+                            tr!(language, "select.auth_provider"),
+                            &picker_value,
                             super::select::ProductChoice::AuthProvider,
                             cx,
                         )))
@@ -2128,33 +2222,48 @@ impl Block {
                 card = card.child(note(error.clone()));
             }
             if self.shell.providers.loaded && self.shell.providers.records.is_empty() {
-                card = card.child(note(
-                    "No saved providers. Use + to add your server or import its quick link.",
-                ));
+                card = card.child(note(tr!(language, "accounts.auth.provider.none")));
             }
             if state.provider_draft.is_some() {
-                card = card.child(note(
-                    "Finish or close the provider dialog before signing in.",
-                ));
+                card = card.child(note(tr!(language, "accounts.auth.provider.dialog_open")));
             }
             if provider.is_some_and(|provider| {
                 state.external_api.as_deref() != Some(provider.api_url.as_str())
             }) {
-                card = card.child(note(
-                    "The provider address changed. Choose it again and re-enter your password.",
-                ));
+                card = card.child(note(tr!(
+                    language,
+                    "accounts.auth.provider.address_changed"
+                )));
             }
             if let Some(provider) = provider
                 && provider.api_url.starts_with("http:")
             {
-                card=card.child(div().p_3().rounded_lg().border_1().border_color(rgb(self.palette.destructive))
-                    .child(note("This provider uses HTTP. Your password and tokens are sent without encryption. Continue only if you trust this address and network.")))
-                    .child(components::checkbox("auth-http-consent","I accept the HTTP risk for this address",state.accepted_http.as_deref()==Some(provider.api_url.as_str()),self.palette,ControlState{disabled:self.busy,..ControlState::default()},cx.listener(|view,(),window,cx|view.handle(UiAction::AuthHttpConsent,window,cx))));
+                card = card.child(
+                    div()
+                        .p_3()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(rgb(self.palette.destructive))
+                        .child(note(tr!(language, "accounts.auth.provider.http_warning")))
+                        .child(components::checkbox(
+                            "auth-http-consent",
+                            tr!(language, "accounts.auth.http_consent"),
+                            state.accepted_http.as_deref() == Some(provider.api_url.as_str()),
+                            self.palette,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx.listener(|view, (), window, cx| {
+                                view.handle(UiAction::AuthHttpConsent, window, cx);
+                            }),
+                        )),
+                );
             }
             let mut fields = div().flex().gap_4();
             if let Some(login) = &state.login {
                 fields = fields.child(div().flex_1().min_w_0().child(components::field_with(
-                    "Account",
+                    tr!(language, "accounts.auth.login.label"),
                     login,
                     self.palette,
                     components::FieldOptions {
@@ -2184,21 +2293,26 @@ impl Block {
                                 }
                                 cx.stop_propagation();
                             })
-                            .child("Password *"),
+                            .child(format!(
+                                "{} *",
+                                tr!(language, "accounts.auth.password.label")
+                            )),
                     )
                     .children(state.password.as_ref().map(|state| ProviderPassword {
                         state: state.clone(),
                         palette: self.palette,
                     })),
             );
-            return card.child(fields).child(note("The password is cleared after sending and is never saved. Only Finish stores this provider's tokens securely."));
+            return card
+                .child(fields)
+                .child(note(tr!(language, "accounts.auth.password.note")));
         }
         if state.provider == AccountProvider::Offline {
             let mut card = components::card(self.palette)
-                .child(note("An offline identity for local play, without signing in to an authentication service."));
+                .child(note(tr!(language, "accounts.auth.offline.card_note")));
             if let Some(field) = &state.username {
                 card = card.child(components::field_with(
-                    "Player name",
+                    tr!(language, "accounts.auth.offline.name.label"),
                     field,
                     self.palette,
                     components::FieldOptions {
@@ -2207,103 +2321,243 @@ impl Block {
                     },
                 ));
             }
-            return card.child(note(
-                "Use 1–16 ASCII letters, numbers, or underscores. Names are case-sensitive.",
-            ));
+            return card.child(note(tr!(language, "accounts.auth.offline.name.rule")));
         }
         components::card(self.palette)
-            .child(note("Block never asks for your Microsoft password. Authorize only on Microsoft's website."))
-            .child(div().flex().gap_3()
-                .child(components::radio("auth-method-browser", "Browser", state.method == Method::Browser, self.palette,
-                    ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthMethod(Method::Browser), window, cx))))
-                .child(components::radio("auth-method-device", "Device Code", state.method == Method::Device, self.palette,
-                    ControlState::default(), cx.listener(|view, (), window, cx| view.handle(UiAction::AuthMethod(Method::Device), window, cx)))))
+            .child(note(tr!(language, "accounts.auth.microsoft.card_note")))
+            .child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(components::radio(
+                        "auth-method-browser",
+                        tr!(language, "accounts.auth.method.browser"),
+                        state.method == Method::Browser,
+                        self.palette,
+                        ControlState::default(),
+                        cx.listener(|view, (), window, cx| {
+                            view.handle(UiAction::AuthMethod(Method::Browser), window, cx)
+                        }),
+                    ))
+                    .child(components::radio(
+                        "auth-method-device",
+                        tr!(language, "accounts.auth.method.device"),
+                        state.method == Method::Device,
+                        self.palette,
+                        ControlState::default(),
+                        cx.listener(|view, (), window, cx| {
+                            view.handle(UiAction::AuthMethod(Method::Device), window, cx)
+                        }),
+                    )),
+            )
     }
 
     fn auth_waiting(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         if state.provider == AccountProvider::Authlib {
-            return components::card(self.palette)
-                .child(note(if state.phase == Phase::Verifying {
-                    "Confirming the selected character with your provider…"
-                } else {
-                    "Checking your account with the selected provider…"
-                }))
-                .child(components::progress(
-                    ProgressState::Indeterminate,
-                    self.palette,
-                ));
+            return self.authlib_waiting(state, language);
         }
         if state.method == Method::Device
             && matches!(state.phase, Phase::Preparing | Phase::Waiting)
         {
-            let mut card = components::card(self.palette).gap_3();
-            if let Some(code) = &state.device_code {
-                card = card.child(note("Enter this short-lived code on Microsoft's website:"))
-                    .child(div().flex().items_center().justify_between().gap_3()
-                        .child(div().id("auth-device-code").text_2xl().child(code.user_code.clone()))
-                        .child(self.auth_button("auth-copy-code", "Copy code", UiAction::CopyDeviceCode, ButtonVariant::Outline,
-                            ControlState { disabled: code.expires_at <= std::time::Instant::now(), ..ControlState::default() }, cx)))
-                    .child(div().flex().items_center().justify_between().gap_3()
-                        .child(div().flex_1().min_w_0().text_xs().truncate().child(code.verification_uri.clone()))
-                        .child(self.auth_button("auth-reopen", "Open Microsoft page", UiAction::AuthReopen, ButtonVariant::Outline, ControlState::default(), cx)))
-                    .child(note("Keep this window open. Verification begins when Microsoft approves the request."));
+            return self.device_waiting(state, language, cx);
+        }
+        self.browser_waiting(state, language, cx)
+    }
+
+    /// The waiting card for an external provider, which signs in without a browser handoff.
+    fn authlib_waiting(&self, state: &AuthWizard, language: Language) -> gpui::Div {
+        components::card(self.palette)
+            .child(note(if state.phase == Phase::Verifying {
+                tr!(language, "accounts.auth.waiting.authlib.verifying")
             } else {
-                card = card.child(note("Requesting your device code…"));
-            }
-            return card.child(components::progress(
+                tr!(language, "accounts.auth.waiting.authlib.checking")
+            }))
+            .child(components::progress(
                 ProgressState::Indeterminate,
                 self.palette,
-            ));
-        }
+                tr!(language, "common.in_progress"),
+            ))
+    }
+
+    /// The device-code card, which keeps the code and its address visible until sign-in finishes.
+    fn device_waiting(
+        &self,
+        state: &AuthWizard,
+        language: Language,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        let mut card = components::card(self.palette).gap_3();
+        card = if let Some(code) = &state.device_code {
+            card.child(note(tr!(
+                language,
+                "accounts.auth.waiting.device.code_note"
+            )))
+            .child(self.device_code_row(code, language, cx))
+            .child(self.device_open_row(code, language, cx))
+            .child(note(tr!(
+                language,
+                "accounts.auth.waiting.device.keep_open"
+            )))
+        } else {
+            card.child(note(tr!(
+                language,
+                "accounts.auth.waiting.device.requesting"
+            )))
+        };
+        card.child(components::progress(
+            ProgressState::Indeterminate,
+            self.palette,
+            tr!(language, "common.in_progress"),
+        ))
+    }
+
+    /// The issued device code beside the control that copies it.
+    fn device_code_row(
+        &self,
+        code: &DeviceCode,
+        language: Language,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(
+                div()
+                    .id("auth-device-code")
+                    .text_2xl()
+                    .child(code.user_code.clone()),
+            )
+            .child(self.auth_button(
+                "auth-copy-code",
+                tr!(language, "accounts.auth.waiting.device.copy"),
+                UiAction::CopyDeviceCode,
+                ButtonVariant::Outline,
+                ControlState {
+                    disabled: code.expires_at <= std::time::Instant::now(),
+                    ..ControlState::default()
+                },
+                cx,
+            ))
+    }
+
+    /// The verification address beside the control that reopens it.
+    fn device_open_row(
+        &self,
+        code: &DeviceCode,
+        language: Language,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_xs()
+                    .truncate()
+                    .child(code.verification_uri.clone()),
+            )
+            .child(self.auth_button(
+                "auth-reopen",
+                tr!(language, "accounts.auth.waiting.device.open"),
+                UiAction::AuthReopen,
+                ButtonVariant::Outline,
+                ControlState::default(),
+                cx,
+            ))
+    }
+
+    /// The browser sign-in card, which reports the observed stage and offers a reopen control.
+    fn browser_waiting(
+        &self,
+        state: &AuthWizard,
+        language: Language,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
         let mut card = components::card(self.palette)
             .child(Icon::ExternalLink.render(32., self.palette.foreground))
-            .child(note("After authorization, Block verifies Java Edition ownership and resolves your player profile. You review the identity before saving it."))
-            .child(components::progress(ProgressState::Indeterminate, self.palette))
-            .child(note("This can take a moment after you finish in the browser."));
+            .child(note(tr!(language, "accounts.auth.waiting.ownership_note")))
+            .child(components::progress(
+                ProgressState::Indeterminate,
+                self.palette,
+                tr!(language, "common.in_progress"),
+            ))
+            .child(note(tr!(language, "accounts.auth.waiting.moment")));
         if let Some(stage) = state.stage {
-            card = card.child(note(auth_stage_label(stage)));
-            for (boundary, label) in [
-                (SignInStage::Ownership, "Microsoft and Xbox authorization"),
-                (SignInStage::PlayerProfile, "Java Edition ownership"),
-                (SignInStage::SaveCredential, "Player profile"),
-                (SignInStage::SaveMetadata, "Secure credential storage"),
-            ] {
-                let verified = stage >= boundary;
-                card = card.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(if verified { Icon::Check } else { Icon::Info }.render(
-                            14.,
-                            if verified {
-                                self.palette.success
-                            } else {
-                                self.palette.muted
-                            },
-                        ))
-                        .child(note(format!(
-                            "{label}{}",
-                            if verified {
-                                " · Verified"
-                            } else {
-                                " · Pending"
-                            }
-                        ))),
-                );
-            }
+            card = card
+                .child(note(tr!(language, auth_stage_key(stage))))
+                .children(self.stage_boundary_rows(stage, language));
         }
         if state.browser_url.is_some() || self.visual_only && state.phase == Phase::Waiting {
-            card = card.child(self.auth_button("auth-reopen", "Open browser again", UiAction::AuthReopen,
-                ButtonVariant::Outline, ControlState::default(), cx))
-                .child(note("If the browser did not open, try again. Block cannot tell whether you closed an external browser window."));
+            card = card
+                .child(self.auth_button(
+                    "auth-reopen",
+                    tr!(language, "accounts.auth.waiting.reopen"),
+                    UiAction::AuthReopen,
+                    ButtonVariant::Outline,
+                    ControlState::default(),
+                    cx,
+                ))
+                .child(note(tr!(language, "accounts.auth.waiting.reopen_note")));
         }
         card
     }
 
+    /// One row per stage boundary, marked once the attempt reaches it.
+    fn stage_boundary_rows(&self, stage: SignInStage, language: Language) -> Vec<gpui::Div> {
+        [
+            (
+                SignInStage::Ownership,
+                tr!(language, "accounts.auth.waiting.boundary.microsoft_xbox"),
+            ),
+            (
+                SignInStage::PlayerProfile,
+                tr!(language, "accounts.auth.waiting.boundary.ownership"),
+            ),
+            (
+                SignInStage::SaveCredential,
+                tr!(language, "accounts.auth.waiting.boundary.profile"),
+            ),
+            (
+                SignInStage::SaveMetadata,
+                tr!(language, "accounts.auth.waiting.boundary.credential"),
+            ),
+        ]
+        .into_iter()
+        .map(|(boundary, label)| self.stage_boundary_row(stage >= boundary, &label, language))
+        .collect()
+    }
+
+    fn stage_boundary_row(&self, verified: bool, label: &str, language: Language) -> gpui::Div {
+        let (icon, color) = if verified {
+            (Icon::Check, self.palette.success)
+        } else {
+            (Icon::Info, self.palette.muted)
+        };
+        let text = if verified {
+            tr!(language, "accounts.auth.waiting.verified", label = label)
+        } else {
+            tr!(language, "accounts.auth.waiting.pending", label = label)
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(icon.render(14., color))
+            .child(note(text))
+    }
+
     fn auth_complete(&self, state: &AuthWizard) -> gpui::Div {
+        let language = self.language();
         let Some(account) = &state.prepared_account else {
-            return components::card(self.palette).child(note("Waiting for a verified identity."));
+            return components::card(self.palette)
+                .child(note(tr!(language, "accounts.auth.complete.waiting")));
         };
         components::card(self.palette)
             .child(components::account_avatar(
@@ -2314,13 +2568,33 @@ impl Block {
                 AvatarState::Fallback,
             ))
             .child(div().text_xl().child(account.player_name.clone()))
-            .child(components::badge(self.account_authority(account), self.palette, BadgeVariant::Secondary))
-            .children(self.account_provider(account).map(|provider|note(provider.api_url.clone())))
-            .child(components::badge(if state.phase == Phase::Saved { "Account saved" } else { "Ready to save" }, self.palette, BadgeVariant::Success))
-            .child(note(if state.phase == Phase::Saved { "The account has been saved and is ready to use." } else { "Finish saves this account securely and selects it. Closing now discards this sign-in." }))
+            .child(components::badge(
+                self.account_authority(account),
+                self.palette,
+                BadgeVariant::Secondary,
+            ))
+            .children(
+                self.account_provider(account)
+                    .map(|provider| note(provider.api_url.clone())),
+            )
+            .child(components::badge(
+                if state.phase == Phase::Saved {
+                    tr!(language, "accounts.auth.complete.badge.saved")
+                } else {
+                    tr!(language, "accounts.auth.complete.badge.ready")
+                },
+                self.palette,
+                BadgeVariant::Success,
+            ))
+            .child(note(if state.phase == Phase::Saved {
+                tr!(language, "accounts.auth.complete.note.saved")
+            } else {
+                tr!(language, "accounts.auth.complete.note.ready")
+            }))
     }
 
     fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
+        let language = self.language();
         let mut footer = patterns::management_footer(self.palette)
             .id("auth-footer")
             .debug_selector(|| "auth-footer".into())
@@ -2332,9 +2606,9 @@ impl Block {
                 .child(self.auth_button(
                     "auth-cancel",
                     if state.phase.pending() {
-                        "Cancel sign-in"
+                        tr!(language, "accounts.auth.footer.cancel_sign_in")
                     } else {
-                        "Close"
+                        tr!(language, "common.close")
                     },
                     UiAction::AuthCancel,
                     ButtonVariant::Ghost,
@@ -2354,7 +2628,7 @@ impl Block {
                         .then(|| {
                             self.auth_button(
                                 "auth-back",
-                                "Back",
+                                tr!(language, "accounts.auth.footer.back"),
                                 UiAction::AuthBack,
                                 ButtonVariant::Ghost,
                                 ControlState::default(),
@@ -2364,28 +2638,59 @@ impl Block {
                 ),
         );
         let (label, action, busy) = match state.phase {
-            Phase::Choose => ("Continue", UiAction::AuthNext, false),
+            Phase::Choose => (
+                tr!(language, "accounts.auth.footer.continue"),
+                UiAction::AuthNext,
+                false,
+            ),
             Phase::Information => (
-                if state.provider == AccountProvider::Offline {
-                    "Continue"
-                } else if state.provider == AccountProvider::Authlib {
-                    "Sign in"
-                } else if state.method == Method::Device {
-                    "Request a code"
-                } else {
-                    "Open browser"
+                match state.provider {
+                    AccountProvider::Offline => {
+                        tr!(language, "accounts.auth.footer.continue")
+                    }
+                    AccountProvider::Authlib => {
+                        tr!(language, "accounts.auth.footer.sign_in")
+                    }
+                    AccountProvider::Microsoft if state.method == Method::Device => {
+                        tr!(language, "accounts.auth.footer.request_code")
+                    }
+                    AccountProvider::Microsoft => {
+                        tr!(language, "accounts.auth.footer.open_browser")
+                    }
                 },
                 UiAction::Authenticate,
                 false,
             ),
-            Phase::Preparing | Phase::Waiting | Phase::Verifying => {
-                ("Waiting…", UiAction::Authenticate, true)
-            }
-            Phase::Failed => ("Try again", UiAction::AuthRetry, false),
-            Phase::Characters => ("Continue", UiAction::Authenticate, false),
-            Phase::Complete => ("Finish", UiAction::AuthFinish, false),
-            Phase::Saving => ("Saving…", UiAction::AuthFinish, true),
-            Phase::Saved => ("Done", UiAction::AuthCancel, false),
+            Phase::Preparing | Phase::Waiting | Phase::Verifying => (
+                tr!(language, "accounts.auth.footer.waiting"),
+                UiAction::Authenticate,
+                true,
+            ),
+            Phase::Failed => (
+                tr!(language, "accounts.auth.footer.try_again"),
+                UiAction::AuthRetry,
+                false,
+            ),
+            Phase::Characters => (
+                tr!(language, "accounts.auth.footer.continue"),
+                UiAction::Authenticate,
+                false,
+            ),
+            Phase::Complete => (
+                tr!(language, "accounts.auth.footer.finish"),
+                UiAction::AuthFinish,
+                false,
+            ),
+            Phase::Saving => (
+                tr!(language, "accounts.auth.footer.saving"),
+                UiAction::AuthFinish,
+                true,
+            ),
+            Phase::Saved => (
+                tr!(language, "accounts.auth.footer.done"),
+                UiAction::AuthCancel,
+                false,
+            ),
         };
         let provider_blocked = state.provider == AccountProvider::Authlib
             && matches!(state.phase, Phase::Information | Phase::Failed)
@@ -2427,7 +2732,7 @@ impl Block {
     fn auth_button(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<gpui::SharedString>,
         action: UiAction,
         variant: ButtonVariant,
         state: ControlState,
@@ -2446,65 +2751,162 @@ impl Block {
     }
 }
 
-fn sign_in_error(error: &str) -> String {
+/// The semantic keys of the heading and description for the step the wizard is on.
+///
+/// The keys stay unresolved so the view renders them in its current language,
+/// including after a language change.
+fn auth_heading_keys(state: &AuthWizard) -> (&'static str, &'static str) {
+    match state.phase {
+        Phase::Choose => (
+            "accounts.auth.choose.title",
+            "accounts.auth.choose.description",
+        ),
+        Phase::Information => match state.provider {
+            AccountProvider::Offline => (
+                "accounts.auth.info.title.offline",
+                "accounts.auth.info.description.offline",
+            ),
+            AccountProvider::Authlib => (
+                "accounts.auth.info.title.authlib",
+                "accounts.auth.info.description.authlib",
+            ),
+            AccountProvider::Microsoft => (
+                "accounts.auth.info.title.microsoft",
+                "accounts.auth.info.description.microsoft",
+            ),
+        },
+        Phase::Preparing => (
+            "accounts.auth.preparing.title",
+            if state.provider == AccountProvider::Authlib {
+                "accounts.auth.preparing.description.authlib"
+            } else {
+                "accounts.auth.preparing.description.microsoft"
+            },
+        ),
+        Phase::Waiting if state.method == Method::Device => (
+            "accounts.auth.waiting.device.title",
+            "accounts.auth.waiting.device.description",
+        ),
+        Phase::Waiting => (
+            "accounts.auth.waiting.browser.title",
+            "accounts.auth.waiting.browser.description",
+        ),
+        Phase::Verifying => (
+            "accounts.auth.verifying.title",
+            if state.provider == AccountProvider::Authlib {
+                "accounts.auth.verifying.description.authlib"
+            } else {
+                "accounts.auth.verifying.description.microsoft"
+            },
+        ),
+        Phase::Characters => (
+            "accounts.auth.characters.title",
+            "accounts.auth.characters.description",
+        ),
+        Phase::Failed if state.provider == AccountProvider::Offline => (
+            "accounts.auth.failed.offline.title",
+            "accounts.auth.failed.offline.description",
+        ),
+        Phase::Failed => (
+            "accounts.auth.failed.title",
+            "accounts.auth.failed.description",
+        ),
+        Phase::Complete => (
+            "accounts.auth.complete.title",
+            if state.provider == AccountProvider::Offline {
+                "accounts.auth.complete.description.offline"
+            } else {
+                "accounts.auth.complete.description.online"
+            },
+        ),
+        Phase::Saving => (
+            "accounts.auth.saving.title",
+            if state.provider == AccountProvider::Offline {
+                "accounts.auth.saving.description.offline"
+            } else {
+                "accounts.auth.saving.description.online"
+            },
+        ),
+        Phase::Saved => (
+            "accounts.auth.saved.title",
+            "accounts.auth.saved.description",
+        ),
+    }
+}
+
+/// Classify a raw sign-in failure into the product recovery text it needs.
+///
+/// The backend reports failures as English diagnostics; classification reads
+/// those diagnostics, while the message the user sees is a semantic key the
+/// view renders in its own language.
+fn sign_in_error(error: &str) -> AccountMessage {
     let lower = error.to_lowercase();
     if lower.contains("cancel") {
-        "Sign-in was cancelled. You can try again when you are ready.".into()
+        AccountMessage::product("accounts.auth.error.cancelled")
     } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("expired")
     {
-        "Authorization expired. Start sign-in again to request a fresh session.".into()
+        AccountMessage::product("accounts.auth.error.expired")
     } else if lower.contains("ownership")
         || lower.contains("does not own")
         || lower.contains("entitlement")
     {
-        "Minecraft: Java Edition ownership could not be verified. Check the Microsoft account and try again.".into()
+        AccountMessage::product("accounts.auth.error.ownership")
     } else if lower.contains("no minecraft: java edition player profile") {
-        "Complete your Minecraft: Java Edition player profile at minecraft.net, then try again."
-            .into()
+        AccountMessage::product("accounts.auth.error.player_profile")
     } else if lower.contains("create an xbox profile") {
-        "Create an Xbox profile for this Microsoft account, then try again.".into()
+        AccountMessage::product("accounts.auth.error.xbox_profile")
     } else if lower.contains("family restrictions") || lower.contains("xbox account permissions") {
-        "Xbox account permissions or family restrictions prevent this sign-in. Check the account's Xbox settings.".into()
+        AccountMessage::product("accounts.auth.error.family")
     } else if lower.contains("different microsoft application registration") {
-        "This player is saved under another Microsoft application registration. Remove that saved account first, then sign in again.".into()
+        AccountMessage::product("accounts.auth.error.registration_other")
     } else if lower.contains("application registration") || lower.contains("client id") {
-        "The Microsoft application rejected this sign-in method. Check its public-client and personal-account settings; browser sign-in also needs its desktop redirect URI.".into()
+        AccountMessage::product("accounts.auth.error.registration")
     } else if lower.contains("secure credential store is unavailable or locked") {
         if cfg!(target_os = "linux") {
-            "The desktop Secret Service is unavailable or locked. Start or unlock your system keyring, then try again. Credentials are never saved to a plaintext file.".into()
+            AccountMessage::product("accounts.auth.error.store_unavailable.linux")
         } else if cfg!(target_os = "windows") {
-            "Windows Credential Manager is unavailable. Check access to your Windows user session, then try again. Credentials are never saved to a plaintext file.".into()
+            AccountMessage::product("accounts.auth.error.store_unavailable.windows")
         } else {
-            "The system keychain is unavailable or locked. Unlock your login keychain, then try again. Credentials are never saved to a plaintext file.".into()
+            AccountMessage::product("accounts.auth.error.store_unavailable.macos")
         }
     } else if lower.contains("no supported secure credential store") {
-        "This system has no supported secure credential store. Account sign-in is unavailable until a system credential store is configured.".into()
+        AccountMessage::product("accounts.auth.error.store_unsupported")
     } else if lower.contains("metadata")
         || lower.contains("secure storage")
         || lower.contains("credential")
     {
-        "Block could not save the account securely. Check access to the data directory and credential store, then try again.".into()
+        AccountMessage::product("accounts.auth.error.save_failed")
     } else if lower.contains("engine unavailable") {
-        "Secure sign-in is unavailable. Check Block’s data directory and restart the app.".into()
+        AccountMessage::product("accounts.auth.error.engine_unavailable")
     } else {
-        "Microsoft sign-in could not finish. Check your connection and try again. Your saved accounts are kept.".into()
+        AccountMessage::product("accounts.auth.error.generic")
     }
 }
 
-const fn auth_stage_label(stage: SignInStage) -> &'static str {
+const fn auth_stage_key(stage: SignInStage) -> &'static str {
     match stage {
-        SignInStage::SecureStorage => "Checking secure credential storage",
-        SignInStage::DeviceAuthorization => "Requesting a Microsoft device code",
-        SignInStage::BrowserAuthorization => "Waiting for Microsoft authorization in your browser",
-        SignInStage::MicrosoftAuthorization => "Exchanging Microsoft authorization",
-        SignInStage::XboxAuthentication => "Authenticating with Xbox Live",
-        SignInStage::XboxAuthorization => "Authorizing Minecraft services",
-        SignInStage::MinecraftAuthentication => "Obtaining a Minecraft session",
-        SignInStage::Ownership => "Verifying Java Edition ownership",
-        SignInStage::PlayerProfile => "Resolving your player profile",
-        SignInStage::SaveCredential => "Saving your refresh credential securely",
-        SignInStage::SaveMetadata => "Saving public account metadata",
+        SignInStage::SecureStorage => "accounts.auth.stage.secure_storage",
+        SignInStage::DeviceAuthorization => "accounts.auth.stage.device_code",
+        SignInStage::BrowserAuthorization => "accounts.auth.stage.browser",
+        SignInStage::MicrosoftAuthorization => "accounts.auth.stage.microsoft",
+        SignInStage::XboxAuthentication => "accounts.auth.stage.xbox_auth",
+        SignInStage::XboxAuthorization => "accounts.auth.stage.xbox_authorization",
+        SignInStage::MinecraftAuthentication => "accounts.auth.stage.minecraft",
+        SignInStage::Ownership => "accounts.auth.stage.ownership",
+        SignInStage::PlayerProfile => "accounts.auth.stage.profile",
+        SignInStage::SaveCredential => "accounts.auth.stage.credential",
+        SignInStage::SaveMetadata => "accounts.auth.stage.metadata",
     }
+}
+
+/// The product name of an account's authentication authority.
+pub(super) fn provider_label(language: Language, provider: AccountProvider) -> String {
+    let key = match provider {
+        AccountProvider::Microsoft => "accounts.provider.microsoft",
+        AccountProvider::Authlib => "accounts.provider.authlib",
+        AccountProvider::Offline => "accounts.provider.offline",
+    };
+    tr!(language, key)
 }
 
 #[cfg(test)]
@@ -2536,7 +2938,8 @@ mod tests {
     #[test]
     fn secure_store_preflight_errors_explain_system_recovery_without_private_details() {
         let error = block_auth::AuthError::CredentialStoreUnavailable.to_string();
-        let message = super::sign_in_error(&format!("{error} PRIVATE_DIAGNOSTIC"));
+        let message = super::sign_in_error(&format!("{error} PRIVATE_DIAGNOSTIC"))
+            .render(crate::Language::English);
         assert!(message.contains(if cfg!(target_os = "linux") {
             "Secret Service"
         } else if cfg!(target_os = "windows") {
@@ -2548,11 +2951,66 @@ mod tests {
         assert!(!message.contains("PRIVATE_DIAGNOSTIC"));
         assert!(!message.contains("could not save the account"));
         let unsupported =
-            super::sign_in_error(&block_auth::AuthError::UnsupportedSecureStore.to_string());
+            super::sign_in_error(&block_auth::AuthError::UnsupportedSecureStore.to_string())
+                .render(crate::Language::English);
         assert!(unsupported.contains("sign-in is unavailable"));
         assert_ne!(
             message,
             super::sign_in_error("Account metadata cannot be written")
+                .render(crate::Language::English)
+        );
+    }
+
+    #[test]
+    fn sign_in_failures_keep_the_classified_key_and_render_each_language() {
+        use crate::Language::{English, Japanese, SimplifiedChinese};
+
+        let cases = [
+            (
+                "Sign-in was cancelled by the user",
+                "accounts.auth.error.cancelled",
+            ),
+            ("The sign-in timed out", "accounts.auth.error.expired"),
+            (
+                "Java Edition ownership could not be found",
+                "accounts.auth.error.ownership",
+            ),
+            (
+                "Create an Xbox profile for this account",
+                "accounts.auth.error.xbox_profile",
+            ),
+            (
+                "This provider uses a different Microsoft application registration",
+                "accounts.auth.error.registration_other",
+            ),
+            (
+                "Engine unavailable",
+                "accounts.auth.error.engine_unavailable",
+            ),
+        ];
+        for (raw, expected) in cases {
+            let message = super::sign_in_error(raw);
+            assert_eq!(message, super::AccountMessage::product(expected), "{raw}");
+            assert_ne!(message.render(English), message.render(Japanese), "{raw}");
+            assert_ne!(
+                message.render(English),
+                message.render(SimplifiedChinese),
+                "{raw}"
+            );
+        }
+        // Unclassified failures still produce the product recovery text rather
+        // than the backend's diagnostic.
+        assert_eq!(
+            super::sign_in_error("unexpected backend detail"),
+            super::AccountMessage::product("accounts.auth.error.generic")
+        );
+        assert_eq!(
+            super::sign_in_error("The sign-in timed out").render(Japanese),
+            "認可の有効期限が切れました。サインインをやり直して新しいセッションを要求してください。"
+        );
+        assert_eq!(
+            super::sign_in_error("Sign-in was cancelled by the user").render(SimplifiedChinese),
+            "登录已取消。你可以随时重试。"
         );
     }
 
@@ -2615,10 +3073,9 @@ mod tests {
                         .auth
                         .as_ref()
                         .and_then(|state| state.provider_draft.as_ref())
-                        .is_some_and(|draft| draft
-                            .error
-                            .as_ref()
-                            .is_some_and(|error| error.contains("HTTP warning")))
+                        .is_some_and(|draft| draft.error.as_ref().is_some_and(|error| error
+                            .render(crate::Language::English)
+                            .contains("HTTP warning")))
                 );
                 assert!(!view.auth_provider_saved(&provider.id.to_string(), cx));
                 view.cancel_auth_provider(cx);
@@ -2734,10 +3191,11 @@ mod tests {
                 assert_eq!(password.read(cx).value().as_ref(), "");
                 assert!(view.shell.auth.as_ref().is_some_and(|state| {
                     state.phase == Phase::Failed
-                        && state
-                            .error
-                            .as_ref()
-                            .is_some_and(|error| error.contains("provider address changed"))
+                        && state.error.as_ref().is_some_and(|error| {
+                            error
+                                .render(crate::Language::English)
+                                .contains("provider address changed")
+                        })
                 }));
                 view.auth_back(window, cx);
                 assert_eq!(password.read(cx).value().as_ref(), "");
@@ -2932,7 +3390,7 @@ mod tests {
                 verification_uri: "https://example.invalid/sensitive".into(),
                 expires_at: std::time::Instant::now(),
             }),
-            error: Some("sensitive-error-detail".into()),
+            error: Some(super::AccountMessage::diagnostic("sensitive-error-detail")),
             ..AuthWizard::default()
         };
         let debug = format!("{state:?}");
@@ -3583,5 +4041,77 @@ mod tests {
             && view.form.is_some()
             && view.accounts.len() == 1
             && view.shell.auth.is_none()));
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "The fixture paints every control it inspects."
+    )]
+    fn control_node(
+        cx: &mut gpui::VisualTestContext,
+        id: &'static str,
+    ) -> gpui_base::test_support::ElementSnapshot {
+        cx.run_until_parked();
+        cx.update(|window, _| {
+            gpui_base::test_support::find(window, &[], &gpui::ElementId::Name(id.into()))
+        })
+        .expect("painted control")
+    }
+
+    #[gpui::test]
+    fn account_setup_renders_the_view_language_and_retains_semantic_failures(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.preferences.language = Some(crate::Language::Japanese);
+            view
+        });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.router.navigate(Tab::Accounts);
+                view.open_auth_wizard(window, cx);
+            });
+        });
+        assert_eq!(control_node(cx, "auth-primary").label(), Some("続行"));
+        assert_eq!(
+            control_node(cx, "auth-microsoft").label(),
+            Some("Microsoft アカウント")
+        );
+        assert_eq!(
+            control_node(cx, "auth-other-options").label(),
+            Some("その他のサインインオプション")
+        );
+
+        // A classified failure is retained as its semantic key, so the same
+        // preparation renders the recovery text in a newly selected language.
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.auth_next(cx);
+                if let Some(state) = view.shell.auth.as_mut() {
+                    state.transition(Phase::Preparing);
+                }
+                view.auth_finished(&Err("The sign-in timed out".into()));
+                view.preferences.language = Some(crate::Language::SimplifiedChinese);
+                cx.notify();
+            });
+        });
+        assert!(
+            view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
+                |state| state.phase == Phase::Failed
+                    && state.error
+                        == Some(super::AccountMessage::product(
+                            "accounts.auth.error.expired"
+                        ))
+            ))
+        );
+        assert_eq!(control_node(cx, "auth-primary").label(), Some("重试"));
+        assert_eq!(control_node(cx, "auth-cancel").label(), Some("关闭"));
+        assert_eq!(
+            super::AccountMessage::product("accounts.auth.error.expired")
+                .render(crate::Language::SimplifiedChinese),
+            "授权已过期。请重新开始登录以请求新的会话。"
+        );
     }
 }

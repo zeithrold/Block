@@ -580,22 +580,36 @@ pub(super) fn memory_gb_text(mib: u32) -> String {
     text
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MemoryError {
+    Range,
+    Precision,
+}
+
+impl MemoryError {
+    pub(super) const fn key(self) -> &'static str {
+        match self {
+            Self::Range => "common.memory_range",
+            Self::Precision => "common.memory_precision",
+        }
+    }
+}
+
 /// Parse the editable GB field into MiB and enforce the product range.
-pub(super) fn parse_memory_gb(value: &str) -> Result<u32, String> {
+pub(super) fn parse_memory_gb(value: &str) -> Result<u32, MemoryError> {
     let text = value.trim();
-    let message = "Choose a memory limit between 1 and 32 GB.".to_owned();
-    let gb = text.parse::<f64>().map_err(|_| message.clone())?;
+    let gb = text.parse::<f64>().map_err(|_| MemoryError::Range)?;
     if !gb.is_finite() {
-        return Err(message);
+        return Err(MemoryError::Range);
     }
     let mib = (gb * 1024.0).round();
     if !(f64::from(block_launcher::MIN_MEMORY_MIB)..=f64::from(block_launcher::MAX_MEMORY_MIB))
         .contains(&mib)
     {
-        return Err(message);
+        return Err(MemoryError::Range);
     }
     if (mib / 1024.0 - gb).abs() > 0.000_5 {
-        return Err("Enter a memory limit in GB with up to three decimal places.".into());
+        return Err(MemoryError::Precision);
     }
     Ok(mib as u32)
 }
@@ -1177,7 +1191,11 @@ impl ProgressState {
     clippy::cast_precision_loss,
     reason = "Native progress numeric values are doubles; the displayed byte counts retain integer precision."
 )]
-pub(super) fn progress(state: ProgressState, palette: Palette) -> Stateful<Div> {
+pub(super) fn progress(
+    state: ProgressState,
+    palette: Palette,
+    in_progress: impl Into<SharedString>,
+) -> Stateful<Div> {
     let mut track = div()
         .h(px(4.))
         .w_full()
@@ -1203,7 +1221,7 @@ pub(super) fn progress(state: ProgressState, palette: Palette) -> Stateful<Div> 
                 .text_size(px(SMALL_FONT_SIZE))
                 .text_color(rgb(palette.muted))
                 .child(Icon::Loading.render(12., palette.muted))
-                .child("In progress"),
+                .child(in_progress.into()),
         );
     }
     progress.id("progress").role(gpui::Role::ProgressIndicator)
@@ -1792,19 +1810,20 @@ mod memory_tests {
         assert_eq!(parse_memory_gb("1.5"), Ok(1536));
         assert_eq!(parse_memory_gb("2.5"), Ok(2560));
         assert_eq!(
-            parse_memory_gb("1023.999"),
+            parse_memory_gb("1023.999").map_err(|error| tr!(crate::Language::English, error.key())),
             Err("Choose a memory limit between 1 and 32 GB.".into())
         );
         assert_eq!(
-            parse_memory_gb("0.25"),
+            parse_memory_gb("0.25").map_err(|error| tr!(crate::Language::English, error.key())),
             Err("Choose a memory limit between 1 and 32 GB.".into())
         );
         assert_eq!(
-            parse_memory_gb("33"),
+            parse_memory_gb("33").map_err(|error| tr!(crate::Language::English, error.key())),
             Err("Choose a memory limit between 1 and 32 GB.".into())
         );
         assert_eq!(
-            parse_memory_gb("not-a-number"),
+            parse_memory_gb("not-a-number")
+                .map_err(|error| tr!(crate::Language::English, error.key())),
             Err("Choose a memory limit between 1 and 32 GB.".into())
         );
         assert_eq!(memory_gb_text(1024), "1");

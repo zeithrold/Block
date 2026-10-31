@@ -26,6 +26,7 @@ static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Drawer {
     ImportGames,
+    Language,
     Menu,
     Accounts,
     Profiles,
@@ -96,10 +97,43 @@ pub(super) struct HomeState {
 
 #[derive(Clone, Debug)]
 struct HomePanel {
-    phase: &'static str,
-    status: String,
+    phase: HomePhase,
+    status: crate::i18n::UiText,
     resource: Option<(u64, Option<u64>)>,
     verified: usize,
+}
+
+/// What the retained task panel is doing. Presentation resolves the label, so a
+/// retained panel follows the language it is painted in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HomePhase {
+    Stopping,
+    PreparingLaunch,
+    MonitoringInterrupted,
+    Running,
+    Downloading,
+    VerifyingInstallation,
+    Working,
+}
+
+impl HomePhase {
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Stopping => "home.phase.stopping",
+            Self::PreparingLaunch => "home.phase.preparing_launch",
+            Self::MonitoringInterrupted => "home.phase.monitoring_interrupted",
+            Self::Running => "home.phase.running",
+            Self::Downloading => "home.phase.downloading",
+            Self::VerifyingInstallation => "home.phase.verifying",
+            Self::Working => "home.phase.working",
+        }
+    }
+
+    /// A running game reports no aggregate progress, so only work with a
+    /// verifiable total shows a bar.
+    const fn shows_progress(self) -> bool {
+        !matches!(self, Self::Running | Self::MonitoringInterrupted)
+    }
 }
 
 impl HomeState {
@@ -200,48 +234,55 @@ impl Block {
             .font_family(super::design::FONT_FAMILY)
             .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
             .child(div().flex_1().min_h_0().child(content));
-        root = root.children(self.render_popups(cx));
+        root = root.children(self.render_popups(false, cx));
         root
     }
 
-    pub(super) fn navigation_title(&self) -> &'static str {
+    pub(super) fn navigation_title(&self) -> String {
+        let language = self.language();
         let page = self.page_spec().page;
         if page == super::navigation::Page::Authentication {
-            return "Accounts";
+            return tr!(language, "nav.accounts");
         }
         if page == super::navigation::Page::Providers {
-            return "Authlib providers";
+            return tr!(language, "nav.authlib_providers");
         }
         if self.shell.instance_editor.is_some() {
-            return "Instance settings";
+            return tr!(language, "nav.instance_settings");
         }
         match &self.form {
             Some(Form::Profile(_)) => match self.shell.editor.page {
-                Some(super::profile_editor::EditorPage::Appearance) => "Profile appearance",
-                Some(super::profile_editor::EditorPage::Data) => "Data and account",
-                Some(super::profile_editor::EditorPage::Launch) | None => "Launch settings",
+                Some(super::profile_editor::EditorPage::Appearance) => {
+                    tr!(language, "nav.profile_appearance")
+                }
+                Some(super::profile_editor::EditorPage::Data) => {
+                    tr!(language, "nav.data_and_account")
+                }
+                Some(super::profile_editor::EditorPage::Launch) | None => {
+                    tr!(language, "nav.launch_settings")
+                }
             },
             Some(Form::Instance(_))
                 if page == super::navigation::Page::GameWizard
                     && self.router.tab() != Tab::Onboarding =>
             {
-                "Create a game"
+                tr!(language, "nav.create_game")
             }
             _ => match self.router.tab() {
-                Tab::Home => "Block",
+                Tab::Home => "Block".to_owned(),
                 Tab::Onboarding if self.shell.first_run.enabled => match self.shell.first_run.stage
                 {
                     super::first_run::Stage::Welcome | super::first_run::Stage::Overview => {
-                        "Set up Block"
+                        tr!(language, "nav.setup_block")
                     }
-                    super::first_run::Stage::GameChoice => "Set up a game",
-                    super::first_run::Stage::GameWizard => "Create a game",
+                    super::first_run::Stage::GameChoice => tr!(language, "nav.setup_game"),
+                    super::first_run::Stage::GameWizard => tr!(language, "nav.create_game"),
                 },
-                Tab::Onboarding => "Set up Block",
-                Tab::Instances | Tab::Profiles => "Games",
-                Tab::Accounts => "Accounts",
-                Tab::Settings => "Settings",
-                Tab::About => "About Block",
+                Tab::Onboarding => tr!(language, "nav.setup_block"),
+                Tab::Instances | Tab::Profiles => tr!(language, "nav.games"),
+                Tab::Accounts => tr!(language, "nav.accounts"),
+                Tab::Settings => tr!(language, "nav.settings"),
+                Tab::About => tr!(language, "nav.about"),
             },
         }
     }
@@ -253,7 +294,7 @@ impl Block {
         id: &'static str,
         action: UiAction,
         icon: impl IntoElement,
-        label: &'static str,
+        label: String,
         cx: &Context<'_, Self>,
     ) -> super::components::Control {
         self.button_with_variant(id, "", action, super::components::ButtonVariant::Ghost, cx)
@@ -273,10 +314,11 @@ impl Block {
     ) -> impl IntoElement + use<> {
         let first_run = self.setup_incomplete() && self.shell.first_run.enabled;
         let task = self.wizard_task_active();
+        let language = self.language();
         let title = if home
             || first_run && self.shell.first_run.stage == super::first_run::Stage::Welcome
         {
-            ""
+            String::new()
         } else {
             self.navigation_title()
         };
@@ -307,28 +349,30 @@ impl Block {
                 } else {
                     UiAction::CancelForm
                 };
+                let text = tr!(language, "chrome.close_setup");
                 super::tooltip::trigger(
                     self.chrome_icon_button(
                         "task-close",
                         action,
                         super::design::Icon::ChevronDown.render(16., self.palette.muted),
-                        "Close setup",
+                        text.clone(),
                         cx,
                     ),
-                    "Close setup",
+                    text,
                     cx,
                 )
                 .into_any_element()
             } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
+                let text = tr!(language, "chrome.back_to_welcome");
                 super::tooltip::trigger(
                     self.chrome_icon_button(
                         "setup-back-welcome",
                         UiAction::FirstRun(super::first_run::Action::BackToWelcome),
                         super::design::Icon::ChevronLeft.render(16., self.palette.muted),
-                        "Back to welcome",
+                        text.clone(),
                         cx,
                     ),
-                    "Back to welcome",
+                    text,
                     cx,
                 )
                 .into_any_element()
@@ -375,6 +419,7 @@ impl Block {
                 if home {
                     div()
                         .children((self.busy && self.downloads.is_some()).then(|| {
+                            let text = tr!(language, "chrome.view_downloads");
                             super::tooltip::trigger(
                                 self.button(
                                     "downloads",
@@ -382,14 +427,14 @@ impl Block {
                                     UiAction::Drawer(Some(Drawer::Downloads)),
                                     cx,
                                 )
-                                .aria_label("View downloads")
+                                .aria_label(text.clone())
                                 .child(
                                     super::components::progress_ring(
                                         super::components::ProgressState::Indeterminate,
                                         self.palette,
                                     ),
                                 ),
-                                "View downloads",
+                                text,
                                 cx,
                             )
                         }))
@@ -402,14 +447,14 @@ impl Block {
                 "window-minimize",
                 UiAction::MinimizeWindow,
                 super::design::Icon::Minus.render(16., self.palette.muted),
-                "Minimize Block",
+                tr!(language, "chrome.minimize"),
                 cx,
             ))
             .child(self.chrome_icon_button(
                 "window-close",
                 UiAction::CloseWindow,
                 super::design::Icon::Close.render(16., self.palette.muted),
-                "Close Block",
+                tr!(language, "chrome.close"),
                 cx,
             ))
     }
@@ -429,23 +474,19 @@ impl Block {
             .pb_6()
             .gap_0()
             .child(self.home_identity(account, window, cx))
-            .children(
-                (!matches!(
-                    self.status.as_str(),
-                    "Welcome to Block" | "UI scenario fixture"
-                ))
-                .then(|| {
-                    div()
-                        .id("home-status")
-                        .mb_3()
-                        .text_xs()
-                        .text_color(rgb(self.palette.muted))
-                        .child(self.status.clone())
-                }),
-            );
+            .children((!self.baseline_status()).then(|| {
+                div()
+                    .id("home-status")
+                    .debug_selector(|| "home-status".into())
+                    .mb_3()
+                    .text_xs()
+                    .text_color(rgb(self.palette.muted))
+                    .child(self.status.text(self.language()))
+            }));
         content = content.child(self.home_task(window, cx));
         // While an install/repair runs the Play action queues instead of
         // disappearing, so the user can ask for a launch without waiting.
+        let language = self.language();
         let queue_play = self.play_queue_eligible() && account.is_some();
         if self.busy && !queue_play {
             return content.into_any_element();
@@ -454,9 +495,9 @@ impl Block {
         let (label, action) = if queue_play {
             (
                 if self.pending_play {
-                    "Launch queued"
+                    tr!(language, "home.launch_queued")
                 } else {
-                    "Queue launch"
+                    tr!(language, "home.queue_launch")
                 },
                 UiAction::Play,
             )
@@ -464,19 +505,21 @@ impl Block {
             match profile.and_then(|profile| self.snapshot.selection(&profile.id).ok()) {
                 Some((_, _, target)) => match &target.status {
                     block_launcher::catalog::InstallStatus::Ready if account.is_none() => {
-                        ("Sign in to play", UiAction::SignIn)
+                        (tr!(language, "home.sign_in_to_play"), UiAction::SignIn)
                     }
-                    block_launcher::catalog::InstallStatus::Ready => ("Launch", UiAction::Play),
+                    block_launcher::catalog::InstallStatus::Ready => {
+                        (tr!(language, "home.launch"), UiAction::Play)
+                    }
                     block_launcher::catalog::InstallStatus::Failed { .. } => {
-                        ("Retry download", UiAction::Repair)
+                        (tr!(language, "home.retry_download"), UiAction::Repair)
                     }
                     block_launcher::catalog::InstallStatus::Pending
                     | block_launcher::catalog::InstallStatus::Installing => {
-                        ("Download", UiAction::Repair)
+                        (tr!(language, "home.download"), UiAction::Repair)
                     }
                 },
-                None if profile.is_some() => ("Repair game", UiAction::Repair),
-                None => ("Create game", UiAction::CreateInstance),
+                None if profile.is_some() => (tr!(language, "home.repair_game"), UiAction::Repair),
+                None => (tr!(language, "home.create_game"), UiAction::CreateInstance),
             }
         };
         if account.is_none() && matches!(action, UiAction::SignIn | UiAction::CreateInstance) {
@@ -484,14 +527,15 @@ impl Block {
         }
         let description = if queue_play {
             if self.pending_play {
-                "Starts as soon as the install finishes".to_owned()
+                tr!(language, "home.queue_pending")
             } else {
-                "Starts after the current install finishes".to_owned()
+                tr!(language, "home.queue_waiting")
             }
         } else {
-            profile
-                .map_or("Start a new adventure", |profile| profile.name.as_str())
-                .to_owned()
+            profile.map_or_else(
+                || tr!(language, "home.start_adventure"),
+                |profile| profile.name.clone(),
+            )
         };
         let icon = match &action {
             UiAction::Play => super::design::Icon::Play,
@@ -560,7 +604,7 @@ impl Block {
                         UiAction::Drawer(Some(Drawer::Profiles)),
                         cx,
                     )
-                    .aria_label("Switch game")
+                    .aria_label(tr!(language, "action.switch_game"))
                     .absolute()
                     .right_0()
                     .top_0()
@@ -584,13 +628,22 @@ impl Block {
         content.into_any_element()
     }
 
+    /// The welcome is already shown by the identity card.
+    fn baseline_status(&self) -> bool {
+        self.status.key() == Some("home.welcome")
+    }
+
     fn home_identity(
         &self,
         account: Option<&block_auth::Account>,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
-        let name = account.map_or("Welcome to Block", |account| account.player_name.as_str());
+        let language = self.language();
+        let name = account.map_or_else(
+            || tr!(language, "home.welcome"),
+            |account| account.player_name.clone(),
+        );
         let avatar = account.and_then(|account| self.account_avatars.get(&account_id(account)));
         let has_account = account.is_some();
         let viewport = div()
@@ -608,7 +661,7 @@ impl Block {
             })
             .flex_1()
             .min_h_0()
-            .scroll_area(&self.shell.home_scroll, "Player", self.palette, false);
+            .scroll_area(&self.shell.home_scroll, "home.player", self.palette, false);
         // Center within a content-sized child, not the viewport: when content
         // overflows, its start must remain reachable at the scroll origin.
         let mut identity = div()
@@ -641,7 +694,7 @@ impl Block {
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .max_w_full()
                                 .truncate()
-                                .child(name.to_owned()),
+                                .child(name.clone()),
                         )
                         .child(
                             div()
@@ -658,16 +711,21 @@ impl Block {
                                 ),
                         ),
                 )
-                .child(self.home_avatar(name, avatar, window, cx));
+                .child(self.home_avatar(&name, avatar, window, cx));
         } else {
             identity = identity
                 .child(super::design::Icon::Account.render(40., self.palette.muted))
-                .child(div().text_2xl().child(name.to_owned()))
-                .child(note("Add an account to start your next adventure."))
+                .child(div().text_2xl().child(name))
+                .child(note(tr!(language, "home.add_account_hint")))
                 .child(
-                    self.button("home-sign-in", "Add account", UiAction::SignIn, cx)
-                        .bg(rgb(self.palette.primary))
-                        .text_color(rgb(self.palette.on_primary)),
+                    self.button(
+                        "home-sign-in",
+                        tr!(language, "home.add_account"),
+                        UiAction::SignIn,
+                        cx,
+                    )
+                    .bg(rgb(self.palette.primary))
+                    .text_color(rgb(self.palette.on_primary)),
                 );
         }
         viewport.child(identity)
@@ -739,36 +797,52 @@ impl Block {
                     ))
                     .opacity(hover),
             )
-            .child(super::tooltip::trigger(avatar, "Switch account", cx))
+            .child(super::tooltip::trigger(
+                avatar,
+                tr!(self.language(), "action.switch_account"),
+                cx,
+            ))
     }
 
     fn home_version(&self) -> Option<String> {
         let profile = self.profile()?;
         let (instance, _, target) = self.snapshot.selection(&profile.id).ok()?;
+        let language = self.language();
         let kind = self
             .version_catalog
             .iter()
             .find(|entry| entry.id == instance.minecraft_version)
             .map(|entry| entry.kind);
         let release = match kind {
-            Some(block_launcher::manifest::model::VersionType::Release) => "Stable release",
-            Some(block_launcher::manifest::model::VersionType::Snapshot) => "Snapshot",
-            Some(block_launcher::manifest::model::VersionType::OldBeta) => "Old beta",
-            Some(block_launcher::manifest::model::VersionType::OldAlpha) => "Old alpha",
-            None => "Type unverified",
+            Some(block_launcher::manifest::model::VersionType::Release) => {
+                tr!(language, "home.version.release")
+            }
+            Some(block_launcher::manifest::model::VersionType::Snapshot) => {
+                tr!(language, "home.version.snapshot")
+            }
+            Some(block_launcher::manifest::model::VersionType::OldBeta) => {
+                tr!(language, "home.version.old_beta")
+            }
+            Some(block_launcher::manifest::model::VersionType::OldAlpha) => {
+                tr!(language, "home.version.old_alpha")
+            }
+            None => tr!(language, "home.version.unverified"),
+        };
+        let note = if kind.is_none() {
+            tr!(language, "home.version.note_unverified")
+        } else {
+            tr!(language, "home.version.note_verified")
         };
         let loader = target.display_name();
-        let description = format!(
-            "Minecraft {} · {release} · {loader}{}",
-            instance.minecraft_version,
-            if kind.is_none() {
-                ". Official release metadata is not available for this version."
-            } else {
-                ". Type verified by the official version catalog."
-            }
-        );
 
-        Some(description)
+        Some(tr!(
+            language,
+            "home.version.summary",
+            version = instance.minecraft_version,
+            release = release,
+            loader = loader,
+            note = note,
+        ))
     }
 
     fn home_task(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
@@ -788,26 +862,26 @@ impl Block {
                     && (self.active_run.is_some()
                         || self.operation_kind == super::OperationKind::Launch)));
         let phase = if stopping {
-            "Stopping"
+            HomePhase::Stopping
         } else if let Some(run) = &self.active_run {
             match self.session_revisions.get(run).map(|revision| revision.1) {
                 Some(
                     block_launcher::session_host::RunState::Starting
                     | block_launcher::session_host::RunState::Preparing,
-                ) => "Preparing launch",
+                ) => HomePhase::PreparingLaunch,
                 Some(block_launcher::session_host::RunState::MonitoringInterrupted) => {
-                    "Monitoring interrupted"
+                    HomePhase::MonitoringInterrupted
                 }
-                _ => "Running",
+                _ => HomePhase::Running,
             }
         } else if current.is_some() {
-            "Downloading"
+            HomePhase::Downloading
         } else if self.operation_kind == super::OperationKind::Launch {
-            "Preparing launch"
+            HomePhase::PreparingLaunch
         } else if self.operation_kind == super::OperationKind::Install {
-            "Verifying installation"
+            HomePhase::VerifyingInstallation
         } else {
-            "Working"
+            HomePhase::Working
         };
         state.reconcile(
             self.busy.then(|| HomePanel {
@@ -840,6 +914,7 @@ impl Block {
         panel: &HomePanel,
         cx: &Context<'_, Self>,
     ) -> gpui::Stateful<gpui::Div> {
+        let language = self.language();
         let progress = panel.resource.map_or(
             super::components::ProgressState::Indeterminate,
             |(received, size)| super::components::ProgressState::from_counts(received, size),
@@ -868,42 +943,60 @@ impl Block {
                             .id("home-task-phase")
                             .debug_selector(|| "home-task-phase".into())
                             .text_sm()
-                            .child(panel.phase),
+                            .child(tr!(language, panel.phase.key())),
                     )
-                    .child(div().text_xs().truncate().child(panel.status.clone()))
-                    .children(
-                        (panel.phase != "Running" && panel.phase != "Monitoring interrupted")
-                            .then(|| super::components::progress(progress, self.palette)),
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .child(panel.status.text(language)),
                     )
+                    .children(panel.phase.shows_progress().then(|| {
+                        super::components::progress(
+                            progress,
+                            self.palette,
+                            tr!(language, "common.in_progress"),
+                        )
+                    }))
                     .child(note(panel.resource.map_or_else(
-                        || {
-                            format!(
-                                "{} resources verified · overall total unknown",
-                                panel.verified
-                            )
-                        },
+                        || tr!(language, "home.verified_resources", count = panel.verified,),
                         |(received, size)| {
-                            format!(
-                                "Current resource: {received} / {} bytes",
-                                size.map_or_else(|| "unknown".into(), |size| size.to_string())
+                            let total = size.map_or_else(
+                                || tr!(language, "home.unknown_total"),
+                                |size| size.to_string(),
+                            );
+                            tr!(
+                                language,
+                                "home.current_resource",
+                                received = received,
+                                total = total,
                             )
                         },
                     ))),
             )
             .children(self.can_stop().then(|| {
                 self.button("home-stop", "", UiAction::Stop, cx)
-                    .aria_label("Stop")
+                    .aria_label(tr!(language, "home.stop"))
                     .child(super::design::Icon::Stop.render(14., self.palette.foreground))
             }))
     }
 
-    fn render_popups(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    /// A select nested directly in a sheet must paint above that sheet's scrim.
+    /// Other selects retain their existing shell host, including dialog-owned
+    /// selects stacked over a sheet.
+    pub(super) fn render_popups(&self, sheet: bool, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        let mut sheet_parent = false;
         self.shell
             .surfaces
             .layers()
             .filter_map(|layer| {
-                let Surface::Select(state) = &layer.kind else {
-                    return None;
+                let state = match &layer.kind {
+                    Surface::Select(state) if sheet_parent == sheet => state,
+                    Surface::Select(_) => return None,
+                    kind => {
+                        sheet_parent = kind.overlay() == Some(OverlayPresentation::Sheet);
+                        return None;
+                    }
                 };
                 Some(
                     gpui_base::Positioner::corner(gpui::Anchor::TopLeft, state.anchor)
@@ -961,6 +1054,7 @@ impl Block {
         // Wizard sections bring their own headings, scrolling
         // and actions; size the surface area like the old section window and
         // keep the dialog footer outside that fixed content height.
+        let language = self.language();
         let section_height = px(520.);
         let (content, section) = match &kind {
             Surface::WizardSection(page) => (
@@ -980,12 +1074,22 @@ impl Block {
                         super::patterns::management_footer(self.palette)
                             .justify_end()
                             .child(
-                                self.button("section-cancel", "Cancel", UiAction::Drawer(None), cx)
-                                    .w_auto(),
+                                self.button(
+                                    "section-cancel",
+                                    tr!(language, "common.cancel"),
+                                    UiAction::Drawer(None),
+                                    cx,
+                                )
+                                .w_auto(),
                             )
                             .child(
-                                self.button("section-done", "Done", UiAction::WizardPage(None), cx)
-                                    .w_auto(),
+                                self.button(
+                                    "section-done",
+                                    tr!(language, "action.done"),
+                                    UiAction::WizardPage(None),
+                                    cx,
+                                )
+                                .w_auto(),
                             ),
                     ),
                 true,
@@ -1044,19 +1148,31 @@ impl Block {
     }
 
     /// Fixed content height for each sheet.
-    pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (&'static str, &'static str, f32) {
+    pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (String, String, f32) {
+        let language = self.language();
         match kind {
-            Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(),
-            Surface::Drawer(Drawer::Profiles) => {
-                ("Switch Profile", "Choose how you want to play.", 540.)
-            }
-            Surface::Drawer(Drawer::Accounts) => (
-                "Switch Account",
-                "Choose the account you want to use.",
+            Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(language),
+            Surface::Drawer(Drawer::Language) => (
+                tr!(language, "setup.language.label"),
+                tr!(language, "setup.language.description"),
+                260.,
+            ),
+            Surface::Drawer(Drawer::Profiles) => (
+                tr!(language, "sheet.profiles_title"),
+                tr!(language, "sheet.profiles_description"),
                 540.,
             ),
-            Surface::Drawer(Drawer::Downloads) => ("Downloads", "Track your download tasks.", 440.),
-            _ => ("", "", 440.),
+            Surface::Drawer(Drawer::Accounts) => (
+                tr!(language, "sheet.accounts_title"),
+                tr!(language, "sheet.accounts_description"),
+                540.,
+            ),
+            Surface::Drawer(Drawer::Downloads) => (
+                tr!(language, "surface.downloads"),
+                tr!(language, "sheet.downloads_description"),
+                440.,
+            ),
+            _ => (String::new(), String::new(), 440.),
         }
     }
 
@@ -1070,6 +1186,24 @@ impl Block {
     ) -> AnyElement {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
+            Surface::Drawer(Drawer::Language) => {
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(self.product_select_field(
+                        "setup-language",
+                        tr!(self.language(), "setup.language.label"),
+                        self.language().self_name(),
+                        super::select::ProductChoice::Language,
+                        cx,
+                    ))
+                    .children(self.first_run_feedback(self.language()).map(|message| {
+                        note(message).debug_selector(|| "setup-language-notice".into())
+                    }))
+                    .into_any_element()
+            }
             Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
                 .size_full()
                 .min_h_0()
@@ -1091,6 +1225,7 @@ impl Block {
     /// Name the exact record a confirmation removes when the catalog still
     /// holds it, falling back to the surface's neutral title.
     pub(super) fn surface_dialog_title(&self, kind: &Surface) -> String {
+        let language = self.language();
         match kind {
             Surface::DeleteProfile(id) => self
                 .snapshot
@@ -1098,43 +1233,52 @@ impl Block {
                 .iter()
                 .find(|profile| &profile.id == id)
                 .map_or_else(
-                    || "Delete this profile?".to_owned(),
-                    |profile| format!("Delete {}?", profile.name),
+                    || tr!(language, "dialog.delete_profile.title"),
+                    |profile| {
+                        tr!(
+                            language,
+                            "dialog.delete_profile.title_named",
+                            name = profile.name,
+                        )
+                    },
                 ),
             Surface::RemoveAccount(id) => self
                 .accounts
                 .iter()
                 .find(|account| &account_id(account) == id)
                 .map_or_else(
-                    || "Remove this account?".to_owned(),
-                    |account| format!("Remove {}?", account.player_name),
+                    || tr!(language, "dialog.remove_account.title"),
+                    |account| {
+                        tr!(
+                            language,
+                            "dialog.remove_account.title_named",
+                            name = account.player_name,
+                        )
+                    },
                 ),
-            Surface::RemoveProvider(_) => "Remove this provider?".to_owned(),
-            Surface::SeparateProfiles => "Enable separated profiles?".to_owned(),
-            _ => kind.title().to_owned(),
+            Surface::RemoveProvider(_) => tr!(language, "dialog.remove_provider.title"),
+            Surface::SeparateProfiles => tr!(language, "dialog.separate_profiles.title"),
+            _ => kind.title(language),
         }
     }
 
     fn surface_dialog_notes(&self, kind: &Surface) -> Vec<String> {
+        let language = self.language();
         match kind {
             Surface::DeleteProfile(_) => vec![if self.snapshot.profile_mode
                 == block_launcher::catalog::ProfileMode::Bundled
             {
-                "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.".to_owned()
+                tr!(language, "dialog.delete_profile.bundled")
             } else {
-                "Only launch settings are removed. Worlds, game data and installation files stay on disk.".to_owned()
+                tr!(language, "dialog.delete_profile.separated")
             }],
-            Surface::RemoveAccount(_) => vec![
-                "This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it.".to_owned(),
-            ],
+            Surface::RemoveAccount(_) => vec![tr!(language, "dialog.remove_account.note")],
             Surface::RemoveProvider(id) => vec![if self.provider_links(id) > 0 {
-                "This provider is used by saved accounts. Remove those accounts first.".to_owned()
+                tr!(language, "dialog.remove_provider.used")
             } else {
-                "The saved provider and cached metadata are removed. Game files stay on disk.".to_owned()
+                tr!(language, "dialog.remove_provider.note")
             }],
-            Surface::SeparateProfiles => vec![
-                "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.".to_owned(),
-            ],
+            Surface::SeparateProfiles => vec![tr!(language, "dialog.separate_profiles.note")],
             _ => Vec::new(),
         }
     }
@@ -1144,18 +1288,19 @@ impl Block {
         kind: &Surface,
         cx: &Context<'_, Self>,
     ) -> Vec<super::components::Control> {
+        let language = self.language();
         if matches!(kind, Surface::GamesHelp) {
             return vec![
                 self.surface_dialog_button(
                     "games-help-settings",
-                    "Profile mode",
+                    tr!(language, "action.profile_mode"),
                     Some(UiAction::ProfileModeSettings),
                     SurfaceDialogTone::Outline,
                     cx,
                 ),
                 self.surface_dialog_button(
                     "close-drawer",
-                    "Close",
+                    tr!(language, "common.close"),
                     None,
                     SurfaceDialogTone::Outline,
                     cx,
@@ -1165,22 +1310,22 @@ impl Block {
         let (cancel_id, cancel_label, cancel_action, primary) = match kind {
             Surface::DeleteProfile(_) => (
                 "close-drawer",
-                "Cancel",
+                tr!(language, "common.cancel"),
                 None,
                 Some((
                     "confirm-delete",
-                    "Delete profile",
+                    tr!(language, "action.delete_profile"),
                     UiAction::ConfirmDelete,
                     SurfaceDialogTone::Destructive,
                 )),
             ),
             Surface::RemoveAccount(id) => (
                 "close-drawer",
-                "Cancel",
+                tr!(language, "common.cancel"),
                 None,
                 Some((
                     "confirm-remove-account",
-                    "Remove account",
+                    tr!(language, "action.remove_account"),
                     UiAction::SignOut(id.clone()),
                     SurfaceDialogTone::Destructive,
                 )),
@@ -1189,12 +1334,16 @@ impl Block {
                 let used = self.provider_links(id) > 0;
                 (
                     "close-drawer",
-                    if used { "Close" } else { "Cancel" },
+                    if used {
+                        tr!(language, "common.close")
+                    } else {
+                        tr!(language, "common.cancel")
+                    },
                     None,
                     (!used).then(|| {
                         (
                             "confirm-remove-provider",
-                            "Remove provider",
+                            tr!(language, "action.remove_provider"),
                             UiAction::ProviderRemove(id.clone()),
                             SurfaceDialogTone::Destructive,
                         )
@@ -1203,17 +1352,19 @@ impl Block {
             }
             Surface::SeparateProfiles => (
                 "cancel-separate",
-                "Keep bundled mode",
+                tr!(language, "action.keep_bundled"),
                 Some(UiAction::ConfirmSeparate(false)),
                 Some((
                     "confirm-separate",
-                    "Enable separated profiles",
+                    tr!(language, "action.enable_separated"),
                     UiAction::SeparateProfiles,
                     SurfaceDialogTone::Primary,
                 )),
             ),
-            Surface::DownloadFiles(_) => ("downloads-back", "Back", None, None),
-            _ => ("close-drawer", "Close", None, None),
+            Surface::DownloadFiles(_) => {
+                ("downloads-back", tr!(language, "action.back"), None, None)
+            }
+            _ => ("close-drawer", tr!(language, "common.close"), None, None),
         };
         let mut actions = vec![self.surface_dialog_button(
             cancel_id,
@@ -1231,7 +1382,7 @@ impl Block {
     fn surface_dialog_button(
         &self,
         id: &'static str,
-        label: &'static str,
+        label: String,
         action: Option<UiAction>,
         tone: SurfaceDialogTone,
         cx: &Context<'_, Self>,
@@ -1281,3 +1432,45 @@ enum SurfaceDialogTone {
 #[cfg(test)]
 #[path = "home_tests.rs"]
 mod home_tests;
+
+#[cfg(test)]
+mod phase_tests {
+    use super::HomePhase;
+    use crate::Language;
+
+    /// The task panel keeps its identity as a phase, not as the label it last
+    /// painted: the label resolves per language and the progress bar follows the
+    /// phase itself.
+    #[test]
+    fn every_phase_keeps_its_own_label_and_progress_rule() {
+        for (phase, key, shows_progress) in [
+            (HomePhase::Stopping, "home.phase.stopping", true),
+            (
+                HomePhase::PreparingLaunch,
+                "home.phase.preparing_launch",
+                true,
+            ),
+            (
+                HomePhase::MonitoringInterrupted,
+                "home.phase.monitoring_interrupted",
+                false,
+            ),
+            (HomePhase::Running, "home.phase.running", false),
+            (HomePhase::Downloading, "home.phase.downloading", true),
+            (
+                HomePhase::VerifyingInstallation,
+                "home.phase.verifying",
+                true,
+            ),
+            (HomePhase::Working, "home.phase.working", true),
+        ] {
+            assert_eq!(phase.key(), key);
+            assert_eq!(phase.shows_progress(), shows_progress, "{key}");
+            for language in Language::ALL {
+                let label = tr!(language, key);
+                assert!(!label.is_empty(), "{key} resolved to nothing");
+                assert_ne!(label, key, "{key} has no {} text", language.code());
+            }
+        }
+    }
+}

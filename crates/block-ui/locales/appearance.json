@@ -1,0 +1,17 @@
+{
+  "_version": 2,
+  "appearance.icon.blocks": {"en": "Blocks", "zh-Hans": "方块", "ja": "ブロック"},
+  "appearance.icon.layers": {"en": "Layers", "zh-Hans": "图层", "ja": "レイヤー"},
+  "appearance.icon.pickaxe": {"en": "Pickaxe", "zh-Hans": "镐", "ja": "ツルハシ"},
+  "appearance.icon.sword": {"en": "Sword", "zh-Hans": "剑", "ja": "剣"},
+  "appearance.icon.compass": {"en": "Compass", "zh-Hans": "指南针", "ja": "コンパス"},
+  "appearance.icon.hammer": {"en": "Hammer", "zh-Hans": "锤", "ja": "ハンマー"},
+  "appearance.icon.leaf": {"en": "Leaf", "zh-Hans": "树叶", "ja": "葉"},
+  "appearance.icon.experiment": {"en": "Experiment", "zh-Hans": "实验", "ja": "実験"},
+  "appearance.color.gray": {"en": "Gray", "zh-Hans": "灰色", "ja": "グレー"},
+  "appearance.color.blue": {"en": "Blue", "zh-Hans": "蓝色", "ja": "青"},
+  "appearance.color.green": {"en": "Green", "zh-Hans": "绿色", "ja": "緑"},
+  "appearance.color.orange": {"en": "Orange", "zh-Hans": "橙色", "ja": "オレンジ"},
+  "appearance.color.purple": {"en": "Purple", "zh-Hans": "紫色", "ja": "紫"},
+  "appearance.color.pink": {"en": "Pink", "zh-Hans": "粉色", "ja": "ピンク"}
+}

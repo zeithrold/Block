@@ -116,6 +116,79 @@ fn settings_select_anchors_to_trigger_and_keeps_inspection_separate_from_value(
 }
 
 #[gpui::test]
+fn settings_language_select_previews_cancels_and_saves(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = crate::Engine::with_root(root.path().to_path_buf())?;
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.engine = Some(engine);
+            view.messages = Some(messages);
+            view
+        });
+        cx.simulate_resize(size(px(1152.), px(720.)));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::Tab(Tab::Settings), window, cx)
+            });
+        });
+        click(cx, "settings-language");
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.surfaces.top().is_some_and(|layer| matches!(
+                &layer.kind,
+                Surface::Select(state)
+                    if state.product == Some(ProductChoice::Language)
+                        && state.choices.iter().map(|choice| choice.label.as_str()).collect::<Vec<_>>()
+                            == ["English", "简体中文", "日本語"]
+                        && state.choices[0].selected
+            ))
+        }));
+        click(cx, "select-choice-2");
+        assert!(view.read_with(cx, |view, _| {
+            view.preferences.language == Some(Language::Japanese)
+                && view.saved_preferences.language.is_none()
+        }));
+        assert_eq!(crate::Preferences::load(root.path())?.language, None);
+
+        click(cx, "settings-language");
+        click(cx, "select-choice-1");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.preferences.language),
+            Some(Language::SimplifiedChinese)
+        );
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::Tab(Tab::Home), window, cx)
+            });
+        });
+        assert_eq!(
+            view.read_with(cx, |view, _| view.preferences.language),
+            None
+        );
+
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::Tab(Tab::Settings), window, cx)
+            });
+        });
+        click(cx, "settings-language");
+        click(cx, "select-choice-1");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::SavePreferences, window, cx)
+            });
+        });
+        assert_eq!(
+            crate::Preferences::load(root.path())?.language,
+            Some(Language::SimplifiedChinese)
+        );
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
 fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early(
     cx: &mut gpui::TestAppContext,
 ) {
@@ -404,4 +477,55 @@ fn app_menu_shares_roving_typeahead_current_page_and_real_navigation(
         view.read_with(cx, |view, _| view.router.tab() == Tab::Instances
             && !view.shell.surfaces.is_open())
     );
+}
+
+/// A real language change refreshes the open menu without replacing it.
+#[gpui::test]
+fn menu_labels_resolve_in_the_view_language(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.router.navigate(Tab::Home);
+        view
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| view.open_app_menu_at(None, window, cx));
+    });
+    cx.run_until_parked();
+    crate::test_support::press(cx, "down");
+    let focus = view.read_with(cx, |view, _| {
+        view.shell
+            .surfaces
+            .top()
+            .and_then(|layer| match &layer.kind {
+                Surface::Select(state) => Some(state.focus.clone()),
+                _ => None,
+            })
+    });
+    for (language, title, first_choice) in [
+        (Language::English, "Block menu", "Home"),
+        (Language::SimplifiedChinese, "Block 菜单", "主页"),
+        (Language::Japanese, "Block メニュー", "ホーム"),
+    ] {
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::SetLanguage(language), window, cx);
+            });
+        });
+        let resolved = view.read_with(cx, |view, _| {
+            let layer = view.shell.surfaces.top()?;
+            let Surface::Select(state) = &layer.kind else {
+                return None;
+            };
+            assert_eq!(state.active, 1);
+            assert_eq!(Some(state.focus.clone()), focus);
+            assert!(state.choices[0].selected);
+            Some((state.title(language), state.choices[0].label.clone()))
+        });
+        assert_eq!(
+            resolved,
+            Some((title.to_owned(), first_choice.to_owned())),
+            "{}",
+            language.code()
+        );
+    }
 }

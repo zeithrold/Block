@@ -45,12 +45,15 @@ impl DownloadGroup {
             Self::Cached => "cached",
         }
     }
-    pub(super) const fn label(self) -> &'static str {
-        match self {
-            Self::Active => "Pending verification",
-            Self::Verified => "Verified downloads",
-            Self::Cached => "Verified cache hits",
-        }
+    pub(super) fn label(self, language: crate::Language) -> String {
+        tr!(
+            language,
+            match self {
+                Self::Active => "downloads.pending",
+                Self::Verified => "downloads.verified",
+                Self::Cached => "downloads.cached",
+            }
+        )
     }
     const fn includes(self, transfer: &Transfer) -> bool {
         match self {
@@ -120,6 +123,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
+        let language = self.language();
         let mut page = div()
             .flex_1()
             .min_h_0()
@@ -127,15 +131,26 @@ impl Block {
             .flex()
             .flex_col()
             .gap_3()
-            .child(note(self.status.clone()));
+            .child(note(self.status.text(self.language())));
         let Some(tracker) = self.download_snapshot() else {
-            return page.child(patterns::empty_state("No observed transfers", if self.busy { "The operation is preparing resources. Files appear when the downloader reports them." } else { "Start an installation or repair to track real downloads." }, self.palette));
+            return page.child(patterns::empty_state(
+                tr!(language, "downloads.empty"),
+                tr!(
+                    language,
+                    if self.busy {
+                        "downloads.preparing"
+                    } else {
+                        "downloads.start"
+                    }
+                ),
+                self.palette,
+            ));
         };
         let count = tracker.transfers().count();
         let completed = tracker.verified();
         let trigger = motion::disclosure_trigger(
             "download-expand",
-            "Observed resources",
+            tr!(language, "downloads.observed"),
             &self.shell.downloads.disclosure,
             self.palette,
             self.motion_preferences(),
@@ -156,10 +171,31 @@ impl Block {
             .border_color(rgb(self.palette.border))
             .pl_2()
             .children(DownloadGroup::ALL.map(|group| self.download_group_row(group, &tracker, cx)));
-        let content = div().flex().flex_col().gap_2().child(trigger)
-            .child(components::progress(ProgressState::from_counts(completed as u64, (count > 0).then_some(count as u64)), self.palette))
-            .child(note(format!("{completed} of {count} observed resources verified. {} bytes received from the network, including retries. The overall plan total is unknown.", tracker.transport_bytes)))
-            .child(motion::disclosure("download-groups", &self.shell.downloads.disclosure, self.motion_preferences(), groups.into_any_element(), window, cx));
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(trigger)
+            .child(components::progress(
+                ProgressState::from_counts(completed as u64, (count > 0).then_some(count as u64)),
+                self.palette,
+                tr!(language, "common.in_progress"),
+            ))
+            .child(note(tr!(
+                language,
+                "downloads.summary",
+                completed = completed,
+                count = count,
+                bytes = tracker.transport_bytes
+            )))
+            .child(motion::disclosure(
+                "download-groups",
+                &self.shell.downloads.disclosure,
+                self.motion_preferences(),
+                groups.into_any_element(),
+                window,
+                cx,
+            ));
         page = page.child(
             super::scroll_area::viewport(
                 div()
@@ -168,7 +204,7 @@ impl Block {
                     .min_h_0()
                     .flex_1(),
                 &self.shell.downloads.scroll,
-                "Download tasks",
+                "downloads.tasks",
                 self.palette,
                 false,
             )
@@ -190,7 +226,7 @@ impl Block {
         let completed = files.iter().filter(|file| file.complete).count();
         components::button(
             format!("download-group-{}", group.slug()),
-            group.label(),
+            group.label(self.language()),
             self.palette,
             ButtonVariant::Ghost,
             ControlState::default(),
@@ -205,7 +241,15 @@ impl Block {
         .p_2()
         .child(div().flex_1())
         .child(components::badge(
-            format!("{} files", files.len()),
+            tr!(
+                self.language(),
+                if files.len() == 1 {
+                    "downloads.one_file"
+                } else {
+                    "downloads.files"
+                },
+                count = files.len()
+            ),
             self.palette,
             if completed > 0 {
                 BadgeVariant::Success
@@ -219,6 +263,7 @@ impl Block {
     /// File-level detail for one download group, without a surface-local
     /// heading or back control: the owning dialog supplies those.
     pub(super) fn render_download_files_body(&self, group: DownloadGroup) -> gpui::Div {
+        let language = self.language();
         let files: Vec<_> = self
             .download_snapshot()
             .into_iter()
@@ -230,24 +275,80 @@ impl Block {
                     .collect::<Vec<_>>()
             })
             .collect();
-        let rows = div().flex().flex_col().gap_2()
+        let rows = div()
+            .flex()
+            .flex_col()
+            .gap_2()
             .children(files.iter().map(|file| self.download_file_row(file)))
-            .children(files.is_empty().then(|| patterns::empty_state("No resources in this group", "Transfer updates can move resources between groups. Back returns to the task list.", self.palette)));
-        div().h(px(360.))
-            .min_w_0().flex().flex_col().gap_3()
-            .child(note(format!("{} observed resources. Resource IDs are SHA-1 hashes; the downloader does not report file names.", files.len())))
-            .child(super::scroll_area::viewport(div().id("download-files-scroll").debug_selector(|| "download-files-scroll".into()).min_h_0().flex_1(), &self.shell.downloads.files_scroll[group.index()], "Download files", self.palette, false).child(rows))
+            .children(files.is_empty().then(|| {
+                patterns::empty_state(
+                    tr!(language, "downloads.no_group_resources"),
+                    tr!(language, "downloads.moving_resources"),
+                    self.palette,
+                )
+            }));
+        div()
+            .h(px(360.))
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(note(tr!(
+                language,
+                "downloads.resources_summary",
+                count = files.len()
+            )))
+            .child(
+                super::scroll_area::viewport(
+                    div()
+                        .id("download-files-scroll")
+                        .debug_selector(|| "download-files-scroll".into())
+                        .min_h_0()
+                        .flex_1(),
+                    &self.shell.downloads.files_scroll[group.index()],
+                    "downloads.files",
+                    self.palette,
+                    false,
+                )
+                .child(rows),
+            )
     }
 
     fn download_file_row(&self, file: &Transfer) -> impl gpui::IntoElement + use<> {
-        let status = if file.cached {
-            "Verified cache hit"
-        } else if file.complete {
-            "Downloaded and verified"
-        } else if file.retries > 0 {
-            "Not verified after retry"
+        let language = self.language();
+        let status = tr!(
+            language,
+            if file.cached {
+                "downloads.cache_hit"
+            } else if file.complete {
+                "downloads.downloaded"
+            } else if file.retries > 0 {
+                "downloads.retry_unverified"
+            } else {
+                "downloads.not_verified"
+            }
+        );
+        let total = file.size.map_or_else(
+            || tr!(language, "downloads.unknown"),
+            |size| size.to_string(),
+        );
+        let progress_text = if file.retries > 0 {
+            tr!(
+                language,
+                "downloads.progress_retry",
+                received = file.received,
+                total = total,
+                status = status,
+                retry = file.retries
+            )
         } else {
-            "Not yet verified"
+            tr!(
+                language,
+                "downloads.progress",
+                received = file.received,
+                total = total,
+                status = status
+            )
         };
         let progress = if file.complete {
             ProgressState::from_counts(1, Some(1))
@@ -285,26 +386,17 @@ impl Block {
                         }
                         .render(14., self.palette.muted),
                     )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_xs()
-                            .truncate()
-                            .child(format!("Resource {}", file.id)),
-                    ),
+                    .child(div().min_w_0().flex_1().text_xs().truncate().child(tr!(
+                        language,
+                        "downloads.resource",
+                        id = file.id
+                    ))),
             )
-            .child(components::progress(progress, self.palette))
-            .child(note(format!(
-                "{} / {} bytes · {status}{}",
-                file.received,
-                file.size
-                    .map_or_else(|| "unknown".into(), |size| size.to_string()),
-                if file.retries > 0 {
-                    format!(" · retry {}", file.retries)
-                } else {
-                    String::new()
-                }
-            )))
+            .child(components::progress(
+                progress,
+                self.palette,
+                tr!(language, "common.in_progress"),
+            ))
+            .child(note(progress_text))
     }
 }

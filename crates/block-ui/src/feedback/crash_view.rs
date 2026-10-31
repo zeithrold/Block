@@ -4,7 +4,7 @@ use std::{fmt, fmt::Write as _, path::PathBuf};
 
 use block_launcher::{
     CancellationToken,
-    crash::{Confidence, CrashReport, ExitKind},
+    crash::{Confidence, CrashReport, DiagnosisKind, ExitKind},
 };
 use gpui::{
     App, ClipboardItem, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
@@ -49,6 +49,39 @@ struct CloseHelp;
 
 type ReturnToProfile = Box<dyn FnMut(&mut Window, &mut App)>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Status {
+    Copied,
+    PrepareFailed,
+    ChooseDestination,
+    Exported,
+    ExportFailed,
+    Cancelled,
+    ChooserFailed,
+    LanguageInitializationFailed(String),
+}
+
+impl Status {
+    fn text(&self, language: crate::Language) -> String {
+        match self {
+            Self::Copied => tr!(language, "crash.copied"),
+            Self::PrepareFailed => tr!(language, "crash.prepare_failed"),
+            Self::ChooseDestination => tr!(language, "crash.choose_destination"),
+            Self::Exported => tr!(language, "crash.exported"),
+            Self::ExportFailed => tr!(language, "crash.export_failed"),
+            Self::Cancelled => tr!(language, "crash.export_cancelled"),
+            Self::ChooserFailed => tr!(language, "crash.chooser_failed"),
+            Self::LanguageInitializationFailed(error) => {
+                tr!(
+                    language,
+                    "common.language_initialization_failed",
+                    error = error
+                )
+            }
+        }
+    }
+}
+
 /// Displays facts and possible explanations without reading original game logs.
 ///
 /// The report must already be redacted, including its context and attachments.
@@ -56,13 +89,14 @@ type ReturnToProfile = Box<dyn FnMut(&mut Window, &mut App)>;
 pub struct CrashView {
     report: CrashReport,
     report_directory: PathBuf,
+    language: crate::Language,
     return_to_profile: ReturnToProfile,
     focus: FocusHandle,
     focused: HelpAction,
     show_details: bool,
     exporting: bool,
     export_cancel: Option<CancellationToken>,
-    status: Option<String>,
+    status: Option<Status>,
     chrome_dragging: bool,
 }
 
@@ -86,10 +120,16 @@ impl Drop for CrashView {
 }
 
 impl CrashView {
+    /// Display a startup language-preference failure without hiding the report.
+    pub fn report_language_initialization_error(&mut self, error: String) {
+        self.status = Some(Status::LanguageInitializationFailed(error));
+    }
+
     #[must_use]
     pub fn new(
         report: CrashReport,
         report_directory: PathBuf,
+        language: crate::Language,
         return_to_profile: impl FnMut(&mut Window, &mut App) + 'static,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
@@ -127,6 +167,7 @@ impl CrashView {
         Self {
             report,
             report_directory,
+            language,
             return_to_profile: Box::new(return_to_profile),
             focus,
             focused: HelpAction::ReturnToProfile,
@@ -155,7 +196,7 @@ impl CrashView {
             }
             HelpAction::CopySummary => {
                 cx.write_to_clipboard(ClipboardItem::new_string(diagnostic_summary(&self.report)));
-                self.status = Some("Diagnostic summary copied. Review it before sharing.".into());
+                self.status = Some(Status::Copied);
             }
             HelpAction::ToggleDetails => self.show_details = !self.show_details,
             HelpAction::Close => window.remove_window(),
@@ -173,14 +214,15 @@ impl CrashView {
         action != HelpAction::CancelExport || self.export_cancel.is_some()
     }
 
-    fn export_label(&self) -> &'static str {
-        if self.export_cancel.is_some() {
-            "Waiting for save dialog…"
+    fn export_label(&self) -> String {
+        let key = if self.export_cancel.is_some() {
+            "crash.waiting_save"
         } else if self.exporting {
-            "Exporting…"
+            "crash.exporting"
         } else {
-            "Export diagnostics"
-        }
+            "crash.export"
+        };
+        tr!(self.language, key)
     }
 
     /// Rove to the next action that is offered and enabled.
@@ -216,8 +258,7 @@ impl CrashView {
             return;
         }
         let Ok(serialized) = serde_json::to_vec_pretty(&self.report) else {
-            self.status =
-                Some("Could not prepare diagnostics. You can still copy the summary.".into());
+            self.status = Some(Status::PrepareFailed);
             return;
         };
         let selection =
@@ -226,7 +267,7 @@ impl CrashView {
         self.exporting = true;
         self.export_cancel = Some(cancel.clone());
         self.focused = HelpAction::CancelExport;
-        self.status = Some("Choose where to save the sanitized diagnostic report.".into());
+        self.status = Some(Status::ChooseDestination);
         cx.spawn(async move |view, cx| {
             // A native chooser may wait for the user indefinitely. Race explicit
             // cancellation, not a deadline that could expire a healthy dialog.
@@ -254,21 +295,19 @@ impl CrashView {
                         .spawn(async move { std::fs::write(path, serialized) })
                         .await;
                     if saved.is_ok() {
-                        "Diagnostics exported. Review the report before sharing."
+                        Status::Exported
                     } else {
-                        "Could not save diagnostics. Try another folder."
+                        Status::ExportFailed
                     }
                 }
-                None | Some(Ok(Ok(None))) => "Export canceled.",
-                Some(Ok(Err(_)) | Err(_)) => {
-                    "The save dialog could not open. You can still copy the summary."
-                }
+                None | Some(Ok(Ok(None))) => Status::Cancelled,
+                Some(Ok(Err(_)) | Err(_)) => Status::ChooserFailed,
             };
             let _ = view.update(cx, |view, cx| {
                 view.exporting = false;
                 view.export_cancel = None;
                 view.settle_focus();
-                view.status = Some(status.into());
+                view.status = Some(status);
                 cx.notify();
             });
         })
@@ -317,15 +356,27 @@ impl CrashView {
             .id("crash-technical-details")
             .debug_selector(|| "crash-technical-details".to_owned())
             .gap_3()
-            .child(div().text_sm().child("Technical details"))
-            .child(super::note(exit_details(&self.report)))
-            .child(super::note(format!(
-                "Session {}",
-                self.report.context.run_id
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr!(self.language, "crash.technical_details")),
+            )
+            .child(super::note(localized_exit_details(
+                &self.report,
+                self.language,
             )))
-            .child(div().text_sm().child("Recent game output"))
+            .child(super::note(tr!(
+                self.language,
+                "crash.session",
+                id = &self.report.context.run_id
+            )))
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr!(self.language, "crash.recent_output")),
+            )
             .child(log_text(if self.report.sanitized_tail.is_empty() {
-                "No game output was captured.".into()
+                tr!(self.language, "crash.no_output")
             } else {
                 self.report.sanitized_tail.clone()
             }));
@@ -334,50 +385,42 @@ impl CrashView {
                 .child(div().text_sm().child(attachment.name.clone()))
                 .child(log_text(attachment.sanitized_text.clone()));
             if attachment.truncated {
-                details = details.child(super::note("This diagnostic attachment was truncated."));
+                details = details.child(super::note(tr!(
+                    self.language,
+                    "crash.attachment_truncated"
+                )));
             }
         }
         details
     }
-}
 
-impl Render for CrashView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        if super::ui_logging::claim_failure_notice(block_logging::failure().is_some(), cx) {
-            super::feedback::ToastLayer::enqueue(
-                vec![super::feedback::Toast::new(
-                    super::ui_logging::FAILURE_MESSAGE.into(),
-                    super::feedback::ToastKind::Error,
-                )],
-                window,
-                cx,
-            );
-        }
+    fn content(&self, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
         let context = &self.report.context;
         let edition = context.loader.as_deref().unwrap_or("Vanilla");
         let mut causes = super::panel()
             .gap_3()
-            .child(div().text_lg().child("What might have happened"));
+            .child(div().text_lg().child(tr!(self.language, "crash.causes")));
         if self.report.diagnoses.is_empty() {
-            causes = causes.child(super::note("No diagnosis is available for this session."));
+            causes = causes.child(super::note(tr!(self.language, "crash.no_diagnosis")));
         }
         for diagnosis in &self.report.diagnoses {
-            let confidence = match diagnosis.confidence {
-                Confidence::High => "Strong log evidence",
-                Confidence::Possible => "Possible cause",
-                Confidence::Unknown => "Cause not determined",
+            let confidence_key = match diagnosis.confidence {
+                Confidence::High => "crash.confidence_high",
+                Confidence::Possible => "crash.confidence_possible",
+                Confidence::Unknown => "crash.confidence_unknown",
             };
+            let (title_key, action_key) = diagnosis_keys(diagnosis.kind);
             let mut cause = div()
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(super::note(confidence))
-                .child(div().text_sm().child(diagnosis.title.clone()));
+                .child(super::note(tr!(self.language, confidence_key)))
+                .child(div().text_sm().child(tr!(self.language, title_key)));
             for evidence in &diagnosis.evidence {
                 cause = cause.child(log_text(evidence.clone()));
             }
-            causes = causes
-                .child(cause.child(div().text_sm().child(diagnosis.suggested_action.clone())));
+            causes =
+                causes.child(cause.child(div().text_sm().child(tr!(self.language, action_key))));
         }
         let mut body = div()
             .id("crash-help-content")
@@ -387,29 +430,85 @@ impl Render for CrashView {
             .flex_col()
             .p_6()
             .gap_4()
-            .child(super::note("BLOCK · GAME SESSION HELP"))
-            .child(div().text_2xl().child(headline(self.report.outcome.kind)))
-            .child(div().text_sm().child(format!("{} · Minecraft {} · {edition}", context.profile_name, context.minecraft_version)))
-            .child(super::note(self.report.summary.clone()))
+            .child(super::note(tr!(self.language, "crash.help_heading")))
+            .child(
+                div()
+                    .text_2xl()
+                    .child(headline(self.report.outcome.kind, self.language)),
+            )
+            .child(div().text_sm().child(format!(
+                "{} · Minecraft {} · {edition}",
+                context.profile_name, context.minecraft_version
+            )))
+            .child(super::note(summary(
+                self.report.outcome.kind,
+                self.language,
+            )))
             .child(causes)
-            .child(div().flex().flex_wrap().gap_2()
-                .child(self.button("crash-return", "Return to instance", HelpAction::ReturnToProfile, cx))
-                .child(self.button("crash-open-folder", "Open report folder", HelpAction::OpenFolder, cx))
-                .child(self.button("crash-export", self.export_label(), HelpAction::Export, cx))
-                .child(self.button("crash-copy", "Copy summary", HelpAction::CopySummary, cx))
-                .children(self.export_cancel.is_some().then(|| {
-                    self.button("crash-cancel-export", "Cancel export", HelpAction::CancelExport, cx)
-                }))
-                .child(self.button("crash-details", if self.show_details { "Hide technical details" } else { "View logs and details" }, HelpAction::ToggleDetails, cx))
-                .child(self.button("crash-close", "Close", HelpAction::Close, cx)))
-            .child(super::note("Diagnostics stay on this device until you choose to share them. Returning to the instance does not restart the game."));
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(self.button(
+                        "crash-return",
+                        tr!(self.language, "crash.return"),
+                        HelpAction::ReturnToProfile,
+                        cx,
+                    ))
+                    .child(self.button(
+                        "crash-open-folder",
+                        tr!(self.language, "crash.open_folder"),
+                        HelpAction::OpenFolder,
+                        cx,
+                    ))
+                    .child(self.button("crash-export", self.export_label(), HelpAction::Export, cx))
+                    .child(self.button(
+                        "crash-copy",
+                        tr!(self.language, "crash.copy"),
+                        HelpAction::CopySummary,
+                        cx,
+                    ))
+                    .children(self.export_cancel.is_some().then(|| {
+                        self.button(
+                            "crash-cancel-export",
+                            tr!(self.language, "crash.cancel_export"),
+                            HelpAction::CancelExport,
+                            cx,
+                        )
+                    }))
+                    .child(self.button(
+                        "crash-details",
+                        tr!(
+                            self.language,
+                            if self.show_details {
+                                "crash.hide_details"
+                            } else {
+                                "crash.view_details"
+                            }
+                        ),
+                        HelpAction::ToggleDetails,
+                        cx,
+                    ))
+                    .child(self.button(
+                        "crash-close",
+                        tr!(self.language, "common.close"),
+                        HelpAction::Close,
+                        cx,
+                    )),
+            )
+            .child(super::note(tr!(self.language, "crash.privacy")));
         if let Some(status) = &self.status {
-            body = body.child(div().text_sm().child(status.clone()));
+            body = body.child(div().text_sm().child(status.text(self.language)));
         }
         if self.show_details {
             body = body.child(self.details());
         }
-        let header = div()
+        body
+    }
+
+    fn header(&self, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
+        div()
             .id("crash-window-chrome")
             .debug_selector(|| "crash-window-chrome".into())
             .h(px(40.))
@@ -449,14 +548,14 @@ impl Render for CrashView {
                             }
                         }),
                     )
-                    .child(div().text_sm().child("Block · Crash help")),
+                    .child(div().text_sm().child(window_title(self.language))),
             )
             .child(
                 div()
                     .id("crash-window-minimize")
                     .debug_selector(|| "crash-window-minimize".into())
                     .role(gpui::accesskit::Role::Button)
-                    .aria_label("Minimize Block crash help")
+                    .aria_label(tr!(self.language, "crash.minimize"))
                     .size(px(32.))
                     .flex()
                     .items_center()
@@ -472,7 +571,7 @@ impl Render for CrashView {
                     .id("crash-window-close")
                     .debug_selector(|| "crash-window-close".into())
                     .role(gpui::accesskit::Role::Button)
-                    .aria_label("Close Block crash help")
+                    .aria_label(tr!(self.language, "crash.close_window"))
                     .size(px(32.))
                     .flex()
                     .items_center()
@@ -482,7 +581,25 @@ impl Render for CrashView {
                     .hover(|style| style.bg(rgb(0x0029_3c4a)))
                     .on_click(cx.listener(|_, _, window, _| window.remove_window()))
                     .child(super::design::Icon::Close.render(16., 0x0095_a4b1)),
+            )
+    }
+}
+
+impl Render for CrashView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        super::feedback::ToastLayer::set_language(self.language, window, cx);
+        if super::ui_logging::claim_failure_notice(block_logging::failure().is_some(), cx) {
+            super::feedback::ToastLayer::enqueue(
+                vec![super::feedback::Toast::new(
+                    msg!("common.logging_unavailable"),
+                    super::feedback::ToastKind::Error,
+                )],
+                window,
+                cx,
             );
+        }
+        let body = self.content(cx);
+        let header = self.header(cx);
         div()
             .key_context("CrashHelp")
             .track_focus(&self.focus)
@@ -515,13 +632,67 @@ impl Render for CrashView {
     }
 }
 
-const fn headline(kind: ExitKind) -> &'static str {
+/// The title used by the native crash-help window and its product chrome.
+#[must_use]
+pub fn window_title(language: crate::Language) -> String {
+    tr!(language, "crash.window_title")
+}
+
+fn headline(kind: ExitKind, language: crate::Language) -> String {
+    let key = match kind {
+        ExitKind::Normal => "crash.normal",
+        ExitKind::Stopped => "crash.stopped",
+        ExitKind::StartFailed => "crash.start_failed",
+        ExitKind::Abnormal => "crash.abnormal",
+        ExitKind::MonitoringInterrupted => "crash.interrupted",
+    };
+    tr!(language, key)
+}
+
+fn summary(kind: ExitKind, language: crate::Language) -> String {
+    let key = match kind {
+        ExitKind::Normal => "crash.summary_normal",
+        ExitKind::Stopped => "crash.summary_stopped",
+        ExitKind::StartFailed => "crash.summary_start_failed",
+        ExitKind::Abnormal => "crash.summary_abnormal",
+        ExitKind::MonitoringInterrupted => "crash.summary_interrupted",
+    };
+    tr!(language, key)
+}
+
+fn diagnosis_keys(kind: DiagnosisKind) -> (&'static str, &'static str) {
     match kind {
-        ExitKind::Normal => "Minecraft closed normally",
-        ExitKind::Stopped => "Minecraft was stopped",
-        ExitKind::StartFailed => "Minecraft could not start",
-        ExitKind::Abnormal => "Minecraft closed unexpectedly",
-        ExitKind::MonitoringInterrupted => "Game monitoring was interrupted",
+        DiagnosisKind::JavaHeapMemory => ("crash.heap_title", "crash.heap_action"),
+        DiagnosisKind::NativeMemory => ("crash.native_title", "crash.native_action"),
+        DiagnosisKind::JavaVersion => ("crash.java_title", "crash.java_action"),
+        DiagnosisKind::ModDependencies => ("crash.mods_title", "crash.mods_action"),
+        DiagnosisKind::GraphicsInitialization => ("crash.graphics_title", "crash.graphics_action"),
+        DiagnosisKind::SessionReservation => {
+            ("crash.reservation_title", "crash.reservation_action")
+        }
+        DiagnosisKind::Unknown => ("crash.unknown_title", "crash.unknown_action"),
+    }
+}
+
+fn localized_exit_details(report: &CrashReport, language: crate::Language) -> String {
+    let mut facts = Vec::new();
+    if let Some(code) = report.outcome.code {
+        facts.push(tr!(language, "crash.exit_code", code = code));
+    }
+    if let Some(signal) = report.outcome.signal {
+        facts.push(tr!(language, "crash.signal", signal = signal));
+    }
+    if let Some(status) = report.outcome.windows_status {
+        facts.push(tr!(
+            language,
+            "crash.windows_status",
+            status = format!("0x{status:08X}")
+        ));
+    }
+    if facts.is_empty() {
+        tr!(language, "crash.no_exit_status")
+    } else {
+        facts.join(" · ")
     }
 }
 
@@ -603,6 +774,50 @@ mod tests {
     }
 
     #[gpui::test]
+    fn crash_help_uses_its_explicit_language_without_changing_the_report(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for (language, title, return_label) in [
+            (
+                crate::Language::English,
+                "Block · Crash help",
+                "Return to instance",
+            ),
+            (
+                crate::Language::SimplifiedChinese,
+                "Block · 崩溃帮助",
+                "返回实例",
+            ),
+            (
+                crate::Language::Japanese,
+                "Block · クラッシュのヘルプ",
+                "インスタンスに戻る",
+            ),
+        ] {
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                CrashView::new(
+                    report(),
+                    std::env::temp_dir(),
+                    language,
+                    |_, _| {},
+                    window,
+                    cx,
+                )
+            });
+            assert_eq!(super::window_title(language), title);
+            let label = cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &"crash-return".into())
+                    .and_then(|node| node.label().map(str::to_owned))
+            });
+            assert_eq!(label.as_deref(), Some(return_label));
+            assert_eq!(
+                view.read_with(cx, |view, _| view.report.summary.clone()),
+                "Minecraft closed unexpectedly."
+            );
+        }
+    }
+
+    #[gpui::test]
     fn help_supports_keyboard_details_and_returns_without_relaunching(
         cx: &mut gpui::TestAppContext,
     ) {
@@ -612,6 +827,7 @@ mod tests {
             CrashView::new(
                 report(),
                 std::env::temp_dir(),
+                crate::Language::English,
                 move |_, _| returned_for_view.set(returned_for_view.get() + 1),
                 window,
                 cx,
@@ -631,7 +847,14 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         let (_, cx) = crate::test_support::window(cx, |window, cx| {
-            CrashView::new(report(), std::env::temp_dir(), |_, _| {}, window, cx)
+            CrashView::new(
+                report(),
+                std::env::temp_dir(),
+                crate::Language::English,
+                |_, _| {},
+                window,
+                cx,
+            )
         });
         crate::test_support::press(cx, "tab tab tab enter");
         let text = cx
@@ -654,7 +877,14 @@ mod tests {
                 "original logs",
             )?;
             let (view, cx) = crate::test_support::window(cx, move |window, cx| {
-                CrashView::new(report(), report_directory, |_, _| {}, window, cx)
+                CrashView::new(
+                    report(),
+                    report_directory,
+                    crate::Language::English,
+                    |_, _| {},
+                    window,
+                    cx,
+                )
             });
             crate::test_support::press(cx, "tab tab enter");
             assert!(cx.did_prompt_for_new_path());
@@ -684,7 +914,14 @@ mod tests {
     #[gpui::test]
     fn rendered_actions_publish_button_role_label_and_export_state(cx: &mut gpui::TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            CrashView::new(report(), std::env::temp_dir(), |_, _| {}, window, cx)
+            CrashView::new(
+                report(),
+                std::env::temp_dir(),
+                crate::Language::English,
+                |_, _| {},
+                window,
+                cx,
+            )
         });
         let ready = cx
             .update(|window, _| gpui_base::test_support::find(window, &[], &"crash-export".into()));
@@ -749,6 +986,7 @@ mod tests {
             CrashView::new(
                 report(),
                 directory.path().to_path_buf(),
+                crate::Language::English,
                 |_, _| {},
                 window,
                 cx,
@@ -768,7 +1006,12 @@ mod tests {
         assert!(view.read_with(cx, |view, _| {
             !view.exporting
                 && view.export_cancel.is_none()
-                && view.status.as_deref() == Some("Export canceled.")
+                && view
+                    .status
+                    .as_ref()
+                    .map(|status| status.text(view.language))
+                    .as_deref()
+                    == Some("Export canceled.")
         }));
 
         // A second request keeps its own picker; the abandoned late choice
@@ -798,6 +1041,7 @@ mod tests {
             CrashView::new(
                 report(),
                 directory.path().to_path_buf(),
+                crate::Language::English,
                 |_, _| {},
                 window,
                 cx,

@@ -284,6 +284,7 @@ pub(super) fn render<T: 'static>(
     state: &WelcomeButton,
     palette: Palette,
     preferences: Preferences,
+    label: String,
     window: &Window,
     cx: &Context<'_, T>,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
@@ -340,7 +341,7 @@ pub(super) fn render<T: 'static>(
     let activation_bounds = root_bounds;
     crate::base_controls::Control::button(
         "welcome-play".into(),
-        "Start setup".into(),
+        label.clone().into(),
         gpui::Role::Button,
         false,
         move |event, window, cx| {
@@ -349,7 +350,7 @@ pub(super) fn render<T: 'static>(
             }
         },
     )
-    .aria_label("Start setup")
+    .aria_label(label)
     .debug_selector(|| "welcome-play".into())
     .w(px(DIAMETER))
     .h(px(DIAMETER))

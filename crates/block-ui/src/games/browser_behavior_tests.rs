@@ -1,11 +1,12 @@
 //! Browser outcomes use synthetic records, never credentials or player files.
 
+use anyhow::Context as _;
 use block_launcher::catalog::{InstallStatus, LaunchTarget, LoaderKind, ProfileMode};
 use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, px, size};
 
 use super::{CollectionLoad, RowIcon};
 use crate::{
-    Block, Tab, UiAction,
+    Block, Language, Tab, UiAction,
     test_support::{ready_snapshot, test_account},
 };
 
@@ -700,4 +701,126 @@ fn component_cards_open_and_return_to_their_own_editor_context(cx: &mut TestAppC
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn game_copy_keeps_one_semantic_entry_per_language() {
+    let result = (|| -> anyhow::Result<()> {
+        let catalog = games_catalog()?;
+        assert_eq!(catalog["_version"], 2);
+        assert_one_entry_per_language(&catalog)?;
+        assert_representative_game_copy();
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+fn games_catalog() -> anyhow::Result<serde_json::Value> {
+    serde_json::from_str(include_str!("../../locales/games.json")).context("games catalog")
+}
+
+fn assert_one_entry_per_language(catalog: &serde_json::Value) -> anyhow::Result<()> {
+    let entries = catalog.as_object().context("catalog object")?;
+    let mut counted = 0;
+    for (key, translations) in entries {
+        if key.as_str() == "_version" {
+            continue;
+        }
+        counted += 1;
+        let translations = translations
+            .as_object()
+            .with_context(|| format!("{key} has no language map"))?;
+        let mut locales: Vec<&str> = translations.keys().map(String::as_str).collect();
+        locales.sort_unstable();
+        assert_eq!(locales, ["en", "ja", "zh-Hans"], "{key}");
+        for (locale, text) in translations {
+            assert!(
+                text.as_str().is_some_and(|text| !text.trim().is_empty()),
+                "{key} has no {locale} copy"
+            );
+        }
+    }
+    assert!(
+        counted > 100,
+        "the game catalog keeps its whole surface: {counted}"
+    );
+    Ok(())
+}
+
+/// Representative exact translations. English still carries the original
+/// wording, and the component labels are the ones the Instances grid shows.
+fn assert_representative_game_copy() {
+    use Language::{English, Japanese, SimplifiedChinese};
+
+    assert_eq!(tr!(English, "games.browser.title.instances"), "Instances");
+    assert_eq!(
+        tr!(SimplifiedChinese, "games.browser.title.instances"),
+        "实例"
+    );
+    assert_eq!(
+        tr!(Japanese, "games.browser.title.instances"),
+        "インスタンス"
+    );
+    assert_eq!(tr!(English, "games.components.mod_loader"), "Mod loader");
+    assert_eq!(
+        tr!(SimplifiedChinese, "games.components.mod_loader"),
+        "模组加载器"
+    );
+    assert_eq!(tr!(Japanese, "games.components.mod_loader"), "Mod ローダー");
+    assert_eq!(tr!(English, "games.browser.help"), "What’s the difference?");
+    assert_eq!(
+        tr!(English, "games.profile_editor.inherit_window"),
+        "Use this Instance’s window size and fullscreen setting"
+    );
+    assert_eq!(
+        tr!(Japanese, "games.instance_editor.error.width"),
+        "ウィンドウ幅は 320～16384 ピクセルの範囲で指定してください"
+    );
+    assert_eq!(
+        tr!(SimplifiedChinese, "games.browser.count.profiles", count = 3),
+        "3 个配置"
+    );
+    assert_eq!(
+        tr!(Japanese, "games.install.failed_repair", message = "boom"),
+        "インストールに失敗しました: boom。このゲームを修復して再試行してください。"
+    );
+}
+
+#[gpui::test]
+fn fixed_instance_components_keep_their_lock_in_every_language(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = fixture(window, cx, ProfileMode::Separated);
+        view.shell.games.inspected = Some("instance-a".into());
+        view
+    });
+    cx.simulate_resize(size(px(1152.), px(900.)));
+    for language in Language::ALL {
+        view.update(cx, |view, cx| {
+            view.preferences.language = Some(language);
+            view.saved_preferences.language = Some(language);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        // The action cards prove the component grid painted for this language.
+        assert!(
+            cx.debug_bounds("component-optifine").is_some(),
+            "{language:?}"
+        );
+        assert!(
+            cx.debug_bounds("component-instance-settings").is_some(),
+            "{language:?}"
+        );
+        for (lock, fixed) in [
+            ("component-lock-component-minecraft", true),
+            ("component-lock-component-loader", true),
+            ("component-lock-component-optifine", false),
+            ("component-lock-component-instance-settings", false),
+        ] {
+            assert_eq!(
+                cx.debug_bounds(lock).is_some(),
+                fixed,
+                "{lock} in {language:?} must follow the fixed value, not its label"
+            );
+        }
+    }
 }

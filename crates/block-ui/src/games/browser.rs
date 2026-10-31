@@ -25,18 +25,20 @@ use gpui::{
 };
 
 use super::{
-    Block, Form, Tab, TextInput, UiAction, account_id,
+    Block, Form, Language, Tab, TextInput, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
     design::Icon,
     input, note, patterns,
 };
+
+type DetailBody = super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>>;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) enum CollectionLoad {
     Loading,
     #[default]
     Ready,
-    Failed(String),
+    Failed(crate::i18n::UiText),
 }
 
 #[derive(Debug, Default)]
@@ -86,28 +88,45 @@ enum BrowserKind {
 }
 
 impl BrowserKind {
-    const fn title(self) -> &'static str {
+    /// Semantic keys, so every locale keeps its own wording for a kind.
+    const fn title_key(self) -> &'static str {
         match self {
-            Self::Accounts => "Your accounts",
-            Self::Bundled => "Your games",
-            Self::Instances => "Instances",
-            Self::Profiles => "Profiles",
+            Self::Accounts => "games.browser.title.accounts",
+            Self::Bundled => "games.browser.title.games",
+            Self::Instances => "games.browser.title.instances",
+            Self::Profiles => "games.browser.title.profiles",
         }
     }
-    const fn noun(self) -> &'static str {
+    const fn search_key(self) -> &'static str {
         match self {
-            Self::Accounts => "accounts",
-            Self::Bundled => "games",
-            Self::Instances => "Instances",
-            Self::Profiles => "Profiles",
+            Self::Accounts => "games.browser.search.accounts",
+            Self::Bundled => "games.browser.search.games",
+            Self::Instances => "games.browser.search.instances",
+            Self::Profiles => "games.browser.search.profiles",
         }
     }
-    const fn search(self) -> &'static str {
+    const fn empty_key(self) -> &'static str {
         match self {
-            Self::Accounts => "Search accounts",
-            Self::Bundled => "Search games",
-            Self::Instances => "Search Instances",
-            Self::Profiles => "Search Profiles",
+            Self::Accounts => "games.browser.empty.accounts",
+            Self::Bundled => "games.browser.empty.games",
+            Self::Instances => "games.browser.empty.instances",
+            Self::Profiles => "games.browser.empty.profiles",
+        }
+    }
+    const fn no_match_key(self) -> &'static str {
+        match self {
+            Self::Accounts => "games.browser.no_match.accounts",
+            Self::Bundled => "games.browser.no_match.games",
+            Self::Instances => "games.browser.no_match.instances",
+            Self::Profiles => "games.browser.no_match.profiles",
+        }
+    }
+    const fn count_key(self) -> &'static str {
+        match self {
+            Self::Accounts => "games.browser.count.accounts",
+            Self::Bundled => "games.browser.count.games",
+            Self::Instances => "games.browser.count.instances",
+            Self::Profiles => "games.browser.count.profiles",
         }
     }
 }
@@ -143,8 +162,21 @@ struct Record {
     current: bool,
 }
 
+/// One card of the Instance component grid. `fixed` marks values chosen when the
+/// Instance was created, so the lock marker never depends on a rendered label.
+struct ComponentCard {
+    id: &'static str,
+    icon: Icon,
+    label: String,
+    value: String,
+    description: String,
+    fixed: bool,
+    action: Option<UiAction>,
+}
+
 impl Block {
     pub(super) fn initialize_browsers(&mut self, cx: &mut Context<'_, Self>) {
+        let language = self.language();
         let games = if self.snapshot.profile_mode == ProfileMode::Bundled {
             BrowserKind::Bundled
         } else {
@@ -155,10 +187,12 @@ impl Block {
             (&mut self.shell.profiles, BrowserKind::Profiles),
             (&mut self.shell.accounts, BrowserKind::Accounts),
         ] {
-            let label = format!("{}…", kind.search());
+            let label = tr!(language, kind.search_key());
             if state.query.is_none() {
                 state.query = Some(input("", &label, cx));
             }
+            // The saved language replaces the hint on the retained field, so the
+            // query entity, its selection and its IME state stay untouched.
             if let Some(field) = &state.query {
                 field.update(cx, |input, cx| {
                     input.set_search(true, cx);
@@ -287,11 +321,15 @@ impl Block {
         };
         vec![
             (instance.minecraft_version.clone(), variant),
-            (loader_value(instance, profile), BadgeVariant::Secondary),
+            (
+                loader_value(instance, profile, self.language()),
+                BadgeVariant::Secondary,
+            ),
         ]
     }
 
     fn browser_records(&self, cx: &gpui::App) -> Vec<Record> {
+        let language = self.language();
         let query = self
             .collection()
             .query
@@ -335,7 +373,7 @@ impl Block {
                         "{} {} {}",
                         instance.name,
                         instance.minecraft_version,
-                        loader_value(instance, None)
+                        loader_value(instance, None, language)
                     )
                     .to_lowercase()
                     .contains(&query)
@@ -366,7 +404,8 @@ impl Block {
                         instance.map_or("", |instance| instance.minecraft_version.as_str()),
                         instance.map_or_else(String::new, |instance| loader_value(
                             instance,
-                            Some(profile)
+                            Some(profile),
+                            language
                         ))
                     );
                     if !text.to_lowercase().contains(&query) {
@@ -382,7 +421,12 @@ impl Block {
                         title: profile.name.clone(),
                         icon: RowIcon::Profile(profile.appearance),
                         badges: instance.map_or_else(
-                            || vec![("Instance unavailable".into(), BadgeVariant::Destructive)],
+                            || {
+                                vec![(
+                                    tr!(language, "games.browser.instance_unavailable"),
+                                    BadgeVariant::Destructive,
+                                )]
+                            },
                             |instance| self.instance_badges(instance, Some(profile)),
                         ),
                         current: self.selected_profile.as_ref() == Some(&profile.id),
@@ -509,6 +553,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let state = self.collection();
+        let language = self.language();
         let mut heading = div().p_4().flex().flex_col().gap_4();
         if kind == BrowserKind::Accounts || self.snapshot.profile_mode == ProfileMode::Bundled {
             heading = heading.child(
@@ -516,7 +561,7 @@ impl Block {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(note(kind.title()))
+                    .child(note(tr!(language, kind.title_key())))
                     .child(if kind == BrowserKind::Accounts {
                         note(count.to_string()).into_any_element()
                     } else {
@@ -542,13 +587,13 @@ impl Block {
                             .child(self.browser_tab(
                                 Tab::Instances,
                                 "games-tab-instances",
-                                "Instance",
+                                tr!(language, "games.browser.instance"),
                                 cx,
                             ))
                             .child(self.browser_tab(
                                 Tab::Profiles,
                                 "games-tab-profiles",
-                                "Profile",
+                                tr!(language, "games.browser.profile"),
                                 cx,
                             )),
                     )
@@ -563,11 +608,11 @@ impl Block {
             UiAction::CreateInstance
         };
         let create_label = if kind == BrowserKind::Accounts {
-            "Add account"
+            tr!(language, "games.action.add_account")
         } else if kind == BrowserKind::Profiles {
-            "Create Profile"
+            tr!(language, "games.action.create_profile")
         } else {
-            "Create game setup"
+            tr!(language, "games.action.create_game_setup")
         };
         heading = heading.child(
             div()
@@ -609,6 +654,7 @@ impl Block {
         roving: Option<&str>,
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
+        let language = self.language();
         let state = self.collection();
         let mut rows = div()
             .id("collection-list")
@@ -619,12 +665,15 @@ impl Block {
             .flex_col()
             .pb_3();
         if records.is_empty() && matches!(state.load, CollectionLoad::Loading) {
-            rows = rows.child(self.browser_status("Loading saved records…", Icon::Loading));
+            rows = rows.child(self.browser_status(
+                tr!(language, "games.browser.loading_records"),
+                Icon::Loading,
+            ));
         } else if records.is_empty() && !matches!(state.load, CollectionLoad::Failed(_)) {
             let message = if count == 0 {
-                format!("No {} yet.", kind.noun())
+                tr!(language, kind.empty_key())
             } else {
-                format!("No {} found. Try another search.", kind.noun())
+                tr!(language, kind.no_match_key())
             };
             rows = rows.child(self.browser_status(
                 message,
@@ -647,10 +696,10 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(note(error.clone()).text_color(rgb(self.palette.destructive)))
+                    .child(note(error.text(language)).text_color(rgb(self.palette.destructive)))
                     .child(self.browser_control(
                         "reload-library",
-                        "Try again",
+                        tr!(language, "games.action.try_again"),
                         UiAction::ReloadLibrary,
                         ButtonVariant::Outline,
                         false,
@@ -658,16 +707,17 @@ impl Block {
                     )),
             );
         }
-        rows.scroll_list_area(&state.scroll, "Library records", self.palette)
+        rows.scroll_list_area(&state.scroll, "games.browser.records", self.palette)
     }
 
     fn browser_footer(&self, kind: BrowserKind, count: usize, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let mut footer = patterns::management_footer(self.palette).px_5();
         if kind == BrowserKind::Accounts {
             footer = footer.child(
                 self.browser_control(
                     "authlib-providers",
-                    "Authlib providers",
+                    tr!(language, "games.action.authlib_providers"),
                     UiAction::Providers,
                     ButtonVariant::Ghost,
                     false,
@@ -678,13 +728,16 @@ impl Block {
         } else {
             footer = footer
                 .justify_between()
-                .child(note(format!("{count} {}", kind.noun())))
+                .child(note(tr!(language, kind.count_key(), count = count)))
                 .child(
-                    note(if self.snapshot.profile_mode == ProfileMode::Bundled {
-                        "Bundled"
-                    } else {
-                        "Separated"
-                    })
+                    note(tr!(
+                        language,
+                        if self.snapshot.profile_mode == ProfileMode::Bundled {
+                            "games.mode.bundled"
+                        } else {
+                            "games.mode.separated"
+                        }
+                    ))
                     .text_size(px(10.)),
                 );
         }
@@ -694,7 +747,7 @@ impl Block {
     fn browser_control(
         &self,
         id: impl Into<gpui::SharedString>,
-        label: &str,
+        label: impl Into<gpui::SharedString>,
         action: UiAction,
         variant: ButtonVariant,
         disabled: bool,
@@ -702,13 +755,13 @@ impl Block {
     ) -> components::Control {
         let id = id.into();
         let text = if matches!(id.as_ref(), "sign-in" | "create-instance") {
-            ""
+            gpui::SharedString::from("")
         } else {
-            label
+            label.into()
         };
         components::button(
             id,
-            text.to_owned(),
+            text,
             self.palette,
             variant,
             ControlState {
@@ -723,7 +776,7 @@ impl Block {
         &self,
         tab: Tab,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<gpui::SharedString>,
         cx: &Context<'_, Self>,
     ) -> components::Control {
         components::button_role(
@@ -794,7 +847,7 @@ impl Block {
         .w(px(28.))
         .p_0()
         .child(Icon::Help.render(16., self.palette.muted));
-        super::tooltip::trigger(control, "What’s the difference?", cx)
+        super::tooltip::trigger(control, tr!(self.language(), "games.browser.help"), cx)
     }
 
     fn browser_row(
@@ -932,172 +985,9 @@ impl Block {
         if matches!(self.form, Some(Form::Profile(_))) {
             return self.render_profile_editor(cx);
         }
-        let mut body = div()
-            .id("main-content")
-            .debug_selector(|| "management-detail".into())
-            .flex_1()
-            .min_h_0()
-            .scroll_area(
-                &self.collection().detail_scroll,
-                "Library details",
-                self.palette,
-                false,
-            )
-            .track_focus(&self.browser_detail_focus(cx))
-            .flex()
-            .flex_col()
-            .gap_6()
-            .p_8();
-        let mut footer = patterns::management_footer(self.palette).justify_between();
-        if self.router.tab() == Tab::Accounts {
-            if let Some(account) = self
-                .accounts
-                .iter()
-                .find(|account| Some(account_id(account)) == self.inspected_record())
-            {
-                let id = account_id(account);
-                let current = self.selected_account.as_ref() == Some(&id);
-                body = body.child(self.account_details(account, current));
-                footer = footer
-                    .child(self.browser_control(
-                        format!("account-logout-{id}"),
-                        "Remove account",
-                        UiAction::RequestSignOut(id.clone()),
-                        ButtonVariant::Outline,
-                        self.busy,
-                        cx,
-                    ))
-                    .child(self.browser_control(
-                        format!("account-select-{id}"),
-                        if current {
-                            "Current account"
-                        } else {
-                            "Use account"
-                        },
-                        UiAction::SelectAccount(id),
-                        ButtonVariant::Primary,
-                        current || self.busy,
-                        cx,
-                    ));
-            } else {
-                return self.empty_browser_detail(true, cx);
-            }
-        } else if let Some(instance) = self.inspected_instance() {
-            let profile = self.inspected_profile();
-            let kind = self.browser_kind();
-            if kind == BrowserKind::Instances {
-                body = body
-                    .child(self.detail_identity(
-                        RowIcon::Instance,
-                        &instance.name,
-                        None,
-                        self.instance_badges(instance, None),
-                        false,
-                    ))
-                    .child(self.instance_components(instance, profile, cx))
-                    .child(self.linked_profiles(instance, cx));
-                if let Some(notice) = self.installation_notice(instance, None) {
-                    body = body.child(notice);
-                }
-                footer = footer.child(note("Separated Profile")).child(
-                    self.browser_control(
-                        "new-profile",
-                        "New Profile",
-                        UiAction::NewProfile,
-                        ButtonVariant::Primary,
-                        self.busy,
-                        cx,
-                    )
-                    .child(Icon::Plus.render(16., self.palette.on_primary)),
-                );
-            } else if let Some(profile) = profile {
-                let current = self.selected_profile.as_ref() == Some(&profile.id);
-                body = body.child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap_2()
-                        .child(
-                            self.detail_identity(
-                                RowIcon::Profile(profile.appearance),
-                                &profile.name,
-                                None,
-                                self.instance_badges(instance, Some(profile)),
-                                current,
-                            )
-                            .flex_1()
-                            .min_w_0(),
-                        )
-                        .child(
-                            self.button("profile-actions", "", UiAction::ProfileActions, cx)
-                                .w(px(32.))
-                                .p_0()
-                                .child(Icon::More.render(16., self.palette.foreground)),
-                        ),
-                );
-                if kind == BrowserKind::Bundled {
-                    body = body.child(self.instance_components(instance, Some(profile), cx));
-                } else {
-                    body = body.child(self.linked_instance(instance, cx));
-                }
-                body = body.child(self.launch_details(profile));
-                if let Some(notice) = self.installation_notice(instance, Some(profile)) {
-                    body = body.child(notice);
-                }
-                footer = footer
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                self.browser_control(
-                                    "edit-profile",
-                                    if kind == BrowserKind::Bundled {
-                                        "Edit launch settings"
-                                    } else {
-                                        "Edit Profile"
-                                    },
-                                    UiAction::EditProfile,
-                                    ButtonVariant::Outline,
-                                    self.busy,
-                                    cx,
-                                )
-                                .track_focus(&self.profile_editor_trigger_focus(cx)),
-                            )
-                            .child(self.browser_control(
-                                "repair-profile",
-                                "Repair",
-                                UiAction::RepairProfile(profile.id.clone()),
-                                ButtonVariant::Outline,
-                                self.busy,
-                                cx,
-                            )),
-                    )
-                    .child(self.browser_control(
-                        "use-profile",
-                        if current {
-                            if kind == BrowserKind::Bundled {
-                                "Current game"
-                            } else {
-                                "Current Profile"
-                            }
-                        } else if kind == BrowserKind::Bundled {
-                            "Use game"
-                        } else {
-                            "Use Profile"
-                        },
-                        UiAction::SelectProfile(profile.id.clone()),
-                        ButtonVariant::Primary,
-                        current || self.busy,
-                        cx,
-                    ));
-            } else {
-                return self.empty_browser_detail(false, cx);
-            }
-        } else {
-            return self.empty_browser_detail(false, cx);
-        }
+        let Some((body, footer)) = self.detail_sections(cx) else {
+            return self.empty_browser_detail(self.router.tab() == Tab::Accounts, cx);
+        };
         div()
             .size_full()
             .min_h_0()
@@ -1110,6 +1000,226 @@ impl Block {
                     .debug_selector(|| "detail-footer".into()),
             )
             .into_any_element()
+    }
+
+    /// Body and footer for the inspected record, or `None` when the collection
+    /// holds no record to inspect.
+    fn detail_sections(&self, cx: &Context<'_, Self>) -> Option<(DetailBody, gpui::Div)> {
+        let body = self.detail_body(cx);
+        if self.router.tab() == Tab::Accounts {
+            return self.account_sections(body, cx);
+        }
+        self.instance_sections(body, cx)
+    }
+
+    /// The scrolling region that account and game details both fill with their
+    /// own content.
+    fn detail_body(&self, cx: &Context<'_, Self>) -> DetailBody {
+        div()
+            .id("main-content")
+            .debug_selector(|| "management-detail".into())
+            .flex_1()
+            .min_h_0()
+            .scroll_area(
+                &self.collection().detail_scroll,
+                "games.browser.details",
+                self.palette,
+                false,
+            )
+            .track_focus(&self.browser_detail_focus(cx))
+            .flex()
+            .flex_col()
+            .gap_6()
+            .p_8()
+    }
+
+    fn detail_footer(&self) -> gpui::Div {
+        patterns::management_footer(self.palette).justify_between()
+    }
+
+    fn account_sections(
+        &self,
+        body: DetailBody,
+        cx: &Context<'_, Self>,
+    ) -> Option<(DetailBody, gpui::Div)> {
+        let language = self.language();
+        let account = self
+            .accounts
+            .iter()
+            .find(|account| Some(account_id(account)) == self.inspected_record())?;
+        let id = account_id(account);
+        let current = self.selected_account.as_ref() == Some(&id);
+        let body = body.child(self.account_details(account, current));
+        let footer = self
+            .detail_footer()
+            .child(self.browser_control(
+                format!("account-logout-{id}"),
+                tr!(language, "games.action.remove_account"),
+                UiAction::RequestSignOut(id.clone()),
+                ButtonVariant::Outline,
+                self.busy,
+                cx,
+            ))
+            .child(self.browser_control(
+                format!("account-select-{id}"),
+                if current {
+                    tr!(language, "games.action.current_account")
+                } else {
+                    tr!(language, "games.action.use_account")
+                },
+                UiAction::SelectAccount(id),
+                ButtonVariant::Primary,
+                current || self.busy,
+                cx,
+            ));
+        Some((body, footer))
+    }
+
+    fn instance_sections(
+        &self,
+        body: DetailBody,
+        cx: &Context<'_, Self>,
+    ) -> Option<(DetailBody, gpui::Div)> {
+        let instance = self.inspected_instance()?;
+        if self.browser_kind() == BrowserKind::Instances {
+            return Some(self.separated_instance_sections(body, instance, cx));
+        }
+        let profile = self.inspected_profile()?;
+        Some(self.profile_sections(body, instance, profile, cx))
+    }
+
+    /// An Instance with the Profiles that run on it.
+    fn separated_instance_sections(
+        &self,
+        body: DetailBody,
+        instance: &Instance,
+        cx: &Context<'_, Self>,
+    ) -> (DetailBody, gpui::Div) {
+        let language = self.language();
+        let mut body = body
+            .child(self.detail_identity(
+                RowIcon::Instance,
+                &instance.name,
+                None,
+                self.instance_badges(instance, None),
+                false,
+            ))
+            .child(self.instance_components(instance, None, cx))
+            .child(self.linked_profiles(instance, cx));
+        if let Some(notice) = self.installation_notice(instance, None) {
+            body = body.child(notice);
+        }
+        let footer = self
+            .detail_footer()
+            .child(note(tr!(language, "games.mode.separated_profile")))
+            .child(
+                self.browser_control(
+                    "new-profile",
+                    tr!(language, "games.action.new_profile"),
+                    UiAction::NewProfile,
+                    ButtonVariant::Primary,
+                    self.busy,
+                    cx,
+                )
+                .child(Icon::Plus.render(16., self.palette.on_primary)),
+            );
+        (body, footer)
+    }
+
+    /// A Profile with the components it launches through, or the Instance it
+    /// links to when the game keeps its launch settings on the game itself.
+    fn profile_sections(
+        &self,
+        body: DetailBody,
+        instance: &Instance,
+        profile: &Profile,
+        cx: &Context<'_, Self>,
+    ) -> (DetailBody, gpui::Div) {
+        let language = self.language();
+        let kind = self.browser_kind();
+        let current = self.selected_profile.as_ref() == Some(&profile.id);
+        let mut body = body.child(
+            div()
+                .flex()
+                .items_start()
+                .gap_2()
+                .child(
+                    self.detail_identity(
+                        RowIcon::Profile(profile.appearance),
+                        &profile.name,
+                        None,
+                        self.instance_badges(instance, Some(profile)),
+                        current,
+                    )
+                    .flex_1()
+                    .min_w_0(),
+                )
+                .child(
+                    self.button("profile-actions", "", UiAction::ProfileActions, cx)
+                        .w(px(32.))
+                        .p_0()
+                        .child(Icon::More.render(16., self.palette.foreground)),
+                ),
+        );
+        body = if kind == BrowserKind::Bundled {
+            body.child(self.instance_components(instance, Some(profile), cx))
+        } else {
+            body.child(self.linked_instance(instance, cx))
+        };
+        body = body.child(self.launch_details(profile));
+        if let Some(notice) = self.installation_notice(instance, Some(profile)) {
+            body = body.child(notice);
+        }
+        let footer = self
+            .detail_footer()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        self.browser_control(
+                            "edit-profile",
+                            if kind == BrowserKind::Bundled {
+                                tr!(language, "games.action.edit_launch_settings")
+                            } else {
+                                tr!(language, "games.action.edit_profile")
+                            },
+                            UiAction::EditProfile,
+                            ButtonVariant::Outline,
+                            self.busy,
+                            cx,
+                        )
+                        .track_focus(&self.profile_editor_trigger_focus(cx)),
+                    )
+                    .child(self.browser_control(
+                        "repair-profile",
+                        tr!(language, "games.action.repair"),
+                        UiAction::RepairProfile(profile.id.clone()),
+                        ButtonVariant::Outline,
+                        self.busy,
+                        cx,
+                    )),
+            )
+            .child(self.browser_control(
+                "use-profile",
+                if current {
+                    if kind == BrowserKind::Bundled {
+                        tr!(language, "games.action.current_game")
+                    } else {
+                        tr!(language, "games.action.current_profile")
+                    }
+                } else if kind == BrowserKind::Bundled {
+                    tr!(language, "games.action.use_game")
+                } else {
+                    tr!(language, "games.action.use_profile")
+                },
+                UiAction::SelectProfile(profile.id.clone()),
+                ButtonVariant::Primary,
+                current || self.busy,
+                cx,
+            ));
+        (body, footer)
     }
 
     pub(super) fn reconcile_account_browser(&mut self, next: &[block_auth::Account]) {
@@ -1143,24 +1253,50 @@ impl Block {
         if targets.is_empty() {
             return None;
         }
-        Some(div().flex().flex_col().gap_2().border_t_1().border_color(rgb(self.palette.border)).pt_4().child(note("Installation"))
-            .children(targets.into_iter().map(|target| {
-                let (message, error) = match &target.status {
-                    block_launcher::catalog::InstallStatus::Pending => ("Game files will install when you launch from Home.".to_owned(), false),
-                    block_launcher::catalog::InstallStatus::Installing => ("Game files are being installed. Download progress is available on Home.".to_owned(), false),
-                    block_launcher::catalog::InstallStatus::Failed { message } => (format!(
-                        "Installation failed: {message}. {}",
-                        if profile.is_some() {
-                            "Repair this game to retry."
-                        } else {
-                            "Open a linked Profile to repair this target."
+        let language = self.language();
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .border_t_1()
+                .border_color(rgb(self.palette.border))
+                .pt_4()
+                .child(note(tr!(language, "games.detail.installation")))
+                .children(targets.into_iter().map(|target| {
+                    let (message, error) = match &target.status {
+                        block_launcher::catalog::InstallStatus::Pending => {
+                            (tr!(language, "games.install.pending"), false)
                         }
-                    ), true),
-                    block_launcher::catalog::InstallStatus::Ready => (String::new(), false),
-                };
-                div().id(gpui::SharedString::from(format!("installation-status-{}", target.id)))
-                    .child(note(message).text_color(rgb(if error { self.palette.destructive } else { self.palette.muted })))
-            })))
+                        block_launcher::catalog::InstallStatus::Installing => {
+                            (tr!(language, "games.install.installing"), false)
+                        }
+                        block_launcher::catalog::InstallStatus::Failed { message } => (
+                            if profile.is_some() {
+                                tr!(language, "games.install.failed_repair", message = message)
+                            } else {
+                                tr!(
+                                    language,
+                                    "games.install.failed_open_profile",
+                                    message = message
+                                )
+                            },
+                            true,
+                        ),
+                        block_launcher::catalog::InstallStatus::Ready => (String::new(), false),
+                    };
+                    div()
+                        .id(gpui::SharedString::from(format!(
+                            "installation-status-{}",
+                            target.id
+                        )))
+                        .child(note(message).text_color(rgb(if error {
+                            self.palette.destructive
+                        } else {
+                            self.palette.muted
+                        })))
+                })),
+        )
     }
 
     pub(super) fn browser_detail_focus(&self, cx: &Context<'_, Self>) -> FocusHandle {
@@ -1226,9 +1362,13 @@ impl Block {
                                 self.record_badge(value, variant, matches!(icon, RowIcon::Account))
                             }))
                             .children(current.then(|| {
-                                components::badge("In use", self.palette, BadgeVariant::Success)
-                                    .gap_1()
-                                    .child(Icon::Check.render(12., self.palette.success))
+                                components::badge(
+                                    tr!(self.language(), "games.browser.in_use"),
+                                    self.palette,
+                                    BadgeVariant::Success,
+                                )
+                                .gap_1()
+                                .child(Icon::Check.render(12., self.palette.success))
                             })),
                     ),
             )
@@ -1270,62 +1410,78 @@ impl Block {
         profile: Option<&Profile>,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
+        let language = self.language();
         let mut grid = div().flex().flex_wrap().gap_3();
         let width = 0.48;
-        for (id, icon, label, value, description, action) in [
-            (
-                "component-minecraft",
-                Icon::Blocks,
-                "Minecraft",
-                instance.minecraft_version.clone(),
-                "Fixed at creation".to_owned(),
-                None,
-            ),
-            (
-                "component-loader",
-                Icon::Layers,
-                "Mod loader",
-                loader_value(instance, profile),
-                "Fixed at creation".to_owned(),
-                None,
-            ),
-            (
-                "component-optifine",
-                Icon::Experiment,
-                "OptiFine",
-                instance
+        let components = [
+            ComponentCard {
+                id: "component-minecraft",
+                icon: Icon::Blocks,
+                // Minecraft and OptiFine are product names, not translated copy.
+                label: "Minecraft".to_owned(),
+                value: instance.minecraft_version.clone(),
+                description: tr!(language, "games.components.fixed_at_creation"),
+                fixed: true,
+                action: None,
+            },
+            ComponentCard {
+                id: "component-loader",
+                icon: Icon::Layers,
+                label: tr!(language, "games.components.mod_loader"),
+                value: loader_value(instance, profile, language),
+                description: tr!(language, "games.components.fixed_at_creation"),
+                fixed: true,
+                action: None,
+            },
+            ComponentCard {
+                id: "component-optifine",
+                icon: Icon::Experiment,
+                label: "OptiFine".to_owned(),
+                value: instance
                     .targets
                     .iter()
                     .find(|target| profile.is_some_and(|profile| profile.target_id == target.id))
                     .and_then(|target| target.optifine.as_ref())
                     .map_or_else(
-                        || "Not installed".to_owned(),
+                        || tr!(language, "games.components.not_installed"),
                         |selected| selected.version.clone(),
                     ),
-                "Editable in Instance settings".to_owned(),
-                Some(UiAction::EditInstanceOptiFine),
-            ),
-            (
-                "component-instance-settings",
-                Icon::Settings,
-                "Instance settings",
-                instance
+                description: tr!(language, "games.components.editable_in_settings"),
+                fixed: false,
+                action: Some(UiAction::EditInstanceOptiFine),
+            },
+            ComponentCard {
+                id: "component-instance-settings",
+                icon: Icon::Settings,
+                label: tr!(language, "games.components.instance_settings"),
+                value: match instance
                     .settings
                     .as_ref()
                     .map(|settings| &settings.runtime)
                     .or_else(|| profile.map(|profile| &profile.runtime))
-                    .map_or("Automatic Java", |runtime| {
-                        if matches!(runtime, RuntimeSelection::Managed) {
-                            "Automatic Java"
-                        } else {
-                            "Custom Java"
-                        }
-                    })
-                    .to_owned(),
-                instance.directory.display().to_string(),
-                Some(UiAction::EditInstance),
-            ),
-        ] {
+                {
+                    Some(RuntimeSelection::Managed) | None => {
+                        tr!(language, "games.java.automatic")
+                    }
+                    Some(RuntimeSelection::Local { .. }) => {
+                        tr!(language, "games.java.custom")
+                    }
+                },
+                description: instance.directory.display().to_string(),
+                fixed: false,
+                action: Some(UiAction::EditInstance),
+            },
+        ];
+        for ComponentCard {
+            id,
+            icon,
+            label,
+            value,
+            description,
+            fixed,
+            action,
+        } in components
+        {
             let contents = div()
                 .flex()
                 .flex_col()
@@ -1341,10 +1497,12 @@ impl Block {
                         .gap_2()
                         .child(icon.render(16., self.palette.muted))
                         .child(note(label))
-                        .children(
-                            (label == "Minecraft" || label == "Mod loader")
-                                .then(|| Icon::Lock.render(14., self.palette.muted)),
-                        ),
+                        .children(fixed.then(|| {
+                            div()
+                                .flex_shrink_0()
+                                .debug_selector(move || format!("component-lock-{id}"))
+                                .child(Icon::Lock.render(14., self.palette.muted))
+                        })),
                 )
                 .child(
                     div()
@@ -1396,10 +1554,16 @@ impl Block {
                 );
             }
         }
-        div().flex().flex_col().gap_3().child(grid).child(note("Minecraft version and mod loader are fixed. Create a new Instance for a different game setup."))
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(grid)
+            .child(note(tr!(language, "games.components.fixed_note")))
     }
 
     fn linked_profiles(&self, instance: &Instance, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let profiles: Vec<_> = self
             .snapshot
             .profiles
@@ -1416,13 +1580,17 @@ impl Block {
                     .items_center()
                     .justify_between()
                     .child(note(if profiles.len() == 1 {
-                        "Used by 1 Profile".to_owned()
+                        tr!(language, "games.instance.used_by_one")
                     } else {
-                        format!("Used by {} Profiles", profiles.len())
+                        tr!(
+                            language,
+                            "games.instance.used_by_many",
+                            count = profiles.len()
+                        )
                     }))
                     .child(self.button(
                         "instance-new-profile",
-                        "New Profile",
+                        tr!(language, "games.action.new_profile"),
                         UiAction::NewProfile,
                         cx,
                     )),
@@ -1463,11 +1631,12 @@ impl Block {
     }
 
     fn linked_instance(&self, instance: &Instance, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(note("Game Instance"))
+            .child(note(tr!(language, "games.instance.game_instance")))
             .child(
                 self.button(
                     "linked-instance",
@@ -1494,16 +1663,17 @@ impl Block {
                         .flex_col()
                         .gap_1()
                         .child(instance.name.clone())
-                        .child(note("Shared game files and components")),
+                        .child(note(tr!(language, "games.instance.shared_files"))),
                 )
                 .child(Icon::ExternalLink.render(16., self.palette.muted)),
             )
     }
 
     fn launch_details(&self, profile: &Profile) -> gpui::Div {
+        let language = self.language();
         let server = (!profile.server.address.is_empty()).then(|| profile.server.address.clone());
         let width = 0.48;
-        let card = |icon: Icon, label: &str, value: String, description: &str| {
+        let card = |icon: Icon, label: String, value: String, description: String| {
             div()
                 .w(relative(width))
                 .min_w_0()
@@ -1519,10 +1689,10 @@ impl Block {
                         .items_center()
                         .gap_2()
                         .child(icon.render(16., self.palette.muted))
-                        .child(note(label.to_owned())),
+                        .child(note(label)),
                 )
                 .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(value))
-                .child(note(description.to_owned()))
+                .child(note(description))
         };
         div()
             .flex()
@@ -1532,7 +1702,7 @@ impl Block {
                 div()
                     .text_sm()
                     .font_weight(FontWeight::MEDIUM)
-                    .child("Launch settings"),
+                    .child(tr!(language, "games.launch.settings")),
             )
             .child(
                 div()
@@ -1541,19 +1711,19 @@ impl Block {
                     .gap_3()
                     .child(card(
                         Icon::Server,
-                        "Server",
-                        server.unwrap_or_else(|| "Choose in game".into()),
+                        tr!(language, "games.launch.server"),
+                        server.unwrap_or_else(|| tr!(language, "games.launch.choose_in_game")),
                         if profile.server.connect_on_launch {
-                            "Connect automatically"
+                            tr!(language, "games.launch.connect_automatically")
                         } else {
-                            "No automatic connection"
+                            tr!(language, "games.launch.no_automatic_connection")
                         },
                     ))
                     .child(card(
                         Icon::Cpu,
-                        "Memory",
+                        tr!(language, "games.launch.memory"),
                         components::memory_label(profile.memory_mib),
-                        "Maximum allocation",
+                        tr!(language, "games.launch.maximum_allocation"),
                     )),
             )
             .child(
@@ -1562,7 +1732,7 @@ impl Block {
                     .items_center()
                     .gap_2()
                     .child(Icon::Terminal.render(14., self.palette.muted))
-                    .child(note("JVM arguments")),
+                    .child(note(tr!(language, "games.launch.jvm_arguments"))),
             )
             .child(
                 div()
@@ -1571,7 +1741,7 @@ impl Block {
                     .bg(rgb(self.palette.secondary))
                     .text_xs()
                     .child(if profile.jvm_args.is_empty() {
-                        "Default arguments".into()
+                        tr!(language, "games.launch.default_arguments")
                     } else {
                         profile.jvm_args.join(" ")
                     }),
@@ -1579,23 +1749,24 @@ impl Block {
     }
 
     fn empty_browser_detail(&self, accounts: bool, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let language = self.language();
         let loading = matches!(self.collection().load, CollectionLoad::Loading);
         let failed = matches!(self.collection().load, CollectionLoad::Failed(_));
         let title = if loading {
-            "Loading your library"
+            tr!(language, "games.empty_state.loading_title")
         } else if failed {
-            "Your library could not be loaded"
+            tr!(language, "games.empty_state.failed_title")
         } else {
-            "Your next adventure starts here"
+            tr!(language, "games.empty_state.title")
         };
         let description = if loading {
-            "Reading saved records from this data directory."
+            tr!(language, "games.empty_state.loading_body")
         } else if failed {
-            "Try again to read your saved records. Existing data has not been changed."
+            tr!(language, "games.empty_state.failed_body")
         } else if accounts {
-            "Add an account to get ready to play."
+            tr!(language, "games.empty_state.accounts_body")
         } else {
-            "Create a game setup to get ready to play."
+            tr!(language, "games.empty_state.games_body")
         };
         let mut content = patterns::empty_state(title, description, self.palette).child(
             if accounts { Icon::Account } else { Icon::Games }.render(32., self.palette.muted),
@@ -1604,11 +1775,11 @@ impl Block {
             content = content.child(self.browser_control(
                 "welcome-create",
                 if failed {
-                    "Try again"
+                    tr!(language, "games.action.try_again")
                 } else if accounts {
-                    "Add account"
+                    tr!(language, "games.action.add_account")
                 } else {
-                    "Create game"
+                    tr!(language, "games.action.create_game")
                 },
                 if failed {
                     UiAction::ReloadLibrary
@@ -1634,8 +1805,17 @@ impl Block {
 
     pub(super) fn render_games_help(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let _ = cx;
-        div().flex().flex_col().gap_4()
-            .child(note("An Instance fixes the game version and mod loader. A Profile stores your launch preferences."))
+        let language = self.language();
+        let mode = if self.snapshot.profile_mode == ProfileMode::Bundled {
+            "games.mode.bundled"
+        } else {
+            "games.mode.separated"
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(note(tr!(language, "games.help.intro")))
             .child(
                 div()
                     .id("games-help-body")
@@ -1646,21 +1826,40 @@ impl Block {
                         super::scroll_area::viewport(
                             div().id("games-help-scroll").flex().flex_col().gap_3(),
                             &self.shell.help_scroll,
-                            "Instances and Profiles",
+                            "games.help",
                             self.palette,
                             false,
                         )
-                        .child(components::card(self.palette).p_3().child("Instance").child(note("Minecraft version and mod loader are fixed at creation. Its game folder and installation settings belong to this game setup.")))
-                        .child(components::card(self.palette).p_3().child("Bundled Profile").child(note("Every Instance has exactly one Profile. Games shows them together in one list.")))
-                        .child(components::card(self.palette).p_3().child("Separated Profile").child(note("Several Profiles can share one Instance, with independent accounts, memory and JVM arguments. You can convert from Bundled once; it cannot be reversed.")))
-                        .child(note(format!("Current mode: {} Profile", if self.snapshot.profile_mode == ProfileMode::Bundled { "Bundled" } else { "Separated" }))),
+                        .child(
+                            components::card(self.palette)
+                                .p_3()
+                                .child(tr!(language, "games.browser.instance"))
+                                .child(note(tr!(language, "games.help.instance_body"))),
+                        )
+                        .child(
+                            components::card(self.palette)
+                                .p_3()
+                                .child(tr!(language, "games.mode.bundled_profile"))
+                                .child(note(tr!(language, "games.help.bundled_body"))),
+                        )
+                        .child(
+                            components::card(self.palette)
+                                .p_3()
+                                .child(tr!(language, "games.mode.separated_profile"))
+                                .child(note(tr!(language, "games.help.separated_body"))),
+                        )
+                        .child(note(tr!(
+                            language,
+                            "games.help.current_mode",
+                            mode = tr!(language, mode)
+                        ))),
                     ),
             )
             .into_any_element()
     }
 }
 
-fn loader_value(instance: &Instance, profile: Option<&Profile>) -> String {
+fn loader_value(instance: &Instance, profile: Option<&Profile>, language: Language) -> String {
     let target = profile
         .and_then(|profile| {
             instance
@@ -1676,7 +1875,7 @@ fn loader_value(instance: &Instance, profile: Option<&Profile>) -> String {
         })
         .or_else(|| instance.targets.first());
     target.map_or_else(
-        || "No launch target".into(),
+        || tr!(language, "games.instance.no_launch_target"),
         block_launcher::catalog::LaunchTarget::display_name,
     )
 }

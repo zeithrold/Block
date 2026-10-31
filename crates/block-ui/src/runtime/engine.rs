@@ -126,7 +126,7 @@ pub(crate) enum Message {
         profile: String,
     },
     Recipe(Result<LaunchRecipe, String>),
-    Status(String),
+    Status(super::i18n::UiText),
     Downloads(Arc<Mutex<super::tasks::DownloadTracker>>),
     Log(String),
     Command(String),
@@ -140,7 +140,7 @@ pub(crate) enum Message {
         directory: PathBuf,
         guard: File,
     },
-    Finished(Result<String, String>),
+    Finished(Result<super::i18n::UiText, String>),
 }
 
 /// A task captures its identity when it starts. Late results cannot adopt the
@@ -223,8 +223,8 @@ type MicrosoftSignInSlot = Arc<Mutex<Option<(CancellationToken, PreparedMicrosof
 type AuthlibSignInSlot = Arc<Mutex<Option<(CancellationToken, block_auth::PreparedAuthlibSignIn)>>>;
 
 impl Engine {
-    pub(super) fn new() -> anyhow::Result<(Self, Receiver<Message>)> {
-        let root = std::env::var_os("BLOCK_DATA_DIR").map_or_else(
+    pub(super) fn default_root() -> anyhow::Result<PathBuf> {
+        std::env::var_os("BLOCK_DATA_DIR").map_or_else(
             || {
                 directories::BaseDirs::new()
                     .map(|dirs| {
@@ -234,8 +234,7 @@ impl Engine {
                     .context("cannot determine the data directory")
             },
             |path| Ok(PathBuf::from(path)),
-        )?;
-        Self::with_root(root)
+        )
     }
 
     pub(super) fn with_root(root: PathBuf) -> anyhow::Result<(Self, Receiver<Message>)> {
@@ -442,7 +441,7 @@ impl Engine {
                         })
                         .await;
                     send_catalog(&root, &sender).await;
-                    finish(&sender, Ok("Game saved".into())).await;
+                    finish(&sender, Ok(msg!("completion.game_saved"))).await;
                 }
                 Err(error) => {
                     send_catalog(&root, &sender).await;
@@ -654,7 +653,7 @@ impl Engine {
                     library
                         .install(&instance.id, &profile.target_id, &cancel)
                         .await?;
-                    Ok::<_, anyhow::Error>("Installation complete · ready to play".to_owned())
+                    Ok::<_, anyhow::Error>(msg!("completion.installation"))
                 }
                 .await;
                 match (created, committed) {
@@ -707,7 +706,7 @@ impl Engine {
                             profile: profile.id,
                         })
                         .await;
-                    Ok("Profile created · existing installation preserved".into())
+                    Ok(msg!("completion.profile_created"))
                 }
                 Ok(Err(error)) => Err(error),
                 Err(error) => Err(error.into()),
@@ -720,28 +719,28 @@ impl Engine {
     pub(super) fn save_profile(&self, profile: Profile) {
         self.catalog_change(
             move |catalog| catalog.save_profile(profile),
-            "Profile saved",
+            "completion.profile_saved",
         );
     }
 
     pub(super) fn separate_profiles(&self) {
         self.catalog_change(
             |catalog| catalog.separate_profiles(),
-            "Separated profile mode enabled",
+            "completion.separated",
         );
     }
 
     pub(super) fn copy_profile(&self, id: String, name: String) {
         self.catalog_change(
             move |catalog| catalog.copy_profile(&id, name).map(|_| ()),
-            "Profile copied",
+            "completion.profile_copied",
         );
     }
 
     pub(super) fn delete_profile(&self, id: String) {
         self.catalog_change(
             move |catalog| catalog.delete_profile(&id),
-            "Profile deleted · game data preserved",
+            "completion.profile_deleted",
         );
     }
 
@@ -752,7 +751,7 @@ impl Engine {
     ) {
         self.catalog_change(
             move |catalog| catalog.save_instance(&id, configuration),
-            "Instance settings saved",
+            "completion.instance_saved",
         );
     }
 
@@ -792,7 +791,7 @@ impl Engine {
                             .await?
                             .install(&id, &target_id, &cancel)
                             .await?;
-                        Ok("Instance settings saved · OptiFine applied".to_owned())
+                        Ok(msg!("completion.instance_optifine"))
                     }
                     .await
                 }
@@ -816,7 +815,7 @@ impl Engine {
             let result =
                 tokio::task::spawn_blocking(move || operation(Catalog::open(catalog_root)?)).await;
             let result = match result {
-                Ok(result) => result.map(|()| success.to_owned()),
+                Ok(result) => result.map(|()| msg!(success)),
                 Err(error) => Err(error.into()),
             };
             send_catalog(&root, &sender).await;
@@ -833,7 +832,7 @@ impl Engine {
                     .await?
                     .install(&instance, &target, &cancel)
                     .await?;
-                Ok("Repair complete · ready to play".to_owned())
+                Ok(msg!("completion.repair"))
             }
             .await;
             send_catalog(&root, &sender).await;
@@ -910,7 +909,7 @@ impl Engine {
                     *pending = Some((cancel.clone(), prepared));
                 }
                 let _ = sender.send(Message::AuthPrepared(account)).await;
-                Ok("Identity verified. Finish setup to save this account.".into())
+                Ok(msg!("completion.identity_verified"))
             }
             .await;
             finish(&sender, result).await;
@@ -947,9 +946,7 @@ impl Engine {
                 // Durable state remains authoritative even if its child window closed.
                 let _ = sender.unscoped().send(Message::Accounts(Ok(accounts))).await;
                 let _ = sender.send(Message::SignedIn(account)).await;
-                Ok(format!(
-                    "Signed in as {name} · Java Edition ownership verified"
-                ))
+                Ok(msg!("completion.signed_in", name = name))
             }
             .await;
             finish(&sender, result).await;
@@ -988,7 +985,7 @@ impl Engine {
                         *slot = Some((cancel.clone(), prepared));
                     }
                     let _ = sender.send(Message::AuthPrepared(account)).await;
-                    Ok("External identity verified. Finish to save it securely.".into())
+                    Ok(msg!("completion.external_identity"))
                 } else {
                     let profiles = pending.profiles().to_vec();
                     {
@@ -999,7 +996,7 @@ impl Engine {
                         *slot = Some((cancel.clone(), Arc::new(pending)));
                     }
                     let _ = sender.send(Message::AuthlibCharacters(profiles)).await;
-                    Ok("Choose a character returned by your provider.".into())
+                    Ok(msg!("completion.choose_character"))
                 }
             }
             .await;
@@ -1054,7 +1051,7 @@ impl Engine {
                     }
                 }
                 let _ = sender.send(Message::AuthPrepared(account)).await;
-                Ok("External character verified. Finish to save it securely.".into())
+                Ok(msg!("completion.external_character"))
             }
             .await;
             finish(&sender, result).await;
@@ -1093,7 +1090,7 @@ impl Engine {
                 let name=account.player_name.clone();
                 let _=sender.unscoped().send(Message::Accounts(Ok(accounts))).await;
                 let _=sender.send(Message::SignedIn(account)).await;
-                Ok(format!("External account {name} saved securely"))
+                Ok(msg!("completion.external_saved", name = name))
             }.await;
             finish(&sender,result).await;
         });
@@ -1139,7 +1136,7 @@ impl Engine {
                 let _ = sender
                     .send(Message::ProviderSaved(provider.id.to_string()))
                     .await;
-                Ok(format!("Provider {} saved", provider.name))
+                Ok(msg!("completion.provider_saved", name = provider.name))
             }
             .await;
             finish(&sender, result).await;
@@ -1156,7 +1153,7 @@ impl Engine {
                     .unscoped()
                     .send(Message::Providers(Ok(providers)))
                     .await;
-                Ok("Provider removed; game files are kept".into())
+                Ok(msg!("completion.provider_removed"))
             }
             .await;
             finish(&sender, result).await;
@@ -1180,7 +1177,7 @@ impl Engine {
                     .await;
                 let name = account.player_name.clone();
                 let _ = sender.send(Message::SignedIn(account)).await;
-                Ok(format!("Offline identity {name} saved for local play"))
+                Ok(msg!("completion.offline_saved", name = name))
             }
             .await;
             finish(&sender, result).await;
@@ -1198,13 +1195,12 @@ impl Engine {
                     .send(Message::Accounts(Ok(load_accounts(&root)?)))
                     .await;
                 Ok(if account.provider == AccountProvider::Offline {
-                    "Offline identity removed · game files kept"
+                    msg!("completion.offline_removed")
                 } else if revocation_warning {
-                    "Local credentials removed · provider revocation could not be confirmed"
+                    msg!("completion.revocation_unconfirmed")
                 } else {
-                    "Signed out · saved credentials removed"
-                }
-                .to_owned())
+                    msg!("completion.signed_out")
+                })
             }
             .await;
             finish(&sender, result).await;
@@ -1223,9 +1219,7 @@ impl Engine {
         self.runtime.spawn(async move {
             let result = async {
                 let _ = sender
-                    .send(Message::Status(
-                        "Preparing · checking account authorization".into(),
-                    ))
+                    .send(Message::Status(msg!("runtime.checking_authorization")))
                     .await;
                 let provider = match account.provider {
                     AccountProvider::Authlib => {
@@ -1251,9 +1245,7 @@ impl Engine {
                             "The provider API changed. Sign in again before launching."
                         );
                         let _ = sender
-                            .send(Message::Status(
-                                "Preparing the official Authlib agent · verifying SHA-256".into(),
-                            ))
+                            .send(Message::Status(msg!("runtime.preparing_authlib_agent")))
                             .await;
                         let tracker =
                             Arc::new(Mutex::new(super::tasks::DownloadTracker::default()));
@@ -1361,8 +1353,9 @@ impl Engine {
                 }
                 Err(error) => {
                     let _ = sender
-                        .send(Message::Status(format!(
-                            "Could not stop this session · {error:#}"
+                        .send(Message::Status(msg!(
+                            "runtime.stop_failed",
+                            error = format!("{error:#}")
                         )))
                         .await;
                 }
@@ -1388,7 +1381,7 @@ impl Engine {
         self.runtime.spawn(async move {
             let result = run_recipe(recipe, root, sender.clone(), cancel)
                 .await
-                .map(|code| format!("Development recipe exited · {code:?}"));
+                .map(|code| msg!("completion.recipe_exited", code = format!("{code:?}")));
             finish(&sender, result).await;
         });
     }
@@ -1471,10 +1464,8 @@ async fn version_index(root: PathBuf, url: &str) -> anyhow::Result<Vec<VersionEn
 
 fn forward_event(sender: &EventSender, event: ExecutionEvent) {
     let message = match event {
-        ExecutionEvent::Stage { name } => Message::Status(name),
-        ExecutionEvent::Started { pid } => {
-            Message::Status(format!("Running · Minecraft PID {pid}"))
-        }
+        ExecutionEvent::Stage { name } => Message::Status(super::i18n::UiText::Raw(name)),
+        ExecutionEvent::Started { pid } => Message::Status(msg!("runtime.running_pid", pid = pid)),
         ExecutionEvent::Exited { .. } | ExecutionEvent::Terminated { .. } => return,
         ExecutionEvent::CaptureFailed { message } => Message::Log(message),
         ExecutionEvent::Log { line, .. } => {
@@ -1754,7 +1745,7 @@ fn import_and_save_candidate(
     saved
 }
 
-async fn finish(sender: &EventSender, result: anyhow::Result<String>) {
+async fn finish(sender: &EventSender, result: anyhow::Result<super::i18n::UiText>) {
     let _ = sender
         .send(Message::Finished(
             result.map_err(|error| format!("{error:#}")),
@@ -2170,6 +2161,31 @@ mod tests {
         path::PathBuf,
         time::{Duration, SystemTime},
     };
+
+    #[test]
+    fn execution_event_bridge_preserves_raw_stages_and_localizes_typed_pid() {
+        use block_launcher::executor::ExecutionEvent;
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+        let sender = super::EventSender::from(sender);
+        super::forward_event(
+            &sender,
+            ExecutionEvent::Stage {
+                name: "untranslated raw stage".into(),
+            },
+        );
+        super::forward_event(&sender, ExecutionEvent::Started { pid: 42 });
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(super::Message::Status(crate::i18n::UiText::Raw(text)))
+                if text == "untranslated raw stage"
+        ));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(super::Message::Status(text))
+                if text.text(crate::Language::English) == "Running · Minecraft PID 42"
+                    && text.text(crate::Language::Japanese) == "実行中 · Minecraft PID 42"
+        ));
+    }
 
     #[test]
     fn provider_persistence_preserves_drafts_duplicates_links_and_corrupt_files()

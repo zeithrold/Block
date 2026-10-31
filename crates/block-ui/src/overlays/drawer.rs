@@ -220,8 +220,9 @@ struct DrawerFrame {
     kind: Surface,
     owner: WeakEntity<Block>,
     palette: Palette,
-    title: &'static str,
-    description: &'static str,
+    language: crate::Language,
+    title: String,
+    description: String,
     focus: FocusHandle,
     insets: Edges<Pixels>,
     width: Pixels,
@@ -256,10 +257,11 @@ impl DrawerFrame {
         // only the panel stops below the title bar when it runs out of room.
         let available_height =
             (f32::from(height) - super::design::CHROME_HEIGHT - TITLE_BAR_GAP).max(0.);
-        let (palette, (title, description, desired_height), reduced) = {
+        let (palette, language, (title, description, desired_height), reduced) = {
             let view = owner.read(cx);
             (
                 view.palette,
+                view.language(),
                 view.surface_sheet_chrome(&kind),
                 view.motion_preferences().reduced(),
             )
@@ -309,6 +311,7 @@ impl DrawerFrame {
             kind,
             owner: active.owner.clone(),
             palette,
+            language,
             title,
             description,
             focus: active.focus.clone(),
@@ -404,7 +407,7 @@ impl DrawerLayer {
         let dismiss = frame.owner.clone();
         let close = components::button(
             "drawer-close",
-            "Close",
+            tr!(frame.language, "common.close"),
             palette,
             ButtonVariant::Ghost,
             ControlState::default(),
@@ -462,7 +465,7 @@ impl DrawerLayer {
                                     .min_w_0()
                                     .text_lg()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(frame.title),
+                                    .child(frame.title.clone()),
                             )
                             .child(close),
                     )
@@ -471,7 +474,7 @@ impl DrawerLayer {
                             .debug_selector(|| "drawer-description".into())
                             .text_sm()
                             .text_color(rgb(palette.muted))
-                            .child(frame.description),
+                            .child(frame.description.clone()),
                     ),
             )
             .child(
@@ -518,7 +521,7 @@ impl DrawerLayer {
                         let _ = target.update(cx, |view, cx| view.import_header_back(window, cx));
                     },
                 )
-                .aria_label("Back to sources")
+                .aria_label(tr!(frame.language, "chrome.back_to_sources"))
                 .child(Icon::ChevronLeft.render(16., frame.palette.foreground))
             })
     }
@@ -529,10 +532,12 @@ impl DrawerLayer {
         &self,
         frame: &DrawerFrame,
         panel: AnyElement,
+        popups: Vec<AnyElement>,
         cx: &mut Context<'_, Self>,
     ) -> gpui::Div {
         let revision = frame.revision;
         let dismiss = frame.owner.clone();
+        let cancel = frame.owner.clone();
         let overlay = div()
             .debug_selector(|| "block-drawer-backdrop".into())
             .absolute()
@@ -596,7 +601,11 @@ impl DrawerLayer {
                     .overlay_closable(!frame.closing)
                     .request_close(move |window, cx| {
                         let _ = dismiss.update(cx, |view, cx| {
-                            view.dismiss_surface_overlay(revision, window, cx)
+                            if view.shell.surfaces.select_above(revision) {
+                                view.handle(super::UiAction::Drawer(None), window, cx);
+                            } else {
+                                view.dismiss_surface_overlay(revision, window, cx);
+                            }
                         });
                     })
                     .top(frame.insets.top)
@@ -605,7 +614,33 @@ impl DrawerLayer {
                     .h(frame.height)
                     .overflow_hidden()
                     .overlay(overlay)
-                    .surface(panel),
+                    // Keep anchored popups above the scrim and outside the
+                    // clipped panel, but inside the sheet's focus trap.
+                    .surface(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .on_action(move |_: &gpui_base::actions::Cancel, window, cx| {
+                                // A nested selector owns Cancel even after Tab
+                                // moves focus to another control in this sheet.
+                                let handled = cancel
+                                    .update(cx, |view, cx| {
+                                        if !view.shell.surfaces.select_above(revision) {
+                                            return false;
+                                        }
+                                        view.handle(super::UiAction::Drawer(None), window, cx);
+                                        true
+                                    })
+                                    .unwrap_or(false);
+                                if handled {
+                                    cx.stop_propagation();
+                                } else {
+                                    cx.propagate();
+                                }
+                            })
+                            .child(panel)
+                            .children(popups),
+                    ),
             )
     }
 }
@@ -644,11 +679,17 @@ impl Render for DrawerLayer {
             window,
             cx,
         );
-        let body = owner.update(cx, |view, cx| {
-            view.render_surface_sheet_body(&frame.kind, window, cx)
+        let (body, popups) = owner.update(cx, |view, cx| {
+            let body = view.render_surface_sheet_body(&frame.kind, window, cx);
+            let popups = if view.shell.surfaces.contains(frame.revision) {
+                view.render_popups(true, cx)
+            } else {
+                Vec::new()
+            };
+            (body, popups)
         });
         let panel = self.panel(&frame, &owner, body, cx);
-        self.sheet(&frame, panel, cx).into_any_element()
+        self.sheet(&frame, panel, popups, cx).into_any_element()
     }
 }
 

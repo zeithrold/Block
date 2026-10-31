@@ -1,0 +1,1168 @@
+{
+  "_version": 2,
+  "accounts.provider.microsoft": {
+    "en": "Microsoft Account",
+    "zh-Hans": "Microsoft 账户",
+    "ja": "Microsoft アカウント"
+  },
+  "accounts.provider.authlib": {
+    "en": "Authlib-Injector",
+    "zh-Hans": "Authlib-Injector",
+    "ja": "Authlib-Injector"
+  },
+  "accounts.provider.offline": {
+    "en": "Offline Mode",
+    "zh-Hans": "离线模式",
+    "ja": "オフラインモード"
+  },
+  "accounts.auth.setup.title": {
+    "en": "Account setup",
+    "zh-Hans": "账户设置",
+    "ja": "アカウント設定"
+  },
+  "accounts.auth.rail.label": {
+    "en": "Account setup navigation",
+    "zh-Hans": "账户设置导航",
+    "ja": "アカウント設定のナビゲーション"
+  },
+  "accounts.auth.body.label": {
+    "en": "Authentication steps",
+    "zh-Hans": "身份验证步骤",
+    "ja": "認証の手順"
+  },
+  "accounts.auth.step.type.title": {
+    "en": "Account type",
+    "zh-Hans": "账户类型",
+    "ja": "アカウントの種類"
+  },
+  "accounts.auth.step.type.description": {
+    "en": "Choose how to sign in",
+    "zh-Hans": "选择登录方式",
+    "ja": "サインイン方法を選択"
+  },
+  "accounts.auth.step.sign_in.title": {
+    "en": "Sign in",
+    "zh-Hans": "登录",
+    "ja": "サインイン"
+  },
+  "accounts.auth.step.sign_in.offline": {
+    "en": "Choose a local player name",
+    "zh-Hans": "选择本地玩家名称",
+    "ja": "ローカルプレイヤー名を選択"
+  },
+  "accounts.auth.step.sign_in.authlib": {
+    "en": "Your provider account",
+    "zh-Hans": "你的验证服务器账户",
+    "ja": "認証サーバーのアカウント"
+  },
+  "accounts.auth.step.sign_in.microsoft": {
+    "en": "Continue with Microsoft",
+    "zh-Hans": "使用 Microsoft 继续",
+    "ja": "Microsoft で続行"
+  },
+  "accounts.auth.step.verification.title": {
+    "en": "Verification",
+    "zh-Hans": "验证",
+    "ja": "確認"
+  },
+  "accounts.auth.step.verification.offline": {
+    "en": "Validate the local identity",
+    "zh-Hans": "验证本地身份",
+    "ja": "ローカル ID を検証"
+  },
+  "accounts.auth.step.verification.authlib": {
+    "en": "Select your provider character",
+    "zh-Hans": "选择验证服务器角色",
+    "ja": "認証サーバーのキャラクターを選択"
+  },
+  "accounts.auth.step.verification.microsoft": {
+    "en": "Ownership and player profile",
+    "zh-Hans": "游戏所有权与玩家档案",
+    "ja": "所有権とプレイヤープロフィール"
+  },
+  "accounts.auth.step.complete.title": {
+    "en": "Complete",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "accounts.auth.step.complete.description": {
+    "en": "Review and save your account",
+    "zh-Hans": "检查并保存账户",
+    "ja": "アカウントを確認して保存"
+  },
+  "accounts.auth.step.progress": {
+    "en": "Step %{step} of 4",
+    "zh-Hans": "第 %{step} 步，共 4 步",
+    "ja": "ステップ %{step} / 4"
+  },
+  "accounts.auth.error.drop_wayland": {
+    "en": "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.",
+    "zh-Hans": "拖放不可用：此版本不支持 Wayland 窗口；请使用 X11 会话。",
+    "ja": "ドラッグ＆ドロップを利用できません。このビルドは Wayland ウィンドウに対応していません。X11 セッションを使用してください。"
+  },
+  "accounts.auth.error.drop_unsupported": {
+    "en": "Drag and drop is unavailable: unsupported windowing system.",
+    "zh-Hans": "拖放不可用：不支持此窗口系统。",
+    "ja": "ドラッグ＆ドロップを利用できません。ウィンドウシステムに対応していません。"
+  },
+  "accounts.auth.error.drop_failed": {
+    "en": "Drag and drop is unavailable: %{detail}",
+    "zh-Hans": "拖放不可用：%{detail}",
+    "ja": "ドラッグ＆ドロップを利用できません: %{detail}"
+  },
+  "accounts.auth.choose.title": {
+    "en": "Add an account",
+    "zh-Hans": "添加账户",
+    "ja": "アカウントを追加"
+  },
+  "accounts.auth.choose.description": {
+    "en": "Choose an account you own to play Minecraft: Java Edition.",
+    "zh-Hans": "选择一个你拥有的账户来游玩 Minecraft: Java 版。",
+    "ja": "所有しているアカウントを選択して Minecraft: Java Edition をプレイします。"
+  },
+  "accounts.auth.info.title.offline": {
+    "en": "Your local player",
+    "zh-Hans": "你的本地玩家",
+    "ja": "ローカルプレイヤー"
+  },
+  "accounts.auth.info.title.authlib": {
+    "en": "Sign in to your provider",
+    "zh-Hans": "登录验证服务器",
+    "ja": "認証サーバーにサインイン"
+  },
+  "accounts.auth.info.title.microsoft": {
+    "en": "Sign in with Microsoft",
+    "zh-Hans": "使用 Microsoft 登录",
+    "ja": "Microsoft でサインイン"
+  },
+  "accounts.auth.info.description.offline": {
+    "en": "Choose a name for local play without an authentication service.",
+    "zh-Hans": "为无需身份验证服务的本地游戏选择一个名称。",
+    "ja": "認証サービスを使わないローカルプレイ用の名前を選択します。"
+  },
+  "accounts.auth.info.description.authlib": {
+    "en": "Choose your server and enter its account credentials.",
+    "zh-Hans": "选择你的服务器并输入其账户凭据。",
+    "ja": "サーバーを選択し、そのアカウントの資格情報を入力します。"
+  },
+  "accounts.auth.info.description.microsoft": {
+    "en": "Choose browser sign-in or enter a device code on another device.",
+    "zh-Hans": "选择浏览器登录，或在其他设备上输入设备代码。",
+    "ja": "ブラウザーでのサインインを選ぶか、別のデバイスでデバイスコードを入力します。"
+  },
+  "accounts.auth.preparing.title": {
+    "en": "Preparing secure sign-in",
+    "zh-Hans": "正在准备安全登录",
+    "ja": "安全なサインインを準備しています"
+  },
+  "accounts.auth.preparing.description.authlib": {
+    "en": "Block is authenticating with your selected provider.",
+    "zh-Hans": "Block 正在通过你选择的验证服务器进行身份验证。",
+    "ja": "Block は選択した認証サーバーで認証しています。"
+  },
+  "accounts.auth.preparing.description.microsoft": {
+    "en": "Block is requesting a real Microsoft authorization session.",
+    "zh-Hans": "Block 正在请求真实的 Microsoft 授权会话。",
+    "ja": "Block は実際の Microsoft 認可セッションを要求しています。"
+  },
+  "accounts.auth.waiting.device.title": {
+    "en": "Approve your device code",
+    "zh-Hans": "批准你的设备代码",
+    "ja": "デバイスコードを承認"
+  },
+  "accounts.auth.waiting.device.description": {
+    "en": "Open Microsoft's website on this or another device and enter the code below.",
+    "zh-Hans": "在此设备或其他设备上打开 Microsoft 网站，并输入下面的代码。",
+    "ja": "このデバイスまたは別のデバイスで Microsoft のサイトを開き、以下のコードを入力してください。"
+  },
+  "accounts.auth.waiting.browser.title": {
+    "en": "Continue in your browser",
+    "zh-Hans": "在浏览器中继续",
+    "ja": "ブラウザーで続行"
+  },
+  "accounts.auth.waiting.browser.description": {
+    "en": "Complete Microsoft sign-in and return here. This window can stay open.",
+    "zh-Hans": "完成 Microsoft 登录后返回此处。此窗口可以保持打开。",
+    "ja": "Microsoft のサインインを完了して、ここに戻ってください。このウィンドウは開いたままにできます。"
+  },
+  "accounts.auth.verifying.title": {
+    "en": "Verifying your account",
+    "zh-Hans": "正在验证你的账户",
+    "ja": "アカウントを確認しています"
+  },
+  "accounts.auth.verifying.description.authlib": {
+    "en": "Block is assigning the selected character through your provider.",
+    "zh-Hans": "Block 正在通过你的验证服务器分配所选角色。",
+    "ja": "Block は認証サーバーを通じて選択したキャラクターを割り当てています。"
+  },
+  "accounts.auth.verifying.description.microsoft": {
+    "en": "Block is checking Java Edition ownership and resolving your player profile.",
+    "zh-Hans": "Block 正在检查 Java 版所有权并解析你的玩家档案。",
+    "ja": "Block は Java Edition の所有権を確認し、プレイヤープロフィールを取得しています。"
+  },
+  "accounts.auth.characters.title": {
+    "en": "Choose your character",
+    "zh-Hans": "选择你的角色",
+    "ja": "キャラクターを選択"
+  },
+  "accounts.auth.characters.description": {
+    "en": "These characters were returned by your authentication provider.",
+    "zh-Hans": "这些角色由你的验证服务器返回。",
+    "ja": "これらのキャラクターは認証サーバーから返されました。"
+  },
+  "accounts.auth.failed.offline.title": {
+    "en": "Check your player name",
+    "zh-Hans": "检查你的玩家名称",
+    "ja": "プレイヤー名を確認"
+  },
+  "accounts.auth.failed.offline.description": {
+    "en": "Use 1–16 ASCII letters, numbers, or underscores. Your saved accounts are unchanged.",
+    "zh-Hans": "使用 1–16 个 ASCII 字母、数字或下划线。已保存的账户不会改变。",
+    "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。保存済みのアカウントは変更されません。"
+  },
+  "accounts.auth.failed.title": {
+    "en": "Sign-in needs your attention",
+    "zh-Hans": "登录需要处理",
+    "ja": "サインインの対応が必要です"
+  },
+  "accounts.auth.failed.description": {
+    "en": "Your existing saved accounts are kept. You can try again.",
+    "zh-Hans": "已保存的现有账户会保留。你可以重试。",
+    "ja": "既存の保存済みアカウントは保持されます。もう一度お試しください。"
+  },
+  "accounts.auth.complete.title": {
+    "en": "Your account is ready",
+    "zh-Hans": "你的账户已就绪",
+    "ja": "アカウントの準備ができました"
+  },
+  "accounts.auth.complete.description.offline": {
+    "en": "Your local identity is valid. Finish saves it; closing discards this preparation.",
+    "zh-Hans": "你的本地身份有效。完成会保存它；关闭会丢弃这次准备。",
+    "ja": "ローカル ID は有効です。「完了」で保存され、閉じるとこの準備は破棄されます。"
+  },
+  "accounts.auth.complete.description.online": {
+    "en": "Your identity is verified. Finish saves this account securely; closing discards this preparation.",
+    "zh-Hans": "你的身份已验证。完成会安全地保存此账户；关闭会丢弃这次准备。",
+    "ja": "ID は確認済みです。「完了」でこのアカウントを安全に保存し、閉じるとこの準備は破棄されます。"
+  },
+  "accounts.auth.saving.title": {
+    "en": "Saving your account",
+    "zh-Hans": "正在保存你的账户",
+    "ja": "アカウントを保存しています"
+  },
+  "accounts.auth.saving.description.offline": {
+    "en": "Block is saving the local identity. This finishes even if you close the window.",
+    "zh-Hans": "Block 正在保存本地身份。即使关闭窗口也会完成。",
+    "ja": "Block はローカル ID を保存しています。ウィンドウを閉じても完了します。"
+  },
+  "accounts.auth.saving.description.online": {
+    "en": "Block is saving the refresh credential and account metadata. This finishes even if you close the window.",
+    "zh-Hans": "Block 正在保存刷新凭据和账户元数据。即使关闭窗口也会完成。",
+    "ja": "Block はリフレッシュ資格情報とアカウントのメタデータを保存しています。ウィンドウを閉じても完了します。"
+  },
+  "accounts.auth.saved.title": {
+    "en": "Account saved",
+    "zh-Hans": "账户已保存",
+    "ja": "アカウントを保存しました"
+  },
+  "accounts.auth.saved.description": {
+    "en": "Your account is saved securely. Returning to the launcher.",
+    "zh-Hans": "你的账户已安全保存。正在返回启动器。",
+    "ja": "アカウントは安全に保存されました。ランチャーに戻ります。"
+  },
+  "accounts.auth.busy_notice": {
+    "en": "Finish the current launcher task before starting or saving this sign-in.",
+    "zh-Hans": "请先完成当前启动器任务，再开始或保存此登录。",
+    "ja": "このサインインを開始または保存する前に、現在のランチャーのタスクを完了してください。"
+  },
+  "accounts.auth.error.fallback": {
+    "en": "Sign-in could not finish. Try again.",
+    "zh-Hans": "登录未能完成。请重试。",
+    "ja": "サインインを完了できませんでした。もう一度お試しください。"
+  },
+  "accounts.auth.provider.microsoft.label": {
+    "en": "Microsoft account",
+    "zh-Hans": "Microsoft 账户",
+    "ja": "Microsoft アカウント"
+  },
+  "accounts.auth.provider.microsoft.description": {
+    "en": "Sign in securely in your browser. Block never asks for your Microsoft password.",
+    "zh-Hans": "在浏览器中安全登录。Block 绝不会索取你的 Microsoft 密码。",
+    "ja": "ブラウザーで安全にサインインします。Block が Microsoft のパスワードを求めることはありません。"
+  },
+  "accounts.auth.provider.authlib.label": {
+    "en": "Authlib-Injector",
+    "zh-Hans": "Authlib-Injector",
+    "ja": "Authlib-Injector"
+  },
+  "accounts.auth.provider.authlib.description": {
+    "en": "A community authentication provider. Its account and password are separate from Microsoft.",
+    "zh-Hans": "社区验证服务器。其账户和密码与 Microsoft 相互独立。",
+    "ja": "コミュニティの認証サーバーです。そのアカウントとパスワードは Microsoft とは別です。"
+  },
+  "accounts.auth.provider.offline.label": {
+    "en": "Offline Mode",
+    "zh-Hans": "离线模式",
+    "ja": "オフラインモード"
+  },
+  "accounts.auth.provider.offline.description": {
+    "en": "A local player identity. Does not grant access to authenticated online services.",
+    "zh-Hans": "本地玩家身份。不会获得需要验证的在线服务的访问权限。",
+    "ja": "ローカルのプレイヤー ID です。認証が必要なオンラインサービスにはアクセスできません。"
+  },
+  "accounts.auth.other.show": {
+    "en": "Other sign-in options",
+    "zh-Hans": "其他登录选项",
+    "ja": "その他のサインインオプション"
+  },
+  "accounts.auth.other.hide": {
+    "en": "Hide other sign-in options",
+    "zh-Hans": "隐藏其他登录选项",
+    "ja": "その他のサインインオプションを非表示"
+  },
+  "accounts.auth.choices.note": {
+    "en": "Finish saves the account securely on this device.",
+    "zh-Hans": "完成会在此设备上安全保存账户。",
+    "ja": "「完了」でこのデバイスにアカウントを安全に保存します。"
+  },
+  "accounts.auth.provider.missing": {
+    "en": "Missing provider",
+    "zh-Hans": "缺少验证服务器",
+    "ja": "認証サーバーが見つかりません"
+  },
+  "accounts.auth.provider.picker.empty": {
+    "en": "Choose a server",
+    "zh-Hans": "选择服务器",
+    "ja": "サーバーを選択"
+  },
+  "accounts.auth.provider.none": {
+    "en": "No saved providers. Use + to add your server or import its quick link.",
+    "zh-Hans": "尚未保存验证服务器。使用 + 添加你的服务器或导入其快速链接。",
+    "ja": "保存済みの認証サーバーはありません。「+」でサーバーを追加するか、クイックリンクをインポートしてください。"
+  },
+  "accounts.auth.provider.dialog_open": {
+    "en": "Finish or close the provider dialog before signing in.",
+    "zh-Hans": "请先完成或关闭服务器对话框，然后再登录。",
+    "ja": "サインインする前に、認証サーバーのダイアログを完了または閉じてください。"
+  },
+  "accounts.auth.provider.address_changed": {
+    "en": "The provider address changed. Choose it again and re-enter your password.",
+    "zh-Hans": "验证服务器地址已更改。请重新选择并再次输入密码。",
+    "ja": "認証サーバーのアドレスが変更されました。もう一度選択し、パスワードを再入力してください。"
+  },
+  "accounts.auth.provider.http_warning": {
+    "en": "This provider uses HTTP. Your password and tokens are sent without encryption. Continue only if you trust this address and network.",
+    "zh-Hans": "此验证服务器使用 HTTP。你的密码和令牌将不加密发送。仅当你信任此地址和网络时才继续。",
+    "ja": "この認証サーバーは HTTP を使用しています。パスワードとトークンは暗号化されずに送信されます。このアドレスとネットワークを信頼する場合のみ続行してください。"
+  },
+  "accounts.auth.http_consent": {
+    "en": "I accept the HTTP risk for this address",
+    "zh-Hans": "我接受此地址的 HTTP 风险",
+    "ja": "このアドレスの HTTP リスクを受け入れます"
+  },
+  "accounts.auth.login.label": {
+    "en": "Account",
+    "zh-Hans": "账户",
+    "ja": "アカウント"
+  },
+  "accounts.auth.login.placeholder": {
+    "en": "Email or username",
+    "zh-Hans": "电子邮箱或用户名",
+    "ja": "メールアドレスまたはユーザー名"
+  },
+  "accounts.auth.password.label": {
+    "en": "Password",
+    "zh-Hans": "密码",
+    "ja": "パスワード"
+  },
+  "accounts.auth.password.placeholder": {
+    "en": "Your provider password",
+    "zh-Hans": "你的验证服务器密码",
+    "ja": "認証サーバーのパスワード"
+  },
+  "accounts.auth.password.note": {
+    "en": "The password is cleared after sending and is never saved. Only Finish stores this provider's tokens securely.",
+    "zh-Hans": "密码发送后即被清除，绝不会被保存。只有完成操作才会安全保存此验证服务器的令牌。",
+    "ja": "パスワードは送信後に消去され、保存されることはありません。「完了」でのみ、この認証サーバーのトークンが安全に保存されます。"
+  },
+  "accounts.auth.offline.card_note": {
+    "en": "An offline identity for local play, without signing in to an authentication service.",
+    "zh-Hans": "用于本地游戏的离线身份，无需登录身份验证服务。",
+    "ja": "認証サービスにサインインしない、ローカルプレイ用のオフライン ID です。"
+  },
+  "accounts.auth.offline.name.label": {
+    "en": "Player name",
+    "zh-Hans": "玩家名称",
+    "ja": "プレイヤー名"
+  },
+  "accounts.auth.offline.name.placeholder": {
+    "en": "Your player name",
+    "zh-Hans": "你的玩家名称",
+    "ja": "プレイヤー名"
+  },
+  "accounts.auth.offline.name.rule": {
+    "en": "Use 1–16 ASCII letters, numbers, or underscores. Names are case-sensitive.",
+    "zh-Hans": "使用 1–16 个 ASCII 字母、数字或下划线。名称区分大小写。",
+    "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。名前は大文字と小文字を区別します。"
+  },
+  "accounts.auth.microsoft.card_note": {
+    "en": "Block never asks for your Microsoft password. Authorize only on Microsoft's website.",
+    "zh-Hans": "Block 绝不会索取你的 Microsoft 密码。请仅在 Microsoft 网站上授权。",
+    "ja": "Block が Microsoft のパスワードを求めることはありません。Microsoft の Web サイトでのみ認可してください。"
+  },
+  "accounts.auth.method.browser": {
+    "en": "Browser",
+    "zh-Hans": "浏览器",
+    "ja": "ブラウザー"
+  },
+  "accounts.auth.method.device": {
+    "en": "Device Code",
+    "zh-Hans": "设备代码",
+    "ja": "デバイスコード"
+  },
+  "accounts.auth.waiting.authlib.verifying": {
+    "en": "Confirming the selected character with your provider…",
+    "zh-Hans": "正在向验证服务器确认所选角色…",
+    "ja": "選択したキャラクターを認証サーバーで確認しています…"
+  },
+  "accounts.auth.waiting.authlib.checking": {
+    "en": "Checking your account with the selected provider…",
+    "zh-Hans": "正在向所选验证服务器检查你的账户…",
+    "ja": "選択した認証サーバーでアカウントを確認しています…"
+  },
+  "accounts.auth.waiting.device.code_note": {
+    "en": "Enter this short-lived code on Microsoft's website:",
+    "zh-Hans": "在 Microsoft 网站上输入此短期代码：",
+    "ja": "Microsoft の Web サイトでこの一時コードを入力してください："
+  },
+  "accounts.auth.waiting.device.copy": {
+    "en": "Copy code",
+    "zh-Hans": "复制代码",
+    "ja": "コードをコピー"
+  },
+  "accounts.auth.waiting.device.open": {
+    "en": "Open Microsoft page",
+    "zh-Hans": "打开 Microsoft 页面",
+    "ja": "Microsoft のページを開く"
+  },
+  "accounts.auth.waiting.device.keep_open": {
+    "en": "Keep this window open. Verification begins when Microsoft approves the request.",
+    "zh-Hans": "请保持此窗口打开。Microsoft 批准请求后将开始验证。",
+    "ja": "このウィンドウは開いたままにしてください。Microsoft が要求を承認すると確認が始まります。"
+  },
+  "accounts.auth.waiting.device.requesting": {
+    "en": "Requesting your device code…",
+    "zh-Hans": "正在请求设备代码…",
+    "ja": "デバイスコードを要求しています…"
+  },
+  "accounts.auth.waiting.ownership_note": {
+    "en": "After authorization, Block verifies Java Edition ownership and resolves your player profile. You review the identity before saving it.",
+    "zh-Hans": "授权后，Block 会验证 Java 版所有权并解析你的玩家档案。保存前你可以检查身份信息。",
+    "ja": "認可後、Block は Java Edition の所有権を確認し、プレイヤープロフィールを取得します。保存前に ID を確認できます。"
+  },
+  "accounts.auth.waiting.moment": {
+    "en": "This can take a moment after you finish in the browser.",
+    "zh-Hans": "在浏览器中完成后，这可能需要一点时间。",
+    "ja": "ブラウザーでの操作が完了してから、少し時間がかかる場合があります。"
+  },
+  "accounts.auth.waiting.boundary.microsoft_xbox": {
+    "en": "Microsoft and Xbox authorization",
+    "zh-Hans": "Microsoft 与 Xbox 授权",
+    "ja": "Microsoft と Xbox の認可"
+  },
+  "accounts.auth.waiting.boundary.ownership": {
+    "en": "Java Edition ownership",
+    "zh-Hans": "Java 版所有权",
+    "ja": "Java Edition の所有権"
+  },
+  "accounts.auth.waiting.boundary.profile": {
+    "en": "Player profile",
+    "zh-Hans": "玩家档案",
+    "ja": "プレイヤープロフィール"
+  },
+  "accounts.auth.waiting.boundary.credential": {
+    "en": "Secure credential storage",
+    "zh-Hans": "安全凭据存储",
+    "ja": "安全な資格情報ストレージ"
+  },
+  "accounts.auth.waiting.verified": {
+    "en": "%{label} · Verified",
+    "zh-Hans": "%{label} · 已验证",
+    "ja": "%{label} · 確認済み"
+  },
+  "accounts.auth.waiting.pending": {
+    "en": "%{label} · Pending",
+    "zh-Hans": "%{label} · 待处理",
+    "ja": "%{label} · 保留中"
+  },
+  "accounts.auth.waiting.reopen": {
+    "en": "Open browser again",
+    "zh-Hans": "再次打开浏览器",
+    "ja": "ブラウザーを再度開く"
+  },
+  "accounts.auth.waiting.reopen_note": {
+    "en": "If the browser did not open, try again. Block cannot tell whether you closed an external browser window.",
+    "zh-Hans": "如果浏览器没有打开，请重试。Block 无法判断你是否关闭了外部浏览器窗口。",
+    "ja": "ブラウザーが開かなかった場合は、もう一度お試しください。外部ブラウザーのウィンドウを閉じたかどうかを Block は判別できません。"
+  },
+  "accounts.auth.complete.waiting": {
+    "en": "Waiting for a verified identity.",
+    "zh-Hans": "正在等待已验证的身份。",
+    "ja": "確認済みの ID を待っています。"
+  },
+  "accounts.auth.complete.badge.saved": {
+    "en": "Account saved",
+    "zh-Hans": "账户已保存",
+    "ja": "アカウントを保存しました"
+  },
+  "accounts.auth.complete.badge.ready": {
+    "en": "Ready to save",
+    "zh-Hans": "可以保存",
+    "ja": "保存の準備完了"
+  },
+  "accounts.auth.complete.note.saved": {
+    "en": "The account has been saved and is ready to use.",
+    "zh-Hans": "账户已保存，可以使用。",
+    "ja": "アカウントは保存され、使用できる状態です。"
+  },
+  "accounts.auth.complete.note.ready": {
+    "en": "Finish saves this account securely and selects it. Closing now discards this sign-in.",
+    "zh-Hans": "完成会安全保存此账户并将其选中。现在关闭会丢弃此登录。",
+    "ja": "「完了」でこのアカウントを安全に保存し、選択します。ここで閉じるとこのサインインは破棄されます。"
+  },
+  "accounts.auth.footer.cancel_sign_in": {
+    "en": "Cancel sign-in",
+    "zh-Hans": "取消登录",
+    "ja": "サインインをキャンセル"
+  },
+  "accounts.auth.footer.back": {
+    "en": "Back",
+    "zh-Hans": "返回",
+    "ja": "戻る"
+  },
+  "accounts.auth.footer.continue": {
+    "en": "Continue",
+    "zh-Hans": "继续",
+    "ja": "続行"
+  },
+  "accounts.auth.footer.sign_in": {
+    "en": "Sign in",
+    "zh-Hans": "登录",
+    "ja": "サインイン"
+  },
+  "accounts.auth.footer.request_code": {
+    "en": "Request a code",
+    "zh-Hans": "请求代码",
+    "ja": "コードを要求"
+  },
+  "accounts.auth.footer.open_browser": {
+    "en": "Open browser",
+    "zh-Hans": "打开浏览器",
+    "ja": "ブラウザーを開く"
+  },
+  "accounts.auth.footer.waiting": {
+    "en": "Waiting…",
+    "zh-Hans": "等待中…",
+    "ja": "待機中…"
+  },
+  "accounts.auth.footer.try_again": {
+    "en": "Try again",
+    "zh-Hans": "重试",
+    "ja": "もう一度試す"
+  },
+  "accounts.auth.footer.finish": {
+    "en": "Finish",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "accounts.auth.footer.saving": {
+    "en": "Saving…",
+    "zh-Hans": "正在保存…",
+    "ja": "保存中…"
+  },
+  "accounts.auth.footer.done": {
+    "en": "Done",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "accounts.auth.provider_add.title": {
+    "en": "Add a provider",
+    "zh-Hans": "添加验证服务器",
+    "ja": "認証サーバーを追加"
+  },
+  "accounts.auth.provider_add.description": {
+    "en": "Enter the server details or paste an Authlib quick link.",
+    "zh-Hans": "输入服务器详细信息，或粘贴 Authlib 快速链接。",
+    "ja": "サーバーの詳細を入力するか、Authlib のクイックリンクを貼り付けてください。"
+  },
+  "accounts.auth.provider_add.drop": {
+    "en": "Drop an Authlib quick link here",
+    "zh-Hans": "将 Authlib 快速链接拖到此处",
+    "ja": "Authlib のクイックリンクをここにドロップ"
+  },
+  "accounts.auth.provider_add.drop_note": {
+    "en": "You can also paste the link into the server address field.",
+    "zh-Hans": "你也可以将链接粘贴到服务器地址字段。",
+    "ja": "リンクをサーバーアドレス欄に貼り付けることもできます。"
+  },
+  "accounts.auth.provider_add.name.label": {
+    "en": "Display name",
+    "zh-Hans": "显示名称",
+    "ja": "表示名"
+  },
+  "accounts.auth.provider_add.name.placeholder": {
+    "en": "Your community server",
+    "zh-Hans": "你的社区服务器",
+    "ja": "コミュニティサーバー"
+  },
+  "accounts.auth.provider_add.address.label": {
+    "en": "Server API address",
+    "zh-Hans": "服务器 API 地址",
+    "ja": "サーバー API アドレス"
+  },
+  "accounts.auth.provider_add.address.placeholder": {
+    "en": "Server API address or Authlib quick link",
+    "zh-Hans": "服务器 API 地址或 Authlib 快速链接",
+    "ja": "サーバー API アドレスまたは Authlib クイックリンク"
+  },
+  "accounts.auth.provider_add.identify": {
+    "en": "Recognize address",
+    "zh-Hans": "识别地址",
+    "ja": "アドレスを認識"
+  },
+  "accounts.auth.provider_add.existing": {
+    "en": "Already saved as %{name}. Select it without creating a duplicate.",
+    "zh-Hans": "已保存为 %{name}。请直接选择它，无需创建重复项。",
+    "ja": "%{name} として保存済みです。重複を作成せずに選択してください。"
+  },
+  "accounts.auth.provider_add.http_note": {
+    "en": "HTTP sends your password and tokens without encryption. Continue only if you trust this address and network.",
+    "zh-Hans": "HTTP 会在不加密的情况下发送你的密码和令牌。仅当你信任此地址和网络时才继续。",
+    "ja": "HTTP ではパスワードとトークンが暗号化されずに送信されます。このアドレスとネットワークを信頼する場合のみ続行してください。"
+  },
+  "accounts.auth.provider_add.use_saved": {
+    "en": "Use saved provider",
+    "zh-Hans": "使用已保存的验证服务器",
+    "ja": "保存済みの認証サーバーを使用"
+  },
+  "accounts.auth.provider_add.add": {
+    "en": "Add and select",
+    "zh-Hans": "添加并选择",
+    "ja": "追加して選択"
+  },
+  "accounts.auth.stage.secure_storage": {
+    "en": "Checking secure credential storage",
+    "zh-Hans": "正在检查安全凭据存储",
+    "ja": "安全な資格情報ストレージを確認しています"
+  },
+  "accounts.auth.stage.device_code": {
+    "en": "Requesting a Microsoft device code",
+    "zh-Hans": "正在请求 Microsoft 设备代码",
+    "ja": "Microsoft のデバイスコードを要求しています"
+  },
+  "accounts.auth.stage.browser": {
+    "en": "Waiting for Microsoft authorization in your browser",
+    "zh-Hans": "正在等待你在浏览器中完成 Microsoft 授权",
+    "ja": "ブラウザーでの Microsoft の認可を待っています"
+  },
+  "accounts.auth.stage.microsoft": {
+    "en": "Exchanging Microsoft authorization",
+    "zh-Hans": "正在交换 Microsoft 授权",
+    "ja": "Microsoft の認可を交換しています"
+  },
+  "accounts.auth.stage.xbox_auth": {
+    "en": "Authenticating with Xbox Live",
+    "zh-Hans": "正在通过 Xbox Live 进行身份验证",
+    "ja": "Xbox Live で認証しています"
+  },
+  "accounts.auth.stage.xbox_authorization": {
+    "en": "Authorizing Minecraft services",
+    "zh-Hans": "正在授权 Minecraft 服务",
+    "ja": "Minecraft サービスを認可しています"
+  },
+  "accounts.auth.stage.minecraft": {
+    "en": "Obtaining a Minecraft session",
+    "zh-Hans": "正在获取 Minecraft 会话",
+    "ja": "Minecraft セッションを取得しています"
+  },
+  "accounts.auth.stage.ownership": {
+    "en": "Verifying Java Edition ownership",
+    "zh-Hans": "正在验证 Java 版所有权",
+    "ja": "Java Edition の所有権を確認しています"
+  },
+  "accounts.auth.stage.profile": {
+    "en": "Resolving your player profile",
+    "zh-Hans": "正在解析你的玩家档案",
+    "ja": "プレイヤープロフィールを取得しています"
+  },
+  "accounts.auth.stage.credential": {
+    "en": "Saving your refresh credential securely",
+    "zh-Hans": "正在安全保存你的刷新凭据",
+    "ja": "リフレッシュ資格情報を安全に保存しています"
+  },
+  "accounts.auth.stage.metadata": {
+    "en": "Saving public account metadata",
+    "zh-Hans": "正在保存公开账户元数据",
+    "ja": "公開アカウントのメタデータを保存しています"
+  },
+  "accounts.auth.error.cancelled": {
+    "en": "Sign-in was cancelled. You can try again when you are ready.",
+    "zh-Hans": "登录已取消。你可以随时重试。",
+    "ja": "サインインはキャンセルされました。準備ができたらもう一度試せます。"
+  },
+  "accounts.auth.error.expired": {
+    "en": "Authorization expired. Start sign-in again to request a fresh session.",
+    "zh-Hans": "授权已过期。请重新开始登录以请求新的会话。",
+    "ja": "認可の有効期限が切れました。サインインをやり直して新しいセッションを要求してください。"
+  },
+  "accounts.auth.error.ownership": {
+    "en": "Minecraft: Java Edition ownership could not be verified. Check the Microsoft account and try again.",
+    "zh-Hans": "无法验证 Minecraft: Java 版所有权。请检查 Microsoft 账户后重试。",
+    "ja": "Minecraft: Java Edition の所有権を確認できませんでした。Microsoft アカウントを確認して、もう一度お試しください。"
+  },
+  "accounts.auth.error.player_profile": {
+    "en": "Complete your Minecraft: Java Edition player profile at minecraft.net, then try again.",
+    "zh-Hans": "请在 minecraft.net 完成你的 Minecraft: Java 版玩家档案，然后重试。",
+    "ja": "minecraft.net で Minecraft: Java Edition のプレイヤープロフィールを完成させてから、もう一度お試しください。"
+  },
+  "accounts.auth.error.xbox_profile": {
+    "en": "Create an Xbox profile for this Microsoft account, then try again.",
+    "zh-Hans": "为此 Microsoft 账户创建 Xbox 档案，然后重试。",
+    "ja": "この Microsoft アカウントの Xbox プロフィールを作成してから、もう一度お試しください。"
+  },
+  "accounts.auth.error.family": {
+    "en": "Xbox account permissions or family restrictions prevent this sign-in. Check the account's Xbox settings.",
+    "zh-Hans": "Xbox 账户权限或家庭限制阻止了此登录。请检查该账户的 Xbox 设置。",
+    "ja": "Xbox アカウントの権限またはファミリー制限により、このサインインはブロックされています。アカウントの Xbox 設定を確認してください。"
+  },
+  "accounts.auth.error.registration_other": {
+    "en": "This player is saved under another Microsoft application registration. Remove that saved account first, then sign in again.",
+    "zh-Hans": "此玩家已保存在另一个 Microsoft 应用程序注册下。请先移除该已保存账户，然后重新登录。",
+    "ja": "このプレイヤーは別の Microsoft アプリケーション登録で保存されています。先にその保存済みアカウントを削除してから、サインインし直してください。"
+  },
+  "accounts.auth.error.registration": {
+    "en": "The Microsoft application rejected this sign-in method. Check its public-client and personal-account settings; browser sign-in also needs its desktop redirect URI.",
+    "zh-Hans": "Microsoft 应用程序拒绝了此登录方式。请检查其公共客户端和个人账户设置；浏览器登录还需要其桌面重定向 URI。",
+    "ja": "Microsoft アプリケーションがこのサインイン方法を拒否しました。パブリッククライアントと個人アカウントの設定を確認してください。ブラウザーでのサインインにはデスクトップのリダイレクト URI も必要です。"
+  },
+  "accounts.auth.error.store_unavailable.linux": {
+    "en": "The desktop Secret Service is unavailable or locked. Start or unlock your system keyring, then try again. Credentials are never saved to a plaintext file.",
+    "zh-Hans": "桌面 Secret Service 不可用或已锁定。请启动或解锁系统密钥环，然后重试。凭据绝不会保存到明文文件。",
+    "ja": "デスクトップの Secret Service が利用できないかロックされています。システムのキーリングを起動またはロック解除してから、もう一度お試しください。資格情報が平文ファイルに保存されることはありません。"
+  },
+  "accounts.auth.error.store_unavailable.windows": {
+    "en": "Windows Credential Manager is unavailable. Check access to your Windows user session, then try again. Credentials are never saved to a plaintext file.",
+    "zh-Hans": "Windows 凭据管理器不可用。请检查对 Windows 用户会话的访问权限，然后重试。凭据绝不会保存到明文文件。",
+    "ja": "Windows 資格情報マネージャーを利用できません。Windows ユーザーセッションへのアクセスを確認してから、もう一度お試しください。資格情報が平文ファイルに保存されることはありません。"
+  },
+  "accounts.auth.error.store_unavailable.macos": {
+    "en": "The system keychain is unavailable or locked. Unlock your login keychain, then try again. Credentials are never saved to a plaintext file.",
+    "zh-Hans": "系统钥匙串不可用或已锁定。请解锁登录钥匙串，然后重试。凭据绝不会保存到明文文件。",
+    "ja": "システムのキーチェーンが利用できないかロックされています。ログインキーチェーンをロック解除してから、もう一度お試しください。資格情報が平文ファイルに保存されることはありません。"
+  },
+  "accounts.auth.error.store_unsupported": {
+    "en": "This system has no supported secure credential store. Account sign-in is unavailable until a system credential store is configured.",
+    "zh-Hans": "此系统没有受支持的安全凭据存储。在配置系统凭据存储之前，无法登录账户。",
+    "ja": "このシステムには対応する安全な資格情報ストレージがありません。システムの資格情報ストレージを設定するまで、アカウントのサインインは利用できません。"
+  },
+  "accounts.auth.error.save_failed": {
+    "en": "Block could not save the account securely. Check access to the data directory and credential store, then try again.",
+    "zh-Hans": "Block 无法安全保存账户。请检查对数据目录和凭据存储的访问权限，然后重试。",
+    "ja": "Block はアカウントを安全に保存できませんでした。データディレクトリと資格情報ストレージへのアクセスを確認してから、もう一度お試しください。"
+  },
+  "accounts.auth.error.engine_unavailable": {
+    "en": "Secure sign-in is unavailable. Check Block’s data directory and restart the app.",
+    "zh-Hans": "安全登录不可用。请检查 Block 的数据目录并重启应用。",
+    "ja": "安全なサインインは利用できません。Block のデータディレクトリを確認してアプリを再起動してください。"
+  },
+  "accounts.auth.error.generic": {
+    "en": "Microsoft sign-in could not finish. Check your connection and try again. Your saved accounts are kept.",
+    "zh-Hans": "Microsoft 登录未能完成。请检查网络连接后重试。已保存的账户会保留。",
+    "ja": "Microsoft のサインインを完了できませんでした。接続を確認して、もう一度お試しください。保存済みのアカウントは保持されます。"
+  },
+  "accounts.auth.error.offline_save_failed": {
+    "en": "The local identity could not be saved. Check the data directory and try adding it again. Previously saved accounts are kept.",
+    "zh-Hans": "无法保存本地身份。请检查数据目录，然后重新添加。之前保存的账户会保留。",
+    "ja": "ローカル ID を保存できませんでした。データディレクトリを確認して、もう一度追加してください。以前に保存したアカウントは保持されます。"
+  },
+  "accounts.auth.error.offline_name": {
+    "en": "Use 1–16 ASCII letters, numbers, or underscores.",
+    "zh-Hans": "使用 1–16 个 ASCII 字母、数字或下划线。",
+    "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。"
+  },
+  "accounts.auth.error.ended_without_identity": {
+    "en": "Sign-in ended without an identity confirmation",
+    "zh-Hans": "登录在没有身份确认的情况下结束",
+    "ja": "ID の確認なしにサインインが終了しました"
+  },
+  "accounts.auth.error.choose_provider": {
+    "en": "Choose a saved authentication provider first.",
+    "zh-Hans": "请先选择一个已保存的验证服务器。",
+    "ja": "先に保存済みの認証サーバーを選択してください。"
+  },
+  "accounts.auth.error.provider_credentials": {
+    "en": "Enter your provider account and password. The password is never saved.",
+    "zh-Hans": "请输入验证服务器账户和密码。密码绝不会被保存。",
+    "ja": "認証サーバーのアカウントとパスワードを入力してください。パスワードは保存されません。"
+  },
+  "accounts.auth.error.provider_start": {
+    "en": "External sign-in could not start: engine unavailable",
+    "zh-Hans": "无法开始外部登录：引擎不可用",
+    "ja": "外部サインインを開始できませんでした：エンジンが利用できません"
+  },
+  "accounts.auth.error.microsoft_start": {
+    "en": "Secure sign-in could not start: engine unavailable",
+    "zh-Hans": "无法开始安全登录：引擎不可用",
+    "ja": "安全なサインインを開始できませんでした：エンジンが利用できません"
+  },
+  "accounts.auth.error.save_unavailable": {
+    "en": "Secure account saving is unavailable: engine unavailable",
+    "zh-Hans": "无法安全保存账户：引擎不可用",
+    "ja": "アカウントの安全な保存は利用できません：エンジンが利用できません"
+  },
+  "accounts.auth.error.provider_setup_unavailable": {
+    "en": "Provider setup is unavailable: engine unavailable",
+    "zh-Hans": "无法设置验证服务器：引擎不可用",
+    "ja": "認証サーバーの設定は利用できません：エンジンが利用できません"
+  },
+  "accounts.auth.error.provider_display_name": {
+    "en": "Enter a provider display name.",
+    "zh-Hans": "请输入验证服务器的显示名称。",
+    "ja": "認証サーバーの表示名を入力してください。"
+  },
+  "accounts.auth.error.provider_http_confirm": {
+    "en": "Confirm the HTTP warning for this address.",
+    "zh-Hans": "请确认此地址的 HTTP 警告。",
+    "ja": "このアドレスの HTTP 警告を確認してください。"
+  },
+  "accounts.auth.error.provider_http_before_send": {
+    "en": "Confirm the HTTP warning for this provider before sending your password.",
+    "zh-Hans": "在发送密码前，请确认此验证服务器的 HTTP 警告。",
+    "ja": "パスワードを送信する前に、この認証サーバーの HTTP 警告を確認してください。"
+  },
+  "accounts.auth.status.preparing": {
+    "en": "Preparing secure Microsoft sign-in",
+    "zh-Hans": "正在准备安全的 Microsoft 登录",
+    "ja": "安全な Microsoft サインインを準備しています"
+  },
+  "accounts.auth.status.discovering_provider": {
+    "en": "Discovering your authentication provider",
+    "zh-Hans": "正在发现你的验证服务器",
+    "ja": "認証サーバーを検出しています"
+  },
+  "accounts.auth.status.authenticating": {
+    "en": "Authenticating with your provider",
+    "zh-Hans": "正在通过验证服务器进行身份验证",
+    "ja": "認証サーバーで認証しています"
+  },
+  "accounts.auth.status.selecting_character": {
+    "en": "Selecting your provider character",
+    "zh-Hans": "正在选择验证服务器角色",
+    "ja": "認証サーバーのキャラクターを選択しています"
+  },
+  "accounts.auth.status.saving": {
+    "en": "Saving your account securely",
+    "zh-Hans": "正在安全保存你的账户",
+    "ja": "アカウントを安全に保存しています"
+  },
+  "accounts.auth.status.cancelled": {
+    "en": "Sign-in cancelled. Previously saved accounts are kept.",
+    "zh-Hans": "登录已取消。之前保存的账户会保留。",
+    "ja": "サインインはキャンセルされました。以前に保存したアカウントは保持されます。"
+  },
+  "accounts.auth.status.saved": {
+    "en": "%{name} is saved and ready to use",
+    "zh-Hans": "%{name} 已保存并可使用",
+    "ja": "%{name} は保存され、使用できる状態です"
+  },
+  "accounts.providers.search.placeholder": {
+    "en": "Search providers…",
+    "zh-Hans": "搜索验证服务器…",
+    "ja": "認証サーバーを検索…"
+  },
+  "accounts.providers.loading": {
+    "en": "Loading saved providers…",
+    "zh-Hans": "正在加载已保存的验证服务器…",
+    "ja": "保存済みの認証サーバーを読み込んでいます…"
+  },
+  "accounts.providers.load_failed": {
+    "en": "Saved providers could not be loaded.",
+    "zh-Hans": "无法加载已保存的验证服务器。",
+    "ja": "保存済みの認証サーバーを読み込めませんでした。"
+  },
+  "accounts.providers.empty": {
+    "en": "No providers saved.",
+    "zh-Hans": "尚未保存验证服务器。",
+    "ja": "保存済みの認証サーバーはありません。"
+  },
+  "accounts.providers.none_found": {
+    "en": "No providers found.",
+    "zh-Hans": "未找到验证服务器。",
+    "ja": "認証サーバーが見つかりません。"
+  },
+  "accounts.providers.reload": {
+    "en": "Try again",
+    "zh-Hans": "重试",
+    "ja": "もう一度試す"
+  },
+  "accounts.providers.rail.title": {
+    "en": "Your providers",
+    "zh-Hans": "你的验证服务器",
+    "ja": "認証サーバー"
+  },
+  "accounts.providers.rail.unavailable": {
+    "en": "Your providers · unavailable",
+    "zh-Hans": "你的验证服务器 · 不可用",
+    "ja": "認証サーバー · 利用不可"
+  },
+  "accounts.providers.rail.count": {
+    "en": "Your providers · %{count}",
+    "zh-Hans": "你的验证服务器 · %{count}",
+    "ja": "認証サーバー · %{count}"
+  },
+  "accounts.providers.list.label": {
+    "en": "Providers",
+    "zh-Hans": "验证服务器",
+    "ja": "認証サーバー"
+  },
+  "accounts.providers.back": {
+    "en": "Back to accounts",
+    "zh-Hans": "返回账户",
+    "ja": "アカウントに戻る"
+  },
+  "accounts.providers.details.title": {
+    "en": "Provider details",
+    "zh-Hans": "验证服务器详细信息",
+    "ja": "認証サーバーの詳細"
+  },
+  "accounts.providers.add.title": {
+    "en": "Add a provider",
+    "zh-Hans": "添加验证服务器",
+    "ja": "認証サーバーを追加"
+  },
+  "accounts.providers.subtitle": {
+    "en": "Authlib-Injector · Custom authentication",
+    "zh-Hans": "Authlib-Injector · 自定义身份验证",
+    "ja": "Authlib-Injector · カスタム認証"
+  },
+  "accounts.providers.name.label": {
+    "en": "Display name",
+    "zh-Hans": "显示名称",
+    "ja": "表示名"
+  },
+  "accounts.providers.name.placeholder": {
+    "en": "Your community server",
+    "zh-Hans": "你的社区服务器",
+    "ja": "コミュニティサーバー"
+  },
+  "accounts.providers.address.label": {
+    "en": "Server API address or quick link",
+    "zh-Hans": "服务器 API 地址或快速链接",
+    "ja": "サーバー API アドレスまたはクイックリンク"
+  },
+  "accounts.providers.http_note": {
+    "en": "This provider uses HTTP. An unencrypted connection can expose your account and password. Use HTTPS whenever possible.",
+    "zh-Hans": "此验证服务器使用 HTTP。未加密的连接可能会泄露你的账户和密码。请尽可能使用 HTTPS。",
+    "ja": "この認証サーバーは HTTP を使用しています。暗号化されていない接続ではアカウントとパスワードが漏洩する可能性があります。可能な限り HTTPS を使用してください。"
+  },
+  "accounts.providers.http_consent": {
+    "en": "I understand and want to use this HTTP provider.",
+    "zh-Hans": "我已了解并希望使用此 HTTP 验证服务器。",
+    "ja": "理解したうえで、この HTTP 認証サーバーを使用します。"
+  },
+  "accounts.providers.identify_note": {
+    "en": "Addresses without a scheme use HTTPS. Identify normalizes a quick link or selects an already saved provider.",
+    "zh-Hans": "未指定协议的地址将使用 HTTPS。“识别地址”会规范化快速链接，或选择已保存的验证服务器。",
+    "ja": "スキームのないアドレスは HTTPS を使用します。「アドレスを認識」はクイックリンクを正規化するか、保存済みの認証サーバーを選択します。"
+  },
+  "accounts.providers.identify": {
+    "en": "Identify address",
+    "zh-Hans": "识别地址",
+    "ja": "アドレスを認識"
+  },
+  "accounts.providers.links": {
+    "en": "%{count} linked accounts · API metadata cached",
+    "zh-Hans": "已关联 %{count} 个账户 · API 元数据已缓存",
+    "ja": "リンク済みアカウント %{count} 件 · API メタデータはキャッシュ済み"
+  },
+  "accounts.providers.server": {
+    "en": "Server: %{name}",
+    "zh-Hans": "服务器：%{name}",
+    "ja": "サーバー：%{name}"
+  },
+  "accounts.providers.skins": {
+    "en": "Skin domains: %{domains}",
+    "zh-Hans": "皮肤域名：%{domains}",
+    "ja": "スキンドメイン：%{domains}"
+  },
+  "accounts.providers.address_locked": {
+    "en": "The API address is locked while accounts use this provider.",
+    "zh-Hans": "当账户使用此验证服务器时，API 地址被锁定。",
+    "ja": "アカウントがこの認証サーバーを使用している間は、API アドレスはロックされます。"
+  },
+  "accounts.providers.remove": {
+    "en": "Remove",
+    "zh-Hans": "移除",
+    "ja": "削除"
+  },
+  "accounts.providers.save_changes": {
+    "en": "Save changes",
+    "zh-Hans": "保存更改",
+    "ja": "変更を保存"
+  },
+  "accounts.providers.add": {
+    "en": "Add provider",
+    "zh-Hans": "添加验证服务器",
+    "ja": "認証サーバーを追加"
+  },
+  "accounts.providers.empty_title": {
+    "en": "Your authentication providers",
+    "zh-Hans": "你的验证服务器",
+    "ja": "認証サーバー"
+  },
+  "accounts.providers.empty_description": {
+    "en": "Choose a provider or add a server API address. Block discovers its API and caches real metadata.",
+    "zh-Hans": "选择一个验证服务器，或添加服务器 API 地址。Block 会发现其 API 并缓存真实元数据。",
+    "ja": "認証サーバーを選択するか、サーバー API アドレスを追加してください。Block は API を検出し、実際のメタデータをキャッシュします。"
+  },
+  "accounts.providers.error.name": {
+    "en": "Enter a provider name.",
+    "zh-Hans": "请输入验证服务器名称。",
+    "ja": "認証サーバーの名前を入力してください。"
+  },
+  "accounts.providers.error.save_unavailable": {
+    "en": "Provider saving is unavailable. Check the data directory and restart Block.",
+    "zh-Hans": "无法保存验证服务器。请检查数据目录并重启 Block。",
+    "ja": "認証サーバーを保存できません。データディレクトリを確認して Block を再起動してください。"
+  },
+  "accounts.providers.error.linked": {
+    "en": "This provider is used by saved accounts. Remove those accounts first.",
+    "zh-Hans": "此验证服务器正被已保存的账户使用。请先移除这些账户。",
+    "ja": "この認証サーバーは保存済みのアカウントで使用されています。先にそれらのアカウントを削除してください。"
+  },
+  "accounts.providers.error.remove_unavailable": {
+    "en": "Provider removal is unavailable. Restart Block.",
+    "zh-Hans": "无法移除验证服务器。请重启 Block。",
+    "ja": "認証サーバーを削除できません。Block を再起動してください。"
+  },
+  "accounts.providers.status.discovering": {
+    "en": "Discovering and saving the provider",
+    "zh-Hans": "正在发现并保存验证服务器",
+    "ja": "認証サーバーを検出して保存しています"
+  },
+  "accounts.providers.status.removing": {
+    "en": "Removing provider",
+    "zh-Hans": "正在移除验证服务器",
+    "ja": "認証サーバーを削除しています"
+  },
+  "accounts.details.title": {
+    "en": "Account details",
+    "zh-Hans": "账户详细信息",
+    "ja": "アカウントの詳細"
+  },
+  "accounts.details.player_name": {
+    "en": "Player name",
+    "zh-Hans": "玩家名称",
+    "ja": "プレイヤー名"
+  },
+  "accounts.details.account_type": {
+    "en": "Account type",
+    "zh-Hans": "账户类型",
+    "ja": "アカウントの種類"
+  },
+  "accounts.details.authentication": {
+    "en": "Authentication",
+    "zh-Hans": "身份验证",
+    "ja": "認証"
+  },
+  "accounts.details.environment": {
+    "en": "Environment",
+    "zh-Hans": "环境",
+    "ja": "環境"
+  },
+  "accounts.details.authentication.microsoft": {
+    "en": "Ownership rechecked at launch",
+    "zh-Hans": "启动时重新检查所有权",
+    "ja": "起動時に所有権を再確認"
+  },
+  "accounts.details.authentication.authlib": {
+    "en": "External authentication provider",
+    "zh-Hans": "外部验证服务器",
+    "ja": "外部認証サーバー"
+  },
+  "accounts.details.authentication.offline": {
+    "en": "Local identity; no online authorization",
+    "zh-Hans": "本地身份；无在线授权",
+    "ja": "ローカル ID。オンライン認可なし"
+  },
+  "accounts.details.identity.microsoft": {
+    "en": "A Microsoft identity for Minecraft: Java Edition.",
+    "zh-Hans": "用于 Minecraft: Java 版的 Microsoft 身份。",
+    "ja": "Minecraft: Java Edition 用の Microsoft ID。"
+  },
+  "accounts.details.identity.authlib": {
+    "en": "An identity issued by an external authentication provider.",
+    "zh-Hans": "由外部验证服务器颁发的身份。",
+    "ja": "外部認証サーバーが発行した ID。"
+  },
+  "accounts.details.identity.offline": {
+    "en": "A local player identity for offline play.",
+    "zh-Hans": "用于离线游戏的本地玩家身份。",
+    "ja": "オフラインプレイ用のローカルプレイヤー ID。"
+  },
+  "accounts.details.credentials.microsoft": {
+    "en": "Sign-in and ownership are checked again when launching. Credentials remain in your system’s secure credential store.",
+    "zh-Hans": "启动时会再次检查登录和所有权。凭据保留在系统的安全凭据存储中。",
+    "ja": "起動時にサインインと所有権が再確認されます。資格情報はシステムの安全な資格情報ストレージに保持されます。"
+  },
+  "accounts.details.credentials.authlib": {
+    "en": "Provider credentials must be verified before launch. Access and client tokens belong in your system credential store.",
+    "zh-Hans": "启动前必须验证验证服务器凭据。访问令牌和客户端令牌存储在系统的凭据存储中。",
+    "ja": "起動前に認証サーバーの資格情報を確認する必要があります。アクセストークンとクライアントトークンはシステムの資格情報ストレージに保存されます。"
+  },
+  "accounts.details.credentials.offline": {
+    "en": "The UUID is derived from the exact player name. No credentials are stored. This identity cannot access authenticated online services.",
+    "zh-Hans": "UUID 由完全一致的玩家名称派生。不存储任何凭据。此身份无法访问需要验证的在线服务。",
+    "ja": "UUID はプレイヤー名そのものから生成されます。資格情報は保存されません。この ID は認証が必要なオンラインサービスにアクセスできません。"
+  },
+  "accounts.details.provider": {
+    "en": "Provider",
+    "zh-Hans": "验证服务器",
+    "ja": "認証サーバー"
+  },
+  "accounts.details.provider_name": {
+    "en": "Name",
+    "zh-Hans": "名称",
+    "ja": "名前"
+  },
+  "accounts.details.provider_api": {
+    "en": "API address",
+    "zh-Hans": "API 地址",
+    "ja": "API アドレス"
+  },
+  "accounts.details.provider_account": {
+    "en": "Account",
+    "zh-Hans": "账户",
+    "ja": "アカウント"
+  },
+  "accounts.details.provider_unavailable": {
+    "en": "Provider unavailable",
+    "zh-Hans": "验证服务器不可用",
+    "ja": "認証サーバーを利用できません"
+  },
+  "accounts.onboarding.saved_toast": {
+    "en": "Setup saved · Continue on Home",
+    "zh-Hans": "设置已保存 · 在主页继续",
+    "ja": "セットアップを保存しました · ホームで続行"
+  },
+  "accounts.onboarding.save_missing": {
+    "en": "Setup could not be saved. Check Block's data directory and restart.",
+    "zh-Hans": "无法保存设置。请检查 Block 的数据目录并重启。",
+    "ja": "セットアップを保存できませんでした。Block のデータディレクトリを確認して再起動してください。"
+  },
+  "accounts.onboarding.finish_failed": {
+    "en": "Could not finish setup: %{error}",
+    "zh-Hans": "无法完成设置：%{error}",
+    "ja": "セットアップを完了できませんでした：%{error}"
+  }
+}

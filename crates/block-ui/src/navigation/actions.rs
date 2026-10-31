@@ -39,6 +39,7 @@ pub(super) enum UiAction {
     Drawer(Option<Drawer>),
     DownloadFiles(downloads::DownloadGroup),
     SetAppearance(Appearance),
+    SetLanguage(crate::Language),
     ReduceMotion,
     SavePreferences,
     ResetPreferences,
@@ -211,8 +212,12 @@ impl Block {
                 }
             }
             UiAction::SetAppearance(appearance) => self.preview_appearance(appearance),
+            UiAction::SetLanguage(language) => {
+                self.preferences.language = Some(language);
+                self.refresh_language(window, cx);
+            }
             UiAction::ReduceMotion => self.preview_reduce_motion(),
-            UiAction::ResetPreferences => self.reset_settings(cx),
+            UiAction::ResetPreferences => self.reset_settings(window, cx),
             UiAction::SavePreferences => self.save_settings(window, cx),
             UiAction::SetFullscreen => self.edit_settings_draft(|form| {
                 form.fullscreen = !form.fullscreen;
@@ -406,6 +411,14 @@ impl Block {
     /// A commit or page change must not interrupt an IME composition: the draft
     /// still holds the text being assembled.
     fn composition_in_progress(&self, action: &UiAction, cx: &Context<'_, Self>) -> bool {
+        if matches!(action, UiAction::SavePreferences) {
+            return self.settings_form.as_ref().is_some_and(|draft| {
+                draft
+                    .fields()
+                    .iter()
+                    .any(|field| field.read(cx).is_composing())
+            });
+        }
         matches!(
             action,
             UiAction::SaveInstance | UiAction::SaveProfile | UiAction::WizardNext
@@ -446,7 +459,8 @@ impl Block {
         if let UiAction::OpenProductSelect(choice) = action {
             return matches!(
                 choice,
-                select::ProductChoice::Appearance
+                select::ProductChoice::Language
+                    | select::ProductChoice::Appearance
                     | select::ProductChoice::Proxy
                     | select::ProductChoice::DefaultJava
                     | select::ProductChoice::DefaultWindow
@@ -470,6 +484,7 @@ impl Block {
                 | UiAction::AuthMethod(_)
                 | UiAction::CopyDeviceCode
                 | UiAction::SetAppearance(_)
+                | UiAction::SetLanguage(_)
                 | UiAction::ReduceMotion
                 | UiAction::DefaultJavaAutomatic(_)
                 | UiAction::DefaultWindow { .. }
@@ -499,10 +514,7 @@ impl Block {
     /// page, settles the frame itself.
     fn navigate(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
         if !self.router.allows(tab, self.setup_incomplete()) {
-            self.push_toast(
-                "Finish setup or choose Skip setup to continue.".into(),
-                feedback::ToastKind::Info,
-            );
+            self.push_toast(msg!("runtime.setup_required"), feedback::ToastKind::Info);
             cx.notify();
             return false;
         }
@@ -513,8 +525,7 @@ impl Block {
             self.cancel_auth(window, cx);
         }
         if self.router.tab() == Tab::Settings && tab != Tab::Settings {
-            self.preferences = self.saved_preferences.clone();
-            self.settings_form = None;
+            self.leave_settings(cx);
         }
         if tab == Tab::Settings && self.router.tab() != Tab::Settings {
             self.open_settings(cx);
@@ -538,7 +549,8 @@ impl Block {
     ) -> bool {
         if self.setup_incomplete()
             && self.shell.first_run.enabled
-            && drawer.is_some_and(|drawer| drawer != Drawer::ImportGames)
+            && drawer
+                .is_some_and(|drawer| !matches!(drawer, Drawer::ImportGames | Drawer::Language))
         {
             return false;
         }
@@ -671,7 +683,7 @@ impl Block {
     fn separate_profiles(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.shell.surfaces.close(window, &self.focus, cx);
         self.begin(
-            "Enabling separated profiles",
+            msg!("runtime.enabling_separated"),
             crate::ui_logging::Operation::SeparateProfiles,
         );
         if let Some(engine) = &self.engine {
@@ -684,9 +696,7 @@ impl Block {
             self.version_load = browser::CollectionLoad::Loading;
             engine.load_versions();
         } else {
-            self.version_load = browser::CollectionLoad::Failed(
-                "Engine unavailable · restart Block to retry".into(),
-            );
+            self.version_load = browser::CollectionLoad::Failed(msg!("runtime.engine_retry"));
         }
     }
 
@@ -709,10 +719,7 @@ impl Block {
             self.selected_instance = Some(profile.instance_id.clone());
             self.selected_profile = Some(id);
         }
-        self.push_toast(
-            "Game selected · ready on Home".into(),
-            feedback::ToastKind::Info,
-        );
+        self.push_toast(msg!("runtime.game_selected"), feedback::ToastKind::Info);
         self.shell.surfaces.clear(window, &self.focus, cx);
         self.form = None;
         self.router.leave_task();
@@ -721,7 +728,7 @@ impl Block {
 
     fn select_account(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.selected_account = Some(id);
-        self.push_toast("Account selected".into(), feedback::ToastKind::Info);
+        self.push_toast(msg!("runtime.account_selected"), feedback::ToastKind::Info);
         self.shell.surfaces.clear(window, &self.focus, cx);
     }
 
@@ -757,7 +764,7 @@ impl Block {
             .cloned()
         {
             self.begin(
-                "Copying profile settings",
+                msg!("runtime.copying_profile"),
                 crate::ui_logging::Operation::CopyProfile,
             );
             if let Some(engine) = &self.engine {
@@ -783,7 +790,7 @@ impl Block {
                 .surfaces
                 .open(Surface::DeleteProfile(id), window, cx);
         } else {
-            self.report("This Profile is no longer available. Refresh the game library.".into());
+            self.report(msg!("runtime.profile_unavailable"));
         }
     }
 
@@ -799,7 +806,7 @@ impl Block {
         if let Some(id) = id {
             self.shell.surfaces.close(window, &self.focus, cx);
             self.begin(
-                "Deleting profile metadata",
+                msg!("runtime.deleting_profile"),
                 crate::ui_logging::Operation::DeleteProfile,
             );
             if let Some(engine) = &self.engine {
@@ -812,7 +819,7 @@ impl Block {
         if let Some(account) = self.accounts.iter().find(|a| account_id(a) == id).cloned() {
             self.shell.surfaces.close(window, &self.focus, cx);
             self.begin(
-                "Removing saved credentials",
+                msg!("runtime.removing_credentials"),
                 crate::ui_logging::Operation::RemoveAccount,
             );
             self.operation_kind = OperationKind::Account;
@@ -831,7 +838,7 @@ impl Block {
             .cloned()
         {
             self.begin_cancellable(
-                "Repairing installation · verifying shared resources",
+                msg!("runtime.repairing"),
                 crate::ui_logging::Operation::Repair,
             );
             self.operation_kind = OperationKind::Install;
@@ -855,7 +862,7 @@ impl Block {
             } else {
                 self.cancel.cancel();
             }
-            self.status = "Stopping · waiting for the current operation".into();
+            self.status = msg!("runtime.stopping");
         }
     }
 

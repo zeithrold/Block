@@ -32,6 +32,21 @@ pub(super) struct SearchSelectorState {
 }
 
 impl SearchSelectorState {
+    pub(super) fn refresh_placeholder(
+        &self,
+        language: crate::Language,
+        cx: &mut Context<'_, Block>,
+    ) {
+        let key = if self.drawer == Drawer::Accounts {
+            "search.accounts_placeholder"
+        } else {
+            "search.profiles_placeholder"
+        };
+        let placeholder = tr!(language, key);
+        self.query
+            .update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+    }
+
     pub(super) fn query_focus(&self, cx: &gpui::App) -> FocusHandle {
         self.query.read(cx).focus_handle(cx)
     }
@@ -71,12 +86,13 @@ impl Block {
             self.shell.selector = None;
             return;
         }
+        let language = self.language();
         let query = input(
             "",
-            if drawer == Drawer::Accounts {
-                "Search accounts…"
+            &if drawer == Drawer::Accounts {
+                tr!(language, "search.accounts_placeholder")
             } else {
-                "Search profiles…"
+                tr!(language, "search.profiles_placeholder")
             },
             cx,
         );
@@ -235,10 +251,11 @@ impl Block {
             .filter(|state| state.drawer == drawer)
         else {
             return div()
-                .child(note("Open the selector again to search."))
+                .child(note(tr!(self.language(), "search.reopen")))
                 .into_any_element();
         };
         let has_query = !state.query.read(cx).value().is_empty();
+        let language = self.language();
         let accounts = drawer == Drawer::Accounts;
         let rows = self.selector_results(drawer, state, window, cx);
         let query_entity = state.query.clone();
@@ -263,16 +280,16 @@ impl Block {
                     .gap_2()
                     .child(div().flex_1().min_w_0().child(components::field(
                         if accounts {
-                            "Search accounts"
+                            tr!(language, "search.accounts_field")
                         } else {
-                            "Search games"
+                            tr!(language, "search.games_field")
                         },
                         &state.query,
                     )))
                     .children(has_query.then(|| {
                         components::button(
                             "selector-clear",
-                            "Clear",
+                            tr!(language, "search.clear"),
                             self.palette,
                             ButtonVariant::Ghost,
                             ControlState::default(),
@@ -294,9 +311,9 @@ impl Block {
                         "manage-games"
                     },
                     if accounts {
-                        "Manage accounts"
+                        tr!(language, "search.manage_accounts")
                     } else {
-                        "Manage games"
+                        tr!(language, "search.manage_games")
                     },
                     UiAction::Tab(if accounts {
                         super::Tab::Accounts
@@ -320,6 +337,7 @@ impl Block {
         let query = state.query.read(cx).value().trim().to_lowercase();
         let choices = self.selector_choices(drawer, &query);
         let active = active_index(&choices, state.active.as_deref());
+        let language = self.language();
         let accounts = drawer == Drawer::Accounts;
 
         let mut rows = div()
@@ -339,27 +357,27 @@ impl Block {
                     .gap_2()
                     .child(if query.is_empty() {
                         if accounts {
-                            "No accounts yet"
+                            tr!(language, "search.no_accounts")
                         } else {
-                            "No games yet"
+                            tr!(language, "search.no_games")
                         }
                     } else {
-                        "No results"
+                        tr!(language, "search.no_results")
                     })
                     .child(note(if query.is_empty() {
                         if accounts {
-                            "Add an account to choose a player identity."
+                            tr!(language, "search.add_account_hint")
                         } else {
-                            "Create a game to start playing."
+                            tr!(language, "search.create_game_hint")
                         }
                     } else {
-                        "Try another name or clear the search."
+                        tr!(language, "search.try_another")
                     })),
             );
         }
         // Add painted chrome after data rows so ScrollHandle indices remain
         // data indices. The active option is the composite's single tab stop.
-        rows.scroll_list_area(&state.scroll, "Search results", self.palette)
+        rows.scroll_list_area(&state.scroll, "search.results", self.palette)
             .tab_index(-1)
     }
 
@@ -451,6 +469,7 @@ impl Block {
     }
 
     fn selector_choices(&self, drawer: Drawer, query: &str) -> Vec<Choice> {
+        let language = self.language();
         let mut choices: Vec<Choice> = if drawer == Drawer::Accounts {
             self.accounts
                 .iter()
@@ -458,19 +477,22 @@ impl Block {
                     let id = account_id(account);
                     let description = match account.provider {
                         block_auth::AccountProvider::Microsoft => {
-                            "Microsoft · Java Edition".to_owned()
+                            tr!(language, "account.microsoft")
                         }
-                        block_auth::AccountProvider::Offline => {
-                            "Local play · No online authorization".to_owned()
+                        block_auth::AccountProvider::Offline => tr!(language, "account.offline"),
+                        block_auth::AccountProvider::Authlib => {
+                            let authority = self.account_authority(account);
+                            let url = self.account_provider(account).map_or_else(
+                                || tr!(language, "account.provider_unavailable"),
+                                |provider| provider.api_url.clone(),
+                            );
+                            tr!(
+                                language,
+                                "account.authlib",
+                                authority = authority,
+                                url = url,
+                            )
                         }
-                        block_auth::AccountProvider::Authlib => format!(
-                            "{} · {}",
-                            self.account_authority(account),
-                            self.account_provider(account)
-                                .map_or("Provider unavailable", |provider| provider
-                                    .api_url
-                                    .as_str())
-                        ),
                     };
                     format!("{} {description}", account.player_name)
                         .to_lowercase()
@@ -503,15 +525,17 @@ impl Block {
                             .any(|target| target.id == profile.target_id)
                     });
                     let description = instance.map_or_else(
-                        || "Instance unavailable".into(),
+                        || tr!(language, "profile.instance_unavailable"),
                         |instance| {
                             if valid {
-                                format!(
-                                    "{} · Minecraft {}",
-                                    instance.name, instance.minecraft_version
+                                tr!(
+                                    language,
+                                    "profile.summary",
+                                    instance = instance.name,
+                                    version = instance.minecraft_version,
                                 )
                             } else {
-                                "Launch target unavailable".into()
+                                tr!(language, "profile.target_unavailable")
                             }
                         },
                     );
@@ -526,8 +550,11 @@ impl Block {
                             enabled: valid && !self.busy,
                             appearance: Some(profile.appearance),
                             badges: instance.map_or_else(Vec::new, |instance| {
-                                let mut badges =
-                                    vec![format!("Minecraft {}", instance.minecraft_version)];
+                                let mut badges = vec![tr!(
+                                    language,
+                                    "badge.minecraft_version",
+                                    version = instance.minecraft_version,
+                                )];
                                 if let Some(target) = instance
                                     .targets
                                     .iter()

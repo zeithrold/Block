@@ -52,13 +52,13 @@ pub(super) enum ToastKind {
 #[derive(Clone, Debug)]
 pub(super) struct Toast {
     pub id: u64,
-    pub message: String,
+    pub message: crate::i18n::UiText,
     pub kind: ToastKind,
     pub expires: Instant,
 }
 
 impl Toast {
-    pub(super) fn new(message: String, kind: ToastKind) -> Self {
+    pub(super) fn new(message: crate::i18n::UiText, kind: ToastKind) -> Self {
         Self {
             id: NEXT_TOAST_ID.fetch_add(1, Ordering::Relaxed),
             message,
@@ -249,6 +249,7 @@ pub(super) struct ToastLayer {
     last_tick: Option<Instant>,
     reduced_motion: bool,
     bottom: Pixels,
+    language: crate::Language,
 }
 
 impl ToastLayer {
@@ -267,6 +268,7 @@ impl ToastLayer {
             last_tick: None,
             reduced_motion: cx.reduce_motion(),
             bottom: px(TOAST_BOTTOM),
+            language: crate::Language::English,
         }
     }
 
@@ -302,6 +304,23 @@ impl ToastLayer {
                 if !layer.manager.is_empty() {
                     cx.notify();
                 }
+            }
+        });
+    }
+
+    /// Update the language of this window's retained toast values.
+    pub(super) fn set_language(language: crate::Language, window: &Window, cx: &mut App) {
+        let Some(layer) = window
+            .root::<Root>()
+            .flatten()
+            .and_then(|root| root.read(cx).plugin::<Self>())
+        else {
+            return;
+        };
+        layer.update(cx, |layer, cx| {
+            if layer.language != language {
+                layer.language = language;
+                cx.notify();
             }
         });
     }
@@ -730,11 +749,11 @@ impl ToastLayer {
                     .flex_1()
                     .min_w_0()
                     .text_sm()
-                    .child(SharedString::from(toast.message)),
+                    .child(SharedString::from(toast.message.text(self.language))),
             )
             .child(
                 gpui_base::Button::new(ElementId::NamedInteger("block-toast-close".into(), id))
-                    .accessibility_label("Dismiss notification")
+                    .accessibility_label(tr!(self.language, "runtime.dismiss_notification"))
                     .flex()
                     .items_center()
                     .justify_center()

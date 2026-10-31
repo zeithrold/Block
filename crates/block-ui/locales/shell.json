@@ -1,0 +1,863 @@
+{
+  "_version": 2,
+  "nav.accounts": {
+    "en": "Accounts",
+    "zh-Hans": "账户",
+    "ja": "アカウント"
+  },
+  "nav.authlib_providers": {
+    "en": "Authlib providers",
+    "zh-Hans": "Authlib 提供者",
+    "ja": "Authlib プロバイダー"
+  },
+  "nav.instance_settings": {
+    "en": "Instance settings",
+    "zh-Hans": "实例设置",
+    "ja": "インスタンス設定"
+  },
+  "nav.profile_appearance": {
+    "en": "Profile appearance",
+    "zh-Hans": "配置外观",
+    "ja": "プロファイルの外観"
+  },
+  "nav.data_and_account": {
+    "en": "Data and account",
+    "zh-Hans": "数据与账户",
+    "ja": "データとアカウント"
+  },
+  "nav.launch_settings": {
+    "en": "Launch settings",
+    "zh-Hans": "启动设置",
+    "ja": "起動設定"
+  },
+  "nav.create_game": {
+    "en": "Create a game",
+    "zh-Hans": "创建游戏",
+    "ja": "ゲームを作成"
+  },
+  "nav.setup_block": {
+    "en": "Set up Block",
+    "zh-Hans": "设置 Block",
+    "ja": "Block をセットアップ"
+  },
+  "nav.setup_game": {
+    "en": "Set up a game",
+    "zh-Hans": "设置游戏",
+    "ja": "ゲームをセットアップ"
+  },
+  "nav.games": {
+    "en": "Games",
+    "zh-Hans": "游戏",
+    "ja": "ゲーム"
+  },
+  "nav.settings": {
+    "en": "Settings",
+    "zh-Hans": "设置",
+    "ja": "設定"
+  },
+  "nav.about": {
+    "en": "About Block",
+    "zh-Hans": "关于 Block",
+    "ja": "Block について"
+  },
+  "chrome.close_setup": {
+    "en": "Close setup",
+    "zh-Hans": "关闭设置",
+    "ja": "セットアップを閉じる"
+  },
+  "chrome.back_to_welcome": {
+    "en": "Back to welcome",
+    "zh-Hans": "返回欢迎页",
+    "ja": "ウェルカムに戻る"
+  },
+  "chrome.view_downloads": {
+    "en": "View downloads",
+    "zh-Hans": "查看下载",
+    "ja": "ダウンロードを表示"
+  },
+  "chrome.minimize": {
+    "en": "Minimize Block",
+    "zh-Hans": "最小化 Block",
+    "ja": "Block を最小化"
+  },
+  "chrome.close": {
+    "en": "Close Block",
+    "zh-Hans": "关闭 Block",
+    "ja": "Block を閉じる"
+  },
+  "chrome.back_to_sources": {
+    "en": "Back to sources",
+    "zh-Hans": "返回来源",
+    "ja": "ソースに戻る"
+  },
+  "home.welcome": {
+    "en": "Welcome to Block",
+    "zh-Hans": "欢迎使用 Block",
+    "ja": "Block へようこそ"
+  },
+  "home.add_account": {
+    "en": "Add account",
+    "zh-Hans": "添加账户",
+    "ja": "アカウントを追加"
+  },
+  "home.add_account_hint": {
+    "en": "Add an account to start your next adventure.",
+    "zh-Hans": "添加账户，开启你的下一段冒险。",
+    "ja": "アカウントを追加して、次の冒険を始めましょう。"
+  },
+  "home.stop": {
+    "en": "Stop",
+    "zh-Hans": "停止",
+    "ja": "停止"
+  },
+  "action.switch_account": {
+    "en": "Switch account",
+    "zh-Hans": "切换账户",
+    "ja": "アカウントを切り替え"
+  },
+  "action.switch_game": {
+    "en": "Switch game",
+    "zh-Hans": "切换游戏",
+    "ja": "ゲームを切り替え"
+  },
+  "home.launch_queued": {
+    "en": "Launch queued",
+    "zh-Hans": "已排队启动",
+    "ja": "起動を予約済み"
+  },
+  "home.queue_launch": {
+    "en": "Queue launch",
+    "zh-Hans": "排队启动",
+    "ja": "起動を予約"
+  },
+  "home.sign_in_to_play": {
+    "en": "Sign in to play",
+    "zh-Hans": "登录以开始游戏",
+    "ja": "サインインしてプレイ"
+  },
+  "home.launch": {
+    "en": "Launch",
+    "zh-Hans": "启动",
+    "ja": "起動"
+  },
+  "home.retry_download": {
+    "en": "Retry download",
+    "zh-Hans": "重试下载",
+    "ja": "ダウンロードを再試行"
+  },
+  "home.download": {
+    "en": "Download",
+    "zh-Hans": "下载",
+    "ja": "ダウンロード"
+  },
+  "home.repair_game": {
+    "en": "Repair game",
+    "zh-Hans": "修复游戏",
+    "ja": "ゲームを修復"
+  },
+  "home.create_game": {
+    "en": "Create game",
+    "zh-Hans": "创建游戏",
+    "ja": "ゲームを作成"
+  },
+  "home.start_adventure": {
+    "en": "Start a new adventure",
+    "zh-Hans": "开启新的冒险",
+    "ja": "新しい冒険を始める"
+  },
+  "home.queue_pending": {
+    "en": "Starts as soon as the install finishes",
+    "zh-Hans": "安装完成后立即启动",
+    "ja": "インストールが完了するとすぐに起動します"
+  },
+  "home.queue_waiting": {
+    "en": "Starts after the current install finishes",
+    "zh-Hans": "当前安装完成后启动",
+    "ja": "現在のインストール完了後に起動します"
+  },
+  "home.version.summary": {
+    "en": "Minecraft %{version} · %{release} · %{loader}. %{note}",
+    "zh-Hans": "Minecraft %{version} · %{release} · %{loader}。%{note}",
+    "ja": "Minecraft %{version} · %{release} · %{loader}。%{note}"
+  },
+  "home.version.release": {
+    "en": "Stable release",
+    "zh-Hans": "正式版",
+    "ja": "安定版リリース"
+  },
+  "home.version.snapshot": {
+    "en": "Snapshot",
+    "zh-Hans": "快照",
+    "ja": "スナップショット"
+  },
+  "home.version.old_beta": {
+    "en": "Old beta",
+    "zh-Hans": "旧测试版",
+    "ja": "旧ベータ"
+  },
+  "home.version.old_alpha": {
+    "en": "Old alpha",
+    "zh-Hans": "旧 Alpha 版",
+    "ja": "旧アルファ"
+  },
+  "home.version.unverified": {
+    "en": "Type unverified",
+    "zh-Hans": "类型未确认",
+    "ja": "種類未確認"
+  },
+  "home.version.note_verified": {
+    "en": "Type verified by the official version catalog.",
+    "zh-Hans": "类型已由官方版本目录确认。",
+    "ja": "種類は公式バージョンカタログで確認済みです。"
+  },
+  "home.version.note_unverified": {
+    "en": "Official release metadata is not available for this version.",
+    "zh-Hans": "此版本没有可用的官方发布元数据。",
+    "ja": "このバージョンの公式リリースメタデータはありません。"
+  },
+  "home.phase.stopping": {
+    "en": "Stopping",
+    "zh-Hans": "正在停止",
+    "ja": "停止しています"
+  },
+  "home.phase.preparing_launch": {
+    "en": "Preparing launch",
+    "zh-Hans": "正在准备启动",
+    "ja": "起動を準備しています"
+  },
+  "home.phase.monitoring_interrupted": {
+    "en": "Monitoring interrupted",
+    "zh-Hans": "监控中断",
+    "ja": "監視が中断されました"
+  },
+  "home.phase.running": {
+    "en": "Running",
+    "zh-Hans": "运行中",
+    "ja": "実行中"
+  },
+  "home.phase.downloading": {
+    "en": "Downloading",
+    "zh-Hans": "正在下载",
+    "ja": "ダウンロード中"
+  },
+  "home.phase.verifying": {
+    "en": "Verifying installation",
+    "zh-Hans": "正在校验安装",
+    "ja": "インストールを検証中"
+  },
+  "home.phase.working": {
+    "en": "Working",
+    "zh-Hans": "处理中",
+    "ja": "処理中"
+  },
+  "home.verified_resources": {
+    "en": "%{count} resources verified · overall total unknown",
+    "zh-Hans": "已校验 %{count} 个资源 · 合计大小未知",
+    "ja": "%{count} 個のリソースを検証済み · 合計サイズは不明"
+  },
+  "home.current_resource": {
+    "en": "Current resource: %{received} / %{total} bytes",
+    "zh-Hans": "当前资源：%{received} / %{total} 字节",
+    "ja": "現在のリソース: %{received} / %{total} バイト"
+  },
+  "home.unknown_total": {
+    "en": "unknown",
+    "zh-Hans": "未知",
+    "ja": "不明"
+  },
+  "surface.menu": {
+    "en": "Block menu",
+    "zh-Hans": "Block 菜单",
+    "ja": "Block メニュー"
+  },
+  "surface.downloads": {
+    "en": "Downloads",
+    "zh-Hans": "下载",
+    "ja": "ダウンロード"
+  },
+  "surface.import_games": {
+    "en": "Import games",
+    "zh-Hans": "导入游戏",
+    "ja": "ゲームをインポート"
+  },
+  "surface.games_help": {
+    "en": "Instances and Profiles",
+    "zh-Hans": "实例与配置",
+    "ja": "インスタンスとプロファイル"
+  },
+  "surface.wizard_version": {
+    "en": "Minecraft version",
+    "zh-Hans": "Minecraft 版本",
+    "ja": "Minecraft のバージョン"
+  },
+  "surface.wizard_loader": {
+    "en": "Mod loader",
+    "zh-Hans": "模组加载器",
+    "ja": "Mod ローダー"
+  },
+  "surface.wizard_location": {
+    "en": "Game configuration",
+    "zh-Hans": "游戏配置",
+    "ja": "ゲーム設定"
+  },
+  "surface.auth_provider_add": {
+    "en": "Add authentication provider",
+    "zh-Hans": "添加认证提供者",
+    "ja": "認証プロバイダーを追加"
+  },
+  "sheet.profiles_title": {
+    "en": "Switch Profile",
+    "zh-Hans": "切换配置",
+    "ja": "プロファイルを切り替え"
+  },
+  "sheet.accounts_title": {
+    "en": "Switch Account",
+    "zh-Hans": "切换账户",
+    "ja": "アカウントを切り替え"
+  },
+  "sheet.profiles_description": {
+    "en": "Choose how you want to play.",
+    "zh-Hans": "选择你的游玩方式。",
+    "ja": "プレイ方法を選択してください。"
+  },
+  "sheet.accounts_description": {
+    "en": "Choose the account you want to use.",
+    "zh-Hans": "选择要使用的账户。",
+    "ja": "使用するアカウントを選択してください。"
+  },
+  "sheet.downloads_description": {
+    "en": "Track your download tasks.",
+    "zh-Hans": "跟踪你的下载任务。",
+    "ja": "ダウンロードタスクを確認できます。"
+  },
+  "dialog.delete_profile.title": {
+    "en": "Delete this profile?",
+    "zh-Hans": "删除此配置？",
+    "ja": "このプロファイルを削除しますか？"
+  },
+  "dialog.delete_profile.title_named": {
+    "en": "Delete %{name}?",
+    "zh-Hans": "删除 %{name}？",
+    "ja": "%{name} を削除しますか？"
+  },
+  "dialog.delete_profile.bundled": {
+    "en": "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.",
+    "zh-Hans": "此游戏及其启动设置将从库中移除。世界、游戏数据和安装文件仍保留在磁盘上。",
+    "ja": "このゲームと起動設定はライブラリから削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"
+  },
+  "dialog.delete_profile.separated": {
+    "en": "Only launch settings are removed. Worlds, game data and installation files stay on disk.",
+    "zh-Hans": "只会移除启动设置。世界、游戏数据和安装文件仍保留在磁盘上。",
+    "ja": "起動設定のみが削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"
+  },
+  "dialog.remove_account.title": {
+    "en": "Remove this account?",
+    "zh-Hans": "移除此账户？",
+    "ja": "このアカウントを削除しますか？"
+  },
+  "dialog.remove_account.title_named": {
+    "en": "Remove %{name}?",
+    "zh-Hans": "移除 %{name}？",
+    "ja": "%{name} を削除しますか？"
+  },
+  "dialog.remove_account.note": {
+    "en": "This account is removed from the device, including any saved credentials. Your games and worlds stay on disk. Add the account again to use it.",
+    "zh-Hans": "此账户将从设备中移除，包括任何已保存的凭据。你的游戏和世界仍保留在磁盘上。再次添加账户即可使用。",
+    "ja": "このアカウントは保存された認証情報を含めてこのデバイスから削除されます。ゲームとワールドはディスクに残ります。再び使用するにはアカウントを追加し直してください。"
+  },
+  "dialog.remove_provider.title": {
+    "en": "Remove this provider?",
+    "zh-Hans": "移除此提供者？",
+    "ja": "このプロバイダーを削除しますか？"
+  },
+  "dialog.remove_provider.used": {
+    "en": "This provider is used by saved accounts. Remove those accounts first.",
+    "zh-Hans": "此提供者被已保存的账户使用。请先移除这些账户。",
+    "ja": "このプロバイダーは保存済みのアカウントで使用されています。先にそれらのアカウントを削除してください。"
+  },
+  "dialog.remove_provider.note": {
+    "en": "The saved provider and cached metadata are removed. Game files stay on disk.",
+    "zh-Hans": "已保存的提供者和缓存元数据将被移除。游戏文件仍保留在磁盘上。",
+    "ja": "保存されたプロバイダーとキャッシュされたメタデータが削除されます。ゲームファイルはディスクに残ります。"
+  },
+  "dialog.separate_profiles.title": {
+    "en": "Enable separated profiles?",
+    "zh-Hans": "启用独立配置？",
+    "ja": "分離プロファイルを有効にしますか？"
+  },
+  "dialog.separate_profiles.note": {
+    "en": "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.",
+    "zh-Hans": "此单向更改允许多个启动配置共享一个实例。现有游戏和文件将保留。捆绑模式无法恢复。",
+    "ja": "この一方向の変更により、複数の起動プロファイルで 1 つのインスタンスを共有できます。既存のゲームとファイルは保持されます。バンドルモードには戻せません。"
+  },
+  "action.profile_mode": {
+    "en": "Profile mode",
+    "zh-Hans": "配置模式",
+    "ja": "プロファイルモード"
+  },
+  "action.delete_profile": {
+    "en": "Delete profile",
+    "zh-Hans": "删除配置",
+    "ja": "プロファイルを削除"
+  },
+  "action.remove_account": {
+    "en": "Remove account",
+    "zh-Hans": "移除账户",
+    "ja": "アカウントを削除"
+  },
+  "action.remove_provider": {
+    "en": "Remove provider",
+    "zh-Hans": "移除提供者",
+    "ja": "プロバイダーを削除"
+  },
+  "action.keep_bundled": {
+    "en": "Keep bundled mode",
+    "zh-Hans": "保留捆绑模式",
+    "ja": "バンドルモードを維持"
+  },
+  "action.enable_separated": {
+    "en": "Enable separated profiles",
+    "zh-Hans": "启用独立配置",
+    "ja": "分離プロファイルを有効化"
+  },
+  "action.back": {
+    "en": "Back",
+    "zh-Hans": "返回",
+    "ja": "戻る"
+  },
+  "action.done": {
+    "en": "Done",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "select.auth_provider": {
+    "en": "Authentication provider",
+    "zh-Hans": "认证提供者",
+    "ja": "認証プロバイダー"
+  },
+  "select.java_runtime": {
+    "en": "Java runtime",
+    "zh-Hans": "Java 运行时",
+    "ja": "Java ランタイム"
+  },
+  "select.game_data": {
+    "en": "Game data",
+    "zh-Hans": "游戏数据",
+    "ja": "ゲームデータ"
+  },
+  "select.window_size": {
+    "en": "Window size",
+    "zh-Hans": "窗口大小",
+    "ja": "ウィンドウサイズ"
+  },
+  "select.appearance": {
+    "en": "Appearance",
+    "zh-Hans": "外观",
+    "ja": "外観"
+  },
+  "select.proxy": {
+    "en": "Proxy",
+    "zh-Hans": "代理",
+    "ja": "プロキシ"
+  },
+  "select.default_java": {
+    "en": "Default Java runtime",
+    "zh-Hans": "默认 Java 运行时",
+    "ja": "既定の Java ランタイム"
+  },
+  "select.default_window": {
+    "en": "Default window size",
+    "zh-Hans": "默认窗口大小",
+    "ja": "既定のウィンドウサイズ"
+  },
+  "select.profile_color": {
+    "en": "Profile color",
+    "zh-Hans": "配置颜色",
+    "ja": "プロファイルの色"
+  },
+  "select.profile_icon": {
+    "en": "Profile icon",
+    "zh-Hans": "配置图标",
+    "ja": "プロファイルのアイコン"
+  },
+  "select.profile_actions": {
+    "en": "Profile actions",
+    "zh-Hans": "配置操作",
+    "ja": "プロファイルの操作"
+  },
+  "choice.data_isolated": {
+    "en": "Isolated profile directory",
+    "zh-Hans": "独立配置目录",
+    "ja": "分離プロファイルディレクトリ"
+  },
+  "choice.data_shared": {
+    "en": "Shared Instance directory",
+    "zh-Hans": "共享实例目录",
+    "ja": "共有インスタンスディレクトリ"
+  },
+  "choice.java_automatic": {
+    "en": "Automatic Java",
+    "zh-Hans": "自动 Java",
+    "ja": "自動 Java"
+  },
+  "choice.java_custom": {
+    "en": "Custom executable",
+    "zh-Hans": "自定义可执行文件",
+    "ja": "カスタム実行ファイル"
+  },
+  "choice.appearance_system": {
+    "en": "Follow system",
+    "zh-Hans": "跟随系统",
+    "ja": "システムに従う"
+  },
+  "choice.appearance_light": {
+    "en": "Light",
+    "zh-Hans": "浅色",
+    "ja": "ライト"
+  },
+  "choice.appearance_dark": {
+    "en": "Dark",
+    "zh-Hans": "深色",
+    "ja": "ダーク"
+  },
+  "choice.proxy_system": {
+    "en": "Use system proxy",
+    "zh-Hans": "使用系统代理",
+    "ja": "システムプロキシを使用"
+  },
+  "choice.proxy_direct": {
+    "en": "Direct connection",
+    "zh-Hans": "直接连接",
+    "ja": "直接接続"
+  },
+  "choice.proxy_manual": {
+    "en": "Manual proxy",
+    "zh-Hans": "手动代理",
+    "ja": "手動プロキシ"
+  },
+  "choice.custom_size": {
+    "en": "Custom size…",
+    "zh-Hans": "自定义大小…",
+    "ja": "カスタムサイズ…"
+  },
+  "choice.copy_settings": {
+    "en": "Copy settings",
+    "zh-Hans": "复制设置",
+    "ja": "設定をコピー"
+  },
+  "choice.delete_from_library": {
+    "en": "Delete from library",
+    "zh-Hans": "从库中删除",
+    "ja": "ライブラリから削除"
+  },
+  "menu.home": {
+    "en": "Home",
+    "zh-Hans": "主页",
+    "ja": "ホーム"
+  },
+  "menu.accounts": {
+    "en": "Accounts",
+    "zh-Hans": "账户",
+    "ja": "アカウント"
+  },
+  "menu.games": {
+    "en": "Games",
+    "zh-Hans": "游戏",
+    "ja": "ゲーム"
+  },
+  "menu.settings": {
+    "en": "Settings",
+    "zh-Hans": "设置",
+    "ja": "設定"
+  },
+  "menu.about": {
+    "en": "About",
+    "zh-Hans": "关于",
+    "ja": "情報"
+  },
+  "search.accounts_placeholder": {
+    "en": "Search accounts…",
+    "zh-Hans": "搜索账户…",
+    "ja": "アカウントを検索…"
+  },
+  "search.profiles_placeholder": {
+    "en": "Search profiles…",
+    "zh-Hans": "搜索配置…",
+    "ja": "プロファイルを検索…"
+  },
+  "search.accounts_field": {
+    "en": "Search accounts",
+    "zh-Hans": "搜索账户",
+    "ja": "アカウントを検索"
+  },
+  "search.games_field": {
+    "en": "Search games",
+    "zh-Hans": "搜索游戏",
+    "ja": "ゲームを検索"
+  },
+  "search.clear": {
+    "en": "Clear",
+    "zh-Hans": "清除",
+    "ja": "クリア"
+  },
+  "search.manage_accounts": {
+    "en": "Manage accounts",
+    "zh-Hans": "管理账户",
+    "ja": "アカウントを管理"
+  },
+  "search.manage_games": {
+    "en": "Manage games",
+    "zh-Hans": "管理游戏",
+    "ja": "ゲームを管理"
+  },
+  "search.no_accounts": {
+    "en": "No accounts yet",
+    "zh-Hans": "尚无账户",
+    "ja": "アカウントはまだありません"
+  },
+  "search.no_games": {
+    "en": "No games yet",
+    "zh-Hans": "尚无游戏",
+    "ja": "ゲームはまだありません"
+  },
+  "search.no_results": {
+    "en": "No results",
+    "zh-Hans": "无结果",
+    "ja": "結果がありません"
+  },
+  "search.add_account_hint": {
+    "en": "Add an account to choose a player identity.",
+    "zh-Hans": "添加账户以选择玩家身份。",
+    "ja": "プレイヤー ID を選ぶにはアカウントを追加してください。"
+  },
+  "search.create_game_hint": {
+    "en": "Create a game to start playing.",
+    "zh-Hans": "创建游戏即可开始游玩。",
+    "ja": "プレイを始めるにはゲームを作成してください。"
+  },
+  "search.try_another": {
+    "en": "Try another name or clear the search.",
+    "zh-Hans": "试试其他名称或清除搜索。",
+    "ja": "別の名前を試すか、検索をクリアしてください。"
+  },
+  "search.reopen": {
+    "en": "Open the selector again to search.",
+    "zh-Hans": "请重新打开选择器进行搜索。",
+    "ja": "検索するにはセレクターを開き直してください。"
+  },
+  "account.microsoft": {
+    "en": "Microsoft · Java Edition",
+    "zh-Hans": "Microsoft · Java 版",
+    "ja": "Microsoft · Java Edition"
+  },
+  "account.offline": {
+    "en": "Local play · No online authorization",
+    "zh-Hans": "本地游玩 · 无在线授权",
+    "ja": "ローカルプレイ · オンライン認証なし"
+  },
+  "account.authlib": {
+    "en": "%{authority} · %{url}",
+    "zh-Hans": "%{authority} · %{url}",
+    "ja": "%{authority} · %{url}"
+  },
+  "account.provider_unavailable": {
+    "en": "Provider unavailable",
+    "zh-Hans": "提供者不可用",
+    "ja": "プロバイダーを利用できません"
+  },
+  "profile.instance_unavailable": {
+    "en": "Instance unavailable",
+    "zh-Hans": "实例不可用",
+    "ja": "インスタンスを利用できません"
+  },
+  "profile.target_unavailable": {
+    "en": "Launch target unavailable",
+    "zh-Hans": "启动目标不可用",
+    "ja": "起動ターゲットを利用できません"
+  },
+  "profile.summary": {
+    "en": "%{instance} · Minecraft %{version}",
+    "zh-Hans": "%{instance} · Minecraft %{version}",
+    "ja": "%{instance} · Minecraft %{version}"
+  },
+  "badge.minecraft_version": {
+    "en": "Minecraft %{version}",
+    "zh-Hans": "Minecraft %{version}",
+    "ja": "Minecraft %{version}"
+  },
+  "about.tagline": {
+    "en": "One block at a time.",
+    "zh-Hans": "一步一步，搭出世界。",
+    "ja": "一つずつ、ブロックを積み上げる。"
+  },
+  "about.eyebrow": {
+    "en": "MINECRAFT: JAVA EDITION LAUNCHER",
+    "zh-Hans": "MINECRAFT：JAVA 版启动器",
+    "ja": "MINECRAFT: JAVA EDITION ランチャー"
+  },
+  "about.headline": {
+    "en": "Made for your next world.",
+    "zh-Hans": "为你的下一个世界而生。",
+    "ja": "次の世界のために。"
+  },
+  "about.intro": {
+    "en": "A quiet home for your accounts, games, and the way you play. Built around persistent Instances and the Profiles that make them yours.",
+    "zh-Hans": "为你的账户、游戏和游玩方式提供一个安静的家。围绕持久实例以及让它们成为你的配置而构建。",
+    "ja": "アカウント、ゲーム、そしてあなたの遊び方のための静かな場所。永続的なインスタンスと、それをあなたのものにするプロファイルを中心に作られています。"
+  },
+  "about.website": {
+    "en": "Website",
+    "zh-Hans": "网站",
+    "ja": "ウェブサイト"
+  },
+  "about.view_output": {
+    "en": "View output",
+    "zh-Hans": "查看输出",
+    "ja": "出力を表示"
+  },
+  "about.hide_output": {
+    "en": "Hide output",
+    "zh-Hans": "隐藏输出",
+    "ja": "出力を隠す"
+  },
+  "about.view_source": {
+    "en": "View source",
+    "zh-Hans": "查看源码",
+    "ja": "ソースを表示"
+  },
+  "about.feedback": {
+    "en": "Feedback",
+    "zh-Hans": "反馈",
+    "ja": "フィードバック"
+  },
+  "about.open_logs": {
+    "en": "Open logs",
+    "zh-Hans": "打开日志",
+    "ja": "ログを開く"
+  },
+  "about.export_logs": {
+    "en": "Export logs…",
+    "zh-Hans": "导出日志…",
+    "ja": "ログをエクスポート…"
+  },
+  "about.exporting": {
+    "en": "Exporting…",
+    "zh-Hans": "正在导出…",
+    "ja": "エクスポート中…"
+  },
+  "about.waiting_for_picker": {
+    "en": "Waiting for save dialog…",
+    "zh-Hans": "正在等待保存对话框…",
+    "ja": "保存ダイアログを待っています…"
+  },
+  "about.cancel_export": {
+    "en": "Cancel export",
+    "zh-Hans": "取消导出",
+    "ja": "エクスポートをキャンセル"
+  },
+  "about.logs_only_note": {
+    "en": "Launcher logs only. Review before sharing.",
+    "zh-Hans": "仅包含启动器日志。分享前请先检查。",
+    "ja": "ランチャーのログのみです。共有する前に確認してください。"
+  },
+  "about.crash_help_note": {
+    "en": "Built with Rust and GPUI. Game errors open Crash help with recovery actions and diagnostic export. You can inspect the current game output below.",
+    "zh-Hans": "使用 Rust 与 GPUI 构建。游戏错误会打开崩溃帮助，其中提供恢复操作和诊断导出。你可以在下方查看当前游戏输出。",
+    "ja": "Rust と GPUI で構築されています。ゲームのエラーは復旧操作と診断エクスポートを備えたクラッシュヘルプを開きます。現在のゲーム出力は下で確認できます。"
+  },
+  "about.credits": {
+    "en": "Brand artwork: Block-Icon, icon-v4. Interface icons: Lucide. Font: Inter.",
+    "zh-Hans": "品牌素材：Block-Icon，icon-v4。界面图标：Lucide。字体：Inter。",
+    "ja": "ブランドアート: Block-Icon、icon-v4。インターフェースアイコン: Lucide。フォント: Inter。"
+  },
+  "about.build_information": {
+    "en": "Build information",
+    "zh-Hans": "构建信息",
+    "ja": "ビルド情報"
+  },
+  "about.copy": {
+    "en": "Copy",
+    "zh-Hans": "复制",
+    "ja": "コピー"
+  },
+  "about.copy_build_information": {
+    "en": "Copy build information",
+    "zh-Hans": "复制构建信息",
+    "ja": "ビルド情報をコピー"
+  },
+  "about.version": {
+    "en": "Version",
+    "zh-Hans": "版本",
+    "ja": "バージョン"
+  },
+  "about.platform": {
+    "en": "Platform",
+    "zh-Hans": "平台",
+    "ja": "プラットフォーム"
+  },
+  "about.source_commit": {
+    "en": "Source commit",
+    "zh-Hans": "源码提交",
+    "ja": "ソースコミット"
+  },
+  "about.source_fingerprint": {
+    "en": "Source fingerprint",
+    "zh-Hans": "源码指纹",
+    "ja": "ソースフィンガープリント"
+  },
+  "about.not_recorded": {
+    "en": "Not recorded in this build",
+    "zh-Hans": "此构建未记录",
+    "ja": "このビルドには記録されていません"
+  },
+  "about.copy_note_stamped": {
+    "en": "Copy build information to include the complete source identity in a report.",
+    "zh-Hans": "复制构建信息，以便在报告中包含完整的源码标识。",
+    "ja": "ビルド情報をコピーすると、完全なソース識別子をレポートに含められます。"
+  },
+  "about.copy_note_local": {
+    "en": "This local build has no recorded source fingerprint. Copying build information preserves that fact.",
+    "zh-Hans": "此本地构建没有记录源码指纹。复制构建信息会保留这一事实。",
+    "ja": "このローカルビルドにはソースフィンガープリントの記録がありません。ビルド情報をコピーするとその事実も保持されます。"
+  },
+  "about.open_recipe": {
+    "en": "Open development recipe…",
+    "zh-Hans": "打开开发配方…",
+    "ja": "開発レシピを開く…"
+  },
+  "about.launch_recipe": {
+    "en": "Launch development recipe",
+    "zh-Hans": "启动开发配方",
+    "ja": "開発レシピを起動"
+  },
+  "about.build_information_copied": {
+    "en": "Build information copied",
+    "zh-Hans": "已复制构建信息",
+    "ja": "ビルド情報をコピーしました"
+  },
+  "logs.directory_unavailable": {
+    "en": "Could not locate launcher logs.",
+    "zh-Hans": "无法找到启动器日志。",
+    "ja": "ランチャーのログが見つかりませんでした。"
+  },
+  "logs.exported": {
+    "en": "Launcher logs exported. Review before sharing.",
+    "zh-Hans": "启动器日志已导出。分享前请先检查。",
+    "ja": "ランチャーのログをエクスポートしました。共有する前に確認してください。"
+  },
+  "logs.export_failed": {
+    "en": "Could not export launcher logs. Try a new file name or folder.",
+    "zh-Hans": "无法导出启动器日志。请尝试新的文件名或文件夹。",
+    "ja": "ランチャーのログをエクスポートできませんでした。別のファイル名またはフォルダーを試してください。"
+  },
+  "logs.export_canceled": {
+    "en": "Log export canceled.",
+    "zh-Hans": "日志导出已取消。",
+    "ja": "ログのエクスポートをキャンセルしました。"
+  },
+  "logs.picker_unavailable": {
+    "en": "The log export save dialog could not open.",
+    "zh-Hans": "无法打开日志导出的保存对话框。",
+    "ja": "ログのエクスポート用の保存ダイアログを開けませんでした。"
+  }
+}

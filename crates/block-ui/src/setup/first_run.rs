@@ -6,13 +6,14 @@
 
 use super::scroll_area::ScrollAreaExt as _;
 use super::{
-    Block, Form, Tab, UiAction,
-    components::{self, ButtonVariant},
+    Block, Form, Preferences, Tab, UiAction,
+    components::{self, ButtonSize, ButtonVariant, ControlState},
     design::Icon,
     game_wizard::WizardStep,
     note,
     patterns::page_heading,
 };
+use crate::Language;
 use gpui::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, Styled as _,
     Window, div, px, rgb,
@@ -43,6 +44,42 @@ pub(super) enum Action {
     BackToWelcome,
     Import,
     Skip,
+    /// A concrete language choice from the first-setup selector.
+    Language(Language),
+}
+
+/// Product feedback retained by the first-run flow.
+///
+/// It is translated when the page renders, so an earlier language is never
+/// frozen into the notice.
+#[derive(Clone, Debug)]
+pub(super) enum Notice {
+    /// The installation-folder chooser could not be opened.
+    InstallChooser,
+    LanguageInitialization(String),
+    VersionsUnavailable,
+    SetupProgress(String),
+    LanguageNotSaved(String),
+}
+
+impl Notice {
+    fn message(&self, language: Language) -> String {
+        match self {
+            Self::InstallChooser => tr!(language, "setup.notice.install_chooser"),
+            Self::LanguageInitialization(error) => tr!(
+                language,
+                "common.language_initialization_failed",
+                error = error
+            ),
+            Self::VersionsUnavailable => tr!(language, "setup.notice.versions"),
+            Self::SetupProgress(detail) => {
+                tr!(language, "setup.notice.progress", detail = detail.as_str())
+            }
+            Self::LanguageNotSaved(detail) => {
+                tr!(language, "setup.notice.language", detail = detail.as_str())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -53,7 +90,8 @@ pub(super) struct State {
     pub welcome_button: super::welcome_button::WelcomeButton,
     pub game_parent: Option<PathBuf>,
     pub entered: Option<Instant>,
-    pub error: Option<String>,
+    pub error: Option<crate::i18n::UiText>,
+    pub notice: Option<Notice>,
     pub scroll: ScrollHandle,
 }
 
@@ -142,10 +180,77 @@ impl Block {
                 Ok(())
             });
         if let Err(error) = result {
-            self.shell.first_run.error = Some(format!("Could not save setup progress: {error}"));
+            self.shell.first_run.notice = Some(Notice::SetupProgress(format!("{error:#}")));
             return false;
         }
         true
+    }
+
+    /// Apply a first-setup language choice immediately.
+    ///
+    /// The preview is usable even when the write fails. Only a successful
+    /// language-only write updates the saved state, so a failure is reported
+    /// instead of being recorded as saved. Onboarding completion and any open
+    /// game draft are deliberately untouched.
+    fn choose_first_run_language(
+        &mut self,
+        language: Language,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.preferences.language = Some(language);
+        self.refresh_language(window, cx);
+        let result = match &self.engine {
+            Some(engine) => Preferences::persist_language(&engine.root, language),
+            None => Err(anyhow::anyhow!("Block's data directory is unavailable")),
+        };
+        match result {
+            Ok(()) => self.saved_preferences.language = Some(language),
+            Err(error) => {
+                self.shell.first_run.notice = Some(Notice::LanguageNotSaved(format!("{error:#}")));
+            }
+        }
+    }
+
+    /// Record a failed installation-folder chooser on the first-run page.
+    ///
+    /// The retained failure is a semantic identity rather than displayed copy,
+    /// so a later success clears exactly this failure. The shared `report` path
+    /// still owns the transient toast, status and log; it also fills the generic
+    /// first-run error string, which this replaces with the semantic notice.
+    pub(super) fn record_install_chooser_failure(&mut self) {
+        self.shell.first_run.notice = Some(Notice::InstallChooser);
+        self.shell.first_run.error = None;
+    }
+
+    /// Clear the retained chooser failure only while it is still current.
+    ///
+    /// Returns whether the first-run page owned that failure, so a caller can
+    /// reset presentation that belonged to the same failed chooser.
+    pub(super) fn clear_install_chooser_failure(&mut self) -> bool {
+        if matches!(self.shell.first_run.notice, Some(Notice::InstallChooser)) {
+            self.shell.first_run.notice = None;
+            self.shell.first_run.error = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The visible failure for the active first-run page.
+    pub(super) fn first_run_feedback(&self, language: Language) -> Option<String> {
+        self.shell
+            .first_run
+            .notice
+            .as_ref()
+            .map(|notice| notice.message(language))
+            .or_else(|| {
+                self.shell
+                    .first_run
+                    .error
+                    .as_ref()
+                    .map(|error| error.text(language))
+            })
     }
 
     pub(super) fn first_run_overview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -180,7 +285,9 @@ impl Block {
             return;
         }
         self.shell.first_run.error = None;
+        self.shell.first_run.notice = None;
         match action {
+            Action::Language(language) => self.choose_first_run_language(language, window, cx),
             Action::Start => {
                 if !self.mark_first_run_started() {
                     return;
@@ -229,7 +336,7 @@ impl Block {
                 }
                 let version = self.recommended_setup_version().map(str::to_owned);
                 if recommended && version.is_none() {
-                    self.shell.first_run.error = Some("Load the Minecraft version list before using recommended setup. You can retry or use custom setup.".into());
+                    self.shell.first_run.notice = Some(Notice::VersionsUnavailable);
                     return;
                 }
                 self.begin_game_wizard(cx);
@@ -311,12 +418,37 @@ impl Block {
     /// Welcome is the only full-height page: the invitation control is centred
     /// and Skip setup sits at the bottom edge.
     fn first_run_welcome(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let language = self.language();
         let button_size = px(super::welcome_button::DIAMETER);
         div()
             .id("setup-welcome")
             .debug_selector(|| "setup-welcome".into())
             .relative()
             .size_full()
+            .child(
+                div()
+                    .absolute()
+                    .top(px(24.))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .justify_center()
+                    .child(components::button_sized(
+                        "not-your-language",
+                        "Not your language?",
+                        self.palette,
+                        ButtonVariant::Ghost,
+                        ButtonSize::ExtraSmall,
+                        ControlState::default(),
+                        cx.listener(|view, (): &(), window, cx| {
+                            view.handle(
+                                UiAction::Drawer(Some(super::Drawer::Language)),
+                                window,
+                                cx,
+                            );
+                        }),
+                    )),
+            )
             .child(
                 div()
                     .absolute()
@@ -344,21 +476,24 @@ impl Block {
                                     .text_2xl()
                                     .line_height(px(32.))
                                     .font_weight(gpui::FontWeight::BOLD)
-                                    .child("Welcome Back"),
+                                    .child(tr!(language, "setup.welcome.title")),
                             )
-                            .child(note("Add an account and set up a game.").line_height(px(18.))),
+                            .child(
+                                note(tr!(language, "setup.welcome.subtitle")).line_height(px(18.)),
+                            ),
                     )
                     .child(super::welcome_button::render(
                         &self.shell.first_run.welcome_button,
                         self.palette,
                         self.motion_preferences(),
+                        tr!(language, "setup.welcome.start"),
                         window,
                         cx,
                         cx.listener(|view, _, window, cx| {
                             view.handle(UiAction::FirstRun(Action::Start), window, cx)
                         }),
                     ))
-                    .children(self.shell.first_run.error.as_ref().map(|error| {
+                    .children(self.first_run_feedback(language).map(|message| {
                         div()
                             .absolute()
                             .top(gpui::relative(1.))
@@ -366,7 +501,12 @@ impl Block {
                             .left_0()
                             .right_0()
                             .px_6()
-                            .child(note(error.clone()))
+                            .child(
+                                note(message)
+                                    .id("setup-notice")
+                                    .debug_selector(|| "setup-notice".into())
+                                    .text_color(rgb(self.palette.destructive)),
+                            )
                     })),
             )
             .child(
@@ -380,7 +520,7 @@ impl Block {
                     .child(
                         self.button_with_variant(
                             "setup-skip",
-                            "Skip setup",
+                            tr!(language, "setup.welcome.skip"),
                             UiAction::FirstRun(Action::Skip),
                             ButtonVariant::Ghost,
                             cx,
@@ -399,11 +539,13 @@ impl Block {
     /// Overview and Game choice share one scrollable body; only Overview owns a
     /// footer, because those are the two steps it tracks.
     fn first_run_progress_page(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let error = self.shell.first_run.error.as_ref().map(|message| {
+        let error = self.first_run_feedback(self.language()).map(|message| {
             div()
+                .id("setup-notice")
+                .debug_selector(|| "setup-notice".into())
                 .text_sm()
                 .text_color(rgb(self.palette.destructive))
-                .child(message.clone())
+                .child(message)
         });
         let content = if self.shell.first_run.stage == Stage::GameChoice {
             self.first_run_game_choice(cx)
@@ -423,7 +565,12 @@ impl Block {
                     .id("setup-scroll")
                     .flex_1()
                     .min_h_0()
-                    .scroll_area(&self.shell.first_run.scroll, "Setup", self.palette, false)
+                    .scroll_area(
+                        &self.shell.first_run.scroll,
+                        "setup.overview",
+                        self.palette,
+                        false,
+                    )
                     .child(
                         div()
                             .min_h_full()
@@ -453,6 +600,7 @@ impl Block {
             return None;
         }
         let ready = self.first_run_account_ready() && self.first_run_game_ready();
+        let language = self.language();
         Some(
             super::patterns::management_footer(self.palette).child(
                 div()
@@ -465,7 +613,11 @@ impl Block {
                     .gap_3()
                     .child(self.button_with_variant(
                         "setup-continue",
-                        if ready { "Finish" } else { "Continue" },
+                        if ready {
+                            tr!(language, "setup.footer.finish")
+                        } else {
+                            tr!(language, "setup.footer.continue")
+                        },
                         UiAction::FirstRun(Action::Continue),
                         ButtonVariant::Primary,
                         cx,
@@ -477,41 +629,43 @@ impl Block {
     /// The two ways to start a game: the recommended current release, or an
     /// explicit version, loader and settings choice.
     fn first_run_game_choice(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let language = self.language();
+        let recommended = self.recommended_setup_version().map_or_else(
+            || tr!(language, "setup.game_choice.recommended_fallback"),
+            |version| tr!(language, "setup.game_choice.recommended", version = version),
+        );
         div()
             .flex()
             .flex_col()
             .gap_5()
             .child(page_heading(
-                "Set up a game",
-                "Use the current release of Minecraft, or choose its version and components.",
+                tr!(language, "setup.game_choice.title"),
+                tr!(language, "setup.game_choice.description"),
             ))
             .child(self.setup_choice(
                 "setup-recommended",
-                "Recommended setup",
-                &self.recommended_setup_version().map_or_else(
-                    || "Stable Vanilla Minecraft · automatic Java".to_owned(),
-                    |version| format!("Minecraft {version} · Vanilla · automatic Java"),
-                ),
+                &tr!(language, "setup.game_choice.recommended_title"),
+                &recommended,
                 Action::Recommended,
                 cx,
             ))
             .child(self.setup_choice(
                 "setup-custom",
-                "Custom setup",
-                "Choose the Minecraft version, loader and game settings.",
+                &tr!(language, "setup.game_choice.custom_title"),
+                &tr!(language, "setup.game_choice.custom_description"),
                 Action::Custom,
                 cx,
             ))
             .child(self.button_with_variant(
                 "setup-import-game",
-                "Import existing games",
+                tr!(language, "setup.game_choice.import"),
                 UiAction::FirstRun(Action::Import),
                 ButtonVariant::Ghost,
                 cx,
             ))
             .child(self.button_with_variant(
                 "setup-reload-versions",
-                "Reload versions",
+                tr!(language, "setup.game_choice.reload"),
                 UiAction::ReloadVersions,
                 ButtonVariant::Ghost,
                 cx,
@@ -521,17 +675,18 @@ impl Block {
 
     /// The two setup steps, each naming its own current state.
     fn first_run_tasks(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+        let language = self.language();
         let account = self.first_run_account_ready();
         let game = self.first_run_game_ready();
-        let account_description = self.first_run_account_description();
-        let game_description = self.first_run_game_description();
+        let account_description = self.first_run_account_description(language);
+        let game_description = self.first_run_game_description(language);
         div()
             .flex()
             .flex_col()
             .gap_5()
             .child(page_heading(
-                "Two steps and you're ready",
-                "Add an account and a game to finish setup.",
+                tr!(language, "setup.overview.title"),
+                tr!(language, "setup.overview.description"),
             ))
             .child(
                 div()
@@ -541,8 +696,8 @@ impl Block {
                     .gap_4()
                     .child(self.setup_task_card(
                         "setup-account",
-                        "Account",
-                        account_description,
+                        &tr!(language, "setup.account.title"),
+                        &account_description,
                         Icon::Account,
                         account,
                         Action::Account,
@@ -550,7 +705,7 @@ impl Block {
                     ))
                     .child(self.setup_task_card(
                         "setup-game",
-                        "Game",
+                        &tr!(language, "setup.game.title"),
                         &game_description,
                         Icon::Games,
                         game,
@@ -562,7 +717,7 @@ impl Block {
     }
 
     /// The selected account's player name, or the step that is still missing.
-    fn first_run_account_description(&self) -> &str {
+    fn first_run_account_description(&self, language: Language) -> String {
         self.shell
             .onboarding
             .account
@@ -573,25 +728,23 @@ impl Block {
                     .iter()
                     .find(|account| super::account_id(account) == *id)
             })
-            .map_or("Sign in to your Minecraft account.", |account| {
-                account.player_name.as_str()
-            })
+            .map_or_else(
+                || tr!(language, "setup.account.sign_in"),
+                |account| account.player_name.clone(),
+            )
     }
 
     /// How many games are saved, or the step that is still missing.
-    fn first_run_game_description(&self) -> String {
+    fn first_run_game_description(&self, language: Language) -> String {
+        let count = self.snapshot.profiles.len();
         if self.first_run_game_ready() {
-            format!(
-                "{} {} saved",
-                self.snapshot.profiles.len(),
-                if self.snapshot.profiles.len() == 1 {
-                    "game"
-                } else {
-                    "games"
-                }
-            )
+            if count == 1 {
+                tr!(language, "setup.game.saved_one", count = count)
+            } else {
+                tr!(language, "setup.game.saved_other", count = count)
+            }
         } else {
-            "Create a game or import an existing one.".into()
+            tr!(language, "setup.game.none")
         }
     }
 
@@ -681,7 +834,11 @@ impl Block {
                                         .font_weight(gpui::FontWeight::BOLD)
                                         .child(title.to_owned()),
                                 )
-                                .children(complete.then(|| div().text_xs().child("Saved"))),
+                                .children(complete.then(|| {
+                                    div()
+                                        .text_xs()
+                                        .child(tr!(self.language(), "setup.game.saved_badge"))
+                                })),
                         )
                         .child(note(description.to_owned())),
                 ),

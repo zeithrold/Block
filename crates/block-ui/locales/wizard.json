@@ -1,0 +1,1394 @@
+{
+  "_version": 2,
+  "wizard.status.savingProfile": {
+    "en": "Saving your new Profile",
+    "zh-Hans": "正在保存新的配置文件",
+    "ja": "新しいプロファイルを保存しています"
+  },
+  "wizard.status.savingSetup": {
+    "en": "Saving your game setup",
+    "zh-Hans": "正在保存游戏设置",
+    "ja": "ゲームの設定を保存しています"
+  },
+  "wizard.status.creatingGame": {
+    "en": "Creating your game and preparing verified downloads",
+    "zh-Hans": "正在创建游戏并准备已验证的下载",
+    "ja": "ゲームを作成し、検証済みのダウンロードを準備しています"
+  },
+  "wizard.footer.back": {
+    "en": "Back",
+    "zh-Hans": "返回",
+    "ja": "戻る"
+  },
+  "wizard.footer.continue": {
+    "en": "Continue",
+    "zh-Hans": "继续",
+    "ja": "次へ"
+  },
+  "wizard.footer.done": {
+    "en": "Done",
+    "zh-Hans": "完成",
+    "ja": "完了"
+  },
+  "wizard.footer.createGame": {
+    "en": "Create game",
+    "zh-Hans": "创建游戏",
+    "ja": "ゲームを作成"
+  },
+  "wizard.footer.createProfile": {
+    "en": "Create Profile",
+    "zh-Hans": "创建配置文件",
+    "ja": "プロファイルを作成"
+  },
+  "wizard.rail.section": {
+    "en": "Game setup",
+    "zh-Hans": "游戏设置",
+    "ja": "ゲーム設定"
+  },
+  "wizard.rail.sectionLabel": {
+    "en": "Game setup section",
+    "zh-Hans": "游戏设置区域",
+    "ja": "ゲーム設定セクション"
+  },
+  "wizard.rail.stepsLabel": {
+    "en": "Game setup steps",
+    "zh-Hans": "游戏设置步骤",
+    "ja": "ゲーム設定の手順"
+  },
+  "wizard.rail.stepperLabel": {
+    "en": "Create a game",
+    "zh-Hans": "创建游戏",
+    "ja": "ゲームを作成"
+  },
+  "wizard.rail.stepOf": {
+    "en": "Step %{current} of %{total}",
+    "zh-Hans": "第 %{current} 步，共 %{total} 步",
+    "ja": "%{total} ステップ中 %{current} ステップ目"
+  },
+  "wizard.rail.getStarted": {
+    "en": "Get started",
+    "zh-Hans": "开始",
+    "ja": "はじめに"
+  },
+  "wizard.rail.getStartedDetail": {
+    "en": "Choose what to create",
+    "zh-Hans": "选择要创建的内容",
+    "ja": "作成するものを選択"
+  },
+  "wizard.rail.instance": {
+    "en": "Instance",
+    "zh-Hans": "实例",
+    "ja": "インスタンス"
+  },
+  "wizard.rail.chooseInstance": {
+    "en": "Choose Instance",
+    "zh-Hans": "选择实例",
+    "ja": "インスタンスを選択"
+  },
+  "wizard.rail.instanceDetail": {
+    "en": "Game files and components",
+    "zh-Hans": "游戏文件与组件",
+    "ja": "ゲームファイルとコンポーネント"
+  },
+  "wizard.rail.profile": {
+    "en": "Profile",
+    "zh-Hans": "配置文件",
+    "ja": "プロファイル"
+  },
+  "wizard.rail.profileDetail": {
+    "en": "Make it yours",
+    "zh-Hans": "打造成你的风格",
+    "ja": "自分好みに設定"
+  },
+  "wizard.rail.review": {
+    "en": "Review",
+    "zh-Hans": "检查",
+    "ja": "確認"
+  },
+  "wizard.rail.reviewDetail": {
+    "en": "Check the details",
+    "zh-Hans": "检查详细信息",
+    "ja": "内容を確認"
+  },
+  "wizard.rail.setup": {
+    "en": "Game setup",
+    "zh-Hans": "游戏设置",
+    "ja": "ゲーム設定"
+  },
+  "wizard.rail.setupDetail": {
+    "en": "Name and configure",
+    "zh-Hans": "命名并配置",
+    "ja": "名前と設定"
+  },
+  "wizard.start.creationType": {
+    "en": "Creation type",
+    "zh-Hans": "创建类型",
+    "ja": "作成タイプ"
+  },
+  "wizard.start.heading": {
+    "en": "What would you like to create?",
+    "zh-Hans": "你想创建什么？",
+    "ja": "何を作成しますか？"
+  },
+  "wizard.start.subtitle": {
+    "en": "Start fresh or add a new way to play an existing game.",
+    "zh-Hans": "从零开始，或为现有游戏添加新的玩法。",
+    "ja": "新規に始めるか、既存のゲームに新しい遊び方を追加します。"
+  },
+  "wizard.start.badge": {
+    "en": "Separated Profile",
+    "zh-Hans": "分离配置文件",
+    "ja": "分離プロファイル"
+  },
+  "wizard.start.newInstance": {
+    "en": "New Instance + Profile",
+    "zh-Hans": "新实例 + 配置文件",
+    "ja": "新しいインスタンス + プロファイル"
+  },
+  "wizard.start.newInstanceNote": {
+    "en": "A fresh Minecraft setup, with your first Profile ready to go.",
+    "zh-Hans": "全新的 Minecraft 环境，并已准备好第一个配置文件。",
+    "ja": "新しい Minecraft 環境と、すぐに使える最初のプロファイルを用意します。"
+  },
+  "wizard.start.newProfile": {
+    "en": "New Profile",
+    "zh-Hans": "新配置文件",
+    "ja": "新しいプロファイル"
+  },
+  "wizard.start.noInstancesNote": {
+    "en": "Create an Instance first. New Profiles can reuse it later without duplicating game files.",
+    "zh-Hans": "请先创建实例。之后新建配置文件可以复用它，无需复制游戏文件。",
+    "ja": "先にインスタンスを作成してください。新しいプロファイルは後で再利用でき、ゲームファイルを複製しません。"
+  },
+  "wizard.start.reuseNote": {
+    "en": "Reuse an existing Instance with independent appearance and launch settings. Game files are shared.",
+    "zh-Hans": "复用现有实例，外观和启动设置保持独立，游戏文件共享。",
+    "ja": "既存のインスタンスを再利用し、外観と起動設定は個別に保ちます。ゲームファイルは共有されます。"
+  },
+  "wizard.instance.group": {
+    "en": "Existing game Instance",
+    "zh-Hans": "现有游戏实例",
+    "ja": "既存のゲームインスタンス"
+  },
+  "wizard.instance.heading": {
+    "en": "Choose a game Instance",
+    "zh-Hans": "选择游戏实例",
+    "ja": "ゲームインスタンスを選択"
+  },
+  "wizard.instance.subtitle": {
+    "en": "Your new Profile uses these existing game files and components.",
+    "zh-Hans": "新配置文件将使用这些现有游戏文件和组件。",
+    "ja": "新しいプロファイルは、この既存のゲームファイルとコンポーネントを使用します。"
+  },
+  "wizard.instance.profiles": {
+    "en": "%{count} Profiles",
+    "zh-Hans": "%{count} 个配置文件",
+    "ja": "%{count} 個のプロファイル"
+  },
+  "wizard.instance.emptyTitle": {
+    "en": "No Instances",
+    "zh-Hans": "没有实例",
+    "ja": "インスタンスがありません"
+  },
+  "wizard.instance.emptyDetail": {
+    "en": "Go back and create a new Instance with its first Profile.",
+    "zh-Hans": "请返回并新建一个实例及其第一个配置文件。",
+    "ja": "戻って、最初のプロファイルとともに新しいインスタンスを作成してください。"
+  },
+  "wizard.setup.heading": {
+    "en": "Create your game",
+    "zh-Hans": "创建你的游戏",
+    "ja": "ゲームを作成"
+  },
+  "wizard.setup.subtitle": {
+    "en": "Choose the game components. Review everything before installation begins.",
+    "zh-Hans": "选择游戏组件。安装开始前请检查全部内容。",
+    "ja": "ゲームのコンポーネントを選択します。インストール開始前にすべてを確認してください。"
+  },
+  "wizard.setup.gameName": {
+    "en": "Game name",
+    "zh-Hans": "游戏名称",
+    "ja": "ゲーム名"
+  },
+  "wizard.setup.gameNamePlaceholder": {
+    "en": "Game name",
+    "zh-Hans": "游戏名称",
+    "ja": "ゲーム名"
+  },
+  "wizard.setup.defaultGameName": {
+    "en": "My Minecraft",
+    "zh-Hans": "我的 Minecraft",
+    "ja": "マイ Minecraft"
+  },
+  "wizard.setup.versionCard": {
+    "en": "Minecraft version",
+    "zh-Hans": "Minecraft 版本",
+    "ja": "Minecraft バージョン"
+  },
+  "wizard.setup.versionPlaceholder": {
+    "en": "Minecraft version",
+    "zh-Hans": "Minecraft 版本",
+    "ja": "Minecraft バージョン"
+  },
+  "wizard.setup.loaderCard": {
+    "en": "Mod loader",
+    "zh-Hans": "模组加载器",
+    "ja": "Mod ローダー"
+  },
+  "wizard.setup.originalGame": {
+    "en": "Original game",
+    "zh-Hans": "原版游戏",
+    "ja": "オリジナルのゲーム"
+  },
+  "wizard.setup.configurationCard": {
+    "en": "Configuration",
+    "zh-Hans": "配置",
+    "ja": "設定"
+  },
+  "wizard.setup.directoryPlaceholder": {
+    "en": "Automatic installation location",
+    "zh-Hans": "自动安装位置",
+    "ja": "自動インストール先"
+  },
+  "wizard.setup.openCard": {
+    "en": "Open a card to change that choice.",
+    "zh-Hans": "打开卡片以更改该选择。",
+    "ja": "カードを開くと選択を変更できます。"
+  },
+  "wizard.setup.appearanceLaunch": {
+    "en": "Appearance & launch settings",
+    "zh-Hans": "外观与启动设置",
+    "ja": "外観と起動設定"
+  },
+  "wizard.setup.unavailable": {
+    "en": "Unavailable",
+    "zh-Hans": "不可用",
+    "ja": "利用不可"
+  },
+  "wizard.card.tooltip": {
+    "en": "%{title}: %{value} · %{detail}",
+    "zh-Hans": "%{title}：%{value} · %{detail}",
+    "ja": "%{title}: %{value} · %{detail}"
+  },
+  "wizard.version.heading": {
+    "en": "Minecraft version",
+    "zh-Hans": "Minecraft 版本",
+    "ja": "Minecraft バージョン"
+  },
+  "wizard.version.subtitle": {
+    "en": "Version and loader become fixed when this Instance is created.",
+    "zh-Hans": "创建此实例后，版本和加载器将固定。",
+    "ja": "このインスタンスを作成すると、バージョンとローダーは固定されます。"
+  },
+  "wizard.version.search": {
+    "en": "Search versions",
+    "zh-Hans": "搜索版本",
+    "ja": "バージョンを検索"
+  },
+  "wizard.version.searchPlaceholder": {
+    "en": "Search versions…",
+    "zh-Hans": "搜索版本…",
+    "ja": "バージョンを検索…"
+  },
+  "wizard.version.searchHint": {
+    "en": "Use Up/Down to choose a result. Tab into the list to use Home/End; the search field keeps normal text editing.",
+    "zh-Hans": "使用上下方向键选择结果。按 Tab 进入列表后可用 Home/End；搜索框保持常规文本编辑。",
+    "ja": "上下キーで結果を選択します。リストに Tab で移動すると Home/End が使えます。検索フィールドでは通常のテキスト編集ができます。"
+  },
+  "wizard.version.snapshots": {
+    "en": "Include snapshots and early builds",
+    "zh-Hans": "包含快照和早期版本",
+    "ja": "スナップショットと初期ビルドを含める"
+  },
+  "wizard.version.resultsOne": {
+    "en": "%{count} result",
+    "zh-Hans": "%{count} 个结果",
+    "ja": "%{count} 件"
+  },
+  "wizard.version.resultsMany": {
+    "en": "%{count} results",
+    "zh-Hans": "%{count} 个结果",
+    "ja": "%{count} 件"
+  },
+  "wizard.version.selectedLabel": {
+    "en": "Selected version ID",
+    "zh-Hans": "所选版本 ID",
+    "ja": "選択したバージョン ID"
+  },
+  "wizard.version.selectedHint": {
+    "en": "Enter an exact official version ID. Installation verifies the catalog before downloading. Loader builds are filtered for this version.",
+    "zh-Hans": "输入精确的官方版本 ID。安装会在下载前校验目录。加载器构建将按此版本筛选。",
+    "ja": "公式のバージョン ID を正確に入力してください。インストール時にカタログを検証してからダウンロードします。ローダーのビルドはこのバージョンで絞り込まれます。"
+  },
+  "wizard.version.listLabel": {
+    "en": "Minecraft versions",
+    "zh-Hans": "Minecraft 版本",
+    "ja": "Minecraft バージョン"
+  },
+  "wizard.version.emptyTitle": {
+    "en": "No matching versions",
+    "zh-Hans": "没有匹配的版本",
+    "ja": "一致するバージョンがありません"
+  },
+  "wizard.version.emptyDetail": {
+    "en": "Try another search. Your selected version is preserved.",
+    "zh-Hans": "试试其他搜索。你选择的版本会保留。",
+    "ja": "別の検索をお試しください。選択中のバージョンは保持されます。"
+  },
+  "wizard.version.exactId": {
+    "en": "Exact version ID",
+    "zh-Hans": "精确版本 ID",
+    "ja": "正確なバージョン ID"
+  },
+  "wizard.version.kind.release": {
+    "en": "Stable release",
+    "zh-Hans": "稳定版",
+    "ja": "安定版"
+  },
+  "wizard.version.kind.snapshot": {
+    "en": "Snapshot",
+    "zh-Hans": "快照",
+    "ja": "スナップショット"
+  },
+  "wizard.version.kind.beta": {
+    "en": "Old beta",
+    "zh-Hans": "旧测试版",
+    "ja": "旧ベータ"
+  },
+  "wizard.version.kind.alpha": {
+    "en": "Old alpha",
+    "zh-Hans": "旧预览版",
+    "ja": "旧アルファ"
+  },
+  "wizard.version.source.empty": {
+    "en": "Choose or enter a Minecraft version.",
+    "zh-Hans": "选择或输入 Minecraft 版本。",
+    "ja": "Minecraft のバージョンを選択または入力してください。"
+  },
+  "wizard.version.source.installerDefault": {
+    "en": "Compatible installer default · official release metadata not loaded",
+    "zh-Hans": "兼容安装程序默认值 · 官方发行元数据未加载",
+    "ja": "対応インストーラーの既定値 · 公式リリースメタデータ未読み込み"
+  },
+  "wizard.version.source.unverified": {
+    "en": "Exact version ID · release type unverified until official metadata loads",
+    "zh-Hans": "精确版本 ID · 官方元数据加载前版本类型未经校验",
+    "ja": "正確なバージョン ID · 公式メタデータの読み込みまでリリース種別は未検証"
+  },
+  "wizard.version.source.notFound": {
+    "en": "Exact version ID · not found in the loaded official catalog; installation will verify it",
+    "zh-Hans": "精确版本 ID · 在已加载的官方目录中未找到；安装时会进行校验",
+    "ja": "正確なバージョン ID · 読み込み済みの公式カタログに見つかりません。インストール時に検証されます"
+  },
+  "wizard.version.unsupported_arm": {
+    "en": "Minecraft %{version} cannot run natively on ARM64: %{reason}",
+    "zh-Hans": "Minecraft %{version} 无法在 ARM64 上原生运行：%{reason}",
+    "ja": "Minecraft %{version} は ARM64 でネイティブ実行できません: %{reason}"
+  },
+  "wizard.version.unsupported_reason": {
+    "en": "%{reason}",
+    "zh-Hans": "此版本不支持原生 ARM64。详情：%{reason}",
+    "ja": "このバージョンは ARM64 のネイティブ実行に対応していません。詳細: %{reason}"
+  },
+  "wizard.version.source.catalog": {
+    "en": "Official catalog · %{kind}",
+    "zh-Hans": "官方目录 · %{kind}",
+    "ja": "公式カタログ · %{kind}"
+  },
+  "wizard.catalog.loadingTitle": {
+    "en": "Loading official version catalog",
+    "zh-Hans": "正在加载官方版本目录",
+    "ja": "公式バージョンカタログを読み込み中"
+  },
+  "wizard.catalog.loadingRefresh": {
+    "en": "Previously loaded versions remain available while refreshing. Your draft selection is preserved.",
+    "zh-Hans": "刷新期间，之前加载的版本仍然可用。你的草稿选择会保留。",
+    "ja": "更新中も、読み込み済みのバージョンは引き続き利用できます。下書きの選択は保持されます。"
+  },
+  "wizard.catalog.loadingFirst": {
+    "en": "Official metadata is loading. Your draft is preserved; the selected version’s source is shown below.",
+    "zh-Hans": "官方元数据正在加载。你的草稿会保留；所选版本的来源显示在下方。",
+    "ja": "公式メタデータを読み込み中です。下書きは保持され、選択したバージョンの出典が下に表示されます。"
+  },
+  "wizard.catalog.failedTitle": {
+    "en": "Version catalog unavailable",
+    "zh-Hans": "版本目录不可用",
+    "ja": "バージョンカタログを利用できません"
+  },
+  "wizard.catalog.failedRefresh": {
+    "en": "%{error}. Previously loaded versions remain available; the current draft is preserved.",
+    "zh-Hans": "%{error}。之前加载的版本仍然可用；当前草稿会保留。",
+    "ja": "%{error}。読み込み済みのバージョンは引き続き利用でき、現在の下書きは保持されます。"
+  },
+  "wizard.catalog.failedFirst": {
+    "en": "%{error}. Your current draft is kept. Retry to fetch official version metadata.",
+    "zh-Hans": "%{error}。当前草稿会保留。请重试以获取官方版本元数据。",
+    "ja": "%{error}。現在の下書きは保持されます。再試行して公式バージョンメタデータを取得してください。"
+  },
+  "wizard.catalog.retry": {
+    "en": "Retry catalog",
+    "zh-Hans": "重试目录",
+    "ja": "カタログを再試行"
+  },
+  "wizard.catalog.emptyTitle": {
+    "en": "Official metadata is unavailable",
+    "zh-Hans": "官方元数据不可用",
+    "ja": "公式メタデータを利用できません"
+  },
+  "wizard.catalog.emptyDetail": {
+    "en": "No official metadata is available yet. Release types remain unverified until it loads.",
+    "zh-Hans": "目前还没有可用的官方元数据。加载完成前，版本类型未经校验。",
+    "ja": "公式メタデータはまだ利用できません。読み込まれるまでリリース種別は未検証のままです。"
+  },
+  "wizard.catalog.reload": {
+    "en": "Reload catalog",
+    "zh-Hans": "重新加载目录",
+    "ja": "カタログを再読み込み"
+  },
+  "wizard.catalog.readyTitle": {
+    "en": "Official version catalog",
+    "zh-Hans": "官方版本目录",
+    "ja": "公式バージョンカタログ"
+  },
+  "wizard.catalog.readyDetail": {
+    "en": "%{count} versions loaded. The selected version’s type comes from this metadata.",
+    "zh-Hans": "已加载 %{count} 个版本。所选版本的类型来自此元数据。",
+    "ja": "%{count} 件のバージョンを読み込みました。選択したバージョンの種別はこのメタデータに基づきます。"
+  },
+  "wizard.catalog.refresh": {
+    "en": "Refresh catalog",
+    "zh-Hans": "刷新目录",
+    "ja": "カタログを更新"
+  },
+  "wizard.catalog.summary": {
+    "en": "Official catalog · %{count} versions",
+    "zh-Hans": "官方目录 · %{count} 个版本",
+    "ja": "公式カタログ · %{count} 件のバージョン"
+  },
+  "wizard.loader.heading": {
+    "en": "Mod loader",
+    "zh-Hans": "模组加载器",
+    "ja": "Mod ローダー"
+  },
+  "wizard.loader.subtitle": {
+    "en": "Choose a loader and build. These choices become fixed when this Instance is created.",
+    "zh-Hans": "选择加载器与构建版本。创建此实例后，这些选择将固定。",
+    "ja": "ローダーとビルドを選択します。このインスタンスを作成すると、これらの選択は固定されます。"
+  },
+  "wizard.loader.group": {
+    "en": "Mod loader",
+    "zh-Hans": "模组加载器",
+    "ja": "Mod ローダー"
+  },
+  "wizard.loader.column": {
+    "en": "Loader",
+    "zh-Hans": "加载器",
+    "ja": "ローダー"
+  },
+  "wizard.loader.note": {
+    "en": "Official builds for the selected Minecraft version. Installation verifies every required file.",
+    "zh-Hans": "所选 Minecraft 版本的官方构建。安装时会校验每个必需文件。",
+    "ja": "選択した Minecraft バージョンの公式ビルドです。インストール時に必要なファイルをすべて検証します。"
+  },
+  "wizard.loader.noneTitle": {
+    "en": "No mod loader needed",
+    "zh-Hans": "无需模组加载器",
+    "ja": "Mod ローダーは不要です"
+  },
+  "wizard.loader.noneDetail": {
+    "en": "Play the original game, or choose a supported loader on the left to use mods.",
+    "zh-Hans": "游玩原版游戏，或在左侧选择受支持的加载器以使用模组。",
+    "ja": "オリジナルのゲームを遊ぶか、左側で対応ローダーを選んで Mod を使用します。"
+  },
+  "wizard.loader.versions": {
+    "en": "%{loader} versions",
+    "zh-Hans": "%{loader} 版本",
+    "ja": "%{loader} のバージョン"
+  },
+  "wizard.loader.buildsCount": {
+    "en": "%{count} builds",
+    "zh-Hans": "%{count} 个构建",
+    "ja": "%{count} 件のビルド"
+  },
+  "wizard.loader.minecraft": {
+    "en": "Minecraft %{version}",
+    "zh-Hans": "Minecraft %{version}",
+    "ja": "Minecraft %{version}"
+  },
+  "wizard.loader.loading": {
+    "en": "Loading official builds…",
+    "zh-Hans": "正在加载官方构建…",
+    "ja": "公式ビルドを読み込み中…"
+  },
+  "wizard.loader.retry": {
+    "en": "Retry",
+    "zh-Hans": "重试",
+    "ja": "再試行"
+  },
+  "wizard.loader.refresh": {
+    "en": "Refresh catalog",
+    "zh-Hans": "刷新目录",
+    "ja": "カタログを更新"
+  },
+  "wizard.loader.noBuildsTitle": {
+    "en": "No compatible builds",
+    "zh-Hans": "没有兼容的构建",
+    "ja": "互換性のあるビルドがありません"
+  },
+  "wizard.loader.noBuildsDetail": {
+    "en": "Choose another Minecraft version or loader.",
+    "zh-Hans": "请选择其他 Minecraft 版本或加载器。",
+    "ja": "別の Minecraft バージョンまたはローダーを選択してください。"
+  },
+  "wizard.loader.searchLabel": {
+    "en": "Search loader builds",
+    "zh-Hans": "搜索加载器构建",
+    "ja": "ローダーのビルドを検索"
+  },
+  "wizard.loader.searchPlaceholder": {
+    "en": "Search loader builds…",
+    "zh-Hans": "搜索加载器构建…",
+    "ja": "ローダーのビルドを検索…"
+  },
+  "wizard.loader.buildGroup": {
+    "en": "Loader build",
+    "zh-Hans": "加载器构建",
+    "ja": "ローダーのビルド"
+  },
+  "wizard.loader.stable": {
+    "en": "Stable",
+    "zh-Hans": "稳定",
+    "ja": "安定"
+  },
+  "wizard.loader.preview": {
+    "en": "Preview",
+    "zh-Hans": "预览",
+    "ja": "プレビュー"
+  },
+  "wizard.loader.searchEmptyTitle": {
+    "en": "No matching builds",
+    "zh-Hans": "没有匹配的构建",
+    "ja": "一致するビルドがありません"
+  },
+  "wizard.loader.searchEmptyDetail": {
+    "en": "Try another search. Your selected build is preserved.",
+    "zh-Hans": "试试其他搜索。你选择的构建会保留。",
+    "ja": "別の検索をお試しください。選択中のビルドは保持されます。"
+  },
+  "wizard.loader.buildsList": {
+    "en": "Loader builds",
+    "zh-Hans": "加载器构建",
+    "ja": "ローダーのビルド"
+  },
+  "wizard.loader.chooseBuild": {
+    "en": "Choose a compatible build.",
+    "zh-Hans": "请选择一个兼容的构建。",
+    "ja": "互換性のあるビルドを選択してください。"
+  },
+  "wizard.loader.selectedBuild": {
+    "en": "Selected build: %{version}",
+    "zh-Hans": "已选构建：%{version}",
+    "ja": "選択中のビルド: %{version}"
+  },
+  "wizard.loader.cancelled": {
+    "en": "The previous request was cancelled. Retry to reload builds.",
+    "zh-Hans": "上一个请求已取消。请重试以重新加载构建。",
+    "ja": "以前のリクエストはキャンセルされました。再試行してビルドを再読み込みしてください。"
+  },
+  "wizard.loader.loadCatalog": {
+    "en": "Load the official catalog to choose a build.",
+    "zh-Hans": "加载官方目录以选择构建。",
+    "ja": "公式カタログを読み込んでビルドを選択してください。"
+  },
+  "wizard.loader.serviceUnavailable": {
+    "en": "The launcher service is unavailable. Retry after reopening this window.",
+    "zh-Hans": "启动器服务不可用。请重新打开此窗口后再试。",
+    "ja": "ランチャーサービスを利用できません。このウィンドウを開き直してから再試行してください。"
+  },
+  "wizard.loader.issue.waitOptifine": {
+    "en": "Wait for OptiFine JAR validation to finish.",
+    "zh-Hans": "请等待 OptiFine JAR 校验完成。",
+    "ja": "OptiFine JAR の検証が完了するまでお待ちください。"
+  },
+  "wizard.loader.issue.loadCatalog": {
+    "en": "Load the official loader catalog and choose a compatible build.",
+    "zh-Hans": "加载官方加载器目录并选择兼容的构建。",
+    "ja": "公式ローダーカタログを読み込み、互換性のあるビルドを選択してください。"
+  },
+  "wizard.loader.issue.reload": {
+    "en": "Reload the loader catalog for this Minecraft version.",
+    "zh-Hans": "请为此 Minecraft 版本重新加载加载器目录。",
+    "ja": "この Minecraft バージョンのローダーカタログを再読み込みしてください。"
+  },
+  "wizard.loader.issue.loading": {
+    "en": "Wait for the official loader versions to load.",
+    "zh-Hans": "请等待官方加载器版本加载完成。",
+    "ja": "公式ローダーのバージョンが読み込まれるまでお待ちください。"
+  },
+  "wizard.loader.issue.failed": {
+    "en": "The official loader catalog could not be loaded. Retry before continuing.",
+    "zh-Hans": "无法加载官方加载器目录。请重试后再继续。",
+    "ja": "公式ローダーカタログを読み込めませんでした。再試行してから続行してください。"
+  },
+  "wizard.loader.issue.noBuild": {
+    "en": "This loader has no official build for the selected Minecraft version. Choose another loader or game version.",
+    "zh-Hans": "此加载器没有所选 Minecraft 版本的官方构建。请选择其他加载器或游戏版本。",
+    "ja": "このローダーには選択した Minecraft バージョンの公式ビルドがありません。別のローダーまたはゲームバージョンを選択してください。"
+  },
+  "wizard.loader.issue.chooseBuild": {
+    "en": "Choose a compatible loader build.",
+    "zh-Hans": "请选择兼容的加载器构建。",
+    "ja": "互換性のあるローダービルドを選択してください。"
+  },
+  "wizard.optifine.heading": {
+    "en": "Install OptiFine",
+    "zh-Hans": "安装 OptiFine",
+    "ja": "OptiFine をインストール"
+  },
+  "wizard.optifine.body": {
+    "en": "Download the installer JAR for your Minecraft version from optifine.net, then select it here. Block validates it and performs the remaining installation automatically.",
+    "zh-Hans": "从 optifine.net 下载与你的 Minecraft 版本对应的安装程序 JAR，然后在此选择。Block 会校验它并自动完成其余安装步骤。",
+    "ja": "optifine.net からお使いの Minecraft バージョン用のインストーラー JAR をダウンロードし、ここで選択してください。Block が検証し、残りのインストールを自動で行います。"
+  },
+  "wizard.optifine.openDownloads": {
+    "en": "Open official downloads",
+    "zh-Hans": "打开官方下载页",
+    "ja": "公式ダウンロードを開く"
+  },
+  "wizard.optifine.choosing": {
+    "en": "Choosing or validating JAR…",
+    "zh-Hans": "正在选择或校验 JAR…",
+    "ja": "JAR を選択または検証しています…"
+  },
+  "wizard.optifine.selectJar": {
+    "en": "Select downloaded JAR",
+    "zh-Hans": "选择已下载的 JAR",
+    "ja": "ダウンロードした JAR を選択"
+  },
+  "wizard.optifine.selected": {
+    "en": "Selected: %{version}",
+    "zh-Hans": "已选择：%{version}",
+    "ja": "選択中: %{version}"
+  },
+  "wizard.optifine.standalone": {
+    "en": "Standalone installation; this release does not declare Forge compatibility.",
+    "zh-Hans": "独立安装；此版本未声明 Forge 兼容性。",
+    "ja": "単体インストールです。このリリースは Forge 互換性を宣言していません。"
+  },
+  "wizard.optifine.forge": {
+    "en": "Standalone or Forge %{version}. Other loaders cannot be combined directly.",
+    "zh-Hans": "独立安装或 Forge %{version}。其他加载器无法直接组合使用。",
+    "ja": "単体または Forge %{version}。他のローダーとは直接組み合わせられません。"
+  },
+  "wizard.optifine.useWithout": {
+    "en": "Use without OptiFine",
+    "zh-Hans": "不使用 OptiFine",
+    "ja": "OptiFine なしで使用"
+  },
+  "wizard.optifine.cacheNote": {
+    "en": "No extraction or manual file placement is required. The selected JAR is kept only in your private launcher cache.",
+    "zh-Hans": "无需解压或手动放置文件。所选 JAR 只会保存在你的私人启动器缓存中。",
+    "ja": "展開や手動でのファイル配置は不要です。選択した JAR はプライベートなランチャーキャッシュにのみ保存されます。"
+  },
+  "wizard.optifine.chooserFailed": {
+    "en": "Could not open the OptiFine file chooser. Check your system file picker and try again.",
+    "zh-Hans": "无法打开 OptiFine 文件选择器。请检查系统文件选择器后重试。",
+    "ja": "OptiFine のファイル選択画面を開けませんでした。システムのファイル選択画面を確認して再試行してください。"
+  },
+  "wizard.optifine.chooserPrompt": {
+    "en": "Select the official OptiFine installer JAR",
+    "zh-Hans": "选择官方 OptiFine 安装程序 JAR",
+    "ja": "公式 OptiFine インストーラー JAR を選択"
+  },
+  "wizard.optifine.importFailed": {
+    "en": "Could not import OptiFine: %{error}",
+    "zh-Hans": "无法导入 OptiFine：%{error}",
+    "ja": "OptiFine をインポートできません: %{error}"
+  },
+  "wizard.optifine.notSelected": {
+    "en": "Not selected",
+    "zh-Hans": "未选择",
+    "ja": "未選択"
+  },
+  "wizard.optifine.verified": {
+    "en": "JAR identity checked",
+    "zh-Hans": "已校验 JAR 标识",
+    "ja": "JAR の同一性を確認済み"
+  },
+  "wizard.optifine.downloadThenSelect": {
+    "en": "Download, then select JAR",
+    "zh-Hans": "下载后选择 JAR",
+    "ja": "ダウンロードして JAR を選択"
+  },
+  "wizard.optifine.cannotCombine": {
+    "en": "Cannot combine directly with %{loader}",
+    "zh-Hans": "无法直接与 %{loader} 组合使用",
+    "ja": "%{loader} と直接組み合わせることはできません"
+  },
+  "wizard.profile.title": {
+    "en": "Your way to play",
+    "zh-Hans": "你的玩法",
+    "ja": "あなたの遊び方"
+  },
+  "wizard.profile.defaultName": {
+    "en": "New Profile",
+    "zh-Hans": "新配置文件",
+    "ja": "新しいプロファイル"
+  },
+  "wizard.profile.name": {
+    "en": "Profile name",
+    "zh-Hans": "配置文件名称",
+    "ja": "プロファイル名"
+  },
+  "wizard.profile.namePlaceholder": {
+    "en": "Profile name",
+    "zh-Hans": "配置文件名称",
+    "ja": "プロファイル名"
+  },
+  "wizard.profile.icon": {
+    "en": "Icon",
+    "zh-Hans": "图标",
+    "ja": "アイコン"
+  },
+  "wizard.profile.color": {
+    "en": "Color",
+    "zh-Hans": "颜色",
+    "ja": "カラー"
+  },
+  "wizard.profile.advanced": {
+    "en": "Advanced launch settings",
+    "zh-Hans": "高级启动设置",
+    "ja": "詳細な起動設定"
+  },
+  "wizard.profile.server": {
+    "en": "Server address (optional)",
+    "zh-Hans": "服务器地址（可选）",
+    "ja": "サーバーアドレス（任意）"
+  },
+  "wizard.profile.serverHint": {
+    "en": "A hostname or IP address, with an optional port. Saving does not connect.",
+    "zh-Hans": "主机名或 IP 地址，可包含端口。保存不会连接。",
+    "ja": "ホスト名または IP アドレス（ポートは任意）。保存しても接続は行いません。"
+  },
+  "wizard.profile.connect": {
+    "en": "Connect to this server automatically on launch",
+    "zh-Hans": "启动时自动连接到此服务器",
+    "ja": "起動時にこのサーバーへ自動接続"
+  },
+  "wizard.profile.connectionUnsupported": {
+    "en": "This version’s client does not accept an automatic server connection. The address can still be saved.",
+    "zh-Hans": "此版本的客户端不接受自动服务器连接。地址仍可保存。",
+    "ja": "このバージョンのクライアントは自動サーバー接続を受け付けません。アドレスは保存できます。"
+  },
+  "wizard.profile.connectionUnknown": {
+    "en": "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.",
+    "zh-Hans": "地址可以保存。在此版本的官方清单可用之前，自动连接不可用。",
+    "ja": "アドレスは保存できます。このバージョンの公式マニフェストが利用可能になるまで、自動接続は無効です。"
+  },
+  "wizard.profile.launchTarget": {
+    "en": "Launch target",
+    "zh-Hans": "启动目标",
+    "ja": "起動ターゲット"
+  },
+  "wizard.profile.installReady": {
+    "en": "Installed",
+    "zh-Hans": "已安装",
+    "ja": "インストール済み"
+  },
+  "wizard.profile.installPending": {
+    "en": "Installs before play",
+    "zh-Hans": "游玩前安装",
+    "ja": "プレイ前にインストール"
+  },
+  "wizard.profile.installInstalling": {
+    "en": "Installing",
+    "zh-Hans": "正在安装",
+    "ja": "インストール中"
+  },
+  "wizard.profile.installFailed": {
+    "en": "Installation needs retry",
+    "zh-Hans": "安装需要重试",
+    "ja": "インストールの再試行が必要"
+  },
+  "wizard.profile.memory": {
+    "en": "Maximum memory (GB)",
+    "zh-Hans": "最大内存（GB）",
+    "ja": "最大メモリ（GB）"
+  },
+  "wizard.profile.memoryHint": {
+    "en": "Allowed: 1–32 GB. Step: 1 GB.",
+    "zh-Hans": "允许范围：1–32 GB。步长：1 GB。",
+    "ja": "許容範囲: 1〜32 GB。刻み: 1 GB。"
+  },
+  "wizard.profile.jvm": {
+    "en": "Extra JVM arguments",
+    "zh-Hans": "额外 JVM 参数",
+    "ja": "追加の JVM 引数"
+  },
+  "wizard.profile.jvmPlaceholder": {
+    "en": "Extra JVM arguments",
+    "zh-Hans": "额外 JVM 参数",
+    "ja": "追加の JVM 引数"
+  },
+  "wizard.profile.automaticJava": {
+    "en": "Automatic Java",
+    "zh-Hans": "自动 Java",
+    "ja": "自動 Java"
+  },
+  "wizard.profile.customExecutable": {
+    "en": "Custom executable",
+    "zh-Hans": "自定义可执行文件",
+    "ja": "カスタム実行ファイル"
+  },
+  "wizard.profile.javaPlaceholder": {
+    "en": "Absolute path to Java",
+    "zh-Hans": "Java 的绝对路径",
+    "ja": "Java の絶対パス"
+  },
+  "wizard.profile.javaExecutable": {
+    "en": "Java executable",
+    "zh-Hans": "Java 可执行文件",
+    "ja": "Java 実行ファイル"
+  },
+  "wizard.profile.windowSizeValue": {
+    "en": "%{width} × %{height}",
+    "zh-Hans": "%{width} × %{height}",
+    "ja": "%{width} × %{height}"
+  },
+  "wizard.profile.windowSizeCustom": {
+    "en": "%{width} × %{height} · Custom",
+    "zh-Hans": "%{width} × %{height} · 自定义",
+    "ja": "%{width} × %{height} · カスタム"
+  },
+  "wizard.profile.windowWidth": {
+    "en": "Window width (px)",
+    "zh-Hans": "窗口宽度（px）",
+    "ja": "ウィンドウ幅（px）"
+  },
+  "wizard.profile.windowHeight": {
+    "en": "Window height (px)",
+    "zh-Hans": "窗口高度（px）",
+    "ja": "ウィンドウ高さ（px）"
+  },
+  "wizard.profile.fullscreen": {
+    "en": "Start in fullscreen",
+    "zh-Hans": "以全屏启动",
+    "ja": "フルスクリーンで起動"
+  },
+  "wizard.profile.defaultError": {
+    "en": "Give the Profile a name of 1–80 characters.",
+    "zh-Hans": "配置文件名称需为 1–80 个字符。",
+    "ja": "プロファイル名は 1〜80 文字で入力してください。"
+  },
+  "wizard.profile.widthError": {
+    "en": "Enter a whole number for window width.",
+    "zh-Hans": "窗口宽度请输入整数。",
+    "ja": "ウィンドウ幅は整数で入力してください。"
+  },
+  "wizard.profile.heightError": {
+    "en": "Enter a whole number for window height.",
+    "zh-Hans": "窗口高度请输入整数。",
+    "ja": "ウィンドウ高さは整数で入力してください。"
+  },
+  "wizard.profile.javaError": {
+    "en": "Choose a Java executable or use managed Java.",
+    "zh-Hans": "请选择 Java 可执行文件，或使用托管 Java。",
+    "ja": "Java 実行ファイルを選択するか、管理された Java を使用してください。"
+  },
+  "wizard.profile.validationDetail": {
+    "en": "Could not validate Profile settings. Details: %{detail}",
+    "zh-Hans": "无法验证配置文件设置。详情：%{detail}",
+    "ja": "プロファイル設定を検証できませんでした。詳細: %{detail}"
+  },
+  "wizard.error.reopen": {
+    "en": "Reopen game setup to continue.",
+    "zh-Hans": "重新打开游戏设置以继续。",
+    "ja": "続行するにはゲーム設定を開き直してください。"
+  },
+  "wizard.error.chooseVersion": {
+    "en": "Choose a Minecraft version from the list.",
+    "zh-Hans": "请从列表中选择 Minecraft 版本。",
+    "ja": "リストから Minecraft バージョンを選択してください。"
+  },
+  "wizard.error.optifinePending": {
+    "en": "Wait for the selected OptiFine JAR to finish validation.",
+    "zh-Hans": "请等待所选 OptiFine JAR 完成校验。",
+    "ja": "選択した OptiFine JAR の検証が完了するまでお待ちください。"
+  },
+  "wizard.error.absoluteFolder": {
+    "en": "Choose an absolute installation folder or leave it empty.",
+    "zh-Hans": "请选择绝对路径的安装文件夹，或留空。",
+    "ja": "絶対パスのインストールフォルダーを選択するか、空欄にしてください。"
+  },
+  "wizard.error.draftUnavailable": {
+    "en": "The configuration draft is unavailable. Reopen game setup.",
+    "zh-Hans": "配置草稿不可用。请重新打开游戏设置。",
+    "ja": "設定の下書きを利用できません。ゲーム設定を開き直してください。"
+  },
+  "wizard.error.absoluteJava": {
+    "en": "Choose an absolute Java executable path or use automatic Java.",
+    "zh-Hans": "请选择 Java 可执行文件的绝对路径，或使用自动 Java。",
+    "ja": "Java 実行ファイルの絶対パスを選択するか、自動 Java を使用してください。"
+  },
+  "wizard.error.widthRange": {
+    "en": "Window width must be a whole number between %{minimum} and %{maximum}.",
+    "zh-Hans": "窗口宽度必须是 %{minimum} 到 %{maximum} 之间的整数。",
+    "ja": "ウィンドウ幅は %{minimum} から %{maximum} までの整数で入力してください。"
+  },
+  "wizard.error.heightRange": {
+    "en": "Window height must be a whole number between %{minimum} and %{maximum}.",
+    "zh-Hans": "窗口高度必须是 %{minimum} 到 %{maximum} 之间的整数。",
+    "ja": "ウィンドウ高さは %{minimum} から %{maximum} までの整数で入力してください。"
+  },
+  "wizard.error.memoryRange": {
+    "en": "Choose a memory limit between 1 and 32 GB.",
+    "zh-Hans": "请选择 1 到 32 GB 之间的内存上限。",
+    "ja": "1〜32 GB の範囲でメモリ上限を選択してください。"
+  },
+  "wizard.error.chooseInstance": {
+    "en": "Choose an existing Instance.",
+    "zh-Hans": "请选择一个现有实例。",
+    "ja": "既存のインスタンスを選択してください。"
+  },
+  "wizard.error.profileDraftUnavailable": {
+    "en": "Profile draft is unavailable. Reopen game setup.",
+    "zh-Hans": "配置文件草稿不可用。请重新打开游戏设置。",
+    "ja": "プロファイルの下書きを利用できません。ゲーム設定を開き直してください。"
+  },
+  "wizard.error.instanceGone": {
+    "en": "The chosen Instance is no longer available. Go back and choose another.",
+    "zh-Hans": "所选实例已不可用。请返回并选择其他实例。",
+    "ja": "選択したインスタンスは利用できません。戻って別のものを選択してください。"
+  },
+  "wizard.error.connectionUnsupported": {
+    "en": "This version does not accept an automatic server connection. Turn off automatic connection to continue.",
+    "zh-Hans": "此版本不接受自动服务器连接。请关闭自动连接以继续。",
+    "ja": "このバージョンは自動サーバー接続を受け付けません。続行するには自動接続をオフにしてください。"
+  },
+  "wizard.error.connectionUnknown": {
+    "en": "This version’s official manifest is unavailable, so automatic connection cannot start. Turn off automatic connection to continue.",
+    "zh-Hans": "此版本的官方清单不可用，因此无法启动自动连接。请关闭自动连接以继续。",
+    "ja": "このバージョンの公式マニフェストが利用できないため、自動接続を開始できません。続行するには自動接続をオフにしてください。"
+  },
+  "wizard.error.chooserFailed": {
+    "en": "Could not open the installation folder chooser. Check your system file picker and try again.",
+    "zh-Hans": "无法打开安装文件夹选择器。请检查系统文件选择器后重试。",
+    "ja": "インストールフォルダーの選択画面を開けませんでした。システムのファイル選択画面を確認して再試行してください。"
+  },
+  "wizard.notice.optifineRemoved": {
+    "en": "OptiFine was removed because it cannot be combined directly with %{loader}.",
+    "zh-Hans": "由于无法与 %{loader} 直接组合使用，OptiFine 已被移除。",
+    "ja": "%{loader} と直接組み合わせられないため、OptiFine を削除しました。"
+  },
+  "wizard.notice.buildGone": {
+    "en": "The selected loader build is no longer listed for this game. Choose another build.",
+    "zh-Hans": "所选加载器构建已不再列于此游戏。请选择其他构建。",
+    "ja": "選択したローダービルドはこのゲームで提供されなくなりました。別のビルドを選択してください。"
+  },
+  "wizard.notice.minecraftChanged": {
+    "en": "Minecraft changed. Choose a compatible build from the refreshed loader catalog.",
+    "zh-Hans": "Minecraft 已更改。请从刷新后的加载器目录中选择兼容构建。",
+    "ja": "Minecraft が変更されました。更新されたローダーカタログから互換性のあるビルドを選択してください。"
+  },
+  "wizard.config.heading": {
+    "en": "Configuration",
+    "zh-Hans": "配置",
+    "ja": "設定"
+  },
+  "wizard.config.subtitle": {
+    "en": "Choose this Instance’s game folder, Java runtime and window settings.",
+    "zh-Hans": "选择此实例的游戏文件夹、Java 运行环境和窗口设置。",
+    "ja": "このインスタンスのゲームフォルダー、Java ランタイム、ウィンドウ設定を選択します。"
+  },
+  "wizard.config.directory": {
+    "en": "Installation folder (optional)",
+    "zh-Hans": "安装文件夹（可选）",
+    "ja": "インストールフォルダー（任意）"
+  },
+  "wizard.config.directoryHint": {
+    "en": "Leave empty for automatic storage. Existing player folders are not moved.",
+    "zh-Hans": "留空以自动存储。现有玩家文件夹不会被移动。",
+    "ja": "空欄にすると自動保存されます。既存のプレイヤーフォルダーは移動しません。"
+  },
+  "wizard.config.browse": {
+    "en": "Choose folder…",
+    "zh-Hans": "选择文件夹…",
+    "ja": "フォルダーを選択…"
+  },
+  "wizard.config.draftNote": {
+    "en": "These settings stay in your draft until the final review is saved.",
+    "zh-Hans": "在最终检查保存之前，这些设置只保留在草稿中。",
+    "ja": "最終確認が保存されるまで、これらの設定は下書きに保持されます。"
+  },
+  "wizard.config.automaticJavaManaged": {
+    "en": "Automatic · managed by Block",
+    "zh-Hans": "自动 · 由 Block 管理",
+    "ja": "自動 · Block が管理"
+  },
+  "wizard.config.defaultWindow": {
+    "en": "Default window",
+    "zh-Hans": "默认窗口",
+    "ja": "既定のウィンドウ"
+  },
+  "wizard.config.customJava": {
+    "en": "Custom Java",
+    "zh-Hans": "自定义 Java",
+    "ja": "カスタム Java"
+  },
+  "wizard.config.fullscreenValue": {
+    "en": "Fullscreen",
+    "zh-Hans": "全屏",
+    "ja": "フルスクリーン"
+  },
+  "wizard.review.titleExisting": {
+    "en": "Review profile setup",
+    "zh-Hans": "检查配置文件设置",
+    "ja": "プロファイル設定を確認"
+  },
+  "wizard.review.titleNew": {
+    "en": "Review game setup",
+    "zh-Hans": "检查游戏设置",
+    "ja": "ゲーム設定を確認"
+  },
+  "wizard.review.consequenceExisting": {
+    "en": "Review the new Profile. Existing game files and other Profiles stay in place.",
+    "zh-Hans": "检查新配置文件。现有游戏文件和其他配置文件保持不变。",
+    "ja": "新しいプロファイルを確認します。既存のゲームファイルと他のプロファイルはそのまま残ります。"
+  },
+  "wizard.review.consequenceFirstRun": {
+    "en": "Create game saves this setup. Finish setup to begin preparing game files.",
+    "zh-Hans": "创建游戏会保存此设置。完成设置后将开始准备游戏文件。",
+    "ja": "ゲームを作成するとこの設定が保存されます。セットアップを完了するとゲームファイルの準備が始まります。"
+  },
+  "wizard.review.consequence": {
+    "en": "Create game saves your setup and begins verified downloads. You can follow installation on Home.",
+    "zh-Hans": "创建游戏会保存你的设置并开始已验证的下载。你可以在主页查看安装进度。",
+    "ja": "ゲームを作成すると設定が保存され、検証済みのダウンロードが始まります。インストールの進行状況はホームで確認できます。"
+  },
+  "wizard.review.fixedExisting": {
+    "en": "This Profile follows the Instance’s fixed Minecraft version and loader.",
+    "zh-Hans": "此配置文件跟随实例固定的 Minecraft 版本和加载器。",
+    "ja": "このプロファイルはインスタンス固定の Minecraft バージョンとローダーに従います。"
+  },
+  "wizard.review.fixedNew": {
+    "en": "Minecraft version and mod loader become fixed when this game is created.",
+    "zh-Hans": "创建此游戏后，Minecraft 版本和模组加载器将固定。",
+    "ja": "このゲームを作成すると、Minecraft バージョンと Mod ローダーは固定されます。"
+  },
+  "wizard.review.eyebrowExisting": {
+    "en": "EXISTING INSTANCE",
+    "zh-Hans": "现有实例",
+    "ja": "既存のインスタンス"
+  },
+  "wizard.review.eyebrowNew": {
+    "en": "NEW INSTANCE",
+    "zh-Hans": "新实例",
+    "ja": "新しいインスタンス"
+  },
+  "wizard.review.eyebrowGame": {
+    "en": "NEW GAME",
+    "zh-Hans": "新游戏",
+    "ja": "新しいゲーム"
+  },
+  "wizard.review.newProfile": {
+    "en": "NEW PROFILE",
+    "zh-Hans": "新配置文件",
+    "ja": "新しいプロファイル"
+  },
+  "wizard.review.details": {
+    "en": "Detailed settings",
+    "zh-Hans": "详细设置",
+    "ja": "詳細設定"
+  },
+  "wizard.review.detailsNote": {
+    "en": "Settings that need no decision.",
+    "zh-Hans": "无需决定即可使用的设置。",
+    "ja": "判断を必要としない設定。"
+  },
+  "wizard.review.existingNote": {
+    "en": "Only the new Profile is saved. Any missing files for its selected target are installed before play.",
+    "zh-Hans": "仅保存新配置文件。所选目标缺失的文件会在游玩前安装。",
+    "ja": "新しいプロファイルのみが保存されます。選択したターゲットに不足しているファイルはプレイ前にインストールされます。"
+  },
+  "wizard.review.automaticConnectionLegacy": {
+    "en": "On · server arguments",
+    "zh-Hans": "开启 · 服务器参数",
+    "ja": "オン · サーバー引数"
+  },
+  "wizard.review.automaticConnectionQuickPlay": {
+    "en": "On · Quick Play",
+    "zh-Hans": "开启 · 快速游玩",
+    "ja": "オン · クイックプレイ"
+  },
+  "wizard.review.connectionOff": {
+    "en": "Off",
+    "zh-Hans": "关闭",
+    "ja": "オフ"
+  },
+  "wizard.review.chooseInGame": {
+    "en": "Choose in game",
+    "zh-Hans": "在游戏内选择",
+    "ja": "ゲーム内で選択"
+  },
+  "wizard.review.noArguments": {
+    "en": "No extra arguments",
+    "zh-Hans": "无额外参数",
+    "ja": "追加引数なし"
+  },
+  "wizard.review.separateFolder": {
+    "en": "A separate folder in Block’s data directory",
+    "zh-Hans": "Block 数据目录中的独立文件夹",
+    "ja": "Block のデータディレクトリ内の独立したフォルダー"
+  },
+  "wizard.review.isolatedFolder": {
+    "en": "Isolated folder for this Profile",
+    "zh-Hans": "此配置文件的独立文件夹",
+    "ja": "このプロファイル専用の独立したフォルダー"
+  },
+  "wizard.review.unavailableInstance": {
+    "en": "Unavailable Instance",
+    "zh-Hans": "不可用的实例",
+    "ja": "利用できないインスタンス"
+  },
+  "wizard.review.chooseLaunchTarget": {
+    "en": "Choose a launch target",
+    "zh-Hans": "选择启动目标",
+    "ja": "起動ターゲットを選択"
+  },
+  "wizard.review.windowFullscreen": {
+    "en": "%{width} × %{height} · Fullscreen",
+    "zh-Hans": "%{width} × %{height} · 全屏",
+    "ja": "%{width} × %{height} · フルスクリーン"
+  },
+  "wizard.fact.java": {
+    "en": "Java",
+    "zh-Hans": "Java",
+    "ja": "Java"
+  },
+  "wizard.fact.memory": {
+    "en": "Memory",
+    "zh-Hans": "内存",
+    "ja": "メモリ"
+  },
+  "wizard.fact.server": {
+    "en": "Server",
+    "zh-Hans": "服务器",
+    "ja": "サーバー"
+  },
+  "wizard.fact.automaticConnection": {
+    "en": "Automatic connection",
+    "zh-Hans": "自动连接",
+    "ja": "自動接続"
+  },
+  "wizard.fact.jvm": {
+    "en": "JVM arguments",
+    "zh-Hans": "JVM 参数",
+    "ja": "JVM 引数"
+  },
+  "wizard.fact.gameWindow": {
+    "en": "Game window",
+    "zh-Hans": "游戏窗口",
+    "ja": "ゲームウィンドウ"
+  },
+  "wizard.fact.gameFiles": {
+    "en": "Game files",
+    "zh-Hans": "游戏文件",
+    "ja": "ゲームファイル"
+  },
+  "wizard.fact.gameData": {
+    "en": "Game data",
+    "zh-Hans": "游戏数据",
+    "ja": "ゲームデータ"
+  },
+  "import.cannot_import_detail": {
+    "en": "Cannot import this game. Check its directory and local metadata. Details: %{detail}",
+    "zh-Hans": "无法导入此游戏。请检查游戏目录和本地元数据。详情：%{detail}",
+    "ja": "このゲームをインポートできません。ディレクトリとローカルメタデータを確認してください。詳細: %{detail}"
+  },
+  "import.failed_detail": {
+    "en": "Could not import this game. Review the details and retry: %{detail}",
+    "zh-Hans": "无法导入此游戏。请查看详情后重试：%{detail}",
+    "ja": "このゲームをインポートできませんでした。詳細を確認して再試行してください: %{detail}"
+  },
+  "import.header.choose": {"en": "Choose a source.", "zh-Hans": "选择来源。", "ja": "ソースを選択してください。"},
+  "import.header.select": {"en": "Select games to copy.", "zh-Hans": "选择要复制的游戏。", "ja": "コピーするゲームを選択してください。"},
+  "import.header.importing": {"en": "Importing games", "zh-Hans": "正在导入游戏", "ja": "ゲームをインポート中"},
+  "import.header.saved_individually": {"en": "Completed games are saved individually.", "zh-Hans": "完成的游戏会分别保存。", "ja": "完了したゲームは個別に保存されます。"},
+  "import.header.results": {"en": "Import results", "zh-Hans": "导入结果", "ja": "インポート結果"},
+  "import.header.review": {"en": "Review the games added to Block.", "zh-Hans": "查看已添加到 Block 的游戏。", "ja": "Block に追加されたゲームを確認してください。"},
+  "import.source.adjacent": {
+    "en": "This folder · .minecraft",
+    "zh-Hans": "当前文件夹 · .minecraft",
+    "ja": "このフォルダー · .minecraft"
+  },
+  "import.source.launcher": {
+    "en": "Minecraft Launcher",
+    "zh-Hans": "Minecraft 启动器",
+    "ja": "Minecraft ランチャー"
+  },
+  "import.searching": {
+    "en": "Looking for existing games…",
+    "zh-Hans": "正在查找现有游戏…",
+    "ja": "既存のゲームを検索しています…"
+  },
+  "import.source.none": {
+    "en": "No games found.",
+    "zh-Hans": "未找到游戏。",
+    "ja": "ゲームが見つかりません。"
+  },
+  "import.source.one": {
+    "en": "1 game · %{name} · %{version} · %{loader}",
+    "zh-Hans": "1 个游戏 · %{name} · %{version} · %{loader}",
+    "ja": "1 件のゲーム · %{name} · %{version} · %{loader}"
+  },
+  "import.source.many": {
+    "en": "%{count} games found",
+    "zh-Hans": "找到 %{count} 个游戏",
+    "ja": "%{count} 件のゲームが見つかりました"
+  },
+  "import.unknownVersion": {
+    "en": "Unknown version",
+    "zh-Hans": "未知版本",
+    "ja": "不明なバージョン"
+  },
+  "import.unknownLoader": {
+    "en": "Unknown loader",
+    "zh-Hans": "未知加载器",
+    "ja": "不明なローダー"
+  },
+  "import.viewCount": {
+    "en": "View %{count} games →",
+    "zh-Hans": "查看 %{count} 个游戏 →",
+    "ja": "%{count} 件のゲームを表示 →"
+  },
+  "import.viewCountPlain": {
+    "en": "View %{count} games",
+    "zh-Hans": "查看 %{count} 个游戏",
+    "ja": "%{count} 件のゲームを表示"
+  },
+  "import.select.all": {
+    "en": "Select all",
+    "zh-Hans": "全选",
+    "ja": "すべて選択"
+  },
+  "import.select.clear": {
+    "en": "Clear selection",
+    "zh-Hans": "清除选择",
+    "ja": "選択を解除"
+  },
+  "import.selectedCount": {
+    "en": "%{count} selected",
+    "zh-Hans": "已选择 %{count} 个",
+    "ja": "%{count} 件を選択中"
+  },
+  "import.list.empty": {
+    "en": "No games were found for this source.",
+    "zh-Hans": "此来源未找到游戏。",
+    "ja": "このソースにはゲームが見つかりませんでした。"
+  },
+  "import.status.imported": {
+    "en": "Imported",
+    "zh-Hans": "已导入",
+    "ja": "インポート済み"
+  },
+  "import.status.version": {
+    "en": "%{version} · %{loader}",
+    "zh-Hans": "%{version} · %{loader}",
+    "ja": "%{version} · %{loader}"
+  },
+  "import.status.vanilla": {
+    "en": "Vanilla",
+    "zh-Hans": "原版",
+    "ja": "バニラ"
+  },
+  "import.status.saved": {
+    "en": "Saved",
+    "zh-Hans": "已保存",
+    "ja": "保存済み"
+  },
+  "import.status.notImported": {
+    "en": "Not imported",
+    "zh-Hans": "未导入",
+    "ja": "インポートされませんでした"
+  },
+  "import.status.waiting": {
+    "en": "Waiting for copy",
+    "zh-Hans": "等待复制",
+    "ja": "コピー待ち"
+  },
+  "import.progress.summary": {
+    "en": "%{count} of %{total} games imported",
+    "zh-Hans": "已导入 %{count}/%{total} 个游戏",
+    "ja": "%{count}/%{total} 件のゲームをインポートしました"
+  },
+  "import.label.game": {
+    "en": "Game",
+    "zh-Hans": "游戏",
+    "ja": "ゲーム"
+  },
+  "import.footer.stop": {
+    "en": "Stop import",
+    "zh-Hans": "停止导入",
+    "ja": "インポートを停止"
+  },
+  "import.footer.completedStay": {
+    "en": "Completed games stay saved.",
+    "zh-Hans": "已完成的游戏会保持保存。",
+    "ja": "完了したゲームは保存されたまま残ります。"
+  },
+  "import.footer.retry": {
+    "en": "Retry remaining games",
+    "zh-Hans": "重试剩余游戏",
+    "ja": "残りのゲームを再試行"
+  },
+  "import.footer.continue": {
+    "en": "Continue setup",
+    "zh-Hans": "继续设置",
+    "ja": "セットアップを続行"
+  },
+  "import.footer.destination": {
+    "en": "Copy to: %{path}",
+    "zh-Hans": "复制到：%{path}",
+    "ja": "コピー先: %{path}"
+  },
+  "import.footer.originalFiles": {
+    "en": "Original files stay in place.",
+    "zh-Hans": "原始文件保持原位。",
+    "ja": "元のファイルはそのまま残ります。"
+  },
+  "import.footer.importOne": {
+    "en": "Import %{count} game",
+    "zh-Hans": "导入 %{count} 个游戏",
+    "ja": "%{count} 件のゲームをインポート"
+  },
+  "import.footer.importMany": {
+    "en": "Import %{count} games",
+    "zh-Hans": "导入 %{count} 个游戏",
+    "ja": "%{count} 件のゲームをインポート"
+  },
+  "import.footer.newGame": {
+    "en": "Create a new game",
+    "zh-Hans": "创建新游戏",
+    "ja": "新しいゲームを作成"
+  },
+  "import.body.sourcesLabel": {
+    "en": "Game sources",
+    "zh-Hans": "游戏来源",
+    "ja": "ゲームのソース"
+  },
+  "import.body.listLabel": {
+    "en": "Detected games",
+    "zh-Hans": "检测到的游戏",
+    "ja": "検出されたゲーム"
+  },
+  "import.body.resultsLabel": {
+    "en": "Import results",
+    "zh-Hans": "导入结果",
+    "ja": "インポート結果"
+  },
+  "import.error.dataDirectory": {
+    "en": "Block's data directory is unavailable.",
+    "zh-Hans": "Block 的数据目录不可用。",
+    "ja": "Block のデータディレクトリを利用できません。"
+  }
+}

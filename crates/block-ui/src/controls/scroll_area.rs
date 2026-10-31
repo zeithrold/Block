@@ -37,7 +37,7 @@ impl<E> ScrollContent for E where
 pub(super) struct ScrollArea<E: ScrollContent> {
     content: E,
     scroll: ScrollHandle,
-    label: SharedString,
+    focus_key: SharedString,
     palette: Palette,
     horizontal: bool,
     focus: Option<FocusHandle>,
@@ -47,24 +47,32 @@ pub(super) struct ScrollArea<E: ScrollContent> {
 
 /// Preserve content sizing, padding and immediate item indices. The scrollbar is
 /// painted next to the native viewport, never appended to its tracked children.
+/// `focus_key` is a stable identity, not a displayed label; do not localize it.
 pub(super) trait ScrollAreaExt: ScrollContent + Sized {
     fn scroll_area(
         self,
         scroll: &ScrollHandle,
-        label: &str,
+        focus_key: &str,
         palette: Palette,
         horizontal: bool,
     ) -> ScrollArea<Self> {
-        viewport_with_role(self, scroll, label, palette, horizontal, Role::ScrollView)
+        viewport_with_role(
+            self,
+            scroll,
+            focus_key,
+            palette,
+            horizontal,
+            Role::ScrollView,
+        )
     }
 
     fn scroll_list_area(
         self,
         scroll: &ScrollHandle,
-        label: &str,
+        focus_key: &str,
         palette: Palette,
     ) -> ScrollArea<Self> {
-        viewport_with_role(self, scroll, label, palette, false, Role::ListBox)
+        viewport_with_role(self, scroll, focus_key, palette, false, Role::ListBox)
             .tab_index(-1)
             .tab_stop(false)
     }
@@ -74,17 +82,24 @@ impl<E: ScrollContent> ScrollAreaExt for E {}
 pub(super) fn viewport<E: ScrollContent>(
     view: E,
     scroll: &ScrollHandle,
-    label: &str,
+    focus_key: &str,
     palette: Palette,
     horizontal: bool,
 ) -> ScrollArea<E> {
-    viewport_with_role(view, scroll, label, palette, horizontal, Role::ScrollView)
+    viewport_with_role(
+        view,
+        scroll,
+        focus_key,
+        palette,
+        horizontal,
+        Role::ScrollView,
+    )
 }
 
 pub(super) fn viewport_with_role<E: ScrollContent>(
     view: E,
     scroll: &ScrollHandle,
-    label: &str,
+    focus_key: &str,
     palette: Palette,
     horizontal: bool,
     role: Role,
@@ -101,7 +116,7 @@ pub(super) fn viewport_with_role<E: ScrollContent>(
     ScrollArea {
         content,
         scroll: scroll.clone(),
-        label: label.to_owned().into(),
+        focus_key: focus_key.to_owned().into(),
         palette,
         horizontal,
         focus: None,
@@ -151,7 +166,7 @@ impl<E: ScrollContent> RenderOnce for ScrollArea<E> {
         let mut focus = self.focus.unwrap_or_else(|| {
             window
                 .use_keyed_state(
-                    SharedString::from(format!("scroll-viewport-focus:{}", self.label)),
+                    SharedString::from(format!("scroll-viewport-focus:{}", self.focus_key)),
                     cx,
                     |_, cx| cx.focus_handle().tab_stop(true),
                 )

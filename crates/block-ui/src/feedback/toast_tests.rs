@@ -34,7 +34,10 @@ fn manager_keeps_five_active_items_and_retains_exiting_items() {
     for id in 1..=6 {
         manager.push(
             id,
-            Rc::new(RefCell::new(Toast::new(format!("{id}"), ToastKind::Info))),
+            Rc::new(RefCell::new(Toast::new(
+                format!("{id}").into(),
+                ToastKind::Info,
+            ))),
             ToastOptions::default(),
             now,
         );

@@ -10,8 +10,8 @@ use super::{
     shell::{Drawer, OverlayPresentation, Surface},
 };
 use gpui::{
-    App, AppContext as _, Context, FocusHandle, Focusable as _, IntoElement, ParentElement as _,
-    Render, Styled as _, WeakEntity, Window, div, px,
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, Styled as _, WeakEntity, Window, div, px,
 };
 use gpui_component::WindowExt as _;
 use std::{cell::RefCell, collections::HashMap};
@@ -66,6 +66,15 @@ impl Overlays {
 
     pub(super) fn contains(&self, revision: usize) -> bool {
         self.entries.iter().any(|entry| entry.revision == revision)
+    }
+
+    /// Whether this sheet directly owns the current anchored selector.
+    pub(super) fn select_above(&self, revision: usize) -> bool {
+        matches!(
+            self.entries.as_slice(),
+            [.., parent, top]
+                if parent.revision == revision && matches!(top.kind, Surface::Select(_))
+        )
     }
 
     pub(super) fn discard(&mut self) -> Option<Surface> {
@@ -216,6 +225,15 @@ impl Overlays {
     ) {
         let owner = cx.weak_entity();
         let observer = owner.clone();
+        let close_owner = owner.clone();
+        let close = cx.new(|cx| {
+            if let Some(owner) = close_owner.upgrade() {
+                cx.observe(&owner, |_, _, cx| cx.notify()).detach();
+            }
+            SurfaceDialogClose { owner: close_owner }
+        });
+        let body_close = matches!(kind, Surface::WizardSection(_) | Surface::AuthProviderAdd)
+            .then(|| close.clone());
         let body = cx.new(|cx| {
             if let Some(owner) = observer.upgrade() {
                 cx.observe(&owner, |_, _, cx| cx.notify()).detach();
@@ -223,6 +241,7 @@ impl Overlays {
             SurfaceOverlayBody {
                 owner: observer,
                 revision,
+                close: body_close,
             }
         });
         // The window root and neighbouring surface state are still settling
@@ -236,6 +255,7 @@ impl Overlays {
             }
             let build_owner = owner.clone();
             let body = body.clone();
+            let close = close.clone();
             window.open_dialog(cx, move |dialog, _dialog_window, dialog_cx| {
                 let Some(view) = build_owner.upgrade() else {
                     return dialog;
@@ -270,12 +290,21 @@ impl Overlays {
                         .title(
                             div()
                                 .px(px(24.))
-                                .text_xl()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(title),
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_xl()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(title),
+                                )
+                                .child(close.clone()),
                         )
                 };
                 dialog
+                    .close_button(false)
                     .content(move |content, _window, _cx| content.child(body.clone()))
                     .on_cancel(move |_, _, cx| {
                         gate.upgrade().is_none_or(|view| {
@@ -352,16 +381,60 @@ impl Overlays {
 struct SurfaceOverlayBody {
     owner: WeakEntity<Block>,
     revision: usize,
+    close: Option<Entity<SurfaceDialogClose>>,
 }
 
 impl Render for SurfaceOverlayBody {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let revision = self.revision;
-        self.owner
+        let body = self
+            .owner
             .update(cx, |view, cx| {
                 view.render_surface_dialog_body(revision, window, cx)
             })
-            .unwrap_or_else(|_| div().into_any_element())
+            .unwrap_or_else(|_| div().into_any_element());
+        div()
+            .relative()
+            .w_full()
+            .child(body)
+            .children(self.close.as_ref().map(|close| {
+                div()
+                    .absolute()
+                    .top(px(8.))
+                    .right(px(8.))
+                    .child(close.clone())
+            }))
+    }
+}
+
+/// Product-localized trigger using Base's existing dialog-cancel action.
+struct SurfaceDialogClose {
+    owner: WeakEntity<Block>,
+}
+
+impl Render for SurfaceDialogClose {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let (language, palette) = self.owner.upgrade().map_or(
+            (crate::Language::English, super::Palette::LIGHT),
+            |owner| {
+                let view = owner.read(cx);
+                (view.language(), view.palette)
+            },
+        );
+        let label = tr!(language, "common.close");
+        gpui_base::DialogClose::new().trigger(move |button| {
+            button
+                .accessibility_label(label)
+                .debug_selector(|| "surface-dialog-close".into())
+                .size(px(32.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md()
+                .cursor_pointer()
+                .hover(move |style| style.bg(gpui::rgb(palette.accent)))
+                .child(super::design::Icon::Close.render(16., palette.foreground))
+        })
     }
 }
 
@@ -417,6 +490,9 @@ impl Block {
         else {
             return;
         };
+        if self.shell.surfaces.select_above(revision) {
+            self.shell.surfaces.close(window, &self.focus, cx);
+        }
         let entry = self.shell.surfaces.entries.remove(index);
         self.shell.surfaces.trace_change(&entry, "closed");
         match entry.kind {
@@ -447,6 +523,7 @@ impl Surface {
     const fn log_label(&self) -> &'static str {
         match self {
             Self::Drawer(Drawer::ImportGames) => "import_games",
+            Self::Drawer(Drawer::Language) => "language",
             Self::Drawer(Drawer::Menu) => "menu",
             Self::Drawer(Drawer::Accounts) => "accounts",
             Self::Drawer(Drawer::Profiles) => "profiles",
@@ -474,27 +551,30 @@ impl Surface {
         }
     }
 
-    pub(super) fn title(&self) -> &str {
+    /// The surface's display name in the given language. Every name resolves
+    /// from a semantic key, so a retained layer follows the painting language.
+    pub(super) fn title(&self, language: super::Language) -> String {
         match self {
-            Self::Drawer(Drawer::Menu) => "Block menu",
-            Self::Drawer(Drawer::Accounts) => "Switch account",
-            Self::Drawer(Drawer::Profiles) => "Switch game",
-            Self::Drawer(Drawer::Downloads) => "Downloads",
-            Self::Drawer(Drawer::ImportGames) => "Import games",
-            Self::DownloadFiles(group) => group.label(),
-            Self::DeleteProfile(_) => "Delete profile",
-            Self::RemoveAccount(_) => "Remove account",
-            Self::RemoveProvider(_) => "Remove provider",
-            Self::SeparateProfiles => "Enable separated profiles",
-            Self::GamesHelp => "Instances and Profiles",
+            Self::Drawer(Drawer::Menu) => tr!(language, "surface.menu"),
+            Self::Drawer(Drawer::Language) => tr!(language, "setup.language.label"),
+            Self::Drawer(Drawer::Accounts) => tr!(language, "action.switch_account"),
+            Self::Drawer(Drawer::Profiles) => tr!(language, "action.switch_game"),
+            Self::Drawer(Drawer::Downloads) => tr!(language, "surface.downloads"),
+            Self::Drawer(Drawer::ImportGames) => tr!(language, "surface.import_games"),
+            Self::DownloadFiles(group) => group.label(language),
+            Self::DeleteProfile(_) => tr!(language, "action.delete_profile"),
+            Self::RemoveAccount(_) => tr!(language, "action.remove_account"),
+            Self::RemoveProvider(_) => tr!(language, "action.remove_provider"),
+            Self::SeparateProfiles => tr!(language, "action.enable_separated"),
+            Self::GamesHelp => tr!(language, "surface.games_help"),
             Self::WizardSection(page) => match page {
-                super::WizardPage::Version => "Minecraft version",
-                super::WizardPage::Loader => "Mod loader",
-                super::WizardPage::OptiFine => "OptiFine",
-                super::WizardPage::Location => "Game configuration",
+                super::WizardPage::Version => tr!(language, "surface.wizard_version"),
+                super::WizardPage::Loader => tr!(language, "surface.wizard_loader"),
+                super::WizardPage::OptiFine => "OptiFine".to_owned(),
+                super::WizardPage::Location => tr!(language, "surface.wizard_location"),
             },
-            Self::AuthProviderAdd => "Add authentication provider",
-            Self::Select(state) => &state.title,
+            Self::AuthProviderAdd => tr!(language, "surface.auth_provider_add"),
+            Self::Select(state) => state.title(language),
         }
     }
 
@@ -504,7 +584,11 @@ impl Surface {
         match self {
             Self::Drawer(Drawer::Menu) | Self::Select(_) => None,
             Self::Drawer(
-                Drawer::Accounts | Drawer::Profiles | Drawer::Downloads | Drawer::ImportGames,
+                Drawer::Accounts
+                | Drawer::Profiles
+                | Drawer::Downloads
+                | Drawer::ImportGames
+                | Drawer::Language,
             ) => Some(OverlayPresentation::Sheet),
             Self::DownloadFiles(_)
             | Self::GamesHelp

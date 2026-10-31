@@ -23,7 +23,14 @@ pub(super) struct Request {
 pub(super) struct State {
     sequence: u64,
     pending: Option<Request>,
-    result: Option<(Request, Result<u16, String>)>,
+    result: Option<(Request, TestResult)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TestResult {
+    Response(u16),
+    Failure(String),
+    EngineUnavailable,
 }
 
 impl Block {
@@ -66,10 +73,7 @@ impl Block {
             self.shell.connection.pending = Some(request.clone());
             engine.test_connection(request);
         } else {
-            self.shell.connection.result = Some((
-                request,
-                Err("The launcher engine is unavailable. Restart Block to retry.".into()),
-            ));
+            self.shell.connection.result = Some((request, TestResult::EngineUnavailable));
         }
         cx.notify();
     }
@@ -97,10 +101,17 @@ impl Block {
             .connection_identity(cx)
             .is_some_and(|(draft, options)| draft == request.draft && options == request.options)
         {
-            self.shell.connection.result = Some((request, result));
+            self.shell.connection.result = Some((
+                request,
+                match result {
+                    Ok(status) => TestResult::Response(status),
+                    Err(error) => TestResult::Failure(error),
+                },
+            ));
         }
     }
     pub(super) fn render_connection_test(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
         let identity = self.connection_identity(cx);
         let current = |request: &Request| {
             identity.as_ref().is_some_and(|(draft, options)| {
@@ -115,12 +126,18 @@ impl Block {
             .as_ref()
             .filter(|(request, _)| current(request));
         let description = if running {
-            "Testing the current draft connection…".into()
+            tr!(language, "connection.testing")
         } else {
-            result.map_or_else(|| "Checks Mojang's metadata endpoint using this draft. Nothing is saved.".into(), |(_, result)| match result {
-                Ok(status) => format!("Mojang metadata responded with HTTP {status}. This verifies this endpoint only; settings are still a draft."),
-                Err(error) => format!("Connection test failed: {error}"),
-            })
+            result.map_or_else(
+                || tr!(language, "connection.description"),
+                |(_, result)| match result {
+                    TestResult::Response(status) => {
+                        tr!(language, "connection.success", status = status)
+                    }
+                    TestResult::Failure(error) => tr!(language, "connection.failed", error = error),
+                    TestResult::EngineUnavailable => tr!(language, "connection.unavailable"),
+                },
+            )
         };
 
         div()
@@ -130,9 +147,9 @@ impl Block {
             .child(components::button(
                 "test-proxy-connection",
                 if running {
-                    "Testing connection…"
+                    tr!(language, "connection.testing_button")
                 } else {
-                    "Test connection"
+                    tr!(language, "connection.test_button")
                 },
                 self.palette,
                 ButtonVariant::Outline,
@@ -198,7 +215,7 @@ mod tests {
                         .connection
                         .result
                         .as_ref()
-                        .is_some_and(|(_, result)| *result == Ok(204))
+                        .is_some_and(|(_, result)| *result == TestResult::Response(204))
                 );
                 view.shell.connection.pending = Some(current.clone());
                 view.open_settings(cx); // Save/reopen creates a fresh draft identity.

@@ -455,6 +455,24 @@ fn escape_after_a_crash_closes_games_help_not_the_launcher(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn dialog_close_uses_the_view_language_and_the_existing_cancel_action(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    view.update(cx, |view, cx| {
+        view.preferences.language = Some(crate::Language::Japanese);
+        cx.notify();
+    });
+    click(cx, "games-help");
+    let label = cx.update(|window, _| {
+        gpui_base::test_support::find(window, &[], &"close".into())
+            .and_then(|node| node.label().map(str::to_owned))
+    });
+    assert_eq!(label.as_deref(), Some("閉じる"));
+    click(cx, "surface-dialog-close");
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+    assert!(!view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
+}
+
+#[gpui::test]
 fn crash_waits_for_games_help_before_taking_focus_and_marking_seen(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
@@ -785,7 +803,14 @@ fn escape_closes_standalone_crash_help(cx: &mut TestAppContext) {
             anyhow::bail!("the test message must contain a crash");
         };
         let (_, cx) = crate::test_support::window(cx, |window, cx| {
-            crate::CrashView::new(*report, directory, |_, _| {}, window, cx)
+            crate::CrashView::new(
+                *report,
+                directory,
+                crate::Language::English,
+                |_, _| {},
+                window,
+                cx,
+            )
         });
         let window_id = gpui::VisualContext::window_handle(cx).window_id();
         crate::test_support::press(cx, "escape");
@@ -1316,4 +1341,57 @@ fn auth_provider_add_opens_as_dialog_and_escape_dismisses_it(cx: &mut TestAppCon
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
+}
+
+/// A sheet header, a confirmation title and its notes are product text: each
+/// paints in the view's own language while the logical surface stays the same.
+#[gpui::test]
+fn surface_names_resolve_in_the_view_language(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.snapshot = crate::test_support::ready_snapshot();
+        view
+    });
+    for (language, sheet_title, sheet_description, profile_title, provider_title) in [
+        (
+            crate::Language::English,
+            "Switch Account",
+            "Choose the account you want to use.",
+            "Delete Test profile?",
+            "Remove this provider?",
+        ),
+        (
+            crate::Language::SimplifiedChinese,
+            "切换账户",
+            "选择要使用的账户。",
+            "删除 Test profile？",
+            "移除此提供者？",
+        ),
+        (
+            crate::Language::Japanese,
+            "アカウントを切り替え",
+            "使用するアカウントを選択してください。",
+            "Test profile を削除しますか？",
+            "このプロバイダーを削除しますか？",
+        ),
+    ] {
+        view.update(cx, |view, _| view.preferences.language = Some(language));
+        let (chrome, named, unnamed, provider) = view.read_with(cx, |view, _| {
+            (
+                view.surface_sheet_chrome(&Surface::Drawer(Drawer::Accounts)),
+                view.surface_dialog_title(&Surface::DeleteProfile("profile-a".into())),
+                view.surface_dialog_title(&Surface::DeleteProfile("missing".into())),
+                view.surface_dialog_title(&Surface::RemoveProvider("missing".into())),
+            )
+        });
+        assert_eq!(chrome.0, sheet_title, "{}", language.code());
+        assert_eq!(chrome.1, sheet_description, "{}", language.code());
+        assert_eq!(named, profile_title, "{}", language.code());
+        assert_eq!(provider, provider_title, "{}", language.code());
+        assert!(
+            !unnamed.contains("Test profile"),
+            "{} must not name an absent profile: {unnamed}",
+            language.code()
+        );
+    }
 }

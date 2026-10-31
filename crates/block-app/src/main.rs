@@ -159,7 +159,7 @@ fn run(args: Args, logging: Logging) -> anyhow::Result<()> {
                 tracing::warn!(event = "bundled_fonts_unavailable");
                 eprintln!("Could not register bundled fonts: {error:#}");
             }
-            configure_application(cx);
+            configure_application(cx, block_ui::Language::English);
             if let Err(error) = open_launcher(
                 cx,
                 LaunchOptions {
@@ -199,7 +199,8 @@ fn install_logging_shutdown(cx: &App, logging: Logging) {
     .detach();
 }
 
-fn configure_application(cx: &mut App) {
+fn configure_application(cx: &mut App, language: block_ui::Language) {
+    block_ui::initialize_desktop_locale(cx, language);
     block_ui::initialize(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
@@ -250,6 +251,7 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
     let directory = session_host::report_directory(&root, &report.context.run_id)?;
     let run_id = report.context.run_id.clone();
     let profile = report.context.profile_id.clone();
+    let (language, language_error) = block_ui::initialize_saved_language(&root);
     gpui_platform::application()
         .with_assets(block_ui::UiAssets)
         .run(move |cx: &mut App| {
@@ -258,7 +260,7 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
                 tracing::warn!(event = "bundled_fonts_unavailable");
                 eprintln!("Could not register bundled fonts: {error:#}");
             }
-            configure_application(cx);
+            configure_application(cx, language);
             let return_root = root.clone();
             let return_to_profile = move |window: &mut gpui::Window, cx: &mut App| {
                 let options = LaunchOptions {
@@ -276,9 +278,15 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
             };
             let options = window_options(cx);
             match cx.open_window(options, |window, cx| {
-                window.set_window_title("Block · Crash help");
-                let view =
-                    cx.new(|cx| CrashView::new(report, directory, return_to_profile, window, cx));
+                window.set_window_title(&block_ui::crash_window_title(language));
+                let view = cx.new(|cx| {
+                    let mut view =
+                        CrashView::new(report, directory, language, return_to_profile, window, cx);
+                    if let Some(error) = language_error {
+                        view.report_language_initialization_error(format!("{error:#}"));
+                    }
+                    view
+                });
                 cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
             }) {
                 Ok(_) => {

@@ -3,8 +3,14 @@
 use block_launcher::catalog::{ProfileColor, ProfileIcon, ProfileMode};
 use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, point, px, size};
 
-use super::{CreationKind, WizardField, WizardPage, WizardState, WizardStep};
-use crate::{Form, test_support::ready_snapshot};
+use super::{CreationKind, WizardFailure, WizardField, WizardPage, WizardState, WizardStep};
+use crate::{Form, Language, test_support::ready_snapshot};
+
+/// The wizard error painted in English. The wizard keeps product causes and text
+/// a shared owner rendered apart, so tests read the resolved message.
+fn error_text(view: &crate::Block) -> Option<String> {
+    view.shell.wizard.error_text(Language::English)
+}
 
 fn compatible_optifine() -> block_launcher::install::optifine::OptiFineJar {
     block_launcher::install::optifine::OptiFineJar {
@@ -57,10 +63,8 @@ fn optifine_import_is_draft_bound_revalidates_late_results_and_cancels_without_s
         view.finish_optifine_import(changed, field, Ok(selected), cx);
         assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none()));
         assert!(
-            view.shell
-                .wizard
-                .error
-                .as_ref()
+            error_text(view)
+                .as_deref()
                 .is_some_and(|error| error.contains("1.21.1"))
         );
         assert_eq!(view.snapshot.instances.len(), count);
@@ -126,9 +130,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
         cx.run_until_parked();
         assert!(crate::test_support::control_bounds(cx, "wizard-optifine-error").is_some());
         assert!(view.read_with(cx, |view, _| {
-            view.shell
-                .wizard
-                .error
+            error_text(view)
                 .as_deref()
                 .is_some_and(|error| error.contains("file chooser"))
                 && view.shell.wizard.optifine_request.is_none()
@@ -151,7 +153,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
                 );
             }
             assert_eq!(view.shell.wizard.optifine_request, current);
-            assert!(view.shell.wizard.error.is_none());
+            assert!(error_text(view).is_none());
         });
         cx.simulate_path_prompt_response(|_| None);
         cx.run_until_parked();
@@ -162,7 +164,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
         cx.simulate_path_prompt_response(|_| None);
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
-            view.shell.wizard.optifine_request.is_none() && view.shell.wizard.error.is_none()
+            view.shell.wizard.optifine_request.is_none() && error_text(view).is_none()
         }));
         click(cx, "optifine-select-jar");
         let request = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
@@ -181,10 +183,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
             view.shell.wizard.optifine_request.is_none()
-                && view
-                    .shell
-                    .wizard
-                    .error
+                && error_text(view)
                     .as_deref()
                     .is_some_and(|error| error.contains("Could not import OptiFine"))
                 && matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none())
@@ -579,7 +578,7 @@ fn review_shows_changed_settings_outside_the_fold_and_keeps_its_draft_across_ste
         view.read_with(cx, |view, _| !view.shell.wizard.advanced.borrow().is_open()),
         "arriving at the review must fold the defaults again"
     );
-    assert!(view.read_with(cx, |view, _| view.shell.wizard.error.is_none()));
+    assert!(view.read_with(cx, |view, _| error_text(view).is_none()));
     assert!(crate::test_support::control_bounds(cx, "wizard-review-server").is_some());
     assert_eq!(
         view.read_with(cx, |view, _| view.snapshot.instances.len()),
@@ -706,6 +705,94 @@ fn entering_the_review_folds_details_the_setup_disclosure_left_open(cx: &mut Tes
         "the review must keep its unchanged defaults folded: folded={folded:?} \
          trigger={trigger:?}"
     );
+}
+
+#[gpui::test]
+fn outer_profile_validation_retains_its_language_across_continue_and_submit(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.preferences.language = Some(Language::SimplifiedChinese);
+        view.versions = vec!["1.21.1".into()];
+        view.snapshot = ready_snapshot();
+        view.begin_game_wizard(cx);
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(1400.)));
+    click(cx, "wizard-profile-options");
+    view.update(cx, |view, cx| {
+        if let Some(profile) = &view.shell.wizard.profile {
+            profile
+                .jvm
+                .update(cx, |input, cx| input.set_value("\"", cx));
+        }
+    });
+    click(cx, "wizard-next");
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let error = view.shell.wizard.error.clone();
+            assert_eq!(
+                error.as_ref().and_then(|error| error.key()),
+                Some("common.arguments_unclosed_quote")
+            );
+            assert_eq!(
+                view.shell.wizard.error_text(view.language()).as_deref(),
+                Some("请闭合附加参数中的双引号")
+            );
+            view.handle(crate::UiAction::SetLanguage(Language::Japanese), window, cx);
+            assert_eq!(view.shell.wizard.error, error);
+            assert_eq!(
+                view.shell.wizard.error_text(view.language()).as_deref(),
+                Some("追加引数の二重引用符を閉じてください")
+            );
+            view.wizard_kind(false, cx);
+            view.shell.wizard.separated = true;
+            view.shell.wizard.step = WizardStep::Profile;
+            if let Some(profile) = &view.shell.wizard.profile {
+                profile.jvm.update(cx, |input, cx| input.set_value("", cx));
+                profile
+                    .width
+                    .update(cx, |input, cx| input.set_value("100", cx));
+            }
+            cx.notify();
+        });
+    });
+    click(cx, "wizard-next");
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let error = view.shell.wizard.error.clone();
+            assert_eq!(
+                error.as_ref().and_then(|error| error.key()),
+                Some("wizard.error.widthRange")
+            );
+            assert_eq!(
+                view.shell.wizard.error_text(view.language()).as_deref(),
+                Some("ウィンドウ幅は 320 から 16384 までの整数で入力してください。")
+            );
+            view.handle(
+                crate::UiAction::SetLanguage(Language::SimplifiedChinese),
+                window,
+                cx,
+            );
+            assert_eq!(view.shell.wizard.error, error);
+            assert_eq!(
+                view.shell.wizard.error_text(view.language()).as_deref(),
+                Some("窗口宽度必须是 320 到 16384 之间的整数。")
+            );
+            view.shell.wizard.step = WizardStep::Review;
+            view.submit_game_wizard(cx);
+            assert_eq!(
+                view.shell
+                    .wizard
+                    .error
+                    .as_ref()
+                    .and_then(|error| error.key()),
+                Some("wizard.error.widthRange")
+            );
+        });
+    });
 }
 
 #[gpui::test]
@@ -1014,7 +1101,7 @@ fn first_run_create_status_names_the_save_and_starts_no_preparation(cx: &mut Tes
             view.submit_game_wizard(cx);
             assert!(view.busy, "first-run Create must start its save");
             assert_eq!(
-                view.status.as_str(),
+                view.status.text(Language::English),
                 "Saving your game setup",
                 "the busy status must name the save first-run Create really starts"
             );
@@ -1047,7 +1134,10 @@ fn first_run_create_status_names_the_save_and_starts_no_preparation(cx: &mut Tes
             .map_err(|_| anyhow::anyhow!("the first-run save did not finish"))?
         })?;
         assert_eq!(
-            finished.ok().as_deref(),
+            finished
+                .ok()
+                .map(|status| status.text(Language::English))
+                .as_deref(),
             Some("Game saved"),
             "first-run Create must end after saving"
         );
@@ -1084,7 +1174,7 @@ fn ordinary_create_status_still_announces_preparation(cx: &mut TestAppContext) {
             view.submit_game_wizard(cx);
             assert!(view.busy, "ordinary Create must start its installation");
             assert_eq!(
-                view.status.as_str(),
+                view.status.text(Language::English),
                 "Creating your game and preparing verified downloads",
                 "ordinary Create still prepares game files"
             );
@@ -1221,14 +1311,14 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
         }
         view.advance_game_wizard(cx);
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
-        assert!(view.shell.wizard.error.is_some());
+        assert!(error_text(view).is_some());
         if let Some(Form::Instance(form)) = &view.form {
             form.directory
                 .update(cx, |field, cx| field.set_value(&directory, cx));
         }
         view.advance_game_wizard(cx);
         assert_eq!(view.shell.wizard.page, None);
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
         if let Some(Form::Instance(form)) = &view.form {
             assert_eq!(form.directory.read(cx).value(), directory);
         }
@@ -1492,7 +1582,7 @@ fn version_loading_failure_retry_and_recovery_preserve_the_draft(cx: &mut TestAp
 
     click(cx, "wizard-retry-versions");
     // No test Engine: retry must report the actual missing engine, never Ready.
-    assert!(view.read_with(cx, |view, _| matches!(&view.version_load, crate::browser::CollectionLoad::Failed(message) if message.contains("Engine unavailable"))));
+    assert!(view.read_with(cx, |view, _| matches!(&view.version_load, crate::browser::CollectionLoad::Failed(message) if message.text(Language::English).contains("Engine unavailable"))));
     assert!(
         sender
             .try_send(crate::Message::Versions(Ok(vec![entry(
@@ -1973,9 +2063,7 @@ fn reject_relative_installation_folder(
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
         assert_eq!(view.shell.wizard.error_field, Some(WizardField::Directory));
         assert!(
-            view.shell
-                .wizard
-                .error
+            error_text(view)
                 .as_deref()
                 .is_some_and(|error| error.contains("absolute installation folder")),
             "the section Done must reject the relative folder"
@@ -2002,7 +2090,7 @@ fn assert_section_cancelled_without_stale_validation(
         assert_eq!(view.shell.wizard.page, None, "the outer page is restored");
         assert!(view.shell.wizard.section_snapshot.is_none());
         assert!(
-            view.shell.wizard.error.is_none(),
+            error_text(view).is_none(),
             "a cancelled draft must not leave its validation on the outer page"
         );
         assert!(view.shell.wizard.error_field.is_none());
@@ -2047,7 +2135,7 @@ fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mu
     click(cx, "wizard-component-location");
     view.read_with(cx, |view, _| {
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
         assert!(view.shell.wizard.reveal.get().is_none());
     });
     assert!(
@@ -2058,7 +2146,7 @@ fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mu
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.shell.wizard.page, None);
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
     });
 }
 
@@ -2112,7 +2200,7 @@ fn wizard_state_section_cancel_discards_validation_and_pending_reveal(cx: &mut T
         );
         view.cancel_component_draft(cx);
         assert_eq!(view.shell.wizard.page, None);
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
         assert!(view.shell.wizard.error_field.is_none());
         assert_eq!(view.shell.wizard.reveal.get(), None);
         assert!(matches!(&view.form, Some(Form::Instance(form))
@@ -2440,9 +2528,7 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
         assert_eq!(view.shell.wizard.error_field, Some(WizardField::Loader));
         assert!(
-            view.shell
-                .wizard
-                .error
+            error_text(view)
                 .as_deref()
                 .is_some_and(|error| error.contains("no official build")),
             "the section Done must reject the unavailable official catalog"
@@ -2460,7 +2546,7 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
         );
         assert_eq!(view.shell.wizard.page, None, "the outer page is restored");
         assert!(
-            view.shell.wizard.error.is_none(),
+            error_text(view).is_none(),
             "the cancelled loader draft's catalog error must not survive"
         );
         assert!(view.shell.wizard.error_field.is_none());
@@ -2481,7 +2567,7 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
     click(cx, "wizard-component-loader");
     view.read_with(cx, |view, cx| {
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
         assert!(view.shell.wizard.reveal.get().is_none());
         assert!(view.wizard_loader_issue(cx).is_none());
     });
@@ -2490,7 +2576,7 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.shell.wizard.page, None);
-        assert!(view.shell.wizard.error.is_none());
+        assert!(error_text(view).is_none());
     });
 }
 
@@ -2552,9 +2638,14 @@ fn arm64_version_picker_disables_lwjgl2_versions_with_the_reason(cx: &mut TestAp
         assert!(
             matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.20.6")
         );
-        assert!(
-            view.shell.wizard.version_notice.as_ref().is_some_and(|notice| notice.contains(LWJGL2_ARM64_REASON))
-        );
+        assert!(view.shell.wizard.version_notice.as_ref().is_some_and(|notice| {
+            notice.text(Language::English).contains(LWJGL2_ARM64_REASON)
+        }));
+        assert!(view.shell.wizard.version_notice.as_ref().is_some_and(|notice| {
+            notice.text(Language::SimplifiedChinese).starts_with("Minecraft 1.12.2 无法在 ARM64 上原生运行：")
+                && notice.text(Language::Japanese).starts_with("Minecraft 1.12.2 は ARM64 でネイティブ実行できません:")
+                && notice.text(Language::Japanese).contains(LWJGL2_ARM64_REASON)
+        }));
 
         // An exact ID typed into the field is rejected by validation with the same reason.
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
@@ -2563,9 +2654,9 @@ fn arm64_version_picker_disables_lwjgl2_versions_with_the_reason(cx: &mut TestAp
         }
         assert!(!view.validate_wizard_section(WizardPage::Version, cx));
         assert!(
-            view.shell.wizard.error.as_ref().is_some_and(|error| error.contains(LWJGL2_ARM64_REASON)),
+            error_text(view).is_some_and(|error| error.contains(LWJGL2_ARM64_REASON)),
             "{:?}",
-            view.shell.wizard.error
+            error_text(view)
         );
     });
     cx.simulate_resize(size(px(960.), px(600.)));
@@ -2639,5 +2730,210 @@ fn profile_memory_validation_and_values_use_gb_with_one_to_thirty_two_gb_bounds(
         if let Ok(finer) = finer {
             assert_eq!(finer.defaults.memory_mib, 1536);
         }
+    });
+}
+
+/// Footer labels of a fresh wizard rendered for `language`, read from the
+/// painted controls.
+fn wizard_footer_labels(
+    cx: &mut TestAppContext,
+    language: Language,
+) -> (Option<String>, Option<String>) {
+    let (_view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.preferences.language = Some(language);
+        view.begin_game_wizard(cx);
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(600.)));
+    cx.run_until_parked();
+    cx.update(|window, _| {
+        let label = |selector: &'static str| {
+            gpui_base::test_support::find_all(window, &[], &selector.into())
+                .first()
+                .and_then(|control| control.label())
+                .map(str::to_owned)
+        };
+        (label("wizard-next"), label("cancel-instance"))
+    })
+}
+
+#[gpui::test]
+fn wizard_footer_copy_is_chinese_for_a_chinese_view(cx: &mut TestAppContext) {
+    assert_eq!(
+        wizard_footer_labels(cx, Language::SimplifiedChinese),
+        (Some("继续".to_owned()), Some("取消".to_owned()))
+    );
+}
+
+#[gpui::test]
+fn wizard_footer_copy_is_japanese_for_a_japanese_view(cx: &mut TestAppContext) {
+    assert_eq!(
+        wizard_footer_labels(cx, Language::Japanese),
+        (Some("次へ".to_owned()), Some("キャンセル".to_owned()))
+    );
+}
+
+#[gpui::test]
+fn retained_notice_and_error_keep_their_cause_and_repaint_per_language(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.begin_game_wizard(cx);
+        view
+    });
+    view.update(cx, |view, cx| {
+        if let Some(Form::Instance(form)) = &mut view.form {
+            form.loader = block_launcher::catalog::LoaderKind::Forge;
+            form.loader_version = Some("52.0.16".into());
+            form.optifine = Some(Box::new(compatible_optifine()));
+        }
+        view.choose_wizard_loader(block_launcher::catalog::LoaderKind::Fabric, cx);
+    });
+    let notice = view.read_with(cx, |view, _| view.shell.wizard.version_notice.clone());
+    assert!(notice.is_some(), "removing OptiFine must retain a notice");
+    if let Some(notice) = notice {
+        assert_eq!(
+            notice.text(Language::English),
+            "OptiFine was removed because it cannot be combined directly with Fabric."
+        );
+        assert_eq!(
+            notice.text(Language::SimplifiedChinese),
+            "由于无法与 Fabric 直接组合使用，OptiFine 已被移除。"
+        );
+        assert_eq!(
+            notice.text(Language::Japanese),
+            "Fabric と直接組み合わせられないため、OptiFine を削除しました。"
+        );
+    }
+    view.update(cx, |view, cx| {
+        view.open_game_wizard_page(Some(WizardPage::Version), cx);
+        if let Some(Form::Instance(form)) = &mut view.form {
+            form.version.update(cx, |field, cx| field.set_value("", cx));
+        }
+        assert!(!view.validate_wizard_section(WizardPage::Version, cx));
+    });
+    view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.shell.wizard.error_text(Language::English).as_deref(),
+            Some("Choose a Minecraft version from the list.")
+        );
+        assert_eq!(
+            view.shell
+                .wizard
+                .error_text(Language::SimplifiedChinese)
+                .as_deref(),
+            Some("请从列表中选择 Minecraft 版本。")
+        );
+        assert_eq!(
+            view.shell.wizard.error_text(Language::Japanese).as_deref(),
+            Some("リストから Minecraft バージョンを選択してください。")
+        );
+    });
+}
+
+#[test]
+fn feature_locale_covers_every_key_in_every_language() -> anyhow::Result<()> {
+    let document: serde_json::Value =
+        serde_json::from_str(include_str!("../../locales/wizard.json"))?;
+    let entries = document
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("the locale document must be an object"))?;
+    assert_eq!(
+        entries.get("_version").and_then(serde_json::Value::as_u64),
+        Some(2)
+    );
+    for (key, translations) in entries.iter().filter(|(key, _)| key.as_str() != "_version") {
+        let translations = translations
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("{key} must carry one copy per language"))?;
+        for language in ["en", "zh-Hans", "ja"] {
+            let copy = translations
+                .get(language)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            assert!(!copy.trim().is_empty(), "{key} has no {language} copy");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn whole_messages_are_translated_with_their_arguments() {
+    assert_eq!(tr!(Language::English, "wizard.footer.continue"), "Continue");
+    assert_eq!(
+        tr!(Language::SimplifiedChinese, "wizard.footer.continue"),
+        "继续"
+    );
+    assert_eq!(tr!(Language::Japanese, "wizard.footer.continue"), "次へ");
+    assert_eq!(
+        tr!(
+            Language::SimplifiedChinese,
+            "wizard.rail.stepOf",
+            current = 2,
+            total = 4
+        ),
+        "第 2 步，共 4 步"
+    );
+    assert_eq!(
+        tr!(
+            Language::Japanese,
+            "wizard.rail.stepOf",
+            current = 2,
+            total = 4
+        ),
+        "4 ステップ中 2 ステップ目"
+    );
+    assert_eq!(
+        tr!(
+            Language::Japanese,
+            "wizard.version.source.catalog",
+            kind = "安定版"
+        ),
+        "公式カタログ · 安定版"
+    );
+}
+
+/// The installation-folder chooser is raised and cleared through its identity,
+/// so a shared owner never has to compare painted text.
+#[gpui::test]
+fn install_chooser_failure_is_raised_and_cleared_by_identity(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.begin_game_wizard(cx);
+        view
+    });
+    view.update(cx, |view, _| {
+        let wizard = &mut view.shell.wizard;
+        assert_eq!(wizard.failure(), None);
+        wizard.set_failure(WizardFailure::ChooserFailed);
+        assert_eq!(wizard.failure(), Some(WizardFailure::ChooserFailed));
+        assert_eq!(
+            wizard.error_text(Language::English).as_deref(),
+            Some("Could not open the installation folder chooser. Check your system file picker and try again.")
+        );
+        assert_eq!(
+            wizard.error_text(Language::SimplifiedChinese).as_deref(),
+            Some("无法打开安装文件夹选择器。请检查系统文件选择器后重试。")
+        );
+        assert_eq!(
+            wizard.error_text(Language::Japanese).as_deref(),
+            Some("インストールフォルダーの選択画面を開けませんでした。システムのファイル選択画面を確認して再試行してください。")
+        );
+        // A newer report replaces the cause instead of being hidden by it.
+        wizard.error = Some("Engine unavailable".into());
+        assert_eq!(wizard.failure(), None);
+        assert_eq!(wizard.error_text(Language::English).as_deref(), Some("Engine unavailable"));
+        // Clearing another identity leaves the painted message alone.
+        wizard.clear_failure(WizardFailure::ChooserFailed);
+        assert_eq!(wizard.error_text(Language::English).as_deref(), Some("Engine unavailable"));
+        // Raising it again and clearing it removes it.
+        wizard.set_failure(WizardFailure::ChooserFailed);
+        wizard.clear_failure(WizardFailure::ChooserFailed);
+        assert_eq!(wizard.failure(), None);
+        assert_eq!(wizard.error_text(Language::English), None);
+        assert!(!wizard.has_error());
     });
 }

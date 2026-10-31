@@ -1,0 +1,78 @@
+{
+  "_version": 2,
+  "common.cancel": {
+    "en": "Cancel",
+    "zh-Hans": "取消",
+    "ja": "キャンセル"
+  },
+  "common.close": {
+    "en": "Close",
+    "zh-Hans": "关闭",
+    "ja": "閉じる"
+  },
+  "common.save": {
+    "en": "Save",
+    "zh-Hans": "保存",
+    "ja": "保存"
+  },
+  "common.in_progress": {
+    "en": "In progress",
+    "zh-Hans": "进行中",
+    "ja": "処理中"
+  },
+  "common.memory_range": {
+    "en": "Choose a memory limit between 1 and 32 GB.",
+    "zh-Hans": "请选择 1 至 32 GB 之间的内存限制。",
+    "ja": "メモリ上限を 1～32 GB の範囲で選択してください。"
+  },
+  "common.memory_precision": {
+    "en": "Enter a memory limit in GB with up to three decimal places.",
+    "zh-Hans": "请输入以 GB 为单位的内存限制，最多保留三位小数。",
+    "ja": "メモリ上限を GB 単位で小数点以下 3 桁以内で入力してください。"
+  },
+  "common.arguments_unclosed_quote": {
+    "en": "Close the double quote in the additional arguments",
+    "zh-Hans": "请闭合附加参数中的双引号",
+    "ja": "追加引数の二重引用符を閉じてください"
+  },
+  "common.diagnostic_detail": {
+    "en": "Details: %{detail}",
+    "zh-Hans": "详情：%{detail}",
+    "ja": "詳細: %{detail}"
+  },
+  "common.language_initialization_failed": {
+    "en": "Could not initialize language preferences: %{error}",
+    "zh-Hans": "无法初始化语言偏好设置：%{error}",
+    "ja": "言語設定を初期化できませんでした: %{error}"
+  },
+  "common.engine_unavailable_detail": {
+    "en": "Engine unavailable: %{error}",
+    "zh-Hans": "引擎不可用：%{error}",
+    "ja": "エンジンを利用できません: %{error}"
+  },
+  "common.engine_unavailable": {
+    "en": "Engine unavailable · restart Block after checking its data directory",
+    "zh-Hans": "引擎不可用 · 请检查数据目录后重启 Block",
+    "ja": "エンジンを利用できません · データディレクトリを確認して Block を再起動してください"
+  },
+  "common.select_profile_account": {
+    "en": "Select a profile and account before playing",
+    "zh-Hans": "游玩前请选择配置档案和账户",
+    "ja": "プレイする前にプロファイルとアカウントを選択してください"
+  },
+  "common.scenario_failed": {
+    "en": "Could not prepare UI scenario: %{error}",
+    "zh-Hans": "无法准备界面场景：%{error}",
+    "ja": "UI シナリオを準備できませんでした: %{error}"
+  },
+  "common.requested_profile_unavailable": {
+    "en": "The requested profile is no longer available. Select another profile.",
+    "zh-Hans": "所选配置档案已不可用。请选择其他配置档案。",
+    "ja": "指定されたプロファイルは使用できません。別のプロファイルを選択してください。"
+  },
+  "common.logging_unavailable": {
+    "en": "Launcher logs are unavailable. Check disk space and permissions.",
+    "zh-Hans": "启动器日志不可用。请检查磁盘空间和权限。",
+    "ja": "ランチャーのログを利用できません。ディスク容量とアクセス権を確認してください。"
+  }
+}

@@ -1,5 +1,24 @@
 //! A native launcher with persistent installations, launch profiles and Microsoft accounts.
 
+rust_i18n::i18n!("locales", fallback = "en");
+
+// Every product lookup names a semantic key and an explicit view language.
+// Component-library localization is bridged separately at desktop startup.
+macro_rules! tr {
+    ($language:expr, $key:expr $(, $arg:ident = $value:expr)* $(,)?) => {
+        rust_i18n::t!($key, locale = ($language).code() $(, $arg = $value)*).to_string()
+    };
+}
+
+// Construct retained product copy without resolving it in the current language.
+macro_rules! msg {
+    ($key:expr $(, $arg:ident = $value:expr)* $(,)?) => {
+        crate::i18n::UiText::message($key)$(.arg(stringify!($arg), format!("{}", $value)))*
+    };
+}
+
+mod i18n;
+
 #[path = "settings/about.rs"]
 mod about;
 #[path = "navigation/actions.rs"]
@@ -112,12 +131,20 @@ mod window_geometry;
 mod wizard_entrance;
 
 pub use about::BuildInfo;
-pub use crash_view::CrashView;
+pub use crash_view::{CrashView, window_title as crash_window_title};
 pub use design::{UiAssets, load_fonts};
 pub use gpui_base::Root as ProductRoot;
+pub use i18n::{Language, initialize_desktop_locale};
 #[cfg(debug_assertions)]
 pub use scenarios::{SCENARIOS, ScenarioOptions};
 pub use window_geometry::{initial_window_bounds, preferred_management_size};
+
+/// Load or initialize the saved desktop language without discarding failures.
+#[must_use]
+pub fn initialize_saved_language(root: &std::path::Path) -> (Language, Option<anyhow::Error>) {
+    let (preferences, error) = Preferences::initialize_language(root, Language::detect());
+    (preferences.language.unwrap_or_default(), error)
+}
 
 /// Register the shared unstyled foundation once before opening product windows.
 pub fn initialize(cx: &mut gpui::App) {
@@ -170,6 +197,7 @@ use actions::UiAction;
 use appearance::{Appearance, Palette, Preferences};
 use engine::{Engine, Message};
 use game_wizard::{WizardPage, WizardStep};
+use i18n::UiText;
 use navigation::{Router, Tab};
 use scroll_area::ScrollAreaExt as _;
 use shell::{Drawer, ShellState};
@@ -293,7 +321,7 @@ pub struct Block {
     engine: Option<Engine>,
     messages: Option<Receiver<Message>>,
     focus: FocusHandle,
-    status: String,
+    status: UiText,
     completed: usize,
     operation_kind: OperationKind,
     operation_revision: u64,
@@ -331,9 +359,6 @@ pub struct Block {
 struct RecipeLoadState {
     launch_after_load: Option<bool>,
 }
-
-const INSTALL_CHOOSER_ERROR: &str =
-    "Could not open the installation folder chooser. Check your system file picker and try again.";
 
 impl RecipeLoadState {
     const fn start(&mut self, busy: bool, launch: bool) -> bool {
@@ -386,7 +411,101 @@ struct PendingCreation {
     draft: u64,
 }
 
+/// Localize the known session state without interpreting the supervisor's
+/// diagnostic text. Every record keeps that text visible: it may contain
+/// stage or reservation-recovery guidance unavailable in typed fields.
+fn session_status(record: &RunRecord) -> UiText {
+    use block_launcher::crash::ExitKind;
+
+    match record.state {
+        RunState::Starting => msg!("runtime.session_starting", detail = record.status),
+        RunState::Preparing => msg!("runtime.session_preparing", detail = record.status),
+        RunState::Running => record.java_pid.map_or_else(
+            || msg!("runtime.session_running", detail = record.status),
+            |pid| {
+                msg!(
+                    "runtime.session_running_pid",
+                    pid = pid,
+                    detail = record.status
+                )
+            },
+        ),
+        RunState::MonitoringInterrupted => {
+            msg!("runtime.session_interrupted", detail = record.status)
+        }
+        RunState::Finished => {
+            let key = match record.outcome.as_ref().map(|outcome| outcome.kind) {
+                Some(ExitKind::Normal) => "runtime.session_normal",
+                Some(ExitKind::Stopped) => "runtime.session_stopped",
+                Some(ExitKind::Abnormal) => "runtime.session_abnormal",
+                Some(ExitKind::StartFailed) => "runtime.session_start_failed",
+                Some(ExitKind::MonitoringInterrupted) => "runtime.session_interrupted",
+                None => "runtime.session_finished",
+            };
+            msg!(key, detail = record.status)
+        }
+    }
+}
+
 impl Block {
+    pub(crate) fn language(&self) -> Language {
+        self.preferences.language.unwrap_or_default()
+    }
+
+    fn refresh_language(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.refresh_language_without_window(cx);
+        if let Some(auth) = &self.shell.auth {
+            auth.refresh_placeholders(self.language(), window, cx);
+        }
+    }
+
+    fn refresh_language_without_window(&mut self, cx: &mut Context<'_, Self>) {
+        let language = self.language();
+        i18n::request_component_language(cx, language);
+        self.initialize_browsers(cx);
+        if let Some(draft) = &self.settings_form {
+            draft.refresh_placeholders(language, cx);
+        }
+        self.shell.wizard.refresh_placeholders(language, cx);
+        self.shell.providers.refresh_placeholders(language, cx);
+        if let Some(selector) = &self.shell.selector {
+            selector.refresh_placeholder(language, cx);
+        }
+        self.refresh_instance_editor_placeholders(language, cx);
+        match &self.form {
+            Some(Form::Instance(form)) => {
+                for (input, key) in [
+                    (&form.name, "wizard.setup.gameNamePlaceholder"),
+                    (&form.version, "wizard.setup.versionPlaceholder"),
+                    (&form.directory, "wizard.setup.directoryPlaceholder"),
+                ] {
+                    let placeholder = tr!(language, key);
+                    input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+                }
+            }
+            Some(Form::Profile(form)) => {
+                for (input, key) in [
+                    (&form.name, "games.profile_editor.name_placeholder"),
+                    (&form.java, "games.java.executable_placeholder"),
+                    (&form.jvm, "games.profile_editor.jvm_placeholder"),
+                    (&form.game, "games.profile_editor.game_placeholder"),
+                ] {
+                    let placeholder = tr!(language, key);
+                    input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
+                }
+            }
+            None => {}
+        }
+        self.refresh_select_language(cx);
+    }
+
+    /// Revert a Settings preview whenever navigation leaves that page.
+    fn leave_settings(&mut self, cx: &mut Context<'_, Self>) {
+        self.preferences = self.saved_preferences.clone();
+        self.settings_form = None;
+        self.refresh_language_without_window(cx);
+    }
+
     #[must_use]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>, options: LaunchOptions) -> Self {
         initialize(cx);
@@ -398,25 +517,64 @@ impl Block {
         let scenario_mode = false;
         #[cfg(debug_assertions)]
         let scenario_mode = options.scenario.is_some();
-        let engine = if scenario_mode {
+        let root = if scenario_mode {
             None
         } else {
             Some(
                 options
                     .data_dir
                     .clone()
-                    .map_or_else(Engine::new, Engine::with_root),
+                    .map_or_else(Engine::default_root, Ok),
             )
         };
+        // Recover interrupted storage before attempting the first language
+        // write. The root remains available even when engine startup fails.
+        let engine = match &root {
+            Some(Ok(root)) => Some(Engine::with_root(root.clone())),
+            Some(Err(error)) => Some(Err(anyhow::anyhow!("{error:#}"))),
+            None => None,
+        };
+        #[cfg(not(test))]
+        let detected = if scenario_mode {
+            Language::English
+        } else {
+            Language::detect()
+        };
+        #[cfg(test)]
+        let detected = Language::English;
+        let (preferences, initialization_error) = match &root {
+            Some(Ok(root)) => {
+                let (preferences, error) = Preferences::initialize_language(root, detected);
+                (preferences, error.map(|error| format!("{error:#}")))
+            }
+            Some(Err(error)) => (
+                Preferences {
+                    language: Some(detected),
+                    ..Preferences::default()
+                },
+                Some(format!("{error:#}")),
+            ),
+            None => (Preferences::default(), None),
+        };
+        i18n::request_component_language(cx, preferences.language.unwrap_or_default());
         let (engine, messages, status) = match engine {
             Some(Ok((engine, messages))) => {
                 engine.load_catalog();
                 engine.load_versions();
                 engine.load_images();
-                (Some(engine), Some(messages), "Welcome to Block".into())
+                (
+                    Some(engine),
+                    Some(messages),
+                    UiText::message("home.welcome"),
+                )
             }
-            Some(Err(error)) => (None, None, format!("Engine unavailable: {error:#}")),
-            None => (None, None, "UI scenario fixture".into()),
+            Some(Err(error)) => (
+                None,
+                None,
+                UiText::message("common.engine_unavailable_detail")
+                    .arg("error", format!("{error:#}")),
+            ),
+            None => (None, None, UiText::message("home.welcome")),
         };
         if !scenario_mode {
             cx.spawn(async move |view, cx| {
@@ -431,17 +589,9 @@ impl Block {
             })
             .detach();
         }
-        let preferences = engine
-            .as_ref()
-            .map(|engine| Preferences::load(&engine.root))
-            .transpose();
-        let (preferences, status) = match preferences {
-            Ok(value) => (value.unwrap_or_default(), status),
-            Err(error) => (
-                Preferences::default(),
-                format!("Could not read preferences: {error}"),
-            ),
-        };
+        let status = initialization_error.as_ref().map_or(status, |error| {
+            UiText::message("common.language_initialization_failed").arg("error", error)
+        });
         let tab = if preferences.onboarding_complete {
             Tab::Home
         } else {
@@ -472,7 +622,7 @@ impl Block {
             version_load: if engine.is_some() {
                 browser::CollectionLoad::Loading
             } else {
-                browser::CollectionLoad::Failed("Engine unavailable".into())
+                browser::CollectionLoad::Failed(msg!("runtime.engine_short"))
             },
             version_catalog: Vec::new(),
             selected_instance: None,
@@ -525,6 +675,10 @@ impl Block {
         view.shell.accounts.load = load;
         if tab == Tab::Onboarding {
             view.begin_first_run(cx);
+            if let Some(error) = initialization_error {
+                view.shell.first_run.notice =
+                    Some(first_run::Notice::LanguageInitialization(error));
+            }
             if view.shell.first_run.stage != first_run::Stage::Welcome {
                 window.resize(window_geometry::management_size(window));
             }
@@ -532,7 +686,7 @@ impl Block {
         if let Some(path) = options.recipe {
             view.load_recipe(path, options.launch, cx);
         } else if options.launch {
-            view.status = "Select a profile and account before playing".into();
+            view.status = UiText::message("common.select_profile_account");
         }
         #[cfg(debug_assertions)]
         if let Some(scenario) = options.scenario {
@@ -540,7 +694,8 @@ impl Block {
             window.on_next_frame(move |window, cx| {
                 owner.update(cx, |view, cx| {
                     if let Err(error) = view.apply_scenario(&scenario, window, cx) {
-                        view.status = format!("Could not prepare UI scenario: {error:#}");
+                        view.status = UiText::message("common.scenario_failed")
+                            .arg("error", format!("{error:#}"));
                     }
                 });
             });
@@ -554,7 +709,7 @@ impl Block {
             .map(|profile| (profile.id.clone(), profile.default_account.clone()));
         self.snapshot = snapshot;
         if let Some(profile) = self.pending_profile.take() {
-            self.select_requested_profile(&profile);
+            self.select_requested_profile(&profile, cx);
         }
         self.normalize_selection();
         // The catalog decides Bundled vs Separated browsing, so the selector
@@ -569,7 +724,7 @@ impl Block {
         }
     }
 
-    fn select_requested_profile(&mut self, id: &str) {
+    fn select_requested_profile(&mut self, id: &str, cx: &mut Context<'_, Self>) {
         if let Some(profile) = self
             .snapshot
             .profiles
@@ -591,6 +746,9 @@ impl Block {
                 && self.shell.instance_editor.is_none()
                 && !self.setup_incomplete()
             {
+                if self.router.tab() == Tab::Settings {
+                    self.leave_settings(cx);
+                }
                 if self.router.tab() == Tab::Home {
                     self.pending_window_size = Some(preferred_management_size());
                 }
@@ -598,12 +756,11 @@ impl Block {
             }
             self.apply_profile_account();
         } else {
-            self.status =
-                "The requested profile is no longer available. Select another profile.".into();
+            self.status = UiText::message("common.requested_profile_unavailable");
         }
     }
 
-    fn session_updated(&mut self, record: RunRecord) {
+    fn session_updated(&mut self, record: RunRecord, cx: &mut Context<'_, Self>) {
         let id = record.context.run_id.clone();
         let fingerprint = (record.revision, record.state);
         let previous = self.session_revisions.get(&id).copied();
@@ -643,14 +800,14 @@ impl Block {
                     .iter()
                     .any(|profile| profile.id == record.context.profile_id)
                 {
-                    self.select_requested_profile(&record.context.profile_id);
+                    self.select_requested_profile(&record.context.profile_id, cx);
                 } else {
                     self.pending_profile = Some(record.context.profile_id.clone());
                 }
             }
             self.active_run = Some(id);
             self.busy = true;
-            self.status = record.status;
+            self.status = session_status(&record);
             self.logs.clear();
             for line in record.recent_output {
                 self.push_log(line);
@@ -661,7 +818,7 @@ impl Block {
         } else if self.active_run.as_ref() == Some(&id) {
             self.active_run = None;
             self.busy = false;
-            self.status = record.status;
+            self.status = session_status(&record);
             for line in record.recent_output {
                 self.push_log(line);
             }
@@ -684,16 +841,18 @@ impl Block {
         };
         let profile = pending.report.context.profile_id.clone();
         let run = pending.report.context.run_id.clone();
+        let language = self.language();
         let launcher = cx.weak_entity();
         let view = cx.new(|cx| {
             CrashView::new(
                 pending.report,
                 pending.directory,
+                language,
                 move |window, cx| {
                     let _ = launcher.update(cx, |view, cx| {
                         view.crash_help = None;
                         view.crash_guard = None;
-                        view.select_requested_profile(&profile);
+                        view.select_requested_profile(&profile, cx);
                         view.focus.focus(window, cx);
                         cx.notify();
                     });
@@ -816,7 +975,7 @@ impl Block {
         self.logs.push_back(line);
     }
 
-    fn push_toast(&mut self, message: String, kind: feedback::ToastKind) {
+    fn push_toast(&mut self, message: UiText, kind: feedback::ToastKind) {
         let toast = feedback::Toast::new(message, kind);
         self.shell.toast = Some(toast.clone());
         self.shell.pending_toasts.push(toast);
@@ -827,7 +986,7 @@ impl Block {
             return false;
         }
         self.push_toast(
-            ui_logging::FAILURE_MESSAGE.into(),
+            UiText::message("common.logging_unavailable"),
             feedback::ToastKind::Error,
         );
         true
@@ -838,7 +997,7 @@ impl Block {
         !self.preferences.onboarding_complete && self.shell.first_run.enabled
     }
 
-    fn report(&mut self, error: String) {
+    fn report(&mut self, error: UiText) {
         self.push_toast(error.clone(), feedback::ToastKind::Error);
         if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
             self.shell.first_run.error = Some(error.clone());
@@ -846,11 +1005,11 @@ impl Block {
                 self.shell.wizard.error = Some(error.clone());
             }
         }
-        self.push_log(error.clone());
+        self.push_log(error.text(Language::English));
         self.status = error;
     }
 
-    fn begin_cancellable(&mut self, status: &str, operation: ui_logging::Operation) {
+    fn begin_cancellable(&mut self, status: UiText, operation: ui_logging::Operation) {
         self.begin(status, operation);
         self.operation_cancellable = self.busy;
     }
@@ -859,12 +1018,11 @@ impl Block {
         self.busy && (self.active_run.is_some() || self.operation_cancellable)
     }
 
-    fn begin(&mut self, status: &str, operation: ui_logging::Operation) {
+    fn begin(&mut self, status: UiText, operation: ui_logging::Operation) {
         self.operation_cancellable = false;
         self.operation_kind = OperationKind::General;
         if self.engine.is_none() {
-            self.status =
-                "Engine unavailable · restart Block after checking its data directory".into();
+            self.status = UiText::message("common.engine_unavailable");
             return;
         }
         self.operation_revision = self.operation_revision.wrapping_add(1);
@@ -881,7 +1039,7 @@ impl Block {
         self.command = None;
         self.show_command = false;
         self.logs.clear();
-        self.status = status.into();
+        self.status = status;
         self.cancel = CancellationToken::new();
     }
 
@@ -1070,30 +1228,32 @@ impl Block {
         let directory = form.directory.read(cx).value();
         let name = form.name.read(cx).value();
         let version = form.version.read(cx).value();
-        if self.wizard_version_restriction(version.trim()).is_some() {
-            self.report(block_launcher::support::legacy_lwjgl_message(
-                version.trim(),
+        if let Some(reason) = self.wizard_version_restriction(version.trim()) {
+            self.report(msg!(
+                "wizard.version.unsupported_arm",
+                version = version.trim(),
+                reason = reason
             ));
             return false;
         }
         let message = if name.trim().is_empty() {
-            Some("Enter a game name")
+            Some("runtime.game_name_required")
         } else if name.len() > 160 || name.chars().any(char::is_control) {
-            Some("Use a game name of at most 160 UTF-8 bytes without control characters")
+            Some("runtime.game_name_invalid")
         } else if version.trim().is_empty() {
-            Some("Choose a Minecraft version")
+            Some("runtime.version_required")
         } else if version.len() > 80 || version.chars().any(char::is_control) {
-            Some("Use a Minecraft version of at most 80 UTF-8 bytes without control characters")
+            Some("runtime.version_invalid")
         } else if let Some(issue) = self.wizard_loader_issue(cx) {
             self.report(issue);
             return false;
         } else if !directory.trim().is_empty() && !PathBuf::from(directory.trim()).is_absolute() {
-            Some("Choose an absolute installation directory")
+            Some("runtime.absolute_directory")
         } else {
             None
         };
         message.is_none_or(|message| {
-            self.report(message.into());
+            self.report(msg!(message));
             false
         })
     }
@@ -1108,18 +1268,27 @@ impl Block {
             RuntimeSelection::Local { java } => java.display().to_string(),
         };
         self.shell.editor = self.begin_profile_editor(window, cx);
+        let language = self.language();
         self.form = Some(Form::Profile(Box::new(ProfileForm {
-            name: input(&profile.name, "Profile name", cx),
+            name: input(
+                &profile.name,
+                &tr!(language, "games.profile_editor.name_placeholder"),
+                cx,
+            ),
             memory: input(&components::memory_gb_text(profile.memory_mib), "2", cx),
-            java: input(&java, "Absolute path to Java executable", cx),
+            java: input(
+                &java,
+                &tr!(language, "games.java.executable_placeholder"),
+                cx,
+            ),
             jvm: input(
                 &format_arguments(&profile.jvm_args),
-                "Optional JVM arguments",
+                &tr!(language, "games.profile_editor.jvm_placeholder"),
                 cx,
             ),
             game: input(
                 &format_arguments(&profile.game_args),
-                "Optional game arguments",
+                &tr!(language, "games.profile_editor.game_placeholder"),
                 cx,
             ),
             server: input(&profile.server.address, "play.example.com", cx),
@@ -1134,14 +1303,13 @@ impl Block {
                 return;
             }
             self.pending_play = true;
-            self.status =
-                "Launch queued · it starts as soon as the current operation finishes".into();
+            self.status = msg!("runtime.launch_queued");
             cx.notify();
             return;
         }
         self.pending_play = false;
         let Some(profile) = self.selected_profile.clone() else {
-            self.report("Create or select a profile first".into());
+            self.report(msg!("runtime.select_profile"));
             return;
         };
         let Some(account) = self
@@ -1155,14 +1323,14 @@ impl Block {
                 .profile()
                 .is_some_and(|profile| profile.default_account.is_some())
             {
-                "This profile's default account is unavailable. Choose an account explicitly or sign in again.".into()
+                msg!("runtime.default_account_unavailable")
             } else {
-                "Add and select an account before playing".into()
+                msg!("runtime.select_account")
             };
             return;
         };
         self.begin_cancellable(
-            "Preparing · validating profile and account",
+            msg!("runtime.preparing_launch"),
             ui_logging::Operation::Launch,
         );
         self.operation_kind = OperationKind::Launch;
@@ -1195,7 +1363,7 @@ impl Block {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose an installation directory".into()),
+            prompt: Some(tr!(self.language(), "runtime.choose_directory").into()),
         });
         cx.spawn(async move |view, cx| {
             let selection = match selection.await {
@@ -1231,20 +1399,23 @@ impl Block {
                 form.directory.update(cx, |field, cx| {
                     field.set_value(&path.display().to_string(), cx);
                 });
-                if self.shell.wizard.error.as_deref() == Some(INSTALL_CHOOSER_ERROR) {
-                    self.shell.wizard.error = None;
-                }
-                if self.shell.first_run.error.as_deref() == Some(INSTALL_CHOOSER_ERROR) {
-                    self.shell.first_run.error = None;
-                }
-                if self.status == INSTALL_CHOOSER_ERROR {
-                    self.status = "Installation folder selected.".into();
+                self.shell
+                    .wizard
+                    .clear_failure(game_wizard::WizardFailure::ChooserFailed);
+                self.clear_install_chooser_failure();
+                if self.status.key() == Some("wizard.error.chooserFailed") {
+                    self.status = msg!("runtime.folder_selected");
                 }
             }
             Ok(None) => return,
             Err(()) => {
-                self.shell.wizard.error = Some(INSTALL_CHOOSER_ERROR.into());
-                self.report(INSTALL_CHOOSER_ERROR.into());
+                self.report(msg!("wizard.error.chooserFailed"));
+                self.shell
+                    .wizard
+                    .set_failure(game_wizard::WizardFailure::ChooserFailed);
+                if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+                    self.record_install_chooser_failure();
+                }
             }
         }
         cx.notify();
@@ -1255,7 +1426,7 @@ impl Block {
             && self.recipe_load.start(self.busy, launch)
         {
             engine.load_recipe(path);
-            self.status = "Reading development recipe".into();
+            self.status = msg!("runtime.reading_recipe");
             cx.notify();
         }
     }
@@ -1268,7 +1439,7 @@ impl Block {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Select a development launch recipe (.json)".into()),
+            prompt: Some(tr!(self.language(), "runtime.choose_recipe").into()),
         });
         cx.spawn(async move |view, cx| {
             let selection = match prompt.await {
@@ -1291,10 +1462,7 @@ impl Block {
         match selection {
             Ok(Some(path)) => self.load_recipe(path, false, cx),
             Ok(None) => return,
-            Err(()) => self.report(
-                "Could not open the recipe chooser. Check your system file picker and try again."
-                    .into(),
-            ),
+            Err(()) => self.report(msg!("runtime.recipe_chooser_failed")),
         }
         cx.notify();
     }
@@ -1305,7 +1473,7 @@ impl Block {
         }
         if let Some(recipe) = self.recipe.clone() {
             self.begin_cancellable(
-                "Preparing explicit development recipe",
+                msg!("runtime.preparing_recipe"),
                 ui_logging::Operation::LaunchRecipe,
             );
             self.operation_kind = OperationKind::Launch;
@@ -1433,8 +1601,12 @@ impl Block {
     }
 
     fn output(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        let language = self.language();
         let lines = if self.show_command {
-            self.command.as_deref().unwrap_or("A redacted command preview is available for development recipes after preparation.").lines().map(str::to_owned).collect::<Vec<_>>()
+            self.command.as_ref().map_or_else(
+                || vec![tr!(language, "runtime.command_unavailable")],
+                |command| command.lines().map(str::to_owned).collect::<Vec<_>>(),
+            )
         } else {
             self.logs.iter().cloned().collect()
         };
@@ -1443,9 +1615,9 @@ impl Block {
             .child(self.button(
                 "toggle-command",
                 if self.show_command {
-                    "Show game output"
+                    tr!(language, "runtime.show_output")
                 } else {
-                    "Show redacted command"
+                    tr!(language, "runtime.show_command")
                 },
                 UiAction::ToggleCommand,
                 cx,
@@ -1454,7 +1626,7 @@ impl Block {
                 div()
                     .id("game-output")
                     .h(px(210.))
-                    .scroll_area(&self.shell.output_scroll, "Game output", self.palette, true)
+                    .scroll_area(&self.shell.output_scroll, "game.output", self.palette, true)
                     .bg(rgb(self.palette.surface))
                     .p_3()
                     .text_xs()
@@ -1505,6 +1677,7 @@ impl Render for Block {
         );
         self.prepare_crash_help(window, cx);
         self.sync_provider_drop(window, cx);
+        feedback::ToastLayer::set_language(self.language(), window, cx);
         feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         if let Some(help) = &self.crash_help {
             return div().size_full().child(help.clone()).into_any_element();
@@ -1576,11 +1749,13 @@ impl Block {
                 .and_then(|state| state.provider_draft_mut())
                 && draft.error.is_none()
             {
-                draft.error = Some(if cfg!(target_os = "linux") {
-                    "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.".to_owned()
-                } else {
-                    "Drag and drop is unavailable: unsupported windowing system.".to_owned()
-                });
+                draft.error = Some(authentication::AccountMessage::product(
+                    if cfg!(target_os = "linux") {
+                        "accounts.auth.error.drop_wayland"
+                    } else {
+                        "accounts.auth.error.drop_unsupported"
+                    },
+                ));
             }
             return;
         };
@@ -1606,7 +1781,10 @@ impl Block {
                     .and_then(|state| state.provider_draft_mut())
                     && draft.error.is_none()
                 {
-                    draft.error = Some(format!("Drag and drop is unavailable: {error}"));
+                    draft.error = Some(authentication::AccountMessage::detail(
+                        "accounts.auth.error.drop_failed",
+                        error.to_string(),
+                    ));
                 }
             }
         }
@@ -1725,7 +1903,11 @@ mod queued_play_ui_tests {
                 view.update(cx, |view, cx| view.handle(UiAction::Play, window, cx));
             });
             assert!(!view.read_with(cx, |view, _| view.pending_play));
-            assert!(!view.read_with(cx, |view, _| view.status.contains("Launch queued")));
+            assert!(!view.read_with(cx, |view, _| {
+                view.status
+                    .text(crate::Language::English)
+                    .contains("Launch queued")
+            }));
 
             // An install may be asked to launch as soon as it finishes.
             view.update(cx, |view, _| view.operation_kind = OperationKind::Install);
@@ -1733,7 +1915,11 @@ mod queued_play_ui_tests {
                 view.update(cx, |view, cx| view.handle(UiAction::Play, window, cx));
             });
             assert!(view.read_with(cx, |view, _| view.pending_play));
-            assert!(view.read_with(cx, |view, _| view.status.contains("Launch queued")));
+            assert!(view.read_with(cx, |view, _| {
+                view.status
+                    .text(crate::Language::English)
+                    .contains("Launch queued")
+            }));
             assert!(view.read_with(cx, |view, _| view.busy));
 
             // Stop clears a queued launch.
@@ -1825,8 +2011,20 @@ fn frozen_input(input: &Entity<TextInput>, cx: &mut Context<'_, Block>) -> Entit
 fn account_id(account: &Account) -> String {
     account.identity_key()
 }
+
+#[derive(Debug)]
+struct UnterminatedArgumentQuote;
+
+impl std::fmt::Display for UnterminatedArgumentQuote {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Close the double quote in the additional arguments")
+    }
+}
+
+impl std::error::Error for UnterminatedArgumentQuote {}
+
 /// Parse explicit quoted arguments without invoking a shell or interpreting backslashes in paths.
-fn parse_arguments(value: &str) -> anyhow::Result<Vec<String>> {
+fn parse_arguments(value: &str) -> Result<Vec<String>, UnterminatedArgumentQuote> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
@@ -1856,10 +2054,9 @@ fn parse_arguments(value: &str) -> anyhow::Result<Vec<String>> {
             started = true;
         }
     }
-    anyhow::ensure!(
-        !quoted,
-        "Close the double quote in the additional arguments"
-    );
+    if quoted {
+        return Err(UnterminatedArgumentQuote);
+    }
     if started {
         result.push(current);
     }
@@ -1996,6 +2193,38 @@ mod tests {
     }
 
     #[gpui::test]
+    fn startup_language_save_failure_is_visible_on_welcome(cx: &mut gpui::TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let corrupt = root.path().join("block.toml");
+            std::fs::write(&corrupt, b"not = [valid")?;
+            let root_path = root.path().to_owned();
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                super::Block::new(
+                    window,
+                    cx,
+                    super::LaunchOptions {
+                        data_dir: Some(root_path),
+                        ..Default::default()
+                    },
+                )
+            });
+            assert!(view.read_with(cx, |view, _| {
+                view.preferences.language == Some(crate::Language::English)
+                    && view.status.key() == Some("common.language_initialization_failed")
+                    && matches!(
+                        view.shell.first_run.notice,
+                        Some(super::first_run::Notice::LanguageInitialization(_))
+                    )
+            }));
+            assert_eq!(std::fs::read(corrupt)?, b"not = [valid");
+            assert!(!root.path().join(crate::global_config::FILE).exists());
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
     fn logging_storage_failure_notification_is_shown_only_once(cx: &mut gpui::TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, test_view);
         view.update(cx, |view, cx| {
@@ -2004,7 +2233,9 @@ mod tests {
             assert!(!view.notify_logging_failure(true, cx));
             assert_eq!(view.shell.pending_toasts.len(), 1);
             assert_eq!(
-                view.shell.pending_toasts[0].message,
+                view.shell.pending_toasts[0]
+                    .message
+                    .text(crate::Language::English),
                 "Launcher logs are unavailable. Check disk space and permissions."
             );
         });
@@ -2107,7 +2338,9 @@ mod tests {
             });
             assert!(crate::test_support::control_bounds(cx, "wizard-location-error").is_some());
             assert!(view.read_with(cx, |view, cx| {
-                view.status.contains("installation folder chooser")
+                view.status
+                    .text(crate::Language::English)
+                    .contains("installation folder chooser")
                     && matches!(&view.form, Some(super::Form::Instance(form))
                         if form.directory.read(cx).value() == "/draft/game")
             }));
@@ -2117,7 +2350,7 @@ mod tests {
             });
             cx.run_until_parked();
             assert!(view.read_with(cx, |view, cx| {
-                view.status == "Installation folder selected."
+                view.status.text(crate::Language::English) == "Installation folder selected."
                     && view.shell.wizard.error.is_none()
                     && matches!(&view.form, Some(super::Form::Instance(form))
                         if form.directory.read(cx).value() == "/chosen/after-retry")
@@ -2127,10 +2360,11 @@ mod tests {
                 view.shell.first_run.enabled = true;
                 view.shell.first_run.stage = super::first_run::Stage::GameWizard;
                 view.finish_install_browse(field, revision, Err(()), cx);
-                assert_eq!(
-                    view.shell.first_run.error.as_deref(),
-                    Some(super::INSTALL_CHOOSER_ERROR)
-                );
+                assert!(matches!(
+                    view.shell.first_run.notice,
+                    Some(super::first_run::Notice::InstallChooser)
+                ));
+                assert!(view.shell.first_run.error.is_none());
                 view.finish_install_browse(
                     field,
                     revision,
@@ -2138,17 +2372,21 @@ mod tests {
                     cx,
                 );
                 assert!(view.shell.first_run.error.is_none());
+                assert!(view.shell.first_run.notice.is_none());
                 view.shell.first_run.enabled = false;
                 view.router.navigate(super::Tab::Instances);
                 view.open_game_wizard_page(None, cx);
                 view.open_game_wizard_page(Some(super::WizardPage::Location), cx);
                 view.status = "another wizard section".into();
                 view.finish_install_browse(field, revision, Err(()), cx);
-                assert_eq!(view.status, "another wizard section");
+                assert_eq!(
+                    view.status.text(crate::Language::English),
+                    "another wizard section"
+                );
                 view.begin_game_wizard(cx);
                 view.status = "new draft".into();
                 view.finish_install_browse(field, revision, Err(()), cx);
-                assert_eq!(view.status, "new draft");
+                assert_eq!(view.status.text(crate::Language::English), "new draft");
             });
 
             let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
@@ -2178,13 +2416,19 @@ mod tests {
             );
             about.update(cx, |view, cx| view.finish_recipe_browse(Err(()), cx));
             assert!(about.read_with(cx, |view, _| {
-                view.status.contains("recipe chooser") && view.recipe.is_none()
+                view.status
+                    .text(crate::Language::English)
+                    .contains("recipe chooser")
+                    && view.recipe.is_none()
             }));
             about.update(cx, |view, cx| {
                 view.busy = true;
                 view.status = "another operation".into();
                 view.finish_recipe_browse(Err(()), cx);
-                assert_eq!(view.status, "another operation");
+                assert_eq!(
+                    view.status.text(crate::Language::English),
+                    "another operation"
+                );
             });
             Ok(())
         })();
@@ -2414,6 +2658,120 @@ mod tests {
         }
     }
 
+    #[test]
+    fn session_state_messages_preserve_uninterpreted_details_for_every_outcome() {
+        use block_launcher::crash::{ExitKind, ExitOutcome};
+        use block_launcher::session_host::RunState;
+
+        let mut record = supervised_record();
+        record.status = "verbatim diagnostic".into();
+        for (state, expected_key) in [
+            (RunState::Starting, "runtime.session_starting"),
+            (RunState::Preparing, "runtime.session_preparing"),
+            (RunState::Running, "runtime.session_running_pid"),
+            (
+                RunState::MonitoringInterrupted,
+                "runtime.session_interrupted",
+            ),
+        ] {
+            record.state = state;
+            let text = super::session_status(&record);
+            assert_eq!(text.key(), Some(expected_key));
+            for language in [
+                crate::Language::SimplifiedChinese,
+                crate::Language::Japanese,
+            ] {
+                assert!(text.text(language).contains("verbatim diagnostic"));
+            }
+        }
+        record.java_pid = None;
+        record.state = RunState::Running;
+        assert_eq!(
+            super::session_status(&record).key(),
+            Some("runtime.session_running")
+        );
+        record.state = RunState::Finished;
+        for (kind, expected_key) in [
+            (ExitKind::Normal, "runtime.session_normal"),
+            (ExitKind::Stopped, "runtime.session_stopped"),
+            (ExitKind::Abnormal, "runtime.session_abnormal"),
+            (ExitKind::StartFailed, "runtime.session_start_failed"),
+            (
+                ExitKind::MonitoringInterrupted,
+                "runtime.session_interrupted",
+            ),
+        ] {
+            record.outcome = Some(ExitOutcome {
+                kind,
+                code: None,
+                signal: None,
+                windows_status: None,
+            });
+            let text = super::session_status(&record);
+            assert_eq!(text.key(), Some(expected_key));
+            for language in [
+                crate::Language::SimplifiedChinese,
+                crate::Language::Japanese,
+            ] {
+                assert!(text.text(language).contains("verbatim diagnostic"));
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn session_status_relocalizes_typed_state_and_keeps_recovery_detail(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use block_launcher::crash::{ExitKind, ExitOutcome};
+        use block_launcher::session_host::RunState;
+
+        let (view, cx) = crate::test_support::window(cx, test_view);
+        let mut record = supervised_record();
+        view.update(cx, |view, cx| {
+            view.router.navigate(super::Tab::Home);
+            view.session_updated(record.clone(), cx);
+            assert_eq!(view.status.key(), Some("runtime.session_running_pid"));
+            assert_eq!(
+                view.status.text(crate::Language::SimplifiedChinese),
+                "运行中 · Minecraft 进程 ID 456 · 详情：Running · independent game session"
+            );
+            assert_eq!(
+                view.status.text(crate::Language::Japanese),
+                "実行中 · Minecraft PID 456 · 詳細: Running · independent game session"
+            );
+        });
+
+        let recovery = "Minecraft ended, but its directory reservation could not be released. Verify the session has ended before manual recovery.";
+        record.revision += 1;
+        record.state = RunState::Finished;
+        record.outcome = Some(ExitOutcome {
+            kind: ExitKind::Normal,
+            code: Some(0),
+            signal: None,
+            windows_status: None,
+        });
+        record.status = recovery.into();
+        // A full warning list means the supervisor cannot append the release
+        // warning, so the record status must remain visible independently.
+        record.capture_warnings = vec!["other diagnostic".into(); 8];
+        view.update(cx, |view, cx| {
+            view.session_updated(record, cx);
+            let message = view.status.clone();
+            assert_eq!(message.key(), Some("runtime.session_normal"));
+            assert_eq!(
+                message.text(crate::Language::SimplifiedChinese),
+                format!("Minecraft 已正常退出 · 详情：{recovery}")
+            );
+            assert_eq!(
+                message.text(crate::Language::Japanese),
+                format!("Minecraft は正常に終了しました · 詳細: {recovery}")
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("home-status").is_some());
+    }
+
     #[gpui::test]
     fn reopened_ui_restores_session_and_ignores_an_old_handoff_after_exit(
         cx: &mut gpui::TestAppContext,
@@ -2421,7 +2779,7 @@ mod tests {
         let (view, cx) = crate::test_support::window(cx, test_view);
         let record = supervised_record();
         view.update(cx, |view, cx| {
-            view.session_updated(record.clone());
+            view.session_updated(record.clone(), cx);
             cx.notify();
         });
         assert!(view.read_with(cx, |view, _| view.busy));
@@ -2434,16 +2792,16 @@ mod tests {
         finished.revision = 3;
         finished.status = "Exited normally".into();
         view.update(cx, |view, cx| {
-            view.session_updated(finished);
+            view.session_updated(finished, cx);
             // The observer can see the exit before the initial spawn RPC returns.
-            view.session_updated(record);
+            view.session_updated(record, cx);
             cx.notify();
         });
         assert!(!view.read_with(cx, |view, _| view.busy));
         assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
         assert_eq!(
-            view.read_with(cx, |view, _| view.status.clone()),
-            "Exited normally"
+            view.read_with(cx, |view, _| view.status.text(crate::Language::English)),
+            "The Minecraft session ended · Details: Exited normally"
         );
     }
 
@@ -2453,11 +2811,11 @@ mod tests {
     ) {
         let (view, cx) = crate::test_support::window(cx, test_view);
         let mut record = supervised_record();
-        view.update(cx, |view, _| view.session_updated(record.clone()));
+        view.update(cx, |view, cx| view.session_updated(record.clone(), cx));
         record.state = block_launcher::session_host::RunState::MonitoringInterrupted;
         record.status = "Monitoring interrupted · Minecraft may still be running".into();
         view.update(cx, |view, cx| {
-            view.session_updated(record);
+            view.session_updated(record, cx);
             cx.notify();
         });
         assert!(view.read_with(cx, |view, _| view.busy));
@@ -2513,32 +2871,52 @@ mod tests {
     ) {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
-            let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
-            let context = supervised_record().context;
-            let report = block_launcher::crash::CrashReport::new(
-                context,
-                block_launcher::crash::ExitOutcome::start_failed(),
-                "Java could not start",
-                Vec::new(),
-            );
-            let (view, cx) = crate::test_support::window(cx, test_view);
-            view.update(cx, |view, cx| {
-                view.pending_crashes.push_back(super::PendingCrash {
-                    report,
-                    directory: root.path().to_path_buf(),
-                    guard,
+            for preview in [
+                crate::Language::Japanese,
+                crate::Language::SimplifiedChinese,
+            ] {
+                let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
+                let mut context = supervised_record().context;
+                context.profile_id = "profile-a".into();
+                let report = block_launcher::crash::CrashReport::new(
+                    context,
+                    block_launcher::crash::ExitOutcome::start_failed(),
+                    "Java could not start",
+                    Vec::new(),
+                );
+                let (view, cx) = crate::test_support::window(cx, test_view);
+                cx.update(|window, cx| {
+                    view.update(cx, |view, cx| {
+                        view.snapshot = crate::test_support::ready_snapshot();
+                        view.preferences.language = Some(crate::Language::English);
+                        view.saved_preferences = view.preferences.clone();
+                        view.handle(super::UiAction::Tab(super::Tab::Settings), window, cx);
+                        view.handle(super::UiAction::SetLanguage(preview), window, cx);
+                        assert!(view.settings_form.is_some());
+                        assert_eq!(view.preferences.language, Some(preview));
+                        view.pending_crashes.push_back(super::PendingCrash {
+                            report,
+                            directory: root.path().to_path_buf(),
+                            guard,
+                        });
+                        cx.notify();
+                    });
                 });
-                cx.notify();
-            });
-            cx.run_until_parked();
-            assert!(view.read_with(cx, |view, _| view.crash_help.is_some()));
-            assert!(view.read_with(cx, |view, _| view.crash_guard.is_some()));
-            assert!(cx.debug_bounds("crash-return").is_some());
-            crate::test_support::press(cx, "enter");
-            assert!(view.read_with(cx, |view, _| view.crash_help.is_none()));
-            assert!(view.read_with(cx, |view, _| view.crash_guard.is_none()));
-            assert!(!view.read_with(cx, |view, _| view.busy));
-            assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
+                cx.run_until_parked();
+                assert!(view.read_with(cx, |view, _| view.crash_help.is_some()));
+                assert!(view.read_with(cx, |view, _| view.crash_guard.is_some()));
+                assert!(cx.debug_bounds("crash-return").is_some());
+                crate::test_support::press(cx, "enter");
+                assert!(view.read_with(cx, |view, _| view.crash_help.is_none()));
+                assert!(view.read_with(cx, |view, _| view.crash_guard.is_none()));
+                assert!(!view.read_with(cx, |view, _| view.busy));
+                assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
+                assert!(view.read_with(cx, |view, _| {
+                    view.router.tab() == super::Tab::Instances
+                        && view.preferences.language == Some(crate::Language::English)
+                        && view.settings_form.is_none()
+                }));
+            }
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
@@ -2787,6 +3165,7 @@ mod tests {
             assert!(!view.read_with(cx, |view, _| view.busy));
             assert!(view.read_with(cx, |view, _| {
                 view.status
+                    .text(crate::Language::English)
                     .contains("installation directory overlaps another instance")
             }));
             assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
@@ -2811,7 +3190,9 @@ mod tests {
         );
         assert!(!view.read_with(cx, |view, _| view.busy));
         assert!(view.read_with(cx, |view, _| {
-            view.status.contains("Add and select an account")
+            view.status
+                .text(crate::Language::English)
+                .contains("Add and select an account")
         }));
     }
 
@@ -2898,6 +3279,7 @@ mod tests {
         click_selector(cx, "save-profile");
         assert!(view.read_with(cx, |view, _| {
             view.status
+                .text(crate::Language::English)
                 .contains("Choose a memory limit between 1 and 32 GB.")
         }));
         assert_eq!(
@@ -2972,7 +3354,9 @@ mod tests {
             );
             view.update(cx, |view, cx| view.play(cx));
             assert!(view.read_with(cx, |view, _| {
-                view.status.contains("default account is unavailable")
+                view.status
+                    .text(crate::Language::English)
+                    .contains("default account is unavailable")
             }));
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {

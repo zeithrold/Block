@@ -1,7 +1,7 @@
 //! Settings regressions exercise persistence, draft ownership and visible focus.
 
 use super::{SettingsField, format_rate, parse_rate};
-use crate::{Appearance, Preferences, Tab, UiAction};
+use crate::{Appearance, Language, Preferences, Tab, UiAction};
 use gpui::{Focusable as _, px, size};
 
 #[test]
@@ -156,7 +156,7 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
                     .update(cx, |input, cx| input.set_value("3", cx));
             }
             view.select_settings_page(1, window, cx);
-            view.reset_settings(cx);
+            view.reset_settings(window, cx);
             assert!(view.settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
                     && draft.memory.read(cx).value() == "2"
@@ -320,6 +320,196 @@ fn outgoing_snapshot_owns_independent_inputs_scroll_and_reveal_state(
             })
         }));
     });
+}
+
+#[gpui::test]
+fn general_language_previews_saves_and_cancel_or_restore_use_the_shared_paths(
+    cx: &mut gpui::TestAppContext,
+) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                view.handle(UiAction::SetLanguage(Language::Japanese), window, cx);
+                assert_eq!(view.preferences.language, Some(Language::Japanese));
+                assert_eq!(view.saved_preferences.language, None);
+                assert!(
+                    view.settings_form
+                        .as_ref()
+                        .is_some_and(|draft| view.settings_dirty(draft, cx)),
+                    "a language-only preview must offer Save"
+                );
+
+                view.save_settings(window, cx);
+                assert_eq!(view.saved_preferences.language, Some(Language::Japanese));
+                assert_eq!(
+                    Preferences::load(root.path())
+                        .ok()
+                        .and_then(|value| value.language),
+                    Some(Language::Japanese)
+                );
+                assert!(
+                    view.settings_form
+                        .as_ref()
+                        .is_some_and(|draft| { !view.settings_dirty(draft, cx) })
+                );
+
+                // Cancel leaves Settings through the shared dispatcher, which
+                // restores the saved preview.
+                view.handle(
+                    UiAction::SetLanguage(Language::SimplifiedChinese),
+                    window,
+                    cx,
+                );
+                view.handle(UiAction::Tab(Tab::Home), window, cx);
+                assert_eq!(view.preferences, view.saved_preferences);
+                assert_eq!(view.preferences.language, Some(Language::Japanese));
+
+                // Restore on General selects a concrete English choice instead
+                // of rerunning operating-system detection.
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                view.reset_settings(window, cx);
+                assert_eq!(view.preferences.language, Some(Language::English));
+                assert_eq!(view.saved_preferences.language, Some(Language::Japanese));
+                view.save_settings(window, cx);
+                assert_eq!(
+                    Preferences::load(root.path())
+                        .ok()
+                        .and_then(|value| value.language),
+                    Some(Language::English)
+                );
+            });
+        });
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::TestAppContext) {
+    use gpui::EntityInputHandler as _;
+
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.simulate_resize(size(px(960.), px(720.)));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                view.select_settings_page(1, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        let input = view
+            .read_with(cx, |view, _| {
+                view.settings_form.as_ref().map(|draft| draft.jvm.clone())
+            })
+            .ok_or_else(|| anyhow::anyhow!("settings JVM input is missing"))?;
+        let identity = input.entity_id();
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| {
+                input.focus_handle(cx).focus(window, cx);
+                input.replace_and_mark_text_in_range(None, "入力", Some(0..1), window, cx);
+            });
+        });
+        let focus = cx.update(|window, cx| window.focused(cx));
+        assert!(focus.is_some());
+        for (language, expected_label) in [
+            (Language::SimplifiedChinese, "保存更改"),
+            (Language::Japanese, "変更を保存"),
+        ] {
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.handle(UiAction::SetLanguage(language), window, cx);
+                });
+            });
+            cx.run_until_parked();
+            assert_eq!(cx.update(|window, cx| window.focused(cx)), focus);
+            let selection = cx.update(|window, cx| {
+                input.update(cx, |input, cx| {
+                    input
+                        .selected_text_range(false, window, cx)
+                        .map(|selection| selection.range)
+                })
+            });
+            assert_eq!(selection, Some(0..1));
+            assert!(input.read_with(cx, |input, _| input.is_composing()));
+            assert_eq!(input.read_with(cx, |input, _| input.value()), "入力");
+            assert_eq!(
+                view.read_with(cx, |view, _| {
+                    view.settings_form
+                        .as_ref()
+                        .map(|draft| draft.jvm.entity_id())
+                }),
+                Some(identity)
+            );
+            let label = cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &"save-preferences".into())
+                    .and_then(|node| node.label().map(str::to_owned))
+            });
+            assert_eq!(label.as_deref(), Some(expected_label));
+        }
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::SavePreferences, window, cx);
+                assert_eq!(view.saved_preferences.language, None);
+                assert!(input.read(cx).is_composing());
+                input.update(cx, |input, cx| input.unmark_text(window, cx));
+                view.handle(UiAction::SavePreferences, window, cx);
+                assert_eq!(
+                    view.settings_form
+                        .as_ref()
+                        .map(|draft| draft.jvm.entity_id()),
+                    Some(identity)
+                );
+                assert_eq!(input.read(cx).value(), "入力");
+            });
+        });
+        assert_eq!(
+            Preferences::load(root.path())?.language,
+            Some(Language::Japanese)
+        );
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn retained_settings_feedback_resolves_in_the_presentation_language() {
+    let error =
+        super::SettingsError::at(SettingsField::Concurrent, "settings.error.concurrent_range");
+    assert_eq!(
+        error.message(Language::English),
+        "Choose between 1 and 16 parallel downloads."
+    );
+    assert_ne!(
+        error.message(Language::SimplifiedChinese),
+        error.message(Language::English)
+    );
+    assert_ne!(
+        error.message(Language::Japanese),
+        error.message(Language::English)
+    );
+    assert_eq!(error.field, Some(SettingsField::Concurrent));
+
+    let save = super::SettingsError::save("the disk is full".into());
+    assert_eq!(
+        save.message(Language::English),
+        "Could not save settings: the disk is full"
+    );
+    for language in [Language::SimplifiedChinese, Language::Japanese] {
+        let message = save.message(language);
+        assert!(message.contains("the disk is full"), "{message}");
+        assert_ne!(message, save.message(Language::English));
+    }
 }
 
 fn settings_frame(cx: &mut gpui::VisualTestContext) {
@@ -509,7 +699,7 @@ fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
                 });
                 let parsed = draft
                     .parse(&view.saved_preferences, cx)
-                    .map_err(|error| anyhow::anyhow!(error.message))?;
+                    .map_err(|error| anyhow::anyhow!("{error:?}"))?;
                 assert_eq!(
                     parsed.downloads.proxy,
                     block_launcher::ProxyMode::Socks5 {

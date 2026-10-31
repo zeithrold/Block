@@ -77,7 +77,10 @@ fn busy_home_keeps_stop_reachable_and_cancels_the_operation(cx: &mut TestAppCont
                     view.cancel.is_cancelled()
                         && view.play_stop.is_cancelled()
                         && view.busy
-                        && view.status.starts_with("Stopping")
+                        && view
+                            .status
+                            .text(crate::Language::English)
+                            .starts_with("Stopping")
                 }),
                 "{dimensions:?}: stop={stop:?}, panel={:?}, content={:?}, state={:?}",
                 cx.debug_bounds("home-task-motion"),
@@ -171,6 +174,7 @@ fn crash_help_preserves_report_actions_in_the_default_window(cx: &mut TestAppCon
                 Vec::new(),
             ),
             std::env::temp_dir(),
+            crate::Language::English,
             |_, _| {},
             window,
             cx,
