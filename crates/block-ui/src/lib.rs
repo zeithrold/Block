@@ -71,6 +71,8 @@ mod instance_editor;
 #[cfg(test)]
 #[path = "runtime/interaction_tests.rs"]
 mod interaction_tests;
+#[path = "games/modpack_import.rs"]
+mod modpack_import;
 #[path = "navigation/motion.rs"]
 mod motion;
 #[cfg(test)]
@@ -3288,6 +3290,7 @@ mod tests {
         view.update(cx, |view, cx| {
             view.snapshot.instances.push(Instance {
                 settings: None,
+                pack: None,
                 id: "instance".into(),
                 name: "Worlds".into(),
                 minecraft_version: "1.20.6".into(),

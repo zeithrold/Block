@@ -145,6 +145,8 @@ fn companion_libraries_are_added_to_the_verified_classpath() -> anyhow::Result<(
             sha1: "d".repeat(40),
             size: 69_908,
             url: "https://libraries.minecraft.net/org/slf4j/slf4j-api/1.8.0-beta4/slf4j-api-1.8.0-beta4.jar".into(),
+            sha512: None,
+            alternate_urls: Vec::new(),
         },
         filename: "slf4j-api-1.8.0-beta4.jar".into(),
     });

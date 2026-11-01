@@ -22,7 +22,7 @@ use super::{
     components::{self, ButtonVariant, ControlState},
     design::Icon,
     first_run::Stage,
-    note,
+    modpack_import, note,
     scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
 };
@@ -796,7 +796,45 @@ impl Block {
         if let Some(error) = &state.error {
             body = body.child(note(error.text(language)));
         }
+        body = body.child(self.import_pack_entry(interactive, cx));
         body.into_any_element()
+    }
+
+    /// A local pack archive is offered beside the game directories. The
+    /// directory sources above keep their own path into the launcher.
+    fn import_pack_entry(&self, interactive: bool, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        let label = tr!(language, "modpack.action.import_pack");
+        let entry = if interactive {
+            self.button_with_variant(
+                "import-pack",
+                label,
+                UiAction::PackImport(modpack_import::Action::Open),
+                ButtonVariant::Ghost,
+                cx,
+            )
+            .w_full()
+            .justify_start()
+            .child(Icon::Layers.render(16., self.palette.foreground))
+            .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .py_2()
+                .text_sm()
+                .child(label)
+                .into_any_element()
+        };
+        div()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgb(self.palette.border))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(entry)
+            .child(note(tr!(language, "modpack.entry.pack_note")))
     }
 
     fn render_list(

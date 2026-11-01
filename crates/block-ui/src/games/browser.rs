@@ -28,7 +28,7 @@ use super::{
     Block, Form, Language, Tab, TextInput, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
     design::Icon,
-    input, note, patterns,
+    input, modpack_import, note, patterns,
 };
 
 type DetailBody = super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>>;
@@ -624,6 +624,21 @@ impl Block {
                         .query
                         .as_ref()
                         .map(|field| div().flex_1().min_w_0().child(field.clone())),
+                )
+                // A pack archive adds a Game/Instance without a version
+                // wizard, so it is offered beside the create action.
+                .children(
+                    matches!(kind, BrowserKind::Bundled | BrowserKind::Instances).then(|| {
+                        self.browser_control(
+                            "import-pack",
+                            tr!(language, "modpack.action.import_pack"),
+                            UiAction::PackImport(modpack_import::Action::Open),
+                            ButtonVariant::Ghost,
+                            self.busy,
+                            cx,
+                        )
+                        .child(Icon::Layers.render(14., self.palette.muted))
+                    }),
                 )
                 .child(
                     self.browser_control(

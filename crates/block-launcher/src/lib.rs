@@ -17,6 +17,7 @@ pub mod install;
 pub mod launch;
 pub mod library;
 pub mod manifest;
+pub mod modpack;
 pub mod plan;
 #[path = "resolution/platform.rs"]
 pub mod platform;

@@ -102,6 +102,8 @@ fn resource(url: String, body: &[u8]) -> Resource {
         sha1: format!("{:x}", Sha1::digest(body)),
         size: body.len() as u64,
         url,
+        sha512: None,
+        alternate_urls: Vec::new(),
     }
 }
 

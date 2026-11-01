@@ -221,6 +221,8 @@ fn canonical_paths_and_generated_outputs_survive_plan_binding() -> anyhow::Resul
         sha1: "cccccccccccccccccccccccccccccccccccccccc".into(),
         size: 7,
         url: String::new(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     let installed = InstalledLoader {
         version: VERSION.into(),
@@ -309,6 +311,8 @@ fn checksum_mismatch_does_not_publish_installer_library() -> anyhow::Result<()> 
         sha1: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         size: 8,
         url: "https://example.invalid/tool.jar".into(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     let expected = BTreeMap::from([("tool.jar".into(), resource.clone())]);
     assert!(import_libraries(&libraries, &expected, &context).is_err());
@@ -347,6 +351,8 @@ fn valid_content_objects_are_reused_without_replacing_the_file() -> anyhow::Resu
         sha1: file_digest(&source)?,
         size: source.metadata()?.len(),
         url: String::new(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     super::publish_object(&source, &resource, &context)?;
     let destination = context.store.object_path(&resource.sha1)?;

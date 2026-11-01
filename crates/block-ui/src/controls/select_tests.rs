@@ -1,5 +1,11 @@
 use super::*;
-use gpui::{Focusable as _, Modifiers, size};
+use crate::{
+    game_wizard::LoaderCatalog,
+    modpack_import::{Phase, State, TargetDraft},
+    shell::Drawer,
+};
+use block_launcher::install::fabric::LoaderVersion;
+use gpui::{Focusable as _, Modifiers, ScrollDelta, ScrollWheelEvent, size};
 
 fn settle(cx: &mut gpui::VisualTestContext) {
     cx.run_until_parked();
@@ -528,4 +534,444 @@ fn menu_labels_resolve_in_the_view_language(cx: &mut gpui::TestAppContext) {
             language.code()
         );
     }
+}
+
+/// Several screens of options: past the popup list's 624 px maximum.
+const LONG_CATALOG: usize = 70;
+
+fn version_label(index: usize) -> String {
+    format!("1.21.{index}")
+}
+
+fn build_label(index: usize) -> String {
+    format!("0.16.{index}")
+}
+
+/// The real Plain-selector target inside the shared Drawer, with the version
+/// catalog its popup renders.
+fn long_target(
+    cx: &mut gpui::TestAppContext,
+    draft: TargetDraft,
+) -> (gpui::Entity<Block>, &mut gpui::VisualTestContext) {
+    let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.versions = (0..LONG_CATALOG).map(version_label).collect();
+        view.shell.pack_import = State {
+            phase: Phase::Review,
+            draft: Some(draft),
+            ..State::default()
+        };
+        view
+    });
+    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.handle(UiAction::Drawer(Some(Drawer::ImportPack)), window, cx);
+        });
+    });
+    settle(cx);
+    (view, cx)
+}
+
+fn open_target_select(
+    view: &gpui::Entity<Block>,
+    kind: ProductChoice,
+    cx: &mut gpui::VisualTestContext,
+) {
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.open_product_select(kind, None, window, cx);
+        });
+    });
+    settle(cx);
+    for _ in 0..2 {
+        cx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        settle(cx);
+    }
+}
+
+/// A selector as the surface stack holds it, after the last paint.
+#[derive(Debug, Default)]
+struct Open {
+    labels: Vec<String>,
+    selected: Vec<bool>,
+    active: usize,
+    product: Option<ProductChoice>,
+    focus: Option<FocusHandle>,
+    offset: Point<Pixels>,
+    max: Point<Pixels>,
+}
+
+fn open_selector(view: &gpui::Entity<Block>, cx: &mut gpui::VisualTestContext) -> Open {
+    let open = view.read_with(cx, |view, _| {
+        let layer = view.shell.surfaces.top()?;
+        let Surface::Select(state) = &layer.kind else {
+            return None;
+        };
+        Some(Open {
+            labels: state
+                .choices
+                .iter()
+                .map(|choice| choice.label.clone())
+                .collect(),
+            selected: state.choices.iter().map(|choice| choice.selected).collect(),
+            active: state.active,
+            product: state.product,
+            focus: Some(state.focus.clone()),
+            offset: state.scroll.offset(),
+            max: state.scroll.max_offset(),
+        })
+    });
+    assert!(open.is_some(), "the target selector owns the top surface");
+    open.unwrap_or_default()
+}
+
+fn at_bottom(open: &Open) -> bool {
+    open.max.y > px(0.) && (open.offset.y + open.max.y).abs() <= px(1.)
+}
+
+fn at_top(open: &Open) -> bool {
+    open.offset.y.abs() <= px(1.)
+}
+
+fn draft_version(view: &gpui::Entity<Block>, cx: &mut gpui::VisualTestContext) -> Option<String> {
+    view.read_with(cx, |view, _| {
+        view.shell
+            .pack_import
+            .draft
+            .as_ref()
+            .and_then(|draft| draft.version.clone())
+    })
+}
+
+fn drawer_open(view: &gpui::Entity<Block>, cx: &mut gpui::VisualTestContext) -> bool {
+    view.read_with(cx, |view, _| {
+        view.shell
+            .surfaces
+            .layers()
+            .any(|layer| matches!(layer.kind, Surface::Drawer(Drawer::ImportPack)))
+    })
+}
+
+fn select_open(view: &gpui::Entity<Block>, cx: &mut gpui::VisualTestContext) -> bool {
+    view.read_with(cx, |view, _| {
+        view.shell
+            .surfaces
+            .layers()
+            .any(|layer| matches!(layer.kind, Surface::Select(_)))
+    })
+}
+
+/// A plain archive's version list is longer than the popup: the list scrolls
+/// inside a bounded popup, its first and last rows are real choices, and the
+/// chosen version survives the selector closing.
+#[gpui::test]
+fn long_target_version_list_scrolls_inside_a_bounded_popup_and_keeps_every_choice(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = long_target(cx, TargetDraft::default());
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+
+    let expected: Vec<String> = (0..LONG_CATALOG).map(version_label).collect();
+    let open = open_selector(&view, cx);
+    assert_eq!(open.product, Some(ProductChoice::PackTargetVersion));
+    assert_eq!(open.labels, expected, "every offered version is one choice");
+    assert_eq!(open.active, 0, "an unset target visits the first version");
+    assert!(open.selected.iter().all(|selected| !selected));
+    assert_eq!(open.focus, cx.update(|window, cx| window.focused(cx)));
+
+    // The popup stays inside the window and the list inside the popup.
+    assert_popup_within_window(cx);
+    let popup = cx.debug_bounds("drawer-sheet");
+    assert!(
+        popup.is_some_and(|bounds| bounds.size.height <= px(696.)),
+        "popup={popup:?}"
+    );
+    assert!(
+        open.max.y > px(0.),
+        "the catalog is taller than the popup: {open:?}"
+    );
+
+    // Home and End move the active row and the real viewport with it.
+    crate::test_support::press(cx, "end");
+    settle(cx);
+    let last = open_selector(&view, cx);
+    assert_eq!(last.active, LONG_CATALOG - 1);
+    assert!(at_bottom(&last), "End exposes the last row: {last:?}");
+
+    crate::test_support::press(cx, "home");
+    settle(cx);
+    let first = open_selector(&view, cx);
+    assert_eq!(first.active, 0);
+    assert!(at_top(&first), "Home returns to the first row: {first:?}");
+
+    crate::test_support::press(cx, "down");
+    settle(cx);
+    assert_eq!(open_selector(&view, cx).active, 1);
+    crate::test_support::press(cx, "up");
+    settle(cx);
+    assert_eq!(open_selector(&view, cx).active, 0);
+
+    // Enter chooses the last version and closes only the selector.
+    crate::test_support::press(cx, "end enter");
+    settle(cx);
+    assert_eq!(
+        draft_version(&view, cx),
+        Some(version_label(LONG_CATALOG - 1)),
+        "the last version is the chosen target"
+    );
+    assert!(!select_open(&view, cx), "the selector closed");
+    assert!(drawer_open(&view, cx), "the drawer kept the choice");
+    assert!(
+        crate::test_support::control_bounds(cx, "block-drawer").is_some(),
+        "the drawer is still painted"
+    );
+
+    // Reopening inspects the chosen version with the popup focus.
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+    let reopened = open_selector(&view, cx);
+    assert_eq!(reopened.active, LONG_CATALOG - 1);
+    assert_eq!(
+        reopened
+            .selected
+            .iter()
+            .filter(|selected| **selected)
+            .count(),
+        1,
+        "the chosen version is the only selected row"
+    );
+    assert!(
+        reopened.selected[reopened.active],
+        "the active row is the chosen value"
+    );
+    assert_eq!(
+        reopened.labels.last(),
+        Some(&version_label(LONG_CATALOG - 1))
+    );
+    assert!(
+        at_bottom(&reopened),
+        "reopening scrolls the chosen version into view: {reopened:?}"
+    );
+    assert_eq!(reopened.focus, cx.update(|window, cx| window.focused(cx)));
+}
+
+/// The wheel scrolls the selector's own list and nothing behind it.
+#[gpui::test]
+fn wheel_scrolls_the_long_selector_without_moving_the_drawer_beneath(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = long_target(cx, TargetDraft::default());
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+    let popup = cx.debug_bounds("drawer-sheet");
+    assert!(popup.is_some(), "the selector popup is painted");
+    if let Some(popup) = popup {
+        let pointer = popup.center();
+        let list = open_selector(&view, cx);
+        let drawer_scroll = view.read_with(cx, |view, _| view.shell.pack_import.scroll.offset());
+        let tab = view.read_with(cx, |view, _| view.router.tab());
+        cx.simulate_mouse_move(pointer, None, Modifiers::none());
+        cx.run_until_parked();
+        cx.simulate_event(ScrollWheelEvent {
+            position: pointer,
+            delta: ScrollDelta::Pixels(point(px(0.), px(-2400.))),
+            ..ScrollWheelEvent::default()
+        });
+        settle(cx);
+
+        let scrolled = open_selector(&view, cx);
+        assert!(
+            scrolled.offset.y < list.offset.y,
+            "the wheel moved the selector's own list: {scrolled:?}"
+        );
+        assert!(
+            at_bottom(&scrolled),
+            "the wheel reached the end of the list: {scrolled:?}"
+        );
+        assert_eq!(scrolled.active, list.active, "scrolling chooses nothing");
+        assert_eq!(scrolled.selected, list.selected);
+
+        // The surface behind the popup keeps its own state.
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.pack_import.scroll.offset()),
+            drawer_scroll,
+            "the drawer keeps its own scroll"
+        );
+        assert_eq!(view.read_with(cx, |view, _| view.router.tab()), tab);
+        assert!(drawer_open(&view, cx) && select_open(&view, cx));
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: pointer,
+            delta: ScrollDelta::Pixels(point(px(0.), px(2400.))),
+            ..ScrollWheelEvent::default()
+        });
+        settle(cx);
+        let returned = open_selector(&view, cx);
+        assert!(
+            at_top(&returned),
+            "the wheel returns to the first row: {returned:?}"
+        );
+    }
+}
+
+/// A selector nested in the drawer keeps the sheet's keyboard ownership: Tab
+/// cannot reach the page behind, Enter activates the popup's row instead of a
+/// drawer control, and Escape closes only the selector it belongs to.
+#[gpui::test]
+fn nested_selector_tab_and_escape_stay_in_the_drawer_and_restore_its_focus(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = long_target(cx, TargetDraft::default());
+    let drawer_focus = cx.update(|window, cx| window.focused(cx));
+    assert!(drawer_focus.is_some(), "the drawer holds focus");
+
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+    assert_eq!(
+        open_selector(&view, cx).focus,
+        cx.update(|window, cx| window.focused(cx)),
+        "the popup owns focus"
+    );
+
+    // The popup owns activation: Enter chooses its row, never a drawer control.
+    crate::test_support::press(cx, "enter");
+    settle(cx);
+    assert_eq!(draft_version(&view, cx), Some(version_label(0)));
+    assert!(!select_open(&view, cx), "Enter activated the popup's row");
+    assert!(drawer_open(&view, cx), "Enter did not activate the drawer");
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), drawer_focus);
+
+    // Tab and Shift+Tab move focus inside the sheet, never behind it.
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+    for keys in ["tab", "shift-tab", "tab tab"] {
+        crate::test_support::press(cx, keys);
+        settle(cx);
+        let confined = cx.update(|window, cx| {
+            gpui_base::active_focus_trap(window, cx).is_some_and(|trap| {
+                Some(&trap) == drawer_focus.as_ref() && trap.contains_focused(window, cx)
+            })
+        });
+        assert!(confined, "{keys} kept focus inside the drawer's sheet");
+        assert!(select_open(&view, cx), "{keys} kept the selector open");
+        assert!(drawer_open(&view, cx), "{keys} kept the drawer open");
+        assert_eq!(
+            draft_version(&view, cx),
+            Some(version_label(0)),
+            "{keys} chose nothing"
+        );
+    }
+
+    // The nested selector owns Cancel even after Tab reached another control.
+    crate::test_support::press(cx, "escape");
+    settle(cx);
+    assert!(!select_open(&view, cx), "Escape closed the nested selector");
+    assert!(drawer_open(&view, cx), "Escape kept the drawer");
+    assert_eq!(
+        cx.update(|window, cx| window.focused(cx)),
+        drawer_focus,
+        "focus returned to the drawer"
+    );
+
+    crate::test_support::press(cx, "escape");
+    settle(cx);
+    assert!(
+        !drawer_open(&view, cx),
+        "the drawer closes on its own Escape"
+    );
+}
+
+fn long_builds() -> Vec<LoaderVersion> {
+    (0..LONG_CATALOG)
+        .map(|index| LoaderVersion {
+            version: build_label(index),
+            stable: true,
+        })
+        .collect()
+}
+
+fn modded_target(builds: Vec<LoaderVersion>) -> TargetDraft {
+    let version = version_label(0);
+    TargetDraft {
+        version: Some(version.clone()),
+        loader: Some(LoaderKind::Fabric),
+        catalog: Some(LoaderCatalog {
+            request: uuid::Uuid::nil(),
+            minecraft: version,
+            kind: LoaderKind::Fabric,
+            builds,
+            load: CollectionLoad::Ready,
+        }),
+        ..TargetDraft::default()
+    }
+}
+
+/// The loader build catalog is the second long list: it scrolls the same way
+/// and the last build of the chosen loader is a real choice.
+#[gpui::test]
+fn long_loader_build_list_scrolls_and_chooses_its_last_build(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = long_target(cx, modded_target(long_builds()));
+    open_target_select(&view, ProductChoice::PackTargetBuild, cx);
+
+    let expected: Vec<String> = (0..LONG_CATALOG).map(build_label).collect();
+    let open = open_selector(&view, cx);
+    assert_eq!(open.product, Some(ProductChoice::PackTargetBuild));
+    assert_eq!(open.labels, expected, "every offered build is one choice");
+    assert_eq!(open.active, 0);
+    assert!(
+        open.max.y > px(0.),
+        "the builds are taller than the popup: {open:?}"
+    );
+    assert_popup_within_window(cx);
+
+    crate::test_support::press(cx, "end enter");
+    settle(cx);
+    assert_eq!(
+        view.read_with(cx, |view, _| {
+            view.shell
+                .pack_import
+                .draft
+                .as_ref()
+                .and_then(|draft| draft.build.clone())
+        }),
+        Some(build_label(LONG_CATALOG - 1)),
+        "the last build is the chosen one"
+    );
+    assert!(!select_open(&view, cx));
+    assert!(drawer_open(&view, cx), "the drawer kept the build choice");
+    assert!(crate::test_support::control_bounds(cx, "block-drawer").is_some());
+}
+
+/// A saved overlay snapshot keeps the selector offset it captured; scrolling
+/// the live list afterwards must not move the saved copy.
+#[gpui::test]
+fn saved_overlay_snapshot_keeps_the_selector_offset_it_captured(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = long_target(cx, TargetDraft::default());
+    open_target_select(&view, ProductChoice::PackTargetVersion, cx);
+    crate::test_support::press(cx, "end");
+    settle(cx);
+    let captured = open_selector(&view, cx).offset;
+    assert!(
+        captured.y < px(0.),
+        "the captured list is scrolled: {captured:?}"
+    );
+
+    let saved = view.read_with(cx, |view, _| view.shell.surfaces.snapshot());
+    crate::test_support::press(cx, "home");
+    settle(cx);
+    let live = open_selector(&view, cx);
+    assert!(
+        at_top(&live),
+        "the live list returned to its first row: {live:?}"
+    );
+
+    let saved_offset = saved.top().and_then(|layer| match &layer.kind {
+        Surface::Select(state) => Some(state.scroll.offset()),
+        _ => None,
+    });
+    assert_eq!(
+        saved_offset,
+        Some(captured),
+        "the saved snapshot kept its own offset"
+    );
 }

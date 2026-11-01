@@ -37,7 +37,15 @@ pub(super) struct Overlays {
 
 impl Overlays {
     pub(super) fn snapshot(&self) -> Self {
-        self.clone()
+        let mut snapshot = self.clone();
+        for entry in &mut snapshot.entries {
+            if let Surface::Select(state) = &mut entry.kind {
+                let scroll = gpui::ScrollHandle::new();
+                scroll.set_offset(state.scroll.offset());
+                state.scroll = scroll;
+            }
+        }
+        snapshot
     }
 
     pub(super) fn trigger_focus(&self, id: &'static str, cx: &App) -> FocusHandle {
@@ -497,6 +505,7 @@ impl Block {
         self.shell.surfaces.trace_change(&entry, "closed");
         match entry.kind {
             Surface::Drawer(Drawer::ImportGames) => self.import_games_closed(window, cx),
+            Surface::Drawer(Drawer::ImportPack) => self.pack_import_closed(window, cx),
             Surface::WizardSection(_) => {
                 self.cancel_component_draft(cx);
             }
@@ -523,6 +532,7 @@ impl Surface {
     const fn log_label(&self) -> &'static str {
         match self {
             Self::Drawer(Drawer::ImportGames) => "import_games",
+            Self::Drawer(Drawer::ImportPack) => "import_pack",
             Self::Drawer(Drawer::Language) => "language",
             Self::Drawer(Drawer::Menu) => "menu",
             Self::Drawer(Drawer::Accounts) => "accounts",
@@ -561,6 +571,7 @@ impl Surface {
             Self::Drawer(Drawer::Profiles) => tr!(language, "action.switch_game"),
             Self::Drawer(Drawer::Downloads) => tr!(language, "surface.downloads"),
             Self::Drawer(Drawer::ImportGames) => tr!(language, "surface.import_games"),
+            Self::Drawer(Drawer::ImportPack) => tr!(language, "modpack.action.import_pack"),
             Self::DownloadFiles(group) => group.label(language),
             Self::DeleteProfile(_) => tr!(language, "action.delete_profile"),
             Self::RemoveAccount(_) => tr!(language, "action.remove_account"),
@@ -588,6 +599,7 @@ impl Surface {
                 | Drawer::Profiles
                 | Drawer::Downloads
                 | Drawer::ImportGames
+                | Drawer::ImportPack
                 | Drawer::Language,
             ) => Some(OverlayPresentation::Sheet),
             Self::DownloadFiles(_)

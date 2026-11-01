@@ -19,6 +19,9 @@ const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PROFILES: usize = 256;
 const MAX_INHERITANCE_DEPTH: usize = 16;
 
+/// Private staging directory inside a newly created imported Instance.
+pub const IMPORTED_GAME_STAGE: &str = ".block-import-game";
+
 // This finite top-level allowlist prevents a custom gameDir from causing a
 // whole home folder, launcher installation, or unrelated private data to copy.
 const MINECRAFT_DATA_DIRECTORIES: &[&str] = &[
@@ -636,7 +639,7 @@ fn resolve_version(metadata_root: &Path, configured: Option<&str>) -> VersionMet
     }
 }
 
-fn is_known_main_class(main_class: &str) -> bool {
+pub(crate) fn is_known_main_class(main_class: &str) -> bool {
     matches!(
         main_class,
         "net.minecraft.client.main.Main"
@@ -648,7 +651,7 @@ fn is_known_main_class(main_class: &str) -> bool {
     )
 }
 
-fn detect_loader(json: &serde_json::Value, id: &str) -> Option<DetectedLoader> {
+pub(crate) fn detect_loader(json: &serde_json::Value, id: &str) -> Option<DetectedLoader> {
     let (from_id, base) = classify_version(id);
     if from_id.kind != LoaderKind::Vanilla {
         return Some(from_id);
@@ -730,7 +733,7 @@ fn split_maven_coordinate(name: &str) -> Option<(&str, &str, &str)> {
     Some((parts.next()?, parts.next()?, parts.next()?))
 }
 
-fn minecraft_version_from_id(id: &str) -> Option<String> {
+pub(crate) fn minecraft_version_from_id(id: &str) -> Option<String> {
     let (loader, base) = classify_version(id);
     if loader.kind != LoaderKind::Vanilla {
         base.filter(|value| looks_like_minecraft_version(value))
@@ -739,7 +742,7 @@ fn minecraft_version_from_id(id: &str) -> Option<String> {
     }
 }
 
-fn looks_like_minecraft_version(value: &str) -> bool {
+pub(crate) fn looks_like_minecraft_version(value: &str) -> bool {
     fn numeric(value: &str) -> bool {
         !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
     }
@@ -1095,7 +1098,7 @@ fn recognized_game_entry(name: &str, is_directory: bool) -> bool {
     }
 }
 
-fn is_excluded_entry(name: &str, is_directory: bool, top_level: bool) -> bool {
+pub(crate) fn is_excluded_entry(name: &str, is_directory: bool, top_level: bool) -> bool {
     let normalized = name.to_ascii_lowercase();
     let launcher_profile =
         normalized.starts_with("launcher_profiles") || normalized.starts_with("launcher_accounts");

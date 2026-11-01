@@ -282,6 +282,8 @@ async fn install_from(
                 sha1,
                 size,
                 url: artifact_url.into(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             },
             _ => tokio::select! { biased;
                 () = context.cancel.cancelled() => anyhow::bail!("Loader installation cancelled"),

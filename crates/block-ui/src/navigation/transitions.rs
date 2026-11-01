@@ -686,6 +686,15 @@ impl Block {
 
 impl ShellState {
     fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
+        let mut pack_import = self.pack_import.clone();
+        pack_import.scroll = frozen_scroll(&self.pack_import.scroll);
+        // The outgoing copy paints its own name editor so the live one keeps its
+        // draft, selection, composition and undo history.
+        let name = pack_import
+            .name
+            .as_ref()
+            .map(|field| frozen_input(field, cx));
+        pack_import.name = name;
         Self {
             home: self.home.clone(),
             connection: self.connection.clone(),
@@ -717,6 +726,7 @@ impl ShellState {
             wizard_entrance: self.wizard_entrance.clone(),
             first_run: self.first_run.clone(),
             import_games: self.import_games.clone(),
+            pack_import,
             chrome_dragging: false,
         }
     }
@@ -811,5 +821,51 @@ mod policy_tests {
         assert!(first_cx.update(|_, cx| cx.reduce_motion()));
         cancel(&first, &mut first_cx);
         assert_eq!(first_cx.update(|_, cx| cx.reduce_motion()), system_reduced);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use crate::{TextInput, test_support};
+    use gpui::{AppContext as _, TestAppContext};
+
+    /// An outgoing page owns an independent copy of the pack drawer's name
+    /// editor: it paints the value the drawer had when it started leaving, while
+    /// the live editor keeps its own draft.
+    #[gpui::test]
+    fn the_outgoing_copy_freezes_the_pack_instance_name(cx: &mut TestAppContext) {
+        let (view, cx) = test_support::window(cx, crate::tests::test_view);
+        let live = view.update(cx, |view, cx| {
+            let field = cx.new(|cx| TextInput::new("Packed world", "Packed world", cx));
+            view.shell.pack_import.name = Some(field.clone());
+            field
+        });
+        let frozen = view.update(cx, |view, cx| {
+            view.visual_snapshot(cx).shell.pack_import.name.clone()
+        });
+        assert!(frozen.is_some(), "the outgoing copy paints the name field");
+        let Some(frozen) = frozen else {
+            return;
+        };
+        assert_ne!(
+            frozen.entity_id(),
+            live.entity_id(),
+            "the outgoing copy is independent"
+        );
+        assert_eq!(
+            frozen.read_with(cx, |field, _| field.value()),
+            "Packed world"
+        );
+
+        live.update(cx, |field, cx| field.set_value("Renamed while leaving", cx));
+        assert_eq!(
+            frozen.read_with(cx, |field, _| field.value()),
+            "Packed world",
+            "a later edit does not change what is already leaving"
+        );
+        assert_eq!(
+            live.read_with(cx, |field, _| field.value()),
+            "Renamed while leaving"
+        );
     }
 }

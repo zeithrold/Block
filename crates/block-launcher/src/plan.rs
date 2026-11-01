@@ -177,6 +177,8 @@ fn plan_libraries(
                             sha1: artifact.sha1.clone(),
                             size: artifact.size,
                             url: artifact.url.clone(),
+                            sha512: None,
+                            alternate_urls: Vec::new(),
                         },
                         artifact
                             .path
@@ -232,6 +234,8 @@ fn plan_libraries(
                     sha1: artifact.sha1.clone(),
                     size: artifact.size,
                     url: artifact.url.clone(),
+                    sha512: None,
+                    alternate_urls: Vec::new(),
                 },
                 |replacement| replacement.resource.clone(),
             );
@@ -289,6 +293,8 @@ fn plan_assets(
         sha1: manifest.asset_index.sha1.clone(),
         size: manifest.asset_index.size,
         url: manifest.asset_index.url.clone(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     add_copy(
         &mut files.resources,
@@ -310,6 +316,8 @@ fn plan_assets(
                 &asset.hash[..2],
                 asset.hash
             ),
+            sha512: None,
+            alternate_urls: Vec::new(),
         };
         let path = format!("{asset_root}/objects/{}/{}", &asset.hash[..2], asset.hash);
         add_copy(
@@ -411,6 +419,8 @@ fn plan_command(
                 sha1: file.sha1.clone(),
                 size: file.size,
                 url: file.url.clone(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             },
             path.clone(),
             false,

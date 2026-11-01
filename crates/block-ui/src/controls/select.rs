@@ -3,12 +3,15 @@
     clippy::redundant_pub_crate,
     reason = "Selectors are internal to the product shell."
 )]
-use super::{Block, Form, Language, Tab, UiAction, design::Icon, shell::Surface};
-use block_launcher::catalog::{DataPolicy, ProfileColor, ProfileIcon};
+use super::{
+    Block, Form, Language, Tab, UiAction, browser::CollectionLoad, design::Icon, modpack_import,
+    scroll_area::ScrollAreaExt as _, shell::Surface,
+};
+use block_launcher::catalog::{DataPolicy, LoaderKind, ProfileColor, ProfileIcon};
 use gpui::{
     App, Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Pixels, Point, RenderOnce, StatefulInteractiveElement as _, Styled as _,
-    Window, div, point, px, rgb,
+    ParentElement as _, Pixels, Point, RenderOnce, ScrollHandle, StatefulInteractiveElement as _,
+    Styled as _, Window, div, point, px, rgb,
 };
 use std::{
     cell::Cell,
@@ -31,6 +34,12 @@ pub(super) enum ProductChoice {
     InstanceWindow,
     WizardRuntime,
     WizardWindow,
+    /// The exact Minecraft version of a plain archive's target.
+    PackTargetVersion,
+    /// The loader of a plain archive's target; Vanilla is one of the choices.
+    PackTargetLoader,
+    /// One build of the chosen loader for the chosen Minecraft version.
+    PackTargetBuild,
 }
 
 /// Presentation only: Base Select is the sole semantic/focus/keyboard root.
@@ -85,6 +94,9 @@ pub(super) struct SelectState<A> {
     pub menu: Option<MenuKind>,
     pub active: usize,
     pub focus: FocusHandle,
+    /// The options viewport. Long catalogs (Minecraft versions, loader builds)
+    /// scroll inside the popup instead of growing past it.
+    pub scroll: ScrollHandle,
     pub product: Option<ProductChoice>,
     identity: SelectIdentity,
     typeahead: String,
@@ -408,6 +420,83 @@ impl Block {
                     ),
                 ))
             }
+            ProductChoice::PackTargetVersion => {
+                let draft = self.shell.pack_import.draft.as_ref()?;
+                (!self.versions.is_empty()).then(|| {
+                    (
+                        "modpack.target.version_label",
+                        self.versions
+                            .iter()
+                            .map(|version| SelectChoice {
+                                label: version.clone(),
+                                selected: draft.version.as_deref() == Some(version.as_str()),
+                                action: UiAction::PackImport(
+                                    modpack_import::Action::SelectTargetVersion(version.clone()),
+                                ),
+                            })
+                            .collect(),
+                    )
+                })
+            }
+            ProductChoice::PackTargetLoader => {
+                let draft = self.shell.pack_import.draft.as_ref()?;
+                Some((
+                    "modpack.target.loader_label",
+                    [
+                        LoaderKind::Vanilla,
+                        LoaderKind::Fabric,
+                        LoaderKind::Quilt,
+                        LoaderKind::Forge,
+                        LoaderKind::NeoForge,
+                    ]
+                    .into_iter()
+                    .map(|kind| SelectChoice {
+                        label: modpack_import::loader_name(&kind, language),
+                        selected: draft.loader.as_ref() == Some(&kind),
+                        action: UiAction::PackImport(modpack_import::Action::SelectTargetLoader(
+                            kind,
+                        )),
+                    })
+                    .collect(),
+                ))
+            }
+            ProductChoice::PackTargetBuild => {
+                let draft = self.shell.pack_import.draft.as_ref()?;
+                let kind = draft
+                    .loader
+                    .clone()
+                    .filter(|kind| *kind != LoaderKind::Vanilla)?;
+                let version = draft.version.clone()?;
+                let catalog = draft
+                    .catalog
+                    .as_ref()
+                    .filter(|catalog| catalog.kind == kind && catalog.minecraft == version)?;
+                if !matches!(catalog.load, CollectionLoad::Ready) || catalog.builds.is_empty() {
+                    return None;
+                }
+                Some((
+                    "modpack.target.build_label",
+                    catalog
+                        .builds
+                        .iter()
+                        .map(|build| SelectChoice {
+                            label: if build.stable {
+                                build.version.clone()
+                            } else {
+                                tr!(
+                                    language,
+                                    "modpack.target.build_preview",
+                                    version = build.version
+                                )
+                            },
+                            selected: draft.build.as_deref() == Some(build.version.as_str()),
+                            action: UiAction::PackImport(
+                                modpack_import::Action::SelectTargetBuild(build.version.clone()),
+                            ),
+                        })
+                        .collect(),
+                ))
+            }
             _ => self.settings_choices(kind, cx),
         }
     }
@@ -476,7 +565,10 @@ impl Block {
             | ProductChoice::InstanceRuntime
             | ProductChoice::InstanceWindow
             | ProductChoice::WizardRuntime
-            | ProductChoice::WizardWindow => return None,
+            | ProductChoice::WizardWindow
+            | ProductChoice::PackTargetVersion
+            | ProductChoice::PackTargetLoader
+            | ProductChoice::PackTargetBuild => return None,
         })
     }
 
@@ -597,6 +689,10 @@ impl Block {
             .position(|choice| choice.selected)
             .unwrap_or(0);
         let focus = cx.focus_handle().tab_stop(true);
+        let scroll = ScrollHandle::new();
+        if !choices.is_empty() {
+            scroll.scroll_to_item(active);
+        }
         self.shell.surfaces.open(
             Surface::Select(SelectState {
                 title,
@@ -604,6 +700,7 @@ impl Block {
                 menu,
                 active,
                 focus: focus.clone(),
+                scroll,
                 product,
                 identity,
                 typeahead: String::new(),
@@ -618,6 +715,26 @@ impl Block {
             cx,
         );
         focus.focus(window, cx);
+        let owner = cx.weak_entity();
+        // The first callback precedes the initial layout. The second sees the
+        // scroll viewport's bounds, so the selected item can be revealed.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| {
+                let _ = owner.update(cx, |view, cx| {
+                    let Some(layer) = view.shell.surfaces.top_mut() else {
+                        return;
+                    };
+                    let Surface::Select(state) = &mut layer.kind else {
+                        return;
+                    };
+                    if state.focus == focus {
+                        state.scroll.scroll_to_item(state.active);
+                        window.refresh();
+                        cx.notify();
+                    }
+                });
+            });
+        });
     }
 
     pub(super) fn open_appearance_select(
@@ -798,6 +915,7 @@ impl Block {
                 }
                 if let Some(index) = state.typeahead(text, cx.background_executor().now()) {
                     state.active = index;
+                    state.scroll.scroll_to_item(index);
                 }
                 state.focus.focus(window, cx);
                 self.motion_dirty = true;
@@ -806,6 +924,7 @@ impl Block {
             }
         };
         state.active = inspection;
+        state.scroll.scroll_to_item(inspection);
         state.typeahead.clear();
         state.typed_at = None;
         state.focus.focus(window, cx);
@@ -853,7 +972,7 @@ impl Block {
         &self,
         state: &SelectState<UiAction>,
         cx: &Context<'_, Self>,
-    ) -> gpui::Div {
+    ) -> impl IntoElement + use<> {
         let revision = self.shell.surfaces.layers().find_map(|layer| {
             matches!(&layer.kind, Surface::Select(current) if current.focus == state.focus)
                 .then_some(layer.revision)
@@ -862,7 +981,9 @@ impl Block {
         if state.menu == Some(MenuKind::App) {
             content = content.child(self.app_menu_header());
         }
-        content.children(state.choices.iter().enumerate().map(|(index, choice)| {
+        // Version and loader-build catalogs are longer than the popup: the
+        // options scroll inside it, and the active row stays reachable.
+        let options = state.choices.iter().enumerate().map(|(index, choice)| {
             let disabled = self.busy && !Self::available_while_busy(&choice.action);
             let control_state = super::components::ControlState {
                 disabled,
@@ -937,7 +1058,19 @@ impl Block {
                     section_start.then(|| div().h(px(1.)).my_1().bg(rgb(self.palette.border))),
                 )
                 .child(option)
-        }))
+        });
+        let content = content
+            .id("select-options")
+            .max_h(px(624.))
+            .children(options);
+        if state.menu.is_some() {
+            content
+                .scroll_area(&state.scroll, "select.options", self.palette, false)
+                .tab_index(-1)
+                .tab_stop(false)
+        } else {
+            content.scroll_list_area(&state.scroll, "select.options", self.palette)
+        }
     }
 }
 

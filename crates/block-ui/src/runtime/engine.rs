@@ -45,6 +45,18 @@ pub(super) struct ProfileDraftValues {
     pub server: block_launcher::catalog::ServerPreferences,
 }
 
+#[derive(Debug)]
+pub(super) struct PackInstallRequest {
+    pub request: uuid::Uuid,
+    pub instance_id: String,
+    pub instance_name: String,
+    pub source: PathBuf,
+    pub inspection: block_launcher::modpack::PackInspection,
+    pub selection: block_launcher::modpack::PackSelection,
+    pub defaults: GameDefaults,
+    pub cancel: CancellationToken,
+}
+
 impl ProfileDraftValues {
     fn configuration(self) -> anyhow::Result<ProfileConfiguration> {
         self.defaults.validate()?;
@@ -89,6 +101,10 @@ pub(crate) enum Message {
         operation: u64,
         message: Box<Self>,
     },
+    ForPack {
+        request: uuid::Uuid,
+        message: Box<Self>,
+    },
     Versions(Result<Vec<VersionEntry>, String>),
     LoaderVersions {
         request: uuid::Uuid,
@@ -105,6 +121,27 @@ pub(crate) enum Message {
     },
     GameImportFinished {
         request: uuid::Uuid,
+    },
+    PackInspected {
+        request: uuid::Uuid,
+        source: PathBuf,
+        result: Result<
+            (
+                block_launcher::modpack::PackInspection,
+                block_launcher::modpack::PackSelection,
+            ),
+            String,
+        >,
+    },
+    PackCreated {
+        request: uuid::Uuid,
+        instance: String,
+        name: String,
+        profile: String,
+    },
+    PackFinished {
+        request: uuid::Uuid,
+        result: Result<(), String>,
     },
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
@@ -145,17 +182,23 @@ pub(crate) enum Message {
 
 /// A task captures its identity when it starts. Late results cannot adopt the
 /// identity of a later task that happens to use the same channel.
+#[derive(Clone, Copy, Debug)]
+enum EventScope {
+    Operation(u64),
+    Pack(uuid::Uuid),
+}
+
 #[derive(Clone, Debug)]
 struct EventSender {
     sender: Sender<Message>,
-    operation: Option<u64>,
+    scope: Option<EventScope>,
 }
 
 impl From<Sender<Message>> for EventSender {
     fn from(sender: Sender<Message>) -> Self {
         Self {
             sender,
-            operation: None,
+            scope: None,
         }
     }
 }
@@ -169,9 +212,13 @@ impl EventSender {
         ) {
             return message;
         }
-        match self.operation {
-            Some(operation) => Message::ForOperation {
+        match self.scope {
+            Some(EventScope::Operation(operation)) => Message::ForOperation {
                 operation,
+                message: Box::new(message),
+            },
+            Some(EventScope::Pack(request)) => Message::ForPack {
+                request,
                 message: Box::new(message),
             },
             None => message,
@@ -199,7 +246,21 @@ impl EventSender {
     fn unscoped(&self) -> Self {
         Self {
             sender: self.sender.clone(),
-            operation: None,
+            scope: None,
+        }
+    }
+
+    fn for_pack(&self, request: uuid::Uuid) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            scope: Some(EventScope::Pack(request)),
+        }
+    }
+
+    fn operation(&self) -> Option<u64> {
+        match self.scope {
+            Some(EventScope::Operation(operation)) => Some(operation),
+            Some(EventScope::Pack(_)) | None => None,
         }
     }
 }
@@ -259,7 +320,7 @@ impl Engine {
     }
 
     pub(super) const fn begin_operation(&mut self, operation: u64) {
-        self.sender.operation = Some(operation);
+        self.sender.scope = Some(EventScope::Operation(operation));
     }
 
     fn watch_sessions(&self) {
@@ -302,6 +363,110 @@ impl Engine {
                     .unwrap_or_default();
             let _ = sender
                 .send(Message::GameDiscovery { request, report })
+                .await;
+        });
+    }
+
+    pub(super) fn inspect_pack(
+        &self,
+        request: uuid::Uuid,
+        source: PathBuf,
+        instance: Option<String>,
+    ) {
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        self.runtime.spawn(async move {
+            let selected = source.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let library = Library::new(root, Arc::new(|_| {}), Arc::new(|_| {}))?;
+                library.inspect_pack(&selected, instance.as_deref())
+            })
+            .await
+            .map_err(|error| format!("Pack inspection failed: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
+            let _ = sender
+                .send(Message::PackInspected {
+                    request,
+                    source,
+                    result,
+                })
+                .await;
+        });
+    }
+
+    pub(super) fn install_pack(&self, job: PackInstallRequest) {
+        let PackInstallRequest {
+            request,
+            instance_id,
+            instance_name,
+            source,
+            inspection,
+            selection,
+            defaults,
+            cancel,
+        } = job;
+        let root = self.root.clone();
+        let sender = self.sender.unscoped();
+        let events = sender.for_pack(request);
+        self.runtime.spawn(async move {
+            let result = async {
+                let library = library(root.clone(), &events).await?;
+                let snapshot = library.catalog().snapshot()?;
+                let existing = snapshot
+                    .instances
+                    .iter()
+                    .find(|item| item.id == instance_id);
+                let (instance, profile) = if let Some(existing) = existing {
+                    ensure!(existing.pack.is_some(), "instance has no pack");
+                    let profile = snapshot
+                        .profiles
+                        .iter()
+                        .find(|profile| profile.instance_id == existing.id)
+                        .context("pack profile is missing")?;
+                    (existing.clone(), profile.clone())
+                } else {
+                    let config = ProfileDraftValues {
+                        name: instance_name,
+                        defaults,
+                        appearance: ProfileAppearance::default(),
+                        target_id: None,
+                        server: block_launcher::catalog::ServerPreferences::default(),
+                    }
+                    .configuration()?;
+                    let worker = library.clone();
+                    let worker_source = source.clone();
+                    let worker_id = instance_id.clone();
+                    let worker_cancel = cancel.clone();
+                    tokio::task::spawn_blocking(move || {
+                        worker.create_pack(
+                            &worker_id,
+                            &worker_source,
+                            &inspection,
+                            &selection,
+                            config,
+                            &worker_cancel,
+                        )
+                    })
+                    .await??
+                };
+                let _ = sender
+                    .send(Message::PackCreated {
+                        request,
+                        instance: instance.id.clone(),
+                        name: instance.name,
+                        profile: profile.id,
+                    })
+                    .await;
+                send_catalog(&root, &sender).await;
+                library.install_pack(&instance.id, &source, &cancel).await
+            }
+            .await;
+            send_catalog(&root, &sender).await;
+            let _ = sender
+                .send(Message::PackFinished {
+                    request,
+                    result: result.map_err(|error| format!("{error:#}")),
+                })
                 .await;
         });
     }
@@ -1333,7 +1498,7 @@ impl Engine {
                 Ok(record) => {
                     let _ = sender
                         .send(Message::SessionAccepted {
-                            operation: sender.operation,
+                            operation: sender.operation(),
                             record: Box::new(record),
                         })
                         .await;
@@ -1721,26 +1886,30 @@ fn import_and_save_candidate(
         )
     })?;
     let destination = parent.join(uuid::Uuid::new_v4().to_string());
-    let copied = block_launcher::game_import::copy_candidate(&candidate, &destination, cancel)?;
+    std::fs::create_dir(&destination)?;
+    let stage = destination.join(block_launcher::game_import::IMPORTED_GAME_STAGE);
+    if let Err(error) = block_launcher::game_import::copy_candidate(&candidate, &stage, cancel) {
+        let _ = std::fs::remove_dir_all(&destination);
+        return Err(error.into());
+    }
     if cancel.is_cancelled() {
-        let _ = std::fs::remove_dir_all(&copied.target_directory);
+        let _ = std::fs::remove_dir_all(&destination);
         anyhow::bail!("Import cancelled");
     }
     let saved = (|| {
         let catalog = Catalog::open(root)?;
-        catalog.create_instance_with_components(
+        catalog.create_imported_instance(
             candidate.name,
             minecraft_version,
-            Some(copied.target_directory.clone()),
+            destination.clone(),
             loader,
-            None,
             configuration,
         )
     })();
     if saved.is_err() {
         // The target is a fresh UUID path published by this operation. Never
         // remove an existing destination or any source data on rollback.
-        let _ = std::fs::remove_dir_all(&copied.target_directory);
+        let _ = std::fs::remove_dir_all(&destination);
     }
     saved
 }
@@ -2185,6 +2354,44 @@ mod tests {
                 if text.text(crate::Language::English) == "Running · Minecraft PID 42"
                     && text.text(crate::Language::Japanese) == "実行中 · Minecraft PID 42"
         ));
+    }
+
+    #[test]
+    fn pack_execution_events_keep_their_request_identity() -> anyhow::Result<()> {
+        use block_launcher::executor::ExecutionEvent;
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+        let request = uuid::Uuid::new_v4();
+        let sender = super::EventSender::from(sender).for_pack(request);
+        super::forward_event(
+            &sender,
+            ExecutionEvent::Stage {
+                name: "pack stage".into(),
+            },
+        );
+        super::forward_event(
+            &sender,
+            ExecutionEvent::CaptureFailed {
+                message: String::from("pack log"),
+            },
+        );
+        for expected in ["pack stage", "pack log"] {
+            let super::Message::ForPack {
+                request: actual,
+                message,
+            } = receiver.try_recv()?
+            else {
+                anyhow::bail!("pack event lost its request identity");
+            };
+            assert_eq!(actual, request);
+            match *message {
+                super::Message::Status(text) => {
+                    assert_eq!(text.text(crate::Language::English), expected);
+                }
+                super::Message::Log(line) => assert_eq!(line, expected),
+                _ => anyhow::bail!("unexpected forwarded pack event"),
+            }
+        }
+        Ok(())
     }
 
     #[test]
@@ -2890,6 +3097,13 @@ mod tests {
                 instance.directory.parent(),
                 Some(destination_parent.canonicalize()?.as_path())
             );
+            let (_, profile, _) = state.selection(&profile_id)?;
+            assert_eq!(
+                profile.data_policy,
+                block_launcher::catalog::DataPolicy::Isolated
+            );
+            let game = block_launcher::catalog::GameDirectoryGuard::for_profile(instance, profile)?;
+            assert_eq!(game.directory(), profile.game_directory(instance)?);
             for path in [
                 "options.txt",
                 "saves/Synthetic World/level.dat",
@@ -2897,7 +3111,7 @@ mod tests {
             ] {
                 assert_eq!(std::fs::read(source.join(path))?, candidate_id.as_bytes());
                 assert_eq!(
-                    std::fs::read(instance.directory.join(path))?,
+                    std::fs::read(game.directory().join(path))?,
                     candidate_id.as_bytes()
                 );
             }

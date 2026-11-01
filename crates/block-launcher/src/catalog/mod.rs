@@ -55,6 +55,24 @@ pub struct Instance {
     pub targets: Vec<LaunchTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<InstanceSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<PackAttachment>,
+}
+
+/// Pack installation state applies to the entire Instance, independently of
+/// individual loader installation states.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackAttachment {
+    pub target_id: String,
+    pub status: PackStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackStatus {
+    Pending,
+    Ready,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,10 +355,14 @@ fn validate_id(value: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_name(value: &str) -> anyhow::Result<()> {
+/// Validate a display name used by an Instance or Profile.
+///
+/// # Errors
+/// Rejects empty names, control characters and names over 160 UTF-8 bytes.
+pub fn validate_name(value: &str) -> anyhow::Result<()> {
     ensure!(
         !value.trim().is_empty() && value.len() <= 160 && !value.chars().any(char::is_control),
-        "name must contain1..160 printable characters"
+        "name must not be empty, exceed 160 UTF-8 bytes, or contain control characters"
     );
     Ok(())
 }

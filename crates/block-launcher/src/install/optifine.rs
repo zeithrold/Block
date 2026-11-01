@@ -290,6 +290,8 @@ fn inspect_bytes(bytes: &[u8]) -> anyhow::Result<OptiFineJar> {
             size: bytes.len() as u64,
             url: format!("block-import:{sha1}"),
             sha1,
+            sha512: None,
+            alternate_urls: Vec::new(),
         },
     })
 }
@@ -313,6 +315,8 @@ fn publish(bytes: &[u8], context: &ResolveContext) -> anyhow::Result<Resource> {
         size: bytes.len() as u64,
         url: format!("block-import:{sha1}"),
         sha1,
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     let destination = context.store.object_path(&resource.sha1)?;
     let parent = destination
@@ -451,6 +455,8 @@ pub async fn patch(
                 sha1: base.downloads.client.sha1.clone(),
                 size: base.downloads.client.size,
                 url: base.downloads.client.url.clone(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             },
             &context.cancel,
         )
@@ -794,6 +800,8 @@ mod tests {
             sha1: format!("{:x}", Sha1::digest(bytes)),
             size: bytes.len() as u64,
             url: "block-import:synthetic".into(),
+            sha512: None,
+            alternate_urls: Vec::new(),
         };
         let game = root.path().join("test-game");
         std::fs::create_dir_all(&game)?;

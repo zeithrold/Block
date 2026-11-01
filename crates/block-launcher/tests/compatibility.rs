@@ -97,6 +97,8 @@ fn offline_context(root: &Path, manifest: &VersionManifest) -> anyhow::Result<Re
                 sha1: sha1.into(),
                 size,
                 url,
+                sha512: None,
+                alternate_urls: Vec::new(),
             })?,
         )?;
     }
@@ -200,6 +202,8 @@ fn seed_maven(root: &Path, artifacts: &[(&str, &str)]) -> anyhow::Result<()> {
                 sha1: (*sha1).into(),
                 size: 1,
                 url: (*url).into(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             })?,
         )?;
     }

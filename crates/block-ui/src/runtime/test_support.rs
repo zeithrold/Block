@@ -18,6 +18,30 @@ use block_launcher::{
 };
 use gpui::AppContext as _;
 
+/// A synthetic Modrinth archive with one optional file and no real mod content.
+pub(super) fn write_modpack(path: &std::path::Path) -> anyhow::Result<()> {
+    const ZIP_HEX: &str = "504b0304140000000800000021588bc5782127010000b6010000130000006d6f6472696e74682e696e6465782e6a736f6e5550cb6e84300cfc952a67c4c6793afcc19eabf652edc1244ea1650101da4a5df1ef0d5a556ae593673c637bee224fcb95b6575ed67e1a45039578a72b8b465cfb91e342791395181fd0cbf969a6f85980db63fe9c0a0aa54f3cf398788c3dafa2b9ff1117be56b206b15722f7c341bfddc54c5b77ec98d27a9ae6ad58d1507fd052ac3a5abb87c9da11942183e45b440c0cd62867a5722e8221c0885ea241cc04c11e671485055534d6a3c2846c2c688f6c9d61cd29c564a56c7522a01c0339297534ca1b155a2d432297b2e46cb2cc11988ccd21648b21b3493ab52d2a8596b556927c2c8dca5e3b2d351bef9d54d0b6111c4549faf7dbe7febb048725a0e96b1c264ac7fba2dbb6b9399d40f95a968226fc0fe152091e6f470471e8793c42fce5c5be5ff61f504b01021403140000000800000021588bc5782127010000b60100001300000000000000000000008001000000006d6f6472696e74682e696e6465782e6a736f6e504b0506000000000100010041000000580100000000";
+    write_zip_hex(path, ZIP_HEX)
+}
+
+/// A plain Minecraft archive with no target metadata.
+pub(super) fn write_plain_pack(path: &std::path::Path) -> anyhow::Result<()> {
+    const ZIP_HEX: &str = "504b0304140000000800000021581d2541e814000000120000000b0000006f7074696f6e732e7478742baecc2bc9482dc94c56c82f28c9cccf2be60200504b01021403140000000800000021581d2541e814000000120000000b00000000000000000000008001000000006f7074696f6e732e747874504b05060000000001000100390000003d0000000000";
+    write_zip_hex(path, ZIP_HEX)
+}
+
+fn write_zip_hex(path: &std::path::Path, hex: &str) -> anyhow::Result<()> {
+    let bytes = hex
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|digits| Ok(u8::from_str_radix(std::str::from_utf8(digits)?, 16)?))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
 /// Mount the same Base Root used by product windows, retaining the application
 /// entity for assertions. Tab navigation and overlay plugins therefore exercise
 /// the production focus route rather than a test-only shortcut.
@@ -83,6 +107,7 @@ pub(super) fn ready_snapshot() -> Snapshot {
                 optifine_mod: None,
             }],
             settings: None,
+            pack: None,
         }],
         profiles: vec![Profile {
             id: "profile-a".into(),

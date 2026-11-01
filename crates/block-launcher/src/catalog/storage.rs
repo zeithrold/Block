@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     DataPolicy, InstallStatus, Instance, InstanceConfiguration, InstanceSettings, LaunchTarget,
-    LoaderKind, Profile, ProfileConfiguration, ProfileInheritance, ProfileMode, Snapshot,
-    validate_directory, validate_id, validate_name,
+    LoaderKind, PackAttachment, PackStatus, Profile, ProfileConfiguration, ProfileInheritance,
+    ProfileMode, Snapshot, validate_directory, validate_id, validate_name,
 };
 use crate::recipe::{Compatibility, RuntimeSelection};
 
@@ -24,6 +24,16 @@ pub struct Catalog {
 struct Document {
     schema_version: u32,
     snapshot: Snapshot,
+}
+
+enum InitialInstance {
+    Empty {
+        optifine: Option<crate::install::optifine::OptiFineJar>,
+    },
+    Imported,
+    Pack {
+        id: String,
+    },
 }
 
 const SESSION_MARKER: &str = ".block-session.json";
@@ -388,7 +398,94 @@ impl Catalog {
         optifine: Option<crate::install::optifine::OptiFineJar>,
         configuration: ProfileConfiguration,
     ) -> anyhow::Result<(Instance, Profile)> {
+        self.create_instance_inner(
+            name,
+            minecraft_version,
+            directory,
+            loader,
+            configuration,
+            InitialInstance::Empty { optifine },
+        )
+    }
+
+    /// Commit a copied game into its new Profile's actual game directory.
+    ///
+    /// The caller creates the Instance directory and puts its independent copy
+    /// in [`crate::game_import::IMPORTED_GAME_STAGE`] before calling this method.
+    /// No source installation is moved or modified.
+    ///
+    /// # Errors
+    /// Rejects invalid settings, a missing staged copy, or a failed catalog commit.
+    pub fn create_imported_instance(
+        &self,
+        name: String,
+        minecraft_version: String,
+        directory: PathBuf,
+        loader: Option<(LoaderKind, String)>,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<(Instance, Profile)> {
+        self.create_instance_inner(
+            name,
+            minecraft_version,
+            Some(directory),
+            loader,
+            configuration,
+            InitialInstance::Imported,
+        )
+    }
+
+    /// Commit a staged pack and its first Profile under a stable operation ID.
+    ///
+    /// # Errors
+    /// Rejects invalid settings, a reused ID with different identity, or
+    /// overlapping installation directories.
+    pub fn create_pack_instance(
+        &self,
+        id: String,
+        name: String,
+        minecraft_version: String,
+        directory: PathBuf,
+        loader: Option<(LoaderKind, String)>,
+        configuration: ProfileConfiguration,
+    ) -> anyhow::Result<(Instance, Profile)> {
+        validate_id(&id)?;
+        let descriptor = crate::modpack::descriptor::load(&directory)?;
+        ensure!(
+            descriptor.minecraft_version == minecraft_version && descriptor.loader == loader,
+            "staged pack metadata does not match the requested instance"
+        );
+        let declared_target = loader.as_ref().map_or_else(
+            || "vanilla".to_owned(),
+            |(kind, version)| format!("{}-{version}", kind.name().to_lowercase()),
+        );
+        ensure!(
+            configuration.target_id == declared_target,
+            "pack target does not match its declared loader"
+        );
+        self.create_instance_inner(
+            name,
+            minecraft_version,
+            Some(directory),
+            loader,
+            configuration,
+            InitialInstance::Pack { id },
+        )
+    }
+
+    fn create_instance_inner(
+        &self,
+        name: String,
+        minecraft_version: String,
+        directory: Option<PathBuf>,
+        loader: Option<(LoaderKind, String)>,
+        configuration: ProfileConfiguration,
+        initial: InitialInstance,
+    ) -> anyhow::Result<(Instance, Profile)> {
         let storage = crate::storage::acquire(&self.root)?;
+        let optifine = match &initial {
+            InitialInstance::Empty { optifine } => optifine.clone(),
+            InitialInstance::Imported | InitialInstance::Pack { .. } => None,
+        };
         validate_name(&name)?;
         ensure!(
             !minecraft_version.is_empty()
@@ -419,7 +516,12 @@ impl Catalog {
                 loader.as_ref().map(|(_, version)| version.as_str()),
             )?;
         }
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = match &initial {
+            InitialInstance::Pack { id } => id.clone(),
+            InitialInstance::Empty { .. } | InitialInstance::Imported => {
+                uuid::Uuid::new_v4().to_string()
+            }
+        };
         let directory = directory.unwrap_or_else(|| storage.library.join(&id));
         validate_directory(&directory)?;
         let mut instance = Instance {
@@ -437,6 +539,10 @@ impl Catalog {
                 optifine_mod: None,
             }],
             settings: None,
+            pack: matches!(initial, InitialInstance::Pack { .. }).then(|| PackAttachment {
+                target_id: configuration.target_id.clone(),
+                status: PackStatus::Pending,
+            }),
         };
         if let Some((kind, version)) = loader {
             let prefix = match kind {
@@ -464,6 +570,26 @@ impl Catalog {
         let mut prepared = PreparedInstanceDirectory::new(&instance.directory)?;
         instance.directory = instance.directory.canonicalize()?;
         let created = self.transaction(true, |state| {
+            if matches!(initial, InitialInstance::Pack { .. })
+                && let Some(existing) = state.instances.iter().find(|item| item.id == instance.id)
+            {
+                ensure!(
+                    existing.directory == instance.directory
+                        && existing.name == instance.name
+                        && existing.minecraft_version == instance.minecraft_version
+                        && existing.pack.as_ref().map(|pack| &pack.target_id)
+                            == instance.pack.as_ref().map(|pack| &pack.target_id),
+                    "pack operation ID already belongs to another instance"
+                );
+                let existing_profile = state
+                    .profiles
+                    .iter()
+                    .find(|item| {
+                        item.instance_id == existing.id && item.target_id == profile.target_id
+                    })
+                    .context("pack operation has no matching profile")?;
+                return Ok((existing.clone(), existing_profile.clone()));
+            }
             if state.profile_mode == ProfileMode::Bundled {
                 profile.name.clone_from(&instance.name);
             }
@@ -475,6 +601,22 @@ impl Catalog {
                         || i.directory.starts_with(&instance.directory)),
                 "installation directory overlaps another instance"
             );
+            if matches!(initial, InitialInstance::Imported) {
+                let stage = instance
+                    .directory
+                    .join(crate::game_import::IMPORTED_GAME_STAGE);
+                let metadata = fs::symlink_metadata(&stage)
+                    .context("the copied game staging directory is missing")?;
+                ensure!(
+                    metadata.is_dir() && !metadata.file_type().is_symlink(),
+                    "the copied game staging path is not a directory"
+                );
+                let game = profile.game_directory(&instance)?;
+                crate::executor::ensure_write_path(&instance.directory, &game)?;
+                fs::create_dir_all(game.parent().context("game directory has no parent")?)?;
+                ensure!(!game.exists(), "the game directory already exists");
+                fs::rename(&stage, &game)?;
+            }
             state.instances.push(instance.clone());
             state.profiles.push(profile.clone());
             Ok((instance, profile))
@@ -698,6 +840,40 @@ impl Catalog {
         })
     }
 
+    pub(crate) fn finish_pack_install(
+        &self,
+        instance_id: &str,
+        target: &LaunchTarget,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            target.status == InstallStatus::Ready,
+            "pack target is not ready"
+        );
+        self.transaction(true, |state| {
+            let instance = state
+                .instances
+                .iter_mut()
+                .find(|item| item.id == instance_id)
+                .context("installation no longer exists")?;
+            let pack = instance.pack.as_mut().context("instance has no pack")?;
+            ensure!(pack.target_id == target.id, "pack target does not match");
+            let existing = instance
+                .targets
+                .iter_mut()
+                .find(|item| item.id == target.id)
+                .context("pack target is missing")?;
+            ensure!(
+                existing.kind == target.kind
+                    && existing.loader_version == target.loader_version
+                    && existing.optifine == target.optifine,
+                "cannot change installed target identity"
+            );
+            *existing = target.clone();
+            pack.status = PackStatus::Ready;
+            Ok(())
+        })
+    }
+
     fn transaction<T>(
         &self,
         write: bool,
@@ -909,6 +1085,12 @@ fn validate_snapshot(state: &Snapshot) -> anyhow::Result<()> {
                 "invalid launch target ID"
             );
             ensure!(targets.insert(&target.id), "duplicate launch target ID");
+        }
+        if let Some(pack) = &instance.pack {
+            ensure!(
+                targets.contains(&pack.target_id),
+                "pack launch target is missing"
+            );
         }
     }
     let mut profile_ids = std::collections::BTreeSet::new();

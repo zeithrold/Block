@@ -113,6 +113,8 @@ fn resource(url: &str) -> Resource {
         url: url.into(),
         sha1: format!("{:x}", Sha1::digest(b"fixture payload")),
         size: 15,
+        sha512: None,
+        alternate_urls: Vec::new(),
     }
 }
 

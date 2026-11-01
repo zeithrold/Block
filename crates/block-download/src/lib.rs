@@ -1,7 +1,7 @@
 //! Streaming, content-addressed downloads with atomic verified publication.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, btree_map::Entry},
     fmt,
     fs::File,
     io::Read as _,
@@ -14,13 +14,17 @@ use anyhow::{Context as _, bail, ensure};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as _, Sha1};
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 /// Default size bound for SHA-256 artifacts downloaded by the generic store API.
 const MAX_SHA256_ARTIFACT_SIZE: u64 = 16 * 1024 * 1024;
+
+/// URL marker for an object already imported from a user-selected local file.
+/// It names no fetchable source, so a missing copy must be re-imported.
+const IMPORT_URL_PREFIX: &str = "block-import:";
 
 /// Explicit proxy behavior for all HTTP requests made by a [`Store`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,13 +152,93 @@ impl RateLimiter {
     }
 }
 
-/// An upstream-verified object. SHA-1 is mandated by Minecraft metadata.
+/// An upstream-verified object. SHA-1 is mandated by Minecraft metadata; the
+/// optional SHA-512 is a stronger check declared by some sources.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
     pub sha1: String,
     pub size: u64,
     pub url: String,
+    /// Additional checksum to verify on cached and freshly transferred objects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha512: Option<String>,
+    /// Fallback sources tried in declared order after [`Self::url`] fails.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternate_urls: Vec<String>,
+}
+
+impl Resource {
+    /// Declared sources in attempt order, without duplicates or blank entries.
+    fn urls(&self) -> Vec<&str> {
+        let mut urls: Vec<&str> = Vec::new();
+        for url in std::iter::once(&self.url).chain(&self.alternate_urls) {
+            if !url.is_empty() && !urls.contains(&url.as_str()) {
+                urls.push(url);
+            }
+        }
+        urls
+    }
+
+    /// True when any declared source is a local import rather than a fetchable URL.
+    fn has_import_source(&self) -> bool {
+        self.urls()
+            .iter()
+            .any(|url| url.starts_with(IMPORT_URL_PREFIX))
+    }
+
+    /// Reject malformed declared digests before any cache or network use.
+    fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            is_lowercase_hex(&self.sha1, 40),
+            "invalid SHA-1: {}",
+            self.sha1
+        );
+        if let Some(sha512) = &self.sha512 {
+            ensure!(is_lowercase_hex(sha512, 128), "invalid SHA-512: {sha512}");
+        }
+        Ok(())
+    }
+}
+
+/// Accumulates every digest declaration of one object, for cached copies and
+/// for fresh transfers alike, so both paths accept exactly the same content.
+struct ObjectDigests {
+    sha1: Sha1,
+    sha512: Option<Sha512>,
+    size: u64,
+}
+
+impl ObjectDigests {
+    fn new(expected: &Resource) -> Self {
+        Self {
+            sha1: Sha1::new(),
+            sha512: expected.sha512.as_ref().map(|_| Sha512::new()),
+            size: 0,
+        }
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        self.size += bytes.len() as u64;
+        self.sha1.update(bytes);
+        if let Some(sha512) = &mut self.sha512 {
+            sha512.update(bytes);
+        }
+    }
+
+    fn matches(self, expected: &Resource) -> bool {
+        let sha512 = self.sha512.map(|hasher| format!("{:x}", hasher.finalize()));
+        self.size == expected.size
+            && format!("{:x}", self.sha1.finalize()) == expected.sha1
+            && sha512.as_deref() == expected.sha512.as_deref()
+    }
+}
+
+fn is_lowercase_hex(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +265,11 @@ pub enum DownloadEvent {
     },
     Retry {
         sha1: String,
+        /// Always empty: source URLs may embed temporary signatures, so they
+        /// never leave the store through an event.
         url: String,
+        /// Monotonic count of the retries and source changes of this object, so
+        /// observers can restart current-file progress without ordering gaps.
         attempt: u32,
     },
 }
@@ -369,6 +457,8 @@ impl Store {
             sha1: sha1.into(),
             size,
             url: url.into(),
+            sha512: None,
+            alternate_urls: Vec::new(),
         };
         let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
         std::io::Write::write_all(&mut temporary, &serde_json::to_vec(&resource)?)?;
@@ -381,13 +471,7 @@ impl Store {
     /// # Errors
     /// Fails if the digest is not a lowercase SHA-1 value.
     pub fn object_path(&self, sha1: &str) -> anyhow::Result<PathBuf> {
-        ensure!(
-            sha1.len() == 40
-                && sha1
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-            "invalid SHA-1: {sha1}"
-        );
+        ensure!(is_lowercase_hex(sha1, 40), "invalid SHA-1: {sha1}");
         Ok(self.root.join("objects").join(&sha1[..2]).join(sha1))
     }
 
@@ -396,13 +480,7 @@ impl Store {
     /// # Errors
     /// Fails if the digest is not a lowercase SHA-256 value.
     pub fn sha256_object_path(&self, digest: &str) -> anyhow::Result<PathBuf> {
-        ensure!(
-            digest.len() == 64
-                && digest
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "invalid SHA-256 digest"
-        );
+        ensure!(is_lowercase_hex(digest, 64), "invalid SHA-256 digest");
         Ok(self
             .root
             .join("objects-sha256")
@@ -513,26 +591,60 @@ impl Store {
 
     /// Download unique objects with a bounded number of in-flight futures.
     ///
+    /// Objects are grouped by SHA-1. Duplicates must declare one size and one
+    /// SHA-512; a declaration carrying SHA-512 is retained, and their sources
+    /// are combined in declaration order.
+    ///
     /// # Errors
-    /// Fails on conflicting metadata, download/integrity failures, or cancellation.
+    /// Fails on malformed digests, conflicting metadata, download/integrity
+    /// failures, or cancellation.
     pub async fn fetch_all(
         &self,
         resources: &[Resource],
         cancel: &CancellationToken,
     ) -> anyhow::Result<()> {
-        let mut unique = BTreeMap::new();
+        let mut unique: BTreeMap<&str, Resource> = BTreeMap::new();
         for resource in resources {
-            if let Some(previous) = unique.insert(&resource.sha1, resource) {
-                ensure!(
-                    previous.size == resource.size,
-                    "conflicting sizes for {}",
-                    resource.sha1
-                );
+            resource.validate()?;
+            match unique.entry(&resource.sha1) {
+                Entry::Vacant(slot) => {
+                    slot.insert(resource.clone());
+                }
+                Entry::Occupied(mut slot) => {
+                    let merged = slot.get_mut();
+                    ensure!(
+                        merged.size == resource.size,
+                        "conflicting sizes for {}",
+                        resource.sha1
+                    );
+                    match (&merged.sha512, &resource.sha512) {
+                        (Some(known), Some(other)) if known != other => {
+                            bail!("conflicting SHA-512 for {}", resource.sha1)
+                        }
+                        (None, Some(stronger)) => merged.sha512 = Some(stronger.clone()),
+                        _ => {}
+                    }
+                    let mut urls: Vec<String> =
+                        merged.urls().into_iter().map(str::to_owned).collect();
+                    for url in resource.urls() {
+                        if !urls.iter().any(|known| known.as_str() == url) {
+                            urls.push(url.to_owned());
+                        }
+                    }
+                    let mut urls = urls.into_iter();
+                    if let Some(primary) = urls.next() {
+                        merged.url = primary;
+                    }
+                    merged.alternate_urls = urls.collect();
+                }
             }
         }
-        let resources: Vec<Resource> = unique.into_values().cloned().collect();
-        futures_util::stream::iter(resources)
-            .map(|resource| async move { self.fetch(&resource, cancel).await })
+        futures_util::stream::iter(unique.into_values())
+            .map(|resource| async move {
+                self.fetch(&resource, cancel)
+                    .await
+                    .with_context(|| format!("failed to download {}", resource.sha1))
+            })
             .buffer_unordered(self.options.max_concurrent)
             .try_collect::<Vec<_>>()
             .await?;
@@ -540,15 +652,22 @@ impl Store {
     }
 
     /// Download and verify one object. Concurrent processes share an OS file lock.
+    /// A cached copy must satisfy every declared digest; otherwise the declared
+    /// sources are attempted in order, each under the usual retry policy. A retry,
+    /// and a source change after a failed attempt that already reported bytes,
+    /// restart current-file progress through a URL-redacted retry event.
     ///
     /// # Errors
-    /// Fails on a corrupt object, missing offline resource, HTTP/IO, or cancellation.
+    /// Fails on a corrupt object, missing offline resource, HTTP/IO, integrity,
+    /// or cancellation. Messages never repeat a source URL, which may embed a
+    /// temporary signature.
     pub async fn fetch(
         &self,
         resource: &Resource,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PathBuf> {
         ensure!(!cancel.is_cancelled(), "download cancelled");
+        resource.validate()?;
         let path = self.object_path(&resource.sha1)?;
         let directory = path.parent().context("object directory is missing")?;
         tokio::fs::create_dir_all(directory).await?;
@@ -579,15 +698,22 @@ impl Store {
             });
             return Ok(path);
         }
-        ensure!(
-            !resource.url.starts_with("block-import:"),
-            "A user-supplied installation file is missing or corrupt. Select the official JAR again."
-        );
+        let sources: Vec<&str> = resource
+            .urls()
+            .into_iter()
+            .filter(|url| !url.starts_with(IMPORT_URL_PREFIX))
+            .collect();
+        if sources.is_empty() {
+            ensure!(
+                !resource.has_import_source(),
+                "A user-supplied installation file is missing or corrupt. Select the official JAR again."
+            );
+            bail!("The resource declares no downloadable source URL.");
+        }
         ensure!(
             !self.offline,
-            "missing or corrupt offline resource: {} ({})",
-            resource.sha1,
-            resource.url
+            "missing or corrupt offline resource: {}",
+            resource.sha1
         );
         let _permit = tokio::select! {
             () = cancel.cancelled() => bail!("download cancelled"),
@@ -597,42 +723,52 @@ impl Store {
             sha1: resource.sha1.clone(),
             size: resource.size,
         });
-        for attempt in 0..=self.options.max_retries {
-            let result = tokio::select! {
-                () = cancel.cancelled() => bail!("download cancelled"),
-                result = self.transfer(resource, directory, cancel) => result,
-            };
-            match result {
-                Ok(temporary) => {
-                    temporary.persist(&path)?;
-                    (self.events)(DownloadEvent::Complete {
-                        sha1: resource.sha1.clone(),
-                        cached: false,
-                    });
-                    return Ok(path);
-                }
-                Err(error) => {
-                    let permanent = error
-                        .downcast_ref::<reqwest::Error>()
-                        .and_then(reqwest::Error::status)
-                        .is_some_and(|status| {
-                            status.is_client_error()
-                                && status.as_u16() != 408
-                                && status.as_u16() != 429
+        let mut failure = None;
+        let mut retries = 0_u32;
+        let mut sources = sources.into_iter().peekable();
+        while let Some(source) = sources.next() {
+            for attempt in 0..=self.options.max_retries {
+                let mut reported = 0_u64;
+                let result = tokio::select! {
+                    () = cancel.cancelled() => bail!("download cancelled"),
+                    result = self.transfer(resource, source, directory, &mut reported, cancel) => result,
+                };
+                let error = match result {
+                    Ok(temporary) => {
+                        temporary.persist(&path)?;
+                        (self.events)(DownloadEvent::Complete {
+                            sha1: resource.sha1.clone(),
+                            cached: false,
                         });
-                    if permanent || attempt == self.options.max_retries {
-                        return Err(error).with_context(|| resource.url.clone());
+                        return Ok(path);
                     }
-                    (self.events)(DownloadEvent::Retry {
-                        sha1: resource.sha1.clone(),
-                        url: resource.url.clone(),
-                        attempt: attempt + 1,
+                    Err(error) => error,
+                };
+                let permanent = error
+                    .downcast_ref::<reqwest::Error>()
+                    .and_then(reqwest::Error::status)
+                    .is_some_and(|status| {
+                        status.is_client_error() && status.as_u16() != 408 && status.as_u16() != 429
                     });
-                    tokio::select! { () = cancel.cancelled() => bail!("download cancelled"), () = tokio::time::sleep(Duration::from_secs(u64::from(attempt + 1))) => {} }
+                // A spent source, and any permanent rejection of it, both move
+                // on to the next declared URL instead of retrying this one.
+                if permanent || attempt == self.options.max_retries {
+                    failure = Some(error);
+                    // Bytes already announced for this source must not stay in
+                    // current-file progress after another source takes over.
+                    if reported > 0 && sources.peek().is_some() {
+                        retries += 1;
+                        self.retry_event(&resource.sha1, retries);
+                    }
+                    break;
                 }
+                retries += 1;
+                self.retry_event(&resource.sha1, retries);
+                tokio::select! { () = cancel.cancelled() => bail!("download cancelled"), () = tokio::time::sleep(Duration::from_secs(u64::from(attempt + 1))) => {} }
             }
         }
-        bail!("download attempts exhausted")
+        Err(failure.unwrap_or_else(|| anyhow::anyhow!("no source was attempted")))
+            .context("Download failed from every declared source")
     }
 
     /// Fetch an upstream SHA-256 artifact with bounded size and the store's
@@ -831,31 +967,56 @@ impl Store {
         bail!("download attempts exhausted")
     }
 
+    /// Announce a retry without its source URL, so observers restart
+    /// current-file progress while signed URLs stay inside the store.
+    fn retry_event(&self, sha1: &str, attempt: u32) {
+        (self.events)(DownloadEvent::Retry {
+            sha1: sha1.to_owned(),
+            url: String::new(),
+            attempt,
+        });
+    }
+
+    /// Stream one source into a temporary file. `reported` accumulates the body
+    /// bytes already announced to the event sink, so a failed attempt can tell
+    /// whether observers hold progress that the next source has to reset.
     async fn transfer(
         &self,
         resource: &Resource,
+        source: &str,
         directory: &Path,
+        reported: &mut u64,
         cancel: &CancellationToken,
     ) -> anyhow::Result<tempfile::NamedTempFile> {
+        // Source URLs may embed temporary signatures, so transport errors are
+        // stripped of the URL before they can reach a caller or an event sink.
         let response = self
             .client
-            .get(&resource.url)
+            .get(source)
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .map_err(reqwest::Error::without_url)?
+            .error_for_status()
+            .map_err(reqwest::Error::without_url)?;
         let temporary = tempfile::NamedTempFile::new_in(directory)?;
         let mut file = tokio::fs::File::from_std(temporary.reopen()?);
         let mut stream = response.bytes_stream();
-        let mut hasher = Sha1::new();
-        let mut received = 0_u64;
-        while let Some(bytes) = stream.try_next().await? {
-            received += bytes.len() as u64;
-            ensure!(received <= resource.size, "resource exceeds declared size");
+        let mut digests = ObjectDigests::new(resource);
+        while let Some(bytes) = stream
+            .try_next()
+            .await
+            .map_err(reqwest::Error::without_url)?
+        {
+            digests.update(&bytes);
+            ensure!(
+                digests.size <= resource.size,
+                "resource exceeds declared size"
+            );
             if let Some(limiter) = &self.rate_limiter {
                 limiter.wait(bytes.len() as u64, cancel).await?;
             }
-            hasher.update(&bytes);
             file.write_all(&bytes).await?;
+            *reported += bytes.len() as u64;
             (self.events)(DownloadEvent::Bytes {
                 sha1: resource.sha1.clone(),
                 bytes: bytes.len(),
@@ -864,8 +1025,8 @@ impl Store {
         file.flush().await?;
         drop(file);
         ensure!(
-            received == resource.size && format!("{:x}", hasher.finalize()) == resource.sha1,
-            "resource size or SHA-1 mismatch"
+            digests.matches(resource),
+            "resource size, SHA-1 or SHA-512 mismatch"
         );
         Ok(temporary)
     }
@@ -878,14 +1039,14 @@ fn verify_file(path: &Path, expected: &Resource) -> anyhow::Result<bool> {
     if file.metadata()?.len() != expected.size {
         return Ok(false);
     }
-    let mut hasher = Sha1::new();
+    let mut digests = ObjectDigests::new(expected);
     let mut buffer = vec![0; 64 * 1024];
     loop {
         let length = file.read(&mut buffer)?;
         if length == 0 {
             break;
         }
-        hasher.update(&buffer[..length]);
+        digests.update(&buffer[..length]);
     }
-    Ok(format!("{:x}", hasher.finalize()) == expected.sha1)
+    Ok(digests.matches(expected))
 }

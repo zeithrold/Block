@@ -408,6 +408,8 @@ async fn install_staged(
                 sha1: artifact.sha1.clone(),
                 size: artifact.size,
                 url: artifact.url.clone(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             };
             ensure!(
                 resource.url.is_empty() || resource.url.starts_with("https://"),
@@ -857,6 +859,8 @@ fn import_libraries(
                     sha1,
                     size: metadata.len(),
                     url: String::new(),
+                    sha512: None,
+                    alternate_urls: Vec::new(),
                 }
             };
             publish_object(&entry.path(), &resource, context)?;

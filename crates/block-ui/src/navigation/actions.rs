@@ -15,7 +15,7 @@ use crate::{
     appearance::Appearance,
     authentication, browser, downloads, feedback, first_run,
     game_wizard::WizardPage,
-    import_games, motion, profile_editor, select,
+    import_games, modpack_import, motion, profile_editor, select,
     settings::SettingsDraft,
     shell::{Drawer, Surface},
 };
@@ -25,6 +25,7 @@ use crate::{
 pub(super) enum UiAction {
     FirstRun(first_run::Action),
     ImportGames(import_games::Action),
+    PackImport(modpack_import::Action),
     AuthOtherOptions,
     Providers,
     ProvidersBack,
@@ -193,6 +194,7 @@ impl Block {
         match action {
             UiAction::FirstRun(action) => self.handle_first_run(action, window, cx),
             UiAction::ImportGames(action) => self.handle_import_games(action, window, cx),
+            UiAction::PackImport(action) => self.handle_pack_import(action, window, cx),
             UiAction::AuthOtherOptions => self.toggle_auth_other_options(cx),
             UiAction::WizardOptiFineFile => self.browse_optifine(cx),
             UiAction::WizardOptiFineRemove => self.clear_wizard_optifine(),
@@ -363,12 +365,8 @@ impl Block {
             }
             UiAction::SignOut(id) => self.sign_out(id, window, cx),
             UiAction::Play => self.play(cx),
-            UiAction::Repair => {
-                if let Some(id) = self.selected_profile.clone() {
-                    self.repair(&id);
-                }
-            }
-            UiAction::RepairProfile(id) => self.repair(&id),
+            UiAction::Repair => self.repair_selected(window, cx),
+            UiAction::RepairProfile(id) => self.repair(&id, window, cx),
             UiAction::Stop => self.stop(),
             UiAction::ToggleOutput => self.show_output = !self.show_output,
             UiAction::ToggleCommand => self.show_command = !self.show_command,
@@ -469,6 +467,7 @@ impl Block {
         matches!(
             action,
             UiAction::Stop
+                | UiAction::PackImport(modpack_import::Action::Stop)
                 | UiAction::Tab(_)
                 | UiAction::Providers
                 | UiAction::ProvidersBack
@@ -534,6 +533,14 @@ impl Block {
         self.router.navigate(tab);
         self.form = None;
         self.shell.instance_editor = None;
+        if self
+            .shell
+            .surfaces
+            .layers()
+            .any(|entry| matches!(entry.kind, Surface::Drawer(Drawer::ImportPack)))
+        {
+            self.pack_import_closed(window, cx);
+        }
         self.shell.surfaces.clear(window, &self.focus, cx);
         self.request_frame_resize(window, cx);
         true
@@ -549,8 +556,12 @@ impl Block {
     ) -> bool {
         if self.setup_incomplete()
             && self.shell.first_run.enabled
-            && drawer
-                .is_some_and(|drawer| !matches!(drawer, Drawer::ImportGames | Drawer::Language))
+            && drawer.is_some_and(|drawer| {
+                !matches!(
+                    drawer,
+                    Drawer::ImportGames | Drawer::ImportPack | Drawer::Language
+                )
+            })
         {
             return false;
         }
@@ -581,6 +592,14 @@ impl Block {
             self.cancel_component_draft(cx);
             self.shell.surfaces.close(window, &self.focus, cx);
         } else {
+            if self
+                .shell
+                .surfaces
+                .top()
+                .is_some_and(|entry| matches!(entry.kind, Surface::Drawer(Drawer::ImportPack)))
+            {
+                self.pack_import_closed(window, cx);
+            }
             self.shell.surfaces.close(window, &self.focus, cx);
         }
         true
@@ -829,7 +848,16 @@ impl Block {
         }
     }
 
-    fn repair(&mut self, id: &str) {
+    fn repair_selected(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(id) = self.selected_profile.clone() {
+            self.repair(&id, window, cx);
+        }
+    }
+
+    /// Repair the selected profile, or resume the pack installation that never
+    /// completed for its instance. A pending pack owns its files, so repairing
+    /// it means finishing that installation rather than reinstalling a target.
+    fn repair(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if let Some(profile) = self
             .snapshot
             .profiles
@@ -837,6 +865,20 @@ impl Block {
             .find(|profile| profile.id == id)
             .cloned()
         {
+            let pending_pack = self
+                .snapshot
+                .instances
+                .iter()
+                .find(|instance| instance.id == profile.instance_id)
+                .filter(|instance| {
+                    instance.pack.as_ref().is_some_and(|pack| {
+                        pack.status == block_launcher::catalog::PackStatus::Pending
+                    })
+                });
+            if let Some(instance) = pending_pack {
+                self.resume_pack_import(instance.id.clone(), window, cx);
+                return;
+            }
             self.begin_cancellable(
                 msg!("runtime.repairing"),
                 crate::ui_logging::Operation::Repair,

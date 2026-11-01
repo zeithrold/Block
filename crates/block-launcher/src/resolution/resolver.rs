@@ -173,6 +173,8 @@ async fn resolve_inner(
         sha1: asset.sha1.clone(),
         size: asset.size,
         url: asset.url.clone(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     let bytes = context.store.fetch(&resource, &context.cancel).await?;
     let assets = decode(&tokio::fs::read(bytes).await?)?;
@@ -809,5 +811,7 @@ pub fn download_resource(download: &Download) -> Resource {
         sha1: download.sha1.clone(),
         size: download.size,
         url: download.url.clone(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     }
 }

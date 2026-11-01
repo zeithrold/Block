@@ -1,7 +1,8 @@
 //! Concrete installation/profile orchestration above the process-only executor.
 use crate::{
     catalog::{
-        Catalog, GameDirectoryGuard, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile,
+        Catalog, GameDirectoryGuard, InstallStatus, Instance, LaunchTarget, LoaderKind, PackStatus,
+        Profile, ProfileConfiguration,
     },
     executor::{ExecutionSink, Executor},
     install::neoforge::{self, InstalledLoader},
@@ -69,6 +70,221 @@ impl Library {
         self.store.options()
     }
 
+    /// Inspect a local archive and recover the selected optional entries when
+    /// resuming an existing pack installation.
+    ///
+    /// # Errors
+    /// Rejects invalid archives, missing pack metadata and a different pack.
+    pub fn inspect_pack(
+        &self,
+        source: &Path,
+        instance_id: Option<&str>,
+    ) -> anyhow::Result<(
+        crate::modpack::PackInspection,
+        crate::modpack::PackSelection,
+    )> {
+        let mut inspection = crate::modpack::inspect(source)?;
+        let Some(instance_id) = instance_id else {
+            return Ok((inspection, crate::modpack::PackSelection::default()));
+        };
+        let state = self.catalog.snapshot()?;
+        let instance = state
+            .instances
+            .iter()
+            .find(|item| item.id == instance_id)
+            .context("installation no longer exists")?;
+        ensure!(instance.pack.is_some(), "instance has no pack");
+        let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+        ensure!(
+            descriptor.matches_inspection(&inspection),
+            "the selected archive does not match this pack; select the original pack"
+        );
+        if inspection.format == crate::modpack::PackFormat::Plain {
+            inspection.select_target(
+                descriptor.minecraft_version.clone(),
+                descriptor.loader.clone(),
+            )?;
+        }
+        let selection = crate::modpack::PackSelection {
+            optional_files: descriptor
+                .files
+                .iter()
+                .filter(|file| !file.required && file.selected)
+                .map(|file| file.path.clone())
+                .collect(),
+            optional_curse_files: descriptor
+                .missing_files
+                .iter()
+                .filter(|file| !file.required && file.selected)
+                .map(|file| (file.project_id, file.file_id))
+                .collect(),
+        };
+        Ok((inspection, selection))
+    }
+
+    /// Stage a local pack and commit exactly one new Instance for this operation.
+    ///
+    /// Reusing the same operation ID resumes a published but uncommitted pack.
+    /// Source URLs are used only while the selected archive is open.
+    ///
+    /// # Errors
+    /// Rejects changed or unsafe archives, stale selections, conflicting
+    /// operation IDs, cancellation, and storage failures.
+    pub fn create_pack(
+        &self,
+        operation_id: &str,
+        source: &Path,
+        inspected: &crate::modpack::PackInspection,
+        selection: &crate::modpack::PackSelection,
+        mut configuration: ProfileConfiguration,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<(Instance, Profile)> {
+        let id = uuid::Uuid::parse_str(operation_id)?;
+        ensure!(id.to_string() == operation_id, "invalid pack operation ID");
+        ensure!(!cancel.is_cancelled(), "pack import cancelled");
+        ensure!(
+            inspected.target_confirmed(),
+            "select the pack's Minecraft and loader target"
+        );
+        crate::catalog::validate_name(&configuration.name)?;
+        let minecraft_version = inspected
+            .minecraft_version
+            .clone()
+            .context("pack Minecraft version is missing")?;
+        let parent = &self.storage.library;
+        std::fs::create_dir_all(parent)?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(parent.join(format!(".block-pack-{operation_id}.lock")))?;
+        fs2::FileExt::try_lock_exclusive(&lock)
+            .context("this pack import is already in progress")?;
+        let destination = parent.join(operation_id);
+        match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => {
+                ensure!(
+                    metadata.is_dir() && !metadata.file_type().is_symlink(),
+                    "pack destination already exists; it was preserved"
+                );
+                let existing = crate::modpack::descriptor::load(&destination)
+                    .context("pack destination already exists; it was preserved")?;
+                let expected = crate::modpack::descriptor::from_inspection(inspected, selection)?;
+                ensure!(
+                    existing == expected,
+                    "pack destination belongs to a different import; it was preserved"
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let stage = tempfile::Builder::new()
+                    .prefix(".block-pack-instance-")
+                    .tempdir_in(parent)?;
+                crate::modpack::descriptor::stage(
+                    source,
+                    inspected,
+                    selection,
+                    stage.path(),
+                    cancel,
+                )?;
+                ensure!(!cancel.is_cancelled(), "pack import cancelled");
+                let stage = stage.keep();
+                match std::fs::symlink_metadata(&destination) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Ok(_) => anyhow::bail!("pack destination already exists; it was preserved"),
+                    Err(error) => return Err(error.into()),
+                }
+                std::fs::rename(stage, &destination)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        configuration.target_id = inspected.loader.as_ref().map_or_else(
+            || "vanilla".to_owned(),
+            |(kind, version)| format!("{}-{version}", kind.name().to_lowercase()),
+        );
+        let name = configuration.name.clone();
+        self.catalog.create_pack_instance(
+            operation_id.to_owned(),
+            name,
+            minecraft_version,
+            destination,
+            inspected.loader.clone(),
+            configuration,
+        )
+    }
+
+    /// Resume a pack install using the original, locally selected archive.
+    ///
+    /// # Errors
+    /// Leaves the target retryable on incomplete files, mismatched source,
+    /// cancellation or install failures, and never modifies played game data.
+    pub async fn install_pack(
+        &self,
+        instance_id: &str,
+        source: &Path,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<()> {
+        let state = self.catalog.snapshot()?;
+        let instance = state
+            .instances
+            .iter()
+            .find(|item| item.id == instance_id)
+            .context("installation no longer exists")?;
+        let attachment = instance.pack.as_ref().context("instance has no pack")?;
+        let mut target = instance
+            .targets
+            .iter()
+            .find(|item| item.id == attachment.target_id)
+            .context("pack launch target is missing")?
+            .clone();
+        target.status = InstallStatus::Installing;
+        self.catalog.set_target(instance_id, &target)?;
+        let result = async {
+            let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+            ensure!(
+                !descriptor.has_missing_selected(),
+                "pack files cannot be verified from their CurseForge IDs"
+            );
+            ensure!(
+                descriptor.minecraft_version == instance.minecraft_version
+                    && descriptor.loader.as_ref().map_or(
+                        target.kind == LoaderKind::Vanilla,
+                        |(kind, version)| {
+                            *kind == target.kind
+                                && target.loader_version.as_deref() == Some(version)
+                        }
+                    ),
+                "pack target does not match its declared loader"
+            );
+            let inspection = crate::modpack::inspect(source)?;
+            crate::modpack::prepare::prepare(
+                &self.store,
+                instance,
+                &descriptor,
+                &inspection,
+                cancel,
+            )
+            .await?;
+            self.install_target(instance, &target, cancel).await
+        }
+        .await;
+        match result {
+            Ok((path, optifine_mod)) => {
+                target.manifest = Some(path);
+                target.optifine_mod = optifine_mod;
+                target.status = InstallStatus::Ready;
+                self.catalog.finish_pack_install(instance_id, &target)
+            }
+            Err(error) => {
+                target.status = InstallStatus::Failed {
+                    message: format!("{error:#}"),
+                };
+                self.catalog.set_target(instance_id, &target)?;
+                Err(error)
+            }
+        }
+    }
+
     /// Retry/repair checks original content hashes and only publishes ready targets after success.
     /// # Errors
     /// Preserves existing data and reports network/installer/Java errors with a retryable target state.
@@ -90,6 +306,14 @@ impl Library {
             .find(|t| t.id == target_id)
             .context("launch target missing")?
             .clone();
+        if let Some(pack) = &instance.pack
+            && pack.target_id == target.id
+        {
+            ensure!(
+                pack.status == PackStatus::Ready,
+                "pack installation is incomplete; reselect the original archive to resume"
+            );
+        }
         target.status = InstallStatus::Installing;
         self.catalog.set_target(instance_id, &target)?;
         let result = self.install_target(instance, &target, cancel).await;
@@ -271,6 +495,36 @@ impl Library {
             target.status == InstallStatus::Ready,
             "installation is not ready; choose Repair before playing"
         );
+        if let Some(pack) = &instance.pack {
+            ensure!(
+                pack.status == PackStatus::Ready,
+                "pack installation is not ready"
+            );
+            ensure!(
+                target.id == pack.target_id,
+                "this target does not match the pack's declared loader"
+            );
+            let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+            ensure!(
+                !descriptor.has_missing_selected()
+                    && descriptor.minecraft_version == instance.minecraft_version
+                    && descriptor.loader.as_ref().map_or(
+                        target.kind == LoaderKind::Vanilla,
+                        |(kind, version)| {
+                            *kind == target.kind
+                                && target.loader_version.as_deref() == Some(version)
+                        }
+                    ),
+                "the installed pack metadata does not match its launch target"
+            );
+            let baseline = instance.directory.join(".block-pack").join("baseline");
+            let metadata = std::fs::symlink_metadata(&baseline)
+                .context("the installed pack baseline is missing")?;
+            ensure!(
+                metadata.is_dir() && !metadata.file_type().is_symlink(),
+                "the installed pack baseline is not a plain directory"
+            );
+        }
         let manifest = target
             .manifest
             .as_ref()
@@ -279,6 +533,9 @@ impl Library {
             Some(id) => GameDirectoryGuard::for_session(instance, profile, id)?,
             None => GameDirectoryGuard::for_profile(instance, profile)?,
         };
+        if instance.pack.is_some() {
+            crate::modpack::initialize::initialize(instance, &directory, cancel)?;
+        }
         let mut recipe = recipe(
             instance,
             profile,
@@ -429,6 +686,10 @@ impl std::fmt::Debug for Library {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+#[path = "library/pack_tests.rs"]
+mod pack_tests;
 
 async fn resolve_for_host(
     recipe: &mut LaunchRecipe,

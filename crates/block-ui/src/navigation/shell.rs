@@ -26,6 +26,7 @@ static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Drawer {
     ImportGames,
+    ImportPack,
     Language,
     Menu,
     Accounts,
@@ -59,6 +60,7 @@ pub(super) struct ShellState {
     pub wizard_entrance: super::wizard_entrance::WizardEntrance,
     pub first_run: super::first_run::State,
     pub import_games: super::import_games::State,
+    pub pack_import: super::modpack_import::State,
     pub surfaces: super::overlays::Overlays,
     pub connection: super::connection_test::State,
     pub storage: super::settings::StorageState,
@@ -1152,6 +1154,7 @@ impl Block {
         let language = self.language();
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(language),
+            Surface::Drawer(Drawer::ImportPack) => self.shell.pack_import.chrome(language),
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
@@ -1186,6 +1189,7 @@ impl Block {
     ) -> AnyElement {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
+            Surface::Drawer(Drawer::ImportPack) => self.render_modpack_import(window, cx),
             Surface::Drawer(Drawer::Language) => {
                 div()
                     .w_full()

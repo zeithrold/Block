@@ -1449,6 +1449,8 @@ mod tests {
                 sha1: "a".repeat(40),
                 size: 123,
                 url: "block-import:synthetic".into(),
+                sha512: None,
+                alternate_urls: Vec::new(),
             },
         }
     }

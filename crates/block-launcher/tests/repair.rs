@@ -19,6 +19,8 @@ fn resource(store: &Store, bytes: &[u8]) -> anyhow::Result<Resource> {
         sha1: format!("{:x}", Sha1::digest(bytes)),
         size: bytes.len() as u64,
         url: String::new(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     };
     let path = store.object_path(&resource.sha1)?;
     fs::create_dir_all(path.parent().context("object directory")?)?;

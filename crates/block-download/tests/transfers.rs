@@ -62,6 +62,8 @@ fn resource(server: &Server, body: &[u8]) -> Resource {
         sha1: format!("{:x}", Sha1::digest(body)),
         size: body.len() as u64,
         url: server.url.clone(),
+        sha512: None,
+        alternate_urls: Vec::new(),
     }
 }
 

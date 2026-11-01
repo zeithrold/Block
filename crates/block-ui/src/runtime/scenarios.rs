@@ -318,6 +318,8 @@ impl Block {
                     sha1: "a".repeat(40),
                     size: 1,
                     url: "block-import:scenario-only".into(),
+                    sha512: None,
+                    alternate_urls: Vec::new(),
                 },
             }));
         }
@@ -752,6 +754,7 @@ fn library() -> Snapshot {
                 optifine_mod: None,
             }],
             settings: None,
+            pack: None,
         });
         snapshot.profiles.push(Profile {
             id: id.into(),

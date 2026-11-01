@@ -36,6 +36,27 @@ just run
 
 On first launch, Block opens a Home-sized welcome screen, then an Account/Game setup overview. Sign in first or create/import games first; each completed Wizard saves its own result. Recommended setup pins a stable Vanilla release and prepares Java automatically; Custom setup keeps explicit component choices. A source Drawer detects adjacent `.minecraft` games and Minecraft Launcher installations, supports batch selection, and copies games into independent directories without importing credentials or modifying originals. Finish returns Home and begins resource preparation without waiting for downloads. Skip setup preserves any work already saved; unfinished setup resumes after restart. See the [onboarding plan and validation record](docs/onboarding-implementation-plan.md). You can also sign in and create games later, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
 
+**Import pack** inspects a local Modrinth `.mrpack`, CurseForge manifest ZIP,
+Prism/MultiMC instance ZIP, or plain Minecraft game ZIP before creating a new
+Instance. Modrinth downloads are checked against their declared size, SHA-1 and
+SHA-512; optional client files can be selected, and client overrides are applied
+after common overrides. A plain archive with an uncertain Minecraft or Loader
+target needs an explicit selection. Launcher credentials, local Java paths and
+pack hooks are not imported or executed. An interrupted installation can be
+retried on the same Instance; after restarting Block, choose the original
+archive again to resume.
+
+Standard CurseForge manifests identify files only by project and file IDs, not
+by a verifiable filename or hash. Block lists those entries and links to the
+official project page, but required or selected entries remain blocked until
+verifiable information is available. It does not use a CurseForge API key or
+claim that a same-named file is verified. Private MCBBS/HMCL formats, custom
+Prism patches and unsupported components are not imported. Recognizing an
+archive format does not imply that every Minecraft version, Loader or platform
+combination can run. New pack metadata is not readable by older Block binaries.
+See [local modpack import](docs/modpack-import.md) for recovery behavior and
+verification limits.
+
 Each Instance can have several Profiles. A Profile selects its launch target, Java, memory, additional arguments, default account and **Shared** or **Isolated** mutable game data. Copying a Profile copies settings and preserves its data policy: Isolated copies get a new directory; Shared copies continue sharing the Instance directory. Deleting a Profile keeps game files. Shared assets, libraries and managed Java remain in the content-addressed cache. A canonical game-directory lock prevents simultaneous writers.
 
 Development builds need the application's public Microsoft client ID, either at build time or runtime:

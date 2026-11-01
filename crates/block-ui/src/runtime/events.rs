@@ -55,14 +55,21 @@ impl Block {
         }
         self.motion_dirty = true;
         for message in messages {
-            let (message, scoped) = match message {
+            let (message, scoped, pack) = match message {
                 Message::ForOperation { operation, message }
                     if operation == self.operation_revision =>
                 {
-                    (*message, true)
+                    (*message, true, false)
                 }
-                Message::ForOperation { .. } => continue,
-                message => (message, false),
+                Message::ForPack { request, message }
+                    if self.shell.pack_import.accepts(request)
+                        && self.shell.pack_import.phase
+                            == crate::modpack_import::Phase::Installing =>
+                {
+                    (*message, false, true)
+                }
+                Message::ForOperation { .. } | Message::ForPack { .. } => continue,
+                message => (message, false, false),
             };
             match message {
                 Message::GameDiscovery { request, report } => {
@@ -74,7 +81,21 @@ impl Block {
                     result,
                 } => self.receive_game_import(request, candidate, result),
                 Message::GameImportFinished { request } => self.finish_game_import(request),
-                Message::ForOperation { .. } => {}
+                Message::PackInspected {
+                    request,
+                    source,
+                    result,
+                } => self.receive_pack_inspected(request, source, result, cx),
+                Message::PackCreated {
+                    request,
+                    instance,
+                    name,
+                    profile,
+                } => self.receive_pack_created(request, instance, name, profile, cx),
+                Message::PackFinished { request, result } => {
+                    self.finish_pack_import(request, result, cx);
+                }
+                Message::ForOperation { .. } | Message::ForPack { .. } => {}
                 Message::Catalog(result) => self.receive_catalog(result, cx),
                 Message::Providers(result) => {
                     self.receive_providers(result);
@@ -95,7 +116,9 @@ impl Block {
                 Message::ProviderImages(icons) => self.store_provider_images(icons),
                 Message::Versions(result) => self.receive_versions(result),
                 Message::LoaderVersions { request, result } => {
-                    self.receive_loader_versions(request, result, cx);
+                    if !self.receive_pack_loader_versions(request, result.clone(), cx) {
+                        self.receive_loader_versions(request, result, cx);
+                    }
                 }
                 Message::Browser(url) => {
                     if !self.cancel.is_cancelled() {
@@ -119,6 +142,9 @@ impl Block {
                 }
                 Message::Status(status) => self.status = status,
                 Message::Downloads(tracker) => {
+                    if pack {
+                        self.shell.pack_import.tracker = Some(tracker.clone());
+                    }
                     self.downloads = Some(tracker);
                     self.downloads_revision = 0;
                 }
