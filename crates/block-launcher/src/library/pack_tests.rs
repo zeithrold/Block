@@ -31,10 +31,11 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 use super::Library;
 #[cfg(unix)]
 use crate::catalog::{DataPolicy, Profile};
+#[cfg(unix)]
+use crate::recipe::RuntimeSelection;
 use crate::{
     catalog::{InstallStatus, Instance, PackStatus, ProfileConfiguration},
     modpack::{self, PackSelection},
-    recipe::RuntimeSelection,
     session::OfflineSession,
 };
 
@@ -142,6 +143,7 @@ fn download_store(library: &Library) -> anyhow::Result<Store> {
     )
 }
 
+#[cfg(unix)]
 fn seed_object(store: &Store, bytes: &[u8]) -> anyhow::Result<String> {
     let digest = sha1_hex(bytes);
     let path = store.object_path(&digest)?;
@@ -157,6 +159,7 @@ fn configuration(name: &str) -> ProfileConfiguration {
     }
 }
 
+#[cfg(unix)]
 fn configuration_with_java(name: &str, java: &Path) -> ProfileConfiguration {
     ProfileConfiguration {
         runtime: RuntimeSelection::Local {
