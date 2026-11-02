@@ -13,9 +13,13 @@ It does not accept a client secret or read environment files.
 3. Pass `PendingSignIn::authorization_url()` directly to the system browser.
    Do not print the URL: it contains ephemeral OAuth state.
 4. Call `complete_sign_in(pending, &cancellation)` on the worker runtime. The
-   callback expires after ten minutes. The returned account exists only after
-   Java ownership, profile and secure credential storage have succeeded.
-5. Persist only `Account` metadata in the launcher's catalog. Store account
+   callback expires after ten minutes. The returned prepared identity has passed
+   Java ownership and profile verification, but its credential is not yet saved.
+   Display `prepared.account()` for confirmation; dropping the preparation
+   discards it.
+5. After the user confirms, call `save_sign_in(prepared)` to write the credential
+   to native secure storage. Persist only the resulting `Account` metadata in
+   the launcher's catalog. Store account
    references in Profiles, rather than refresh tokens. If catalog persistence
    fails after sign-in, remove only a newly introduced credential reference with
    `sign_out` and report the failure. When an existing account reauthorizes the

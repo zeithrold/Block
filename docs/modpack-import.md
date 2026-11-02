@@ -1,9 +1,11 @@
 # Local modpack import
 
-Choose **Import pack** on Games/Instances, or from the existing import drawer.
-Block inspects the selected archive before creating a new Instance. The review
-shows the game target, instance name and optional files. The instance name can
-be changed without changing the original pack name.
+Choose **Add Game**, then **Import pack**, or use the pack shortcut in the
+existing game-directory import drawer. Block inspects the selected archive
+before creating a new Instance. Review the original pack name, game or Instance
+name, target and optional files; required files can be expanded. The new name
+does not change the original pack name. The first Profile uses the current
+defaults; its launch settings can be changed after import.
 
 ## Supported inputs
 
@@ -45,6 +47,8 @@ configuration or worlds.
 
 An unfinished pack remains Pending and is rejected by the core launch entry
 point. Ready requires the selected files, overlays and base target to complete.
+Stopping leaves the installation unfinished. Leaving during installation asks
+for confirmation before stopping it.
 Retry reuses the same Instance. After creation, its saved target, name and
 optional choices are locked; retry restores those choices rather than silently
 changing the installation. To make different choices, start a new import.
@@ -55,16 +59,34 @@ The already-snapshotted overrides remain the baseline for that installation.
 
 ## Verification
 
-Core integration passed `just check` on macOS ARM64. The final UI and parser
-increments also passed focused macOS tests and strict Clippy with
-`--features tracing/log`. The final candidate passed the complete
+The Game Wizard integration passed `just check` on macOS ARM64, including
+534 UI tests and 3 GPUI framework tests, plus strict UI Clippy with
+`--features tracing/log`. It also passed the complete
 `scripts/verify-platform.py --platform linux-arm64` sequence on Debian 13 ARM64,
-including 238 launcher tests, 509 UI tests, 3 GPUI framework tests and the desktop
-build.
+including 238 launcher tests, 534 UI tests, 3 GPUI framework tests and the desktop
+build. Windows AMD64 passed strict UI Clippy with `--features tracing/log`,
+533 UI tests and the desktop build.
 Automated tests exercise real Catalog, Store, Library and launch-plan
 preparation paths using synthetic archives and local HTTP data.
 
-Linux native observations used KDE Wayland, an Xwayland Block window and an
+Native Game Wizard checks installed Simply Optimized `1.20.1-12.3`
+(Minecraft `1.20.1`, Fabric `0.16.0`) to Ready on Windows AMD64 and Linux ARM64.
+The Windows walkthrough covered source choice, the system picker, failed-file
+recovery, renaming, the required-file list, installation and completion.
+The Linux walkthrough additionally covered returning to source choice without
+losing the name, stopping and resuming the same Pending Instance.
+On both hosts, installation completed while the stop-and-leave dialog was open:
+the dialog closed, Complete remained visible, and Space activated the live Done
+button to open the resulting Instance.
+
+Linux ARM64 Japanese dark-theme checks at 360×540 covered the compact source
+page, wrapped CurseForge recovery actions and Plain target selectors.
+Tab dismissed the version popup without selecting a value and moved to the
+Loader control; Shift+Tab returned to the version trigger, Space reopened it,
+and Escape closed only the popup. These supplemental CF and Plain checks used
+synthetic archives, not successful third-party installations.
+
+The earlier native import observations used KDE Wayland, an Xwayland Block window and an
 isolated D-Bus session with the GTK file-chooser portal. The system's portal
 configuration was not changed. Native checks cover real archive selection,
 picker cancellation/reopening, CF missing-file blocking, Modrinth optional
@@ -94,7 +116,8 @@ server.
 ### Evidence limits
 
 No real third-party modpack gameplay, new Loader/platform compatibility matrix,
-Microsoft login, or Windows/macOS native import session was exercised. Native
+Microsoft login or macOS native import session was exercised. The walkthroughs
+do not establish a full keyboard-only import or native IME acceptance. Linux
 file-chooser interaction was verified with the isolated GTK portal, not automated
 through the host KDE portal. Automated parsing, installation or launch-plan
 success is not evidence of entering a world, exiting normally or relaunching.

@@ -26,7 +26,6 @@ static BRAND: LazyLock<Arc<Image>> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Drawer {
     ImportGames,
-    ImportPack,
     Language,
     Menu,
     Accounts,
@@ -42,6 +41,15 @@ pub(super) enum Surface {
     RemoveAccount(String),
     RemoveProvider(String),
     SeparateProfiles,
+    StopPackImport {
+        request: uuid::Uuid,
+        exit: Box<UiAction>,
+        window: gpui::AnyWindowHandle,
+    },
+    DiscardGameDraft {
+        draft: gpui::EntityId,
+        exit: Box<UiAction>,
+    },
     GamesHelp,
     WizardSection(super::WizardPage),
     AuthProviderAdd,
@@ -165,6 +173,8 @@ impl ShellState {
             | Surface::RemoveAccount(_)
             | Surface::RemoveProvider(_)
             | Surface::SeparateProfiles
+            | Surface::StopPackImport { .. }
+            | Surface::DiscardGameDraft { .. }
             | Surface::GamesHelp
             | Surface::WizardSection(_)
             | Surface::AuthProviderAdd
@@ -236,7 +246,7 @@ impl Block {
             .font_family(super::design::FONT_FAMILY)
             .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
             .child(div().flex_1().min_h_0().child(content));
-        root = root.children(self.render_popups(false, cx));
+        root = root.children(self.render_popups(false, window, cx));
         root
     }
 
@@ -494,6 +504,14 @@ impl Block {
             return content.into_any_element();
         }
         let profile = self.profile();
+        let pending_pack = profile.is_some_and(|profile| {
+            self.snapshot
+                .instances
+                .iter()
+                .find(|instance| instance.id == profile.instance_id)
+                .and_then(|instance| instance.pack.as_ref())
+                .is_some_and(|pack| pack.status == block_launcher::catalog::PackStatus::Pending)
+        });
         let (label, action) = if queue_play {
             (
                 if self.pending_play {
@@ -503,6 +521,8 @@ impl Block {
                 },
                 UiAction::Play,
             )
+        } else if pending_pack {
+            (tr!(language, "home.continue_pack"), UiAction::Repair)
         } else {
             match profile.and_then(|profile| self.snapshot.selection(&profile.id).ok()) {
                 Some((_, _, target)) => match &target.status {
@@ -986,7 +1006,15 @@ impl Block {
     /// A select nested directly in a sheet must paint above that sheet's scrim.
     /// Other selects retain their existing shell host, including dialog-owned
     /// selects stacked over a sheet.
-    pub(super) fn render_popups(&self, sheet: bool, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    pub(super) fn render_popups(
+        &self,
+        sheet: bool,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> Vec<AnyElement> {
+        let viewport = window.viewport_size();
+        let max_width = (viewport.width - px(16.)).max(px(0.));
+        let max_height = (viewport.height - px(16.)).max(px(0.));
         let mut sheet_parent = false;
         self.shell
             .surfaces
@@ -1000,6 +1028,7 @@ impl Block {
                         return None;
                     }
                 };
+                let revision = layer.revision;
                 Some(
                     gpui_base::Positioner::corner(gpui::Anchor::TopLeft, state.anchor)
                         .margin(px(8.))
@@ -1009,30 +1038,61 @@ impl Block {
                                 .debug_selector(|| "drawer-sheet".into())
                                 .track_focus(&layer.focus)
                                 .key_context("LauncherForm")
-                                .on_mouse_down_out(cx.listener(|view, _, window, cx| {
-                                    view.handle(UiAction::Drawer(None), window, cx);
+                                .on_mouse_down_out(cx.listener(move |view, _, window, cx| {
+                                    if view.select_revision_is_top(revision) {
+                                        view.handle(UiAction::Drawer(None), window, cx);
+                                    }
                                 }))
-                                .on_key_down(cx.listener(|view, event, window, cx| {
-                                    if view.select_key(event, window, cx) {
+                                .on_key_down(cx.listener(move |view, event, window, cx| {
+                                    if !view.select_revision_is_top(revision)
+                                        || view.select_key(event, window, cx)
+                                    {
                                         cx.stop_propagation();
                                     } else if event.keystroke.key == "escape" {
                                         view.handle(UiAction::Drawer(None), window, cx);
                                         cx.stop_propagation();
                                     }
                                 }))
-                                .w(state.width)
-                                .max_h(px(696.))
+                                .on_action(cx.listener(
+                                    move |view, _: &super::NextField, window, cx| {
+                                        if view.select_revision_is_top(revision) {
+                                            view.move_focus(false, window, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    },
+                                ))
+                                .on_action(cx.listener(
+                                    move |view, _: &super::PreviousField, window, cx| {
+                                        if view.select_revision_is_top(revision) {
+                                            view.move_focus(true, window, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    },
+                                ))
+                                .w(state.width.min(max_width))
+                                .max_h(max_height.min(px(696.)))
                                 .p_1()
                                 .rounded_lg()
                                 .border_1()
                                 .border_color(rgb(self.palette.border))
                                 .bg(rgb(self.palette.popover))
-                                .child(self.select_options(state, cx)),
+                                .child(self.select_options(
+                                    state,
+                                    (max_height - px(10.)).max(px(0.)).min(px(624.)),
+                                    cx,
+                                )),
                         )
                         .into_any_element(),
                 )
             })
             .collect()
+    }
+
+    fn select_revision_is_top(&self, revision: usize) -> bool {
+        !self.visual_only
+            && self.shell.surfaces.top().is_some_and(|entry| {
+                entry.revision == revision && matches!(entry.kind, Surface::Select(_))
+            })
     }
 
     /// One overlay surface's body: notes and its action row. The dialog host
@@ -1053,11 +1113,12 @@ impl Block {
         let Some(kind) = kind else {
             return div().into_any_element();
         };
-        // Wizard sections bring their own headings, scrolling
-        // and actions; size the surface area like the old section window and
-        // keep the dialog footer outside that fixed content height.
+        // A section keeps its footer visible within the current window.
         let language = self.language();
-        let section_height = px(520.);
+        let section_height = (window.viewport_size().height
+            - px(super::design::MANAGEMENT_FOOTER + 32.))
+        .max(px(0.))
+        .min(px(520.));
         let (content, section) = match &kind {
             Surface::WizardSection(page) => (
                 div()
@@ -1087,7 +1148,7 @@ impl Block {
                             .child(
                                 self.button(
                                     "section-done",
-                                    tr!(language, "action.done"),
+                                    tr!(language, "common.apply_draft"),
                                     UiAction::WizardPage(None),
                                     cx,
                                 )
@@ -1107,7 +1168,7 @@ impl Block {
                 div()
                     .px(px(24.))
                     .pb(px(24.))
-                    .child(self.render_auth_provider_add(cx)),
+                    .child(self.render_auth_provider_add(window, cx)),
                 true,
             ),
             _ => (
@@ -1154,7 +1215,6 @@ impl Block {
         let language = self.language();
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(language),
-            Surface::Drawer(Drawer::ImportPack) => self.shell.pack_import.chrome(language),
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
@@ -1189,7 +1249,6 @@ impl Block {
     ) -> AnyElement {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
-            Surface::Drawer(Drawer::ImportPack) => self.render_modpack_import(window, cx),
             Surface::Drawer(Drawer::Language) => {
                 div()
                     .w_full()
@@ -1262,6 +1321,8 @@ impl Block {
                 ),
             Surface::RemoveProvider(_) => tr!(language, "dialog.remove_provider.title"),
             Surface::SeparateProfiles => tr!(language, "dialog.separate_profiles.title"),
+            Surface::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
+            Surface::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
             _ => kind.title(language),
         }
     }
@@ -1283,6 +1344,8 @@ impl Block {
                 tr!(language, "dialog.remove_provider.note")
             }],
             Surface::SeparateProfiles => vec![tr!(language, "dialog.separate_profiles.note")],
+            Surface::StopPackImport { .. } => vec![tr!(language, "modpack.leave.note")],
+            Surface::DiscardGameDraft { .. } => vec![tr!(language, "wizard.discard.note")],
             _ => Vec::new(),
         }
     }
@@ -1363,6 +1426,28 @@ impl Block {
                     tr!(language, "action.enable_separated"),
                     UiAction::SeparateProfiles,
                     SurfaceDialogTone::Primary,
+                )),
+            ),
+            Surface::StopPackImport { .. } => (
+                "pack-leave-cancel",
+                tr!(language, "modpack.leave.stay"),
+                None,
+                Some((
+                    "pack-leave-confirm",
+                    tr!(language, "modpack.leave.confirm"),
+                    UiAction::ConfirmPackLeave,
+                    SurfaceDialogTone::Destructive,
+                )),
+            ),
+            Surface::DiscardGameDraft { .. } => (
+                "discard-game-stay",
+                tr!(language, "wizard.discard.stay"),
+                None,
+                Some((
+                    "discard-game-confirm",
+                    tr!(language, "wizard.discard.confirm"),
+                    UiAction::ConfirmDiscardGame,
+                    SurfaceDialogTone::Destructive,
                 )),
             ),
             Surface::DownloadFiles(_) => {

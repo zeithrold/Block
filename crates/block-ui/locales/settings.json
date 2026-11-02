@@ -516,14 +516,14 @@
     "ja": "Block の言語を選択してください。"
   },
   "setup.overview.title": {
-    "en": "Two steps and you're ready",
-    "zh-Hans": "两步即可开始",
-    "ja": "2 ステップで準備完了"
+    "en": "Set up Block",
+    "zh-Hans": "设置 Block",
+    "ja": "Block をセットアップ"
   },
   "setup.overview.description": {
-    "en": "Add an account and a game to finish setup.",
-    "zh-Hans": "添加账户和游戏以完成设置。",
-    "ja": "アカウントとゲームを追加してセットアップを完了します。"
+    "en": "Create or import a game, add an account, or continue to Home. Each saved task is kept.",
+    "zh-Hans": "创建或导入游戏、添加账户，或直接进入主页。已保存的内容会保留。",
+    "ja": "ゲームの作成やインポート、アカウントの追加、またはホームへの移動を選べます。保存した内容は保持されます。"
   },
   "setup.account.title": {
     "en": "Account",
@@ -560,6 +560,76 @@
     "zh-Hans": "已保存",
     "ja": "保存済み"
   },
+  "setup.library.label": {
+    "en": "Game library",
+    "zh-Hans": "游戏库",
+    "ja": "ゲームライブラリ"
+  },
+  "setup.library.failed": {
+    "en": "Could not load saved records: %{detail}",
+    "zh-Hans": "无法加载已保存的记录：%{detail}",
+    "ja": "保存済みの記録を読み込めませんでした: %{detail}"
+  },
+  "setup.library.retry": {
+    "en": "Retry loading saved records",
+    "zh-Hans": "重试加载已保存的记录",
+    "ja": "保存済みの記録を再読み込み"
+  },
+  "setup.import.scanning": {
+    "en": "Looking for games to import…",
+    "zh-Hans": "正在查找可导入的游戏…",
+    "ja": "インポートできるゲームを検索しています…"
+  },
+  "setup.import.found": {
+    "en": "%{count} games can be imported",
+    "zh-Hans": "可导入 %{count} 个游戏",
+    "ja": "%{count} 個のゲームをインポートできます"
+  },
+  "setup.import.none": {
+    "en": "No games to import were found.",
+    "zh-Hans": "未找到可导入的游戏。",
+    "ja": "インポートできるゲームは見つかりませんでした。"
+  },
+  "setup.import.open": {
+    "en": "Import games",
+    "zh-Hans": "导入游戏",
+    "ja": "ゲームをインポート"
+  },
+  "setup.import.retry": {
+    "en": "Check again",
+    "zh-Hans": "重新检查",
+    "ja": "再検索"
+  },
+  "setup.draft.found": {
+    "en": "A game draft is still open.",
+    "zh-Hans": "还有未保存的游戏草稿。",
+    "ja": "未保存のゲーム下書きがあります。"
+  },
+  "setup.draft.continue": {
+    "en": "Continue draft",
+    "zh-Hans": "继续草稿",
+    "ja": "下書きを続ける"
+  },
+  "setup.game.prepare": {
+    "en": "Prepare game",
+    "zh-Hans": "准备游戏",
+    "ja": "ゲームを準備"
+  },
+  "setup.game.unprepared": {
+    "en": "This game still needs its files.",
+    "zh-Hans": "该游戏还需要准备文件。",
+    "ja": "このゲームはまだファイルの準備が必要です。"
+  },
+  "setup.game.continue_import": {
+    "en": "Continue import",
+    "zh-Hans": "继续导入",
+    "ja": "インポートを続ける"
+  },
+  "setup.game.pack_pending": {
+    "en": "This modpack import has not finished.",
+    "zh-Hans": "该整合包导入尚未完成。",
+    "ja": "この MOD パックのインポートは未完了です。"
+  },
   "setup.footer.continue": {
     "en": "Continue",
     "zh-Hans": "继续",
@@ -569,6 +639,26 @@
     "en": "Finish",
     "zh-Hans": "完成",
     "ja": "完了"
+  },
+  "setup.footer.later": {
+    "en": "Set up later",
+    "zh-Hans": "稍后设置",
+    "ja": "後で設定"
+  },
+  "setup.footer.home": {
+    "en": "Go to Home",
+    "zh-Hans": "进入主页",
+    "ja": "ホームへ"
+  },
+  "setup.footer.home_later": {
+    "en": "Go to Home without preparing",
+    "zh-Hans": "暂不准备，进入主页",
+    "ja": "準備せずにホームへ"
+  },
+  "setup.footer.prepare_home": {
+    "en": "Prepare and go to Home",
+    "zh-Hans": "准备并进入主页",
+    "ja": "準備してホームへ"
   },
   "setup.game_choice.title": {
     "en": "Set up a game",
@@ -586,14 +676,14 @@
     "ja": "おすすめのセットアップ"
   },
   "setup.game_choice.recommended_fallback": {
-    "en": "Stable Vanilla Minecraft · automatic Java",
-    "zh-Hans": "稳定版原版 Minecraft · 自动 Java",
-    "ja": "安定版バニラ Minecraft · 自動 Java"
+    "en": "Stable Vanilla Minecraft · current launch defaults",
+    "zh-Hans": "稳定版原版 Minecraft · 当前默认启动设置",
+    "ja": "安定版バニラ Minecraft · 現在の既定起動設定"
   },
   "setup.game_choice.recommended": {
-    "en": "Minecraft %{version} · Vanilla · automatic Java",
-    "zh-Hans": "Minecraft %{version} · 原版 · 自动 Java",
-    "ja": "Minecraft %{version} · バニラ · 自動 Java"
+    "en": "Minecraft %{version} · Vanilla · current launch defaults",
+    "zh-Hans": "Minecraft %{version} · 原版 · 当前默认启动设置",
+    "ja": "Minecraft %{version} · バニラ · 現在の既定起動設定"
   },
   "setup.game_choice.custom_title": {
     "en": "Custom setup",

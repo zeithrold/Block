@@ -392,7 +392,7 @@ impl Block {
                     "save-profile"
                 },
                 if page.is_some() {
-                    tr!(language, "games.action.done")
+                    tr!(language, "common.apply_draft")
                 } else {
                     tr!(language, "games.action.save_changes")
                 },

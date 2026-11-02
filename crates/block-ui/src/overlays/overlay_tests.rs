@@ -960,7 +960,7 @@ fn download_files_dialog_stacks_above_the_downloads_sheet(cx: &mut TestAppContex
     clippy::expect_used,
     reason = "The real card is required to exercise the overlay entry."
 )]
-fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppContext) {
+fn wizard_version_page_owns_its_input_and_escape_restores_the_draft(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -1022,7 +1022,7 @@ fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppC
     cx.simulate_mouse_up(card.center(), MouseButton::Left, Modifiers::none());
     cx.run_until_parked();
     assert_eq!(cx.windows().len(), 1, "the section stays inside the wizard");
-    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
     cx.update(|window, _| {
         let snapshots = gpui_base::test_support::find_all(window, &[], &"wizard-snapshots".into());
         assert_eq!(
@@ -1030,44 +1030,32 @@ fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppC
             1,
             "the version checkbox must have one owner: {snapshots:?}"
         );
-        assert!(
-            snapshots[0].path().contains(&"dialog".into()),
-            "the sole version checkbox must be inside the dialog: {snapshots:?}"
-        );
+        assert!(!snapshots[0].path().contains(&"dialog".into()));
         let next = gpui_base::test_support::find_all(window, &[], &"wizard-next".into());
-        assert_eq!(
-            next.len(),
-            1,
-            "the outer footer must stay mounted: {next:?}"
-        );
-        assert_eq!(next[0].label(), Some("Continue"));
+        assert_eq!(next.len(), 1, "the page has one footer: {next:?}");
+        assert_eq!(next[0].label(), Some("Apply to draft"));
         assert!(!next[0].path().contains(&"dialog".into()));
     });
-    assert!(crate::test_support::control_bounds(cx, "wizard-component-version").is_some());
-    let outer_bounds = crate::test_support::control_bounds(cx, "wizard-body");
-    let section_bounds = crate::test_support::control_bounds(cx, "wizard-section-body");
+    assert!(crate::test_support::control_bounds(cx, "wizard-component-version").is_none());
     view.read_with(cx, |view, _| {
-        assert_eq!(view.page_spec().wizard, route);
-        assert_eq!(view.shell.wizard.body_scroll.offset(), outer_offset);
-        assert_eq!(Some(view.shell.wizard.body_scroll.bounds()), outer_bounds);
         assert_eq!(
-            Some(view.shell.wizard.section_scroll.bounds()),
-            section_bounds
+            view.page_spec().wizard,
+            Some(crate::navigation::WizardKey::Game(
+                crate::game_wizard::WizardStep::Setup,
+                Some(crate::game_wizard::WizardPage::Version)
+            ))
         );
     });
     cx.update(|window, cx| {
         view.read_with(cx, |view, cx| {
-            assert!(matches!(
-                view.shell.surfaces.top().map(|layer| &layer.kind),
-                Some(Surface::WizardSection(_))
-            ));
+            assert!(!view.shell.surfaces.is_open());
             assert!(
                 view.shell
                     .wizard
                     .version_search
                     .as_ref()
                     .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window)),
-                "the section search is focused inside the dialog"
+                "the new page focuses the retained search"
             );
             assert_eq!(
                 view.shell
@@ -1088,10 +1076,6 @@ fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppC
     });
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.shell
-                .wizard
-                .section_scroll
-                .set_offset(point(px(0.), px(-30.)));
             if let Some(crate::Form::Instance(form)) = &view.form {
                 form.version
                     .update(cx, |input, cx| input.set_value("1.21.1", cx));
@@ -1101,16 +1085,11 @@ fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppC
         });
     });
     cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(view.shell.wizard.section_scroll.offset().y < px(0.));
-        assert_eq!(view.shell.wizard.body_scroll.offset(), outer_offset);
-    });
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     view.read_with(cx, |view, cx| {
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.page_spec().wizard, route);
-        assert_eq!(view.shell.wizard.body_scroll.offset(), outer_offset);
         assert!(matches!(&view.form, Some(crate::Form::Instance(form))
             if form.name.read(cx).value() == "Retained draft"
                 && form.version.read(cx).value() == original_version));
@@ -1120,7 +1099,7 @@ fn wizard_section_opens_as_dialog_and_escape_cancels_the_draft(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppContext) {
+fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut TestAppContext) {
     use crate::game_wizard::WizardPage;
 
     let (view, cx) = fixture(cx);
@@ -1142,10 +1121,16 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
         let controls =
             gpui_base::test_support::find_all(window, &[], &"wizard-loader-vanilla".into());
         assert_eq!(controls.len(), 1, "the loader has one owner: {controls:?}");
-        assert!(controls[0].path().contains(&"dialog".into()));
+        assert!(!controls[0].path().contains(&"dialog".into()));
     });
     view.read_with(cx, |view, cx| {
-        assert_eq!(view.page_spec().wizard, route);
+        assert_eq!(
+            view.page_spec().wizard,
+            Some(crate::navigation::WizardKey::Game(
+                crate::game_wizard::WizardStep::Setup,
+                Some(WizardPage::Loader)
+            ))
+        );
         assert!(
             view.shell
                 .wizard
@@ -1165,7 +1150,7 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
         );
         assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.is_neoforge()));
     });
-    click(cx, "section-cancel");
+    click(cx, "cancel-instance");
     view.read_with(cx, |view, _| {
         assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if !form.is_neoforge()));
         assert_eq!(view.page_spec().wizard, route);
@@ -1180,7 +1165,7 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
             1,
             "the runtime selector has one owner: {controls:?}"
         );
-        assert!(controls[0].path().contains(&"dialog".into()));
+        assert!(!controls[0].path().contains(&"dialog".into()));
     });
     click(cx, "wizard-java-runtime");
     view.read_with(cx, |view, _| {
@@ -1188,12 +1173,13 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
             view.shell.surfaces.top().map(|layer| &layer.kind),
             Some(Surface::Select(_))
         ));
-        assert!(
-            view.shell.surfaces.layers().any(|layer| {
-                matches!(layer.kind, Surface::WizardSection(WizardPage::Location))
-            })
+        assert_eq!(
+            view.page_spec().wizard,
+            Some(crate::navigation::WizardKey::Game(
+                crate::game_wizard::WizardStep::Setup,
+                Some(WizardPage::Location)
+            ))
         );
-        assert_eq!(view.page_spec().wizard, route);
     });
     cx.update(|window, _| {
         let controls =
@@ -1203,44 +1189,17 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
             1,
             "a nested selector must not remount its owner: {controls:?}"
         );
-        assert!(controls[0].path().contains(&"dialog".into()));
+        assert!(!controls[0].path().contains(&"dialog".into()));
     });
-    assert!(crate::test_support::control_bounds(cx, "wizard-component-version").is_some());
-
-    // A section replacement updates the layer without changing the draft page.
-    // The dialog must follow that layer even while another surface is on top.
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.handle(UiAction::WizardPage(Some(WizardPage::Version)), window, cx);
-        });
-    });
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
-        assert_eq!(view.page_spec().wizard, route);
-        assert!(matches!(
-            view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::Select(_))
-        ));
-    });
-    cx.update(|window, _| {
-        let controls = gpui_base::test_support::find_all(window, &[], &"wizard-snapshots".into());
-        assert_eq!(
-            controls.len(),
-            1,
-            "the layer's new page must be mounted: {controls:?}"
-        );
-        assert!(controls[0].path().contains(&"dialog".into()));
-    });
+    assert!(crate::test_support::control_bounds(cx, "wizard-component-version").is_none());
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
-        assert!(matches!(
-            view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::WizardSection(WizardPage::Version))
-        ));
+        assert!(!view.shell.surfaces.is_open());
+        assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
     });
-    click(cx, "section-cancel");
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.page_spec().wizard, route);
@@ -1248,7 +1207,7 @@ fn wizard_section_keeps_its_own_page_beneath_a_nested_selector(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn onboarding_configuration_owns_advanced_inputs_while_the_dialog_is_open(cx: &mut TestAppContext) {
+fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -1269,32 +1228,22 @@ fn onboarding_configuration_owns_advanced_inputs_while_the_dialog_is_open(cx: &m
         });
     });
     cx.run_until_parked();
-    let memory_height = crate::test_support::control_bounds(cx, "wizard-field-Memory")
-        .map(|bounds| bounds.size.height);
-    let jvm_height = crate::test_support::control_bounds(cx, "wizard-field-Jvm")
-        .map(|bounds| bounds.size.height);
-    let outer_before = view.read_with(cx, |view, _| view.shell.wizard.body_scroll.max_offset().y);
     click(cx, "wizard-component-location");
-    let outer_during = view.read_with(cx, |view, _| view.shell.wizard.body_scroll.max_offset().y);
-    assert!(
-        memory_height
-            .zip(jvm_height)
-            .is_some_and(|(memory, jvm)| { outer_before - outer_during >= memory + jvm }),
-        "the open background disclosure must release both shared fields: before={outer_before:?}, during={outer_during:?}, memory={memory_height:?}, jvm={jvm_height:?}"
-    );
-    click(cx, "section-done");
+    assert!(crate::test_support::control_bounds(cx, "wizard-component-location").is_none());
+    assert!(crate::test_support::control_bounds(cx, "wizard-field-Memory").is_some());
+    assert!(crate::test_support::control_bounds(cx, "wizard-field-Jvm").is_some());
+    click(cx, "wizard-next");
 
     let memory = crate::test_support::control_bounds(cx, "wizard-field-Memory");
-    let section = crate::test_support::control_bounds(cx, "wizard-section-body");
+    let section = crate::test_support::control_bounds(cx, "wizard-body");
     assert!(
         memory.zip(section).is_some_and(|(memory, section)| {
             memory.top() >= section.top() && memory.bottom() <= section.bottom()
         }),
-        "the invalid shared field must be revealed in the section: {memory:?}, {section:?}"
+        "the invalid shared field must be revealed in the page: {memory:?}, {section:?}"
     );
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.wizard.body_scroll.offset().y, px(0.));
-        assert!(view.shell.wizard.section_scroll.offset().y < px(0.));
+        assert!(view.shell.wizard.body_scroll.offset().y < px(0.));
     });
     cx.update(|window, cx| {
         view.read_with(cx, |view, cx| {
@@ -1346,6 +1295,72 @@ fn auth_provider_add_opens_as_dialog_and_escape_dismisses_it(cx: &mut TestAppCon
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
+}
+
+#[gpui::test]
+fn compact_wizard_dialogs_fit_the_window_and_provider_actions_scroll(cx: &mut TestAppContext) {
+    for language in crate::Language::ALL {
+        let (view, cx) = fixture(cx);
+        cx.simulate_resize(size(px(360.), px(540.)));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.language = Some(language);
+                view.preferences.reduce_motion = true;
+                view.begin_game_wizard(cx);
+                view.handle(
+                    UiAction::WizardPage(Some(crate::WizardPage::OptiFine)),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        for selector in ["section-cancel", "section-done"] {
+            let action = crate::test_support::control_bounds(cx, selector);
+            assert!(
+                action.is_some_and(|action| action.left() >= px(0.)
+                    && action.right() <= px(360.)
+                    && action.bottom() <= px(540.)),
+                "{language:?}/{selector}: {action:?}"
+            );
+        }
+        crate::test_support::press(cx, "escape");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::CancelForm, window, cx);
+                view.handle(UiAction::SignIn, window, cx);
+                view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
+                view.handle(UiAction::AuthProviderAdd, window, cx);
+            });
+        });
+        cx.run_until_parked();
+        let viewport = crate::test_support::control_bounds(cx, "auth-provider-scroll");
+        assert!(
+            viewport.is_some(),
+            "{language:?}: provider form must scroll"
+        );
+        let Some(viewport) = viewport else {
+            return;
+        };
+        assert!(viewport.left() >= px(0.) && viewport.right() <= px(360.));
+        assert!(viewport.bottom() <= px(540.));
+        let position = viewport.center();
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position,
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+            ..gpui::ScrollWheelEvent::default()
+        });
+        cx.run_until_parked();
+        let save = crate::test_support::control_bounds(cx, "auth-provider-save");
+        assert!(
+            save.is_some_and(
+                |save| save.top() >= viewport.top() && save.bottom() <= viewport.bottom()
+            ),
+            "{language:?}: provider Save must be reachable: save={save:?}, viewport={viewport:?}"
+        );
+    }
 }
 
 /// A sheet header, a confirmation title and its notes are product text: each

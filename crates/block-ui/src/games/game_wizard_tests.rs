@@ -73,6 +73,54 @@ fn optifine_import_is_draft_bound_revalidates_late_results_and_cancels_without_s
     });
 }
 
+#[gpui::test]
+fn first_run_pack_shortcut_rejects_old_optifine_results_after_restoring_the_draft(
+    cx: &mut TestAppContext,
+) {
+    use crate::first_run::Action;
+
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let old = uuid::Uuid::new_v4();
+    let loader_cancel = block_launcher::CancellationToken::new();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.onboarding_complete = false;
+            view.saved_preferences.onboarding_complete = false;
+            view.preferences.reduce_motion = true;
+            view.begin_first_run(cx);
+            view.handle(crate::UiAction::FirstRun(Action::Game), window, cx);
+            view.handle(crate::UiAction::FirstRun(Action::Custom), window, cx);
+            view.set_wizard_version("1.21.1".into(), cx);
+            view.open_game_wizard_page(Some(WizardPage::OptiFine), cx);
+            view.shell.wizard.optifine_request = Some(old);
+            view.shell.wizard.loader_request = Some(super::LoaderRequest(loader_cancel.clone()));
+            view.shell.wizard.set_failure(WizardFailure::ChooserFailed);
+            view.handle(crate::UiAction::FirstRun(Action::Back), window, cx);
+            assert!(loader_cancel.is_cancelled());
+            assert_eq!(view.shell.wizard.optifine_request, Some(old));
+            view.open_import_games(window, cx);
+            view.open_pack_import(window, cx);
+            view.handle(crate::UiAction::CancelForm, window, cx);
+            assert_eq!(view.shell.wizard.optifine_request, None);
+            assert!(view.shell.wizard.loader_request.is_none());
+            assert_eq!(
+                view.shell.wizard.failure(),
+                Some(WizardFailure::ChooserFailed)
+            );
+            let field = match &view.form {
+                Some(Form::Instance(form)) => form.version.entity_id(),
+                _ => return,
+            };
+            view.finish_optifine_import(old, field, Ok(compatible_optifine()), cx);
+            assert!(matches!(&view.form, Some(Form::Instance(form)) if form.optifine.is_none()));
+            assert_eq!(
+                view.shell.wizard.failure(),
+                Some(WizardFailure::ChooserFailed)
+            );
+        });
+    });
+}
+
 fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
     let bounds = crate::test_support::control_bounds(cx, selector);
@@ -92,6 +140,44 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     }
 }
 
+fn reveal_wizard_control(
+    view: &gpui::Entity<crate::Block>,
+    cx: &mut gpui::VisualTestContext,
+    selector: &'static str,
+) {
+    cx.run_until_parked();
+    let body = view.read_with(cx, |view, _| view.shell.wizard.body_scroll.bounds());
+    let item = crate::test_support::control_bounds(cx, selector);
+    assert!(item.is_some(), "missing control {selector}");
+    let Some(item) = item else {
+        return;
+    };
+    let delta = if item.bottom() > body.bottom() {
+        body.bottom() - item.bottom() - px(8.)
+    } else if item.top() < body.top() {
+        body.top() - item.top() + px(8.)
+    } else {
+        px(0.)
+    };
+    if delta != px(0.) {
+        let position = body.center();
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position,
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), delta)),
+            ..gpui::ScrollWheelEvent::default()
+        });
+        cx.run_until_parked();
+    }
+    let item = crate::test_support::control_bounds(cx, selector);
+    assert!(
+        item.is_some_and(
+            |item| item.top() >= body.top() - px(1.) && item.bottom() <= body.bottom() + px(1.)
+        ),
+        "{selector} must be reachable by scrolling: item={item:?}, body={body:?}"
+    );
+}
+
 #[gpui::test]
 fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
     cx: &mut TestAppContext,
@@ -108,6 +194,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
             view
         });
         cx.simulate_resize(size(px(1100.), px(1300.)));
+        click(cx, "wizard-profile-options");
         click(cx, "wizard-component-optifine");
         click(cx, "optifine-select-jar");
         assert!(cx.did_prompt_for_paths());
@@ -217,14 +304,136 @@ fn entry(
     }
 }
 
+#[gpui::test]
+fn game_creation_defaults_to_a_catalog_release_and_never_guesses_when_missing(
+    cx: &mut TestAppContext,
+) {
+    use block_launcher::manifest::model::VersionType;
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    view.update(cx, |view, cx| {
+        view.saved_preferences.game.show_snapshots = true;
+        view.version_catalog = vec![
+            entry("26w10a", VersionType::Snapshot),
+            entry("1.21.1", VersionType::Release),
+            entry("1.20.6", VersionType::Release),
+        ];
+        view.begin_game_wizard(cx);
+        assert!(matches!(
+            &view.form,
+            Some(Form::Instance(form)) if form.version.read(cx).value() == "1.21.1"
+        ));
+        view.version_catalog.clear();
+        view.versions = vec!["26w10a".into()];
+        view.begin_game_wizard(cx);
+        assert!(matches!(
+            &view.form,
+            Some(Form::Instance(form)) if form.version.read(cx).value().is_empty()
+        ));
+    });
+}
+
+#[gpui::test]
+fn profile_name_uses_the_catalogs_utf8_byte_limit(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    view.update(cx, |view, cx| {
+        view.begin_game_wizard(cx);
+        let profile = view.shell.wizard.profile.as_ref();
+        assert!(profile.is_some(), "missing Profile draft");
+        let Some(profile) = profile else {
+            return;
+        };
+        let limit = format!("{}a", "中".repeat(53));
+        profile
+            .name
+            .update(cx, |field, cx| field.set_value(&limit, cx));
+        assert_eq!(limit.len(), 160);
+        assert_ne!(profile.invalid_field(cx), Some(WizardField::ProfileName));
+        assert!(profile.values(cx).is_ok());
+        profile
+            .name
+            .update(cx, |field, cx| field.set_value(&format!("{limit}a"), cx));
+        assert_eq!(profile.invalid_field(cx), Some(WizardField::ProfileName));
+        assert!(profile.values(cx).is_err());
+    });
+}
+
+#[gpui::test]
+fn missing_release_keeps_setup_visible_and_focuses_the_version_choice(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.version_catalog.clear();
+        view.begin_game_wizard(cx);
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(900.)));
+    click(cx, "wizard-next");
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.wizard.error_field == Some(WizardField::Version)
+            && view.shell.wizard.error.is_some()
+            && view.shell.wizard.page.is_none()
+    }));
+    cx.update(|window, cx| {
+        view.read_with(cx, |view, cx| {
+            assert!(
+                view.shell
+                    .wizard
+                    .creation_focus("version", cx)
+                    .is_focused(window)
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut TestAppContext) {
+    for changed in [false, true] {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view
+        });
+        cx.simulate_resize(size(px(960.), px(900.)));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(crate::UiAction::CreateInstance, window, cx);
+            });
+        });
+        click(cx, "wizard-kind-instance");
+        if changed {
+            view.update(cx, |view, cx| {
+                if let Some(Form::Instance(form)) = &view.form {
+                    form.name
+                        .update(cx, |field, cx| field.set_value("Keep me", cx));
+                }
+            });
+        }
+        click(cx, "cancel-instance");
+        if changed {
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.surfaces.top().is_some_and(|layer| {
+                    matches!(layer.kind, crate::shell::Surface::DiscardGameDraft { .. })
+                })
+            }));
+            click(cx, "discard-game-stay");
+            assert!(view.read_with(cx, |view, cx| {
+                matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Keep me")
+            }));
+            click(cx, "cancel-instance");
+            click(cx, "discard-game-confirm");
+        }
+        assert!(view.read_with(cx, |view, _| view.form.is_none()));
+    }
+}
+
 #[test]
-fn bundled_and_separated_steps_keep_their_own_back_stack() {
+fn bundled_and_separated_sources_both_lead_to_one_setup() {
     let mut bundled = WizardState::default();
     bundled.back();
+    assert_eq!(bundled.step, WizardStep::GetStarted);
+    bundled.next();
     assert_eq!(bundled.step, WizardStep::Setup);
     bundled.next();
-    assert_eq!(bundled.step, WizardStep::Review);
-    bundled.back();
     assert_eq!(bundled.step, WizardStep::Setup);
 
     let mut separated = WizardState {
@@ -232,20 +441,70 @@ fn bundled_and_separated_steps_keep_their_own_back_stack() {
         step: WizardStep::GetStarted,
         ..WizardState::default()
     };
-    for expected in [WizardStep::Setup, WizardStep::Profile, WizardStep::Review] {
-        separated.next();
-        assert_eq!(separated.step, expected);
-    }
-    for expected in [
-        WizardStep::Profile,
-        WizardStep::Setup,
-        WizardStep::GetStarted,
-    ] {
-        separated.back();
-        assert_eq!(separated.step, expected);
-    }
+    separated.next();
+    assert_eq!(separated.step, WizardStep::Setup);
+    separated.next();
+    assert_eq!(separated.step, WizardStep::Setup);
     separated.back();
     assert_eq!(separated.step, WizardStep::GetStarted);
+    separated.back();
+    assert_eq!(separated.step, WizardStep::GetStarted);
+}
+
+#[gpui::test]
+fn pack_rail_groups_inspection_review_and_install_results_into_three_steps(
+    cx: &mut TestAppContext,
+) {
+    use crate::modpack_import::Phase;
+
+    let inspection = (|| -> anyhow::Result<_> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("pack.mrpack");
+        crate::test_support::write_modpack(&source)?;
+        block_launcher::modpack::inspect(&source)
+    })();
+    assert!(inspection.is_ok(), "{inspection:?}");
+    let Ok(inspection) = inspection else {
+        return;
+    };
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_game_wizard(cx);
+        view.shell.wizard.kind = CreationKind::ImportPack;
+        view
+    });
+    view.update(cx, |view, _| {
+        view.shell.wizard.step = WizardStep::GetStarted;
+        assert_eq!(view.wizard_rail_progress(Language::English).1, 0);
+        view.shell.wizard.step = WizardStep::Setup;
+        for phase in [
+            Phase::Choose,
+            Phase::Inspecting,
+            Phase::Review,
+            Phase::Blocked,
+        ] {
+            view.shell.pack_import.phase = phase;
+            view.shell.pack_import.operation_id = None;
+            let (steps, current) = view.wizard_rail_progress(Language::English);
+            assert_eq!(steps.len(), 3);
+            assert_eq!(current, 1, "{phase:?}");
+        }
+        view.shell.pack_import.operation_id = Some(String::from("installation"));
+        view.shell.pack_import.phase = Phase::Blocked;
+        assert_eq!(view.wizard_rail_progress(Language::English).1, 1);
+        view.shell.pack_import.inspection = Some(inspection);
+        for phase in [
+            Phase::Installing,
+            Phase::Blocked,
+            Phase::Stopped,
+            Phase::Complete,
+        ] {
+            view.shell.pack_import.phase = phase;
+            let (steps, current) = view.wizard_rail_progress(Language::English);
+            assert_eq!(steps.len(), 3);
+            assert_eq!(current, 2, "{phase:?}");
+        }
+    });
 }
 
 #[gpui::test]
@@ -275,7 +534,6 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
         let grid = crate::test_support::control_bounds(cx, "wizard-components");
         let version = crate::test_support::control_bounds(cx, "wizard-component-version");
         let loader = crate::test_support::control_bounds(cx, "wizard-component-loader");
-        let optifine = crate::test_support::control_bounds(cx, "wizard-component-optifine");
         let location = crate::test_support::control_bounds(cx, "wizard-component-location");
         let value = crate::test_support::control_bounds(cx, "wizard-component-version-value");
         let detail = crate::test_support::control_bounds(cx, "wizard-component-version-detail");
@@ -283,47 +541,38 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
             grid.is_some()
                 && version.is_some()
                 && loader.is_some()
-                && optifine.is_some()
                 && location.is_some()
                 && value.is_some()
                 && detail.is_some(),
             "live wizard cards must be rendered at {width}"
         );
-        let (
-            Some(grid),
-            Some(version),
-            Some(loader),
-            Some(optifine),
-            Some(location),
-            Some(value),
-            Some(detail),
-        ) = (grid, version, loader, optifine, location, value, detail)
+        let (Some(grid), Some(version), Some(loader), Some(location), Some(value), Some(detail)) =
+            (grid, version, loader, location, value, detail)
         else {
             return;
         };
-        // Version -> Loader / OptiFine -> Configuration stay in two equal columns.
+        // Version and Loader share the first row; Configuration follows.
         assert!(
-            (version.left() - optifine.left()).abs() <= px(1.)
-                && (loader.left() - location.left()).abs() <= px(1.),
-            "both rows must share the same two columns at {width}"
+            (version.left() - location.left()).abs() <= px(1.),
+            "Configuration starts in the first column at {width}"
         );
         assert!(
             (version.size.width - loader.size.width).abs() <= px(1.)
-                && (loader.size.width - optifine.size.width).abs() <= px(1.),
+                && (loader.size.width - location.size.width).abs() <= px(1.),
             "cards must split the grid width equally at {width}"
         );
         let first_row = version.size.height.max(loader.size.height);
-        let second_row = optifine.size.height.max(location.size.height);
+        let second_row = location.size.height;
         assert!(
             (loader.left() - version.right()).abs() <= px(13.)
-                && (optifine.top() - (version.top() + first_row)).abs() <= px(13.),
+                && (location.top() - (version.top() + first_row)).abs() <= px(13.),
             "cards must keep the 12 px grid gap at {width}"
         );
         assert!(
-            version.top() < optifine.top() && loader.top() < location.top(),
+            version.top() < location.top() && loader.top() < location.top(),
             "Version and Loader must lead the first row at {width}"
         );
-        for card in [version, loader, optifine, location] {
+        for card in [version, loader, location] {
             assert!(
                 card.size.height >= px(96.),
                 "cards must keep their 96 px minimum height at {width}: {card:?}"
@@ -331,7 +580,7 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
         }
         assert!(
             (grid.size.height - (first_row + second_row + px(12.))).abs() <= px(1.),
-            "the grid must reserve only its two content rows at {width}: grid={grid:?}, version={version:?}, optifine={optifine:?}"
+            "the grid must reserve only its two content rows at {width}: grid={grid:?}, version={version:?}, location={location:?}"
         );
         // The value and its detail sit inside the card instead of being clipped.
         assert!(
@@ -357,29 +606,16 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
         let tall_value = crate::test_support::control_bounds(cx, "wizard-component-version-value");
         let tall_detail =
             crate::test_support::control_bounds(cx, "wizard-component-version-detail");
-        let tall_optifine = crate::test_support::control_bounds(cx, "wizard-component-optifine");
         let tall_location = crate::test_support::control_bounds(cx, "wizard-component-location");
         assert!(
             tall_version.is_some()
                 && tall_value.is_some()
                 && tall_detail.is_some()
-                && tall_optifine.is_some()
                 && tall_location.is_some(),
             "a long value must keep rendering at {width}"
         );
-        let (
-            Some(tall_version),
-            Some(tall_value),
-            Some(tall_detail),
-            Some(tall_optifine),
-            Some(tall_location),
-        ) = (
-            tall_version,
-            tall_value,
-            tall_detail,
-            tall_optifine,
-            tall_location,
-        )
+        let (Some(tall_version), Some(tall_value), Some(tall_detail), Some(tall_location)) =
+            (tall_version, tall_value, tall_detail, tall_location)
         else {
             return;
         };
@@ -396,7 +632,7 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
             tall_version.size.height
         );
         assert!(
-            (tall_optifine.size.height.max(tall_location.size.height) - second_row).abs() <= px(1.),
+            (tall_location.size.height - second_row).abs() <= px(1.),
             "only the row holding the long value may grow at {width}"
         );
         assert!(
@@ -409,90 +645,63 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
 }
 
 #[gpui::test]
-fn review_leads_with_identity_and_keeps_unchanged_defaults_folded(cx: &mut TestAppContext) {
-    let (view, cx) = review_page(cx);
-    // Identity, then what Create does, then the runtime summary, then the fold.
+fn setup_summarizes_runtime_choices_and_keeps_details_folded(cx: &mut TestAppContext) {
+    let (view, cx) = setup_page(cx);
     assert!(
         !view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "review details must start collapsed"
+        "the appearance and launch details must start collapsed"
     );
-    let identity = crate::test_support::control_bounds(cx, "wizard-review-identity");
-    let consequence = crate::test_support::control_bounds(cx, "wizard-review-consequence");
-    let summary = crate::test_support::control_bounds(cx, "wizard-review-summary");
-    let options = crate::test_support::control_bounds(cx, "wizard-review-options");
-    let short_target = crate::test_support::control_bounds(cx, "wizard-review-launch-target");
+    let grid = entry_bounds(cx, "wizard-components", "Setup");
+    let location = entry_bounds(cx, "wizard-component-location", "Setup");
+    let summary = entry_bounds(cx, "wizard-component-location-value", "Setup");
+    let window = entry_bounds(cx, "wizard-component-location-detail", "Setup");
+    let options = entry_bounds(cx, "wizard-profile-options", "Setup");
     assert!(
-        identity.is_some()
-            && consequence.is_some()
-            && summary.is_some()
-            && options.is_some()
-            && short_target.is_some(),
-        "the review must render its identity, consequence, summary and fold"
+        grid.bottom() <= options.top() && location.bottom() <= options.top(),
+        "the component cards and their Configuration summary come before the fold"
     );
     assert!(
-        short_target.is_some_and(|target| target.size.height == px(20.)),
-        "the ordinary short target must keep its compact badge: {short_target:?}"
+        summary.left() >= location.left() - px(1.)
+            && summary.right() <= location.right() + px(1.)
+            && window.left() >= location.left() - px(1.)
+            && window.right() <= location.right() + px(1.),
+        "the Java, memory and window summary must stay inside its card: \
+         summary={summary:?}, window={window:?}, card={location:?}"
     );
-    let (Some(identity), Some(consequence), Some(summary), Some(options)) =
-        (identity, consequence, summary, options)
-    else {
-        return;
-    };
-    assert!(
-        identity.bottom() <= consequence.top()
-            && consequence.bottom() <= summary.top()
-            && summary.bottom() <= options.top(),
-        "review order must be identity, consequence, runtime summary, then details: \
-         identity={identity:?}, consequence={consequence:?}, summary={summary:?}, options={options:?}"
-    );
-    // Java and memory lead the visible summary while the fold is still closed.
-    let java_fact = crate::test_support::control_bounds(cx, "wizard-review-java");
-    let memory_fact = crate::test_support::control_bounds(cx, "wizard-review-memory");
-    assert!(
-        java_fact.is_some() && memory_fact.is_some(),
-        "the runtime summary must always show Java and memory"
-    );
-    for fact in [java_fact, memory_fact].into_iter().flatten() {
-        assert!(
-            fact.bottom() <= options.top(),
-            "a runtime fact must precede the folded details: {fact:?}"
-        );
-    }
-    // Values that decide nothing stay inside the collapsed fold: they lay out
-    // below its trigger and are only revealed by opening it.
+    // A field that edits one value decides little on its own, so it stays in the
+    // folded details rather than competing with the summary above them.
     for selector in [
-        "wizard-review-server",
-        "wizard-review-automatic-connection",
-        "wizard-review-jvm-arguments",
-        "wizard-review-game-window",
-        "wizard-review-game-files",
+        "wizard-field-Server",
+        "wizard-field-Memory",
+        "wizard-field-Jvm",
     ] {
-        let fact = crate::test_support::control_bounds(cx, selector);
+        let field = entry_bounds(cx, selector, "Setup");
         assert!(
-            fact.is_some(),
-            "the fold must still describe the unchanged default: {selector}"
+            field.top() >= options.bottom(),
+            "an editing field must stay inside the fold: {selector}={field:?}"
         );
-        if let Some(fact) = fact {
-            assert!(
-                fact.top() >= options.bottom(),
-                "an unchanged default must stay inside the fold: {selector}={fact:?}"
-            );
-        }
     }
 }
 
 #[gpui::test]
-fn review_shows_changed_settings_outside_the_fold_and_keeps_its_draft_across_steps(
+fn setup_shows_effective_settings_and_keeps_its_draft_across_component_pages(
     cx: &mut TestAppContext,
 ) {
-    let directory = std::env::temp_dir().join("block-review-game");
+    let directory = std::env::temp_dir().join("block-setup-game");
     let directory = directory.to_string_lossy().into_owned();
     let java = std::env::temp_dir().join(format!("java{}", std::env::consts::EXE_SUFFIX));
     let java = java.to_string_lossy().into_owned();
-    let (view, cx) = review_page(cx);
-    // A deliberate override is visible without opening the fold.
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.snapshot = ready_snapshot();
+        view.begin_game_wizard(cx);
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(1400.)));
+    click(cx, "wizard-component-location");
     view.update(cx, |view, cx| {
-        if let Some(Form::Instance(form)) = &mut view.form {
+        if let Some(Form::Instance(form)) = &view.form {
             form.directory
                 .update(cx, |field, cx| field.set_value(&directory, cx));
         }
@@ -502,86 +711,28 @@ fn review_shows_changed_settings_outside_the_fold_and_keeps_its_draft_across_ste
                 .java
                 .update(cx, |field, cx| field.set_value(&java, cx));
             profile
+                .memory
+                .update(cx, |field, cx| field.set_value("4", cx));
+            profile
                 .jvm
                 .update(cx, |field, cx| field.set_value("-XX:+UseG1GC", cx));
-            profile.server.update(cx, |field, cx| {
-                field.set_value("play.example.com:25565", cx)
-            });
             profile.fullscreen = true;
         }
         cx.notify();
     });
-    cx.run_until_parked();
-    assert!(
-        !view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "a visible summary must not depend on the fold being open"
-    );
-    let collapsed = crate::test_support::control_bounds(cx, "wizard-review-options");
-    assert!(collapsed.is_some(), "the review must keep its fold trigger");
-    if let Some(collapsed) = collapsed {
-        for selector in [
-            "wizard-review-server",
-            "wizard-review-jvm-arguments",
-            "wizard-review-game-window",
-            "wizard-review-game-files",
-        ] {
-            let fact = crate::test_support::control_bounds(cx, selector);
-            assert!(
-                fact.is_some(),
-                "a changed setting must stay visible in the review summary: {selector}"
-            );
-            if let Some(fact) = fact {
-                assert!(
-                    fact.bottom() <= collapsed.top(),
-                    "a changed setting must not move into the fold: {selector}={fact:?}"
-                );
-            }
-        }
-    }
-    // The fold reuses one draft's expansion state rather than a new one.
-    click(cx, "wizard-review-options");
-    assert!(
-        view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "opening the disclosure must reveal the folded defaults"
-    );
-    assert!(
-        view.read_with(cx, |view, _| {
-            view.shell
-                .wizard
-                .profile
-                .as_ref()
-                .is_some_and(|profile| profile.options)
-        }),
-        "the disclosure must keep using the existing profile options state"
-    );
-    // Returning to setup and advancing again must keep the same draft values.
-    click(cx, "wizard-back");
-    assert_eq!(
-        view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Setup
-    );
-    assert!(
-        view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "one draft keeps its expansion across Setup and Review"
-    );
-    assert!(view.read_with(cx, |view, cx| {
-        view.shell.wizard.profile.as_ref().is_some_and(|profile| {
-            profile.jvm.read(cx).value() == "-XX:+UseG1GC"
-                && !profile.managed
-                && profile.fullscreen
-        }) && matches!(&view.form, Some(Form::Instance(form)) if form.directory.read(cx).value() == directory)
-    }));
     click(cx, "wizard-next");
-    assert_eq!(
-        view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Review
-    );
-    assert!(
-        view.read_with(cx, |view, _| !view.shell.wizard.advanced.borrow().is_open()),
-        "arriving at the review must fold the defaults again"
-    );
-    assert!(view.read_with(cx, |view, _| error_text(view).is_none()));
-    assert!(crate::test_support::control_bounds(cx, "wizard-review-server").is_some());
+    assert!(view.read_with(cx, |view, cx| {
+        view.shell.wizard.page.is_none()
+            && view.wizard_configuration_summary(cx)
+                == ("Custom Java · 4 GB".to_owned(), "Fullscreen".to_owned())
+            && view.shell.wizard.profile.as_ref().is_some_and(|profile| {
+                profile.jvm.read(cx).value() == "-XX:+UseG1GC"
+                    && !profile.managed
+                    && profile.fullscreen
+            })
+            && matches!(&view.form, Some(Form::Instance(form)) if form.directory.read(cx).value() == directory)
+    }));
+    assert!(crate::test_support::control_bounds(cx, "wizard-component-location").is_some());
     assert_eq!(
         view.read_with(cx, |view, _| view.snapshot.instances.len()),
         1
@@ -589,63 +740,62 @@ fn review_shows_changed_settings_outside_the_fold_and_keeps_its_draft_across_ste
 }
 
 #[gpui::test]
-fn review_keeps_a_long_launch_target_inside_the_identity_card(cx: &mut TestAppContext) {
-    let (view, cx) = review_page(cx);
-    // Review a real, compatible combination whose complete identity is wider
-    // than one review fact column.
+fn setup_keeps_a_long_loader_label_inside_its_card(cx: &mut TestAppContext) {
+    let (view, cx) = setup_page(cx);
+    // A real, compatible combination whose launch target is wider than one card
+    // column and still has to stay readable inside that card.
     view.update(cx, |view, cx| {
         let selected = compatible_optifine();
         let loader = block_launcher::catalog::LoaderKind::Forge;
+        let Some(Form::Instance(form)) = &mut view.form else {
+            return;
+        };
+        let minecraft = form.version.read(cx).value();
+        assert_eq!(minecraft, "1.21.1");
         assert!(
-            matches!(&view.form, Some(Form::Instance(_))),
-            "the Review must retain the instance draft"
+            selected
+                .validate_for(&minecraft, &loader, Some("52.0.16"))
+                .is_ok()
         );
-        if let Some(Form::Instance(form)) = &mut view.form {
-            let minecraft = form.version.read(cx).value();
-            assert_eq!(minecraft, "1.21.1");
-            assert!(
-                selected
-                    .validate_for(&minecraft, &loader, Some("52.0.16"))
-                    .is_ok()
-            );
-            form.loader = loader;
-            form.loader_version = Some("52.0.16".into());
-            form.optifine = Some(Box::new(selected));
-            assert_eq!(
-                form.loader_label(),
-                "Forge 52.0.16 + OptiFine 1.21.1_HD_U_J1"
-            );
-        }
+        form.loader = loader;
+        form.loader_version = Some("52.0.16".into());
+        form.optifine = Some(Box::new(selected));
+        assert_eq!(
+            form.loader_label(),
+            "Forge 52.0.16 + OptiFine 1.21.1_HD_U_J1"
+        );
         cx.notify();
     });
     for width in [960., 1152.] {
         cx.simulate_resize(size(px(width), px(1400.)));
         cx.run_until_parked();
-        let identity = crate::test_support::control_bounds(cx, "wizard-review-identity");
-        let target = crate::test_support::control_bounds(cx, "wizard-review-launch-target");
-        assert!(identity.is_some() && target.is_some());
-        let (Some(identity), Some(target)) = (identity, target) else {
-            return;
-        };
+        let card = entry_bounds(cx, "wizard-component-loader", "Setup");
+        let value = entry_bounds(cx, "wizard-component-loader-value", "Setup");
+        let detail = entry_bounds(cx, "wizard-component-loader-detail", "Setup");
         assert!(
-            target.left() >= identity.left()
-                && target.right() <= identity.right()
-                && target.top() >= identity.top()
-                && target.bottom() <= identity.bottom(),
-            "the complete launch target must stay inside the identity card at {width}: \
-             target={target:?}, identity={identity:?}"
+            value.left() >= card.left() - px(1.)
+                && value.right() <= card.right() + px(1.)
+                && value.top() >= card.top() - px(1.)
+                && value.bottom() <= card.bottom() + px(1.)
+                && detail.bottom() <= card.bottom() + px(1.),
+            "the complete launch target must stay inside its card at {width}: \
+             value={value:?}, detail={detail:?}, card={card:?}"
         );
     }
 }
 
-/// The Review page of a fresh game draft at the wide diagnostic window.
-fn review_page(
+/// The Setup page of a fresh game draft at the wide diagnostic window.
+fn setup_page(
     cx: &mut TestAppContext,
 ) -> (gpui::Entity<crate::Block>, &mut gpui::VisualTestContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.versions = vec!["1.21.1".into()];
+        view.version_catalog = vec![entry(
+            "1.21.1",
+            block_launcher::manifest::model::VersionType::Release,
+        )];
         view.snapshot = ready_snapshot();
         view.begin_game_wizard(cx);
         view
@@ -657,8 +807,7 @@ fn review_page(
                 field.set_value("Steam \u{4e16}\u{754c}", cx)
             });
         }
-        view.shell.wizard.step = WizardStep::Review;
-        view.shell.wizard.page = None;
+        view.mark_game_wizard_clean(cx);
         cx.notify();
     });
     cx.run_until_parked();
@@ -666,7 +815,7 @@ fn review_page(
 }
 
 #[gpui::test]
-fn entering_the_review_folds_details_the_setup_disclosure_left_open(cx: &mut TestAppContext) {
+fn setup_keeps_its_disclosure_after_a_component_page(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -677,35 +826,24 @@ fn entering_the_review_folds_details_the_setup_disclosure_left_open(cx: &mut Tes
     });
     cx.simulate_resize(size(px(960.), px(1400.)));
     cx.run_until_parked();
-    // Setup and the Review share the wizard's one expansion state, so a Setup
-    // disclosure the user opened would otherwise arrive open in the Review.
     click(cx, "wizard-profile-options");
     assert!(
         view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "the setup disclosure must open before the review could inherit it"
+        "the setup disclosure must open"
     );
+    click(cx, "wizard-component-location");
     click(cx, "wizard-next");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Review
+        WizardStep::Setup
     );
     assert!(
-        view.read_with(cx, |view, _| !view.shell.wizard.advanced.borrow().is_open()),
-        "the review must lead with the decisions instead of a setup expansion"
+        view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
+        "returning from a component must retain the setup disclosure"
     );
-    let trigger = crate::test_support::control_bounds(cx, "wizard-review-options");
-    let folded = crate::test_support::control_bounds(cx, "wizard-review-game-window");
     assert!(
-        trigger.is_some() && folded.is_some(),
-        "the folded review must still describe its defaults"
-    );
-    let (Some(trigger), Some(folded)) = (trigger, folded) else {
-        return;
-    };
-    assert!(
-        folded.top() >= trigger.bottom(),
-        "the review must keep its unchanged defaults folded: folded={folded:?} \
-         trigger={trigger:?}"
+        crate::test_support::control_bounds(cx, "wizard-profile-options").is_some()
+            && crate::test_support::control_bounds(cx, "wizard-field-Jvm").is_some()
     );
 }
 
@@ -749,9 +887,6 @@ fn outer_profile_validation_retains_its_language_across_continue_and_submit(
                 view.shell.wizard.error_text(view.language()).as_deref(),
                 Some("追加引数の二重引用符を閉じてください")
             );
-            view.wizard_kind(false, cx);
-            view.shell.wizard.separated = true;
-            view.shell.wizard.step = WizardStep::Profile;
             if let Some(profile) = &view.shell.wizard.profile {
                 profile.jvm.update(cx, |input, cx| input.set_value("", cx));
                 profile
@@ -783,22 +918,22 @@ fn outer_profile_validation_retains_its_language_across_continue_and_submit(
                 view.shell.wizard.error_text(view.language()).as_deref(),
                 Some("窗口宽度必须是 320 到 16384 之间的整数。")
             );
-            view.shell.wizard.step = WizardStep::Review;
-            view.submit_game_wizard(cx);
-            assert_eq!(
-                view.shell
-                    .wizard
-                    .error
-                    .as_ref()
-                    .and_then(|error| error.key()),
-                Some("wizard.error.widthRange")
-            );
         });
     });
+    click(cx, "wizard-next");
+    assert_eq!(
+        view.read_with(cx, |view, _| view
+            .shell
+            .wizard
+            .error
+            .as_ref()
+            .and_then(|error| error.key())),
+        Some("wizard.error.widthRange")
+    );
 }
 
 #[gpui::test]
-fn review_shows_arguments_and_java_inherited_from_saved_defaults(cx: &mut TestAppContext) {
+fn setup_summary_states_java_and_arguments_inherited_from_saved_defaults(cx: &mut TestAppContext) {
     let java = std::env::temp_dir().join(format!("java{}", std::env::consts::EXE_SUFFIX));
     let java = java.to_string_lossy().into_owned();
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -814,42 +949,45 @@ fn review_shows_arguments_and_java_inherited_from_saved_defaults(cx: &mut TestAp
         view
     });
     cx.simulate_resize(size(px(960.), px(1400.)));
-    view.update(cx, |view, cx| {
-        view.shell.wizard.step = WizardStep::Review;
-        view.shell.wizard.page = None;
-        cx.notify();
-    });
     cx.run_until_parked();
     assert!(
         !view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-        "review details must start collapsed"
+        "the details must start collapsed"
     );
-    let options = crate::test_support::control_bounds(cx, "wizard-review-options");
-    let jvm = crate::test_support::control_bounds(cx, "wizard-review-jvm-arguments");
-    let java_fact = crate::test_support::control_bounds(cx, "wizard-review-java");
-    assert!(
-        options.is_some() && jvm.is_some() && java_fact.is_some(),
-        "the review must show Java and its inherited arguments"
+    // The visible Configuration card already states the inherited runtime, so
+    // the value Decide-by-Create depends on is readable before the fold opens.
+    assert_eq!(
+        view.read_with(cx, |view, cx| view.wizard_configuration_summary(cx)),
+        ("Custom Java · 2 GB".to_owned(), "1280 × 720".to_owned()),
+        "the inherited executable and memory must be stated in the summary"
     );
-    let (Some(options), Some(jvm), Some(java_fact)) = (options, jvm, java_fact) else {
-        return;
-    };
+    let options = entry_bounds(cx, "wizard-profile-options", "Setup");
+    let jvm = entry_bounds(cx, "wizard-field-Jvm", "Setup");
     assert!(
-        jvm.bottom() <= options.top(),
-        "inherited arguments are submitted by Create, so they belong to the visible summary: {jvm:?}"
+        jvm.top() >= options.bottom(),
+        "the inherited arguments belong to the fold: {jvm:?} vs {options:?}"
     );
-    assert!(
-        java_fact.bottom() <= options.top(),
-        "the inherited Java executable must stay visible: {java_fact:?}"
+    assert_eq!(
+        view.read_with(cx, |view, cx| view
+            .shell
+            .wizard
+            .profile
+            .as_ref()
+            .map(|profile| profile.jvm.read(cx).value())),
+        Some("-XX:+UseG1GC".to_owned()),
+        "the fold holds the inherited arguments Create will submit"
     );
 }
 
 #[gpui::test]
-fn review_shows_a_window_choice_inherited_from_saved_defaults(cx: &mut TestAppContext) {
+fn setup_summary_states_a_window_choice_inherited_from_saved_defaults(cx: &mut TestAppContext) {
     // Fullscreen and a non-default size are submitted consequences even when
     // they equal the saved preference, including another built-in size preset.
-    for (fullscreen, width, height) in [(true, 1280, 720), (false, 1600, 900), (false, 1920, 1080)]
-    {
+    for (fullscreen, width, height, expected) in [
+        (true, 1280, 720, "Fullscreen"),
+        (false, 1600, 900, "1600 × 900"),
+        (false, 1920, 1080, "1920 × 1080"),
+    ] {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
@@ -862,33 +1000,27 @@ fn review_shows_a_window_choice_inherited_from_saved_defaults(cx: &mut TestAppCo
             view
         });
         cx.simulate_resize(size(px(960.), px(1400.)));
-        view.update(cx, |view, cx| {
-            view.shell.wizard.step = WizardStep::Review;
-            view.shell.wizard.page = None;
-            cx.notify();
-        });
         cx.run_until_parked();
         assert!(
             !view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
-            "the inherited window choice must be readable without opening the fold"
+            "an inherited window choice must be readable without opening the fold"
         );
-        let options = crate::test_support::control_bounds(cx, "wizard-review-options");
-        let window_fact = crate::test_support::control_bounds(cx, "wizard-review-game-window");
-        assert!(
-            options.is_some() && window_fact.is_some(),
-            "an inherited fullscreen or custom window must stay in the review summary"
+        assert_eq!(
+            view.read_with(cx, |view, cx| view.wizard_configuration_summary(cx).1),
+            expected.to_owned(),
+            "the Configuration card must state the inherited window"
         );
-        let (Some(options), Some(window_fact)) = (options, window_fact) else {
-            return;
-        };
+        let card = entry_bounds(cx, "wizard-component-location", "Setup");
+        let window = entry_bounds(cx, "wizard-component-location-detail", "Setup");
         assert!(
-            window_fact.bottom() <= options.top(),
-            "an inherited window consequence must not move into the fold: window={window_fact:?}, fold={options:?}"
+            window.top() >= card.top() - px(1.) && window.bottom() <= card.bottom() + px(1.),
+            "the inherited window must be stated inside the visible card: \
+             window={window:?}, card={card:?}"
         );
     }
 }
 
-fn review_bounds(
+fn entry_bounds(
     cx: &mut gpui::VisualTestContext,
     selector: &'static str,
     entry: &str,
@@ -902,7 +1034,7 @@ fn review_bounds(
 /// margin, the way `scroll_area_tests` reaches a viewport's keyboard path. The
 /// viewport itself owns that focus target, so End and Home scroll the page.
 fn focus_wizard_body(cx: &mut gpui::VisualTestContext, entry: &str) {
-    let body = review_bounds(cx, "wizard-body", entry);
+    let body = entry_bounds(cx, "wizard-body", entry);
     let blank = point(body.left() + px(8.), body.center().y);
     cx.simulate_click(blank, Modifiers::none());
     settle(cx);
@@ -918,16 +1050,15 @@ fn settle(cx: &mut gpui::VisualTestContext) {
     cx.run_until_parked();
 }
 
-/// The Review tail must reach the edge of the fixed footer through the one real
-/// body viewport, with the values it describes.
-fn assert_review_tail_scrolls_above_the_footer(
+/// The setup fields must reach the fixed footer through the one body viewport.
+fn assert_setup_tail_scrolls_above_the_footer(
     view: &gpui::Entity<crate::Block>,
     cx: &mut gpui::VisualTestContext,
     entry: &str,
 ) {
     let viewport = cx.update(|window, _| window.viewport_size());
-    let body = review_bounds(cx, "wizard-body", entry);
-    let footer = review_bounds(cx, "wizard-footer", entry);
+    let body = entry_bounds(cx, "wizard-body", entry);
+    let footer = entry_bounds(cx, "wizard-footer", entry);
     assert!(
         body.bottom() <= footer.top(),
         "{entry}: the body must end above the fixed footer: body={body:?} footer={footer:?}"
@@ -940,8 +1071,6 @@ fn assert_review_tail_scrolls_above_the_footer(
         let scroll = &view.shell.wizard.body_scroll;
         (scroll.max_offset(), scroll.bounds())
     });
-    // A nested Review viewport claims the shared handle while sizing itself to
-    // its own content, so the outer page keeps the space and reports no range.
     assert!(
         max.y > px(0.),
         "{entry}: these values must need the body scroll: max={max:?} tracked={tracked:?}"
@@ -963,41 +1092,23 @@ fn assert_review_tail_scrolls_above_the_footer(
     );
     crate::test_support::press(cx, "end");
     settle(cx);
-    let body = review_bounds(cx, "wizard-body", entry);
-    let trigger = review_bounds(cx, "wizard-review-options", entry);
-    for selector in ["wizard-review-game-window", "wizard-review-game-data"] {
-        let fact = review_bounds(cx, selector, entry);
-        assert!(
-            fact.top() >= trigger.bottom(),
-            "{entry}: {selector} must stay a folded default of the expanded details: \
-             fact={fact:?} trigger={trigger:?}"
-        );
-        assert!(
-            fact.size.height > px(0.)
-                && fact.top() >= body.top() - px(1.)
-                && fact.bottom() <= body.bottom() + px(1.),
-            "{entry}: {selector} and its value must sit inside the body viewport at its \
-             maximum: fact={fact:?} body={body:?} max={max:?}"
-        );
-    }
-    let content = review_bounds(cx, "wizard-review-content", entry);
+    let body = entry_bounds(cx, "wizard-body", entry);
+    let field = entry_bounds(cx, "wizard-field-Jvm", entry);
     assert!(
-        content.size.height > body.size.height && content.bottom() <= body.bottom() + px(1.),
-        "{entry}: the whole expanded Review must be reachable: content={content:?} body={body:?}"
+        field.size.height > px(0.)
+            && field.top() >= body.top() - px(1.)
+            && field.bottom() <= body.bottom() + px(1.),
+        "{entry}: the last setting must be reachable: field={field:?} body={body:?}"
     );
     assert_eq!(
-        review_bounds(cx, "wizard-footer", entry),
+        entry_bounds(cx, "wizard-footer", entry),
         footer,
         "{entry}: scrolling the body must not move the fixed footer"
     );
 }
 
 #[gpui::test]
-fn expanded_review_scrolls_all_of_its_facts_above_the_fixed_footer(cx: &mut TestAppContext) {
-    // The diagnostic window: 1152×664 with the Review's Java, JVM, server,
-    // automatic connection and directory values long, and the fold really open.
-    // The game window keeps the default 1280×720, so Game window and Game data
-    // stay the folded defaults at the bottom of the expanded Review.
+fn expanded_setup_scrolls_all_fields_above_the_fixed_footer(cx: &mut TestAppContext) {
     let directory = std::env::temp_dir().join("block review long folder");
     let directory = directory.to_string_lossy().into_owned();
     let java = std::env::temp_dir().join("java runtimes/bin/java");
@@ -1034,42 +1145,25 @@ fn expanded_review_scrolls_all_of_its_facts_above_the_fixed_footer(cx: &mut Test
             });
             profile.connect_on_launch = true;
         }
-        view.shell.wizard.step = WizardStep::Review;
-        view.shell.wizard.page = None;
         cx.notify();
     });
     cx.run_until_parked();
-    click(cx, "wizard-review-options");
+    click(cx, "wizard-profile-options");
     assert!(
         view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
         "the fold must really open"
     );
     cx.simulate_resize(size(px(1152.), px(664.)));
     cx.run_until_parked();
-    assert_review_tail_scrolls_above_the_footer(&view, cx, "Review at 1152x664");
-    // Back then Continue keeps this draft, but the returned Review folds its
-    // defaults again; opening them there still scrolls the same tail into view.
-    click(cx, "wizard-back");
-    assert_eq!(
-        view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Setup
-    );
-    click(cx, "wizard-next");
-    assert_eq!(
-        view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Review
-    );
-    assert!(
-        view.read_with(cx, |view, _| !view.shell.wizard.advanced.borrow().is_open()),
-        "the returned review must fold its defaults again"
-    );
-    // A tall window reaches the fold trigger, which a real click opens.
+    assert_setup_tail_scrolls_above_the_footer(&view, cx, "Setup at 1152x664");
+    // A configuration page applies its local draft and returns to the same setup.
     cx.simulate_resize(size(px(960.), px(1400.)));
     cx.run_until_parked();
-    click(cx, "wizard-review-options");
+    click(cx, "wizard-component-location");
+    click(cx, "wizard-next");
     cx.simulate_resize(size(px(1152.), px(664.)));
     cx.run_until_parked();
-    assert_review_tail_scrolls_above_the_footer(&view, cx, "Review after Back");
+    assert_setup_tail_scrolls_above_the_footer(&view, cx, "Setup after configuration");
     // First-run setup renders the same frame, so the same body viewport owns it.
     view.update(cx, |view, cx| {
         view.router.navigate(crate::Tab::Onboarding);
@@ -1079,7 +1173,7 @@ fn expanded_review_scrolls_all_of_its_facts_above_the_fixed_footer(cx: &mut Test
         cx.notify();
     });
     cx.run_until_parked();
-    assert_review_tail_scrolls_above_the_footer(&view, cx, "first-run Review at 1152x664");
+    assert_setup_tail_scrolls_above_the_footer(&view, cx, "first-run Setup at 1152x664");
 }
 
 #[gpui::test]
@@ -1099,7 +1193,7 @@ fn first_run_create_status_names_the_save_and_starts_no_preparation(cx: &mut Tes
             view.router.navigate(crate::Tab::Onboarding);
             view.router.enter_game_wizard();
             view.shell.first_run.enabled = true;
-            view.shell.wizard.step = WizardStep::Review;
+            assert_eq!(view.shell.wizard.step, WizardStep::Setup);
             view.submit_game_wizard(cx);
             assert!(view.busy, "first-run Create must start its save");
             assert_eq!(
@@ -1108,8 +1202,8 @@ fn first_run_create_status_names_the_save_and_starts_no_preparation(cx: &mut Tes
                 "the busy status must name the save first-run Create really starts"
             );
         });
-        // The real submit path saves the setup and starts no preparation: only
-        // Finish begins installing game files.
+        // The real submit path saves the setup and starts no preparation: the
+        // setup center offers preparation as its own step.
         let runtime = tokio::runtime::Runtime::new()?;
         let finished = runtime.block_on(async {
             tokio::time::timeout(std::time::Duration::from_secs(20), async {
@@ -1172,7 +1266,7 @@ fn ordinary_create_status_still_announces_preparation(cx: &mut TestAppContext) {
                 form.directory
                     .update(cx, |field, cx| field.set_value(&blocked, cx));
             }
-            view.shell.wizard.step = WizardStep::Review;
+            assert_eq!(view.shell.wizard.step, WizardStep::Setup);
             view.submit_game_wizard(cx);
             assert!(view.busy, "ordinary Create must start its installation");
             assert_eq!(
@@ -1285,6 +1379,10 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.versions = vec!["1.21.1".into(), "1.20.6".into()];
+        view.version_catalog = vec![entry(
+            "1.21.1",
+            block_launcher::manifest::model::VersionType::Release,
+        )];
         view.snapshot = ready_snapshot();
         view.begin_game_wizard(cx);
         view
@@ -1337,6 +1435,10 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.versions = vec!["1.21.1".into(), "1.20.6".into()];
+        view.version_catalog = vec![entry(
+            "1.21.1",
+            block_launcher::manifest::model::VersionType::Release,
+        )];
         view.begin_game_wizard(cx);
         view
     });
@@ -1379,7 +1481,7 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
 }
 
 #[gpui::test]
-fn separated_profile_review_preserves_home_selection_until_submission(cx: &mut TestAppContext) {
+fn separated_profile_setup_preserves_home_selection_until_submission(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -1396,12 +1498,10 @@ fn separated_profile_review_preserves_home_selection_until_submission(cx: &mut T
         view.read_with(cx, |view, _| view.shell.wizard.kind),
         CreationKind::ExistingInstance
     );
-    click(cx, "wizard-next");
     click(cx, "wizard-instance-instance-a");
-    click(cx, "wizard-next");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Profile
+        WizardStep::Setup
     );
     view.update(cx, |view, cx| {
         let profile = view.shell.wizard.profile.as_ref();
@@ -1416,8 +1516,6 @@ fn separated_profile_review_preserves_home_selection_until_submission(cx: &mut T
         }
         view.wizard_profile_icon(ProfileIcon::Leaf);
         view.wizard_profile_color(ProfileColor::Green);
-        view.advance_game_wizard(cx);
-        assert_eq!(view.shell.wizard.step, WizardStep::Review);
         if let Some(profile) = &view.shell.wizard.profile {
             let values = profile.values(cx);
             assert!(values.is_ok());
@@ -1433,6 +1531,7 @@ fn separated_profile_review_preserves_home_selection_until_submission(cx: &mut T
         cx.notify();
     });
     click(cx, "cancel-instance");
+    click(cx, "discard-game-confirm");
     assert!(view.read_with(cx, |view, _| view.form.is_none()));
     assert_eq!(
         view.read_with(cx, |view, _| view.selected_profile.clone()),
@@ -1527,6 +1626,16 @@ fn long_version_list_end_reveals_the_last_row_and_has_one_roving_tab_stop(cx: &m
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.versions = (0..40).map(|index| format!("1.20.{index}")).collect();
+        view.version_catalog = view
+            .versions
+            .iter()
+            .map(|version| {
+                entry(
+                    version,
+                    block_launcher::manifest::model::VersionType::Release,
+                )
+            })
+            .collect();
         view.begin_game_wizard(cx);
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
         if let Some(search) = &view.shell.wizard.version_search {
@@ -1535,7 +1644,7 @@ fn long_version_list_end_reveals_the_last_row_and_has_one_roving_tab_stop(cx: &m
         view
     });
     cx.simulate_resize(size(px(960.), px(600.)));
-    crate::test_support::press(cx, "tab end");
+    crate::test_support::press(cx, "tab tab end");
     cx.run_until_parked();
     view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.20.39")); });
     let last = crate::test_support::control_bounds(cx, "wizard-version-39");
@@ -1723,10 +1832,119 @@ fn wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext)
             );
         }
         let footer = crate::test_support::control_bounds(cx, "wizard-footer");
-        assert_eq!(footer.map(|bounds| bounds.size.height), Some(px(72.)));
+        assert!(footer.is_some_and(|bounds| bounds.size.height >= px(72.)));
         let rail = crate::test_support::control_bounds(cx, "wizard-rail");
         assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(360.)));
     }
+}
+
+#[gpui::test]
+fn compact_source_new_and_existing_paths_keep_controls_visible_and_keyboard_reachable(
+    cx: &mut TestAppContext,
+) {
+    for language in Language::ALL {
+        for separated in [false, true] {
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.preferences.language = Some(language);
+                view.snapshot = ready_snapshot();
+                view.snapshot.profile_mode = if separated {
+                    ProfileMode::Separated
+                } else {
+                    ProfileMode::Bundled
+                };
+                view
+            });
+            cx.simulate_resize(size(px(1152.), px(720.)));
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.handle(crate::UiAction::CreateInstance, window, cx);
+                });
+            });
+            cx.simulate_resize(size(px(360.), px(540.)));
+            cx.run_until_parked();
+            assert_eq!(
+                view.read_with(cx, |view, _| view.shell.wizard.step),
+                WizardStep::GetStarted
+            );
+            assert!(crate::test_support::control_bounds(cx, "wizard-copy-games").is_some());
+            click(cx, "wizard-kind-instance");
+            assert_eq!(
+                view.read_with(cx, |view, _| view.shell.wizard.step),
+                WizardStep::Setup
+            );
+            assert!(crate::test_support::control_bounds(cx, "wizard-field-GameName").is_some());
+            for selector in ["wizard-rail", "wizard-body", "wizard-footer", "wizard-next"] {
+                let bounds = crate::test_support::control_bounds(cx, selector);
+                assert!(
+                    bounds.is_some_and(|bounds| bounds.left() >= px(0.)
+                        && bounds.right() <= px(360.)
+                        && bounds.top() >= px(0.)
+                        && bounds.bottom() <= px(540.)),
+                    "{language:?}/{separated}/{selector}: {bounds:?}"
+                );
+            }
+            let body = crate::test_support::control_bounds(cx, "wizard-body");
+            assert!(body.is_some_and(|body| body.size.height >= px(120.)));
+            if separated {
+                click(cx, "wizard-back");
+                reveal_wizard_control(&view, cx, "wizard-kind-profile");
+                click(cx, "wizard-kind-profile");
+                assert_eq!(
+                    view.read_with(cx, |view, _| view.shell.wizard.kind),
+                    CreationKind::ExistingInstance
+                );
+                assert!(
+                    crate::test_support::control_bounds(cx, "wizard-instance-instance-a").is_some()
+                );
+                for selector in ["wizard-rail", "wizard-body", "wizard-footer", "wizard-next"] {
+                    let bounds = crate::test_support::control_bounds(cx, selector);
+                    assert!(
+                        bounds.is_some_and(
+                            |bounds| bounds.right() <= px(360.) && bounds.bottom() <= px(540.)
+                        ),
+                        "{language:?}/existing/{selector}: {bounds:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[gpui::test]
+fn compact_wizard_entrance_settles_before_source_controls_activate(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = false;
+            view.handle(crate::UiAction::CreateInstance, window, cx);
+        });
+    });
+    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1000));
+    for _ in 0..3 {
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
+    click(cx, "wizard-kind-instance");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.wizard.step),
+        WizardStep::Setup
+    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1000));
+    for _ in 0..3 {
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
+    let body = crate::test_support::control_bounds(cx, "wizard-body");
+    let footer = crate::test_support::control_bounds(cx, "wizard-footer");
+    assert!(body.zip(footer).is_some_and(|(body, footer)| {
+        body.size.height >= px(120.) && footer.bottom() <= px(540.)
+    }));
 }
 
 #[gpui::test]
@@ -1755,8 +1973,15 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
             view.begin_game_wizard(cx);
             view
         });
-        view.update(cx, |view, cx| {
-            view.wizard_kind(false, cx);
+        view.update_in(cx, |view, window, cx| {
+            // A separated catalog starts on the source page; the real kind control
+            // chooses this Instance and opens Setup.
+            view.handle(
+                crate::UiAction::WizardKind(CreationKind::ExistingInstance),
+                window,
+                cx,
+            );
+            assert_eq!(view.shell.wizard.step, WizardStep::Setup);
             view.wizard_profile_target("neoforge-20.6.144".into());
             if let Some(profile) = &view.shell.wizard.profile {
                 profile
@@ -1777,7 +2002,6 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
             }
             view.wizard_profile_color(ProfileColor::Green);
             view.wizard_profile_icon(ProfileIcon::Leaf);
-            view.shell.wizard.step = WizardStep::Review;
             view.submit_game_wizard(cx);
             assert!(view.busy);
             view.submit_game_wizard(cx);
@@ -1864,20 +2088,22 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
             view.snapshot = ready_snapshot();
             view.snapshot.profile_mode = ProfileMode::Separated;
             view.begin_game_wizard(cx);
-            view.shell.wizard.step = WizardStep::Profile;
+            view
+        });
+        cx.simulate_resize(size(px(width), px(540.)));
+        click(cx, "wizard-kind-instance");
+        view.update(cx, |view, cx| {
             if let Some(profile) = &view.shell.wizard.profile {
                 profile
                     .height
                     .update(cx, |field, cx| field.set_value("not-a-number", cx));
             }
-            view
         });
-        cx.simulate_resize(size(px(width), px(540.)));
         click(cx, "wizard-next");
         cx.run_until_parked();
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.wizard.step),
-            WizardStep::Profile
+            WizardStep::Setup
         );
         view.read_with(cx, |view, _| {
             assert!(!view.shell.surfaces.is_open());
@@ -1885,7 +2111,7 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
             assert_eq!(
                 view.page_spec().wizard,
                 Some(crate::navigation::WizardKey::Game(
-                    WizardStep::Profile,
+                    WizardStep::Setup,
                     Some(WizardPage::Location)
                 ))
             );
@@ -1893,7 +2119,7 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
         cx.update(|window, _| {
             let next = gpui_base::test_support::find_all(window, &[], &"wizard-next".into());
             assert_eq!(next.len(), 1);
-            assert_eq!(next[0].label(), Some("Done"));
+            assert_eq!(next[0].label(), Some("Apply to draft"));
         });
         assert!(view.read_with(cx, |view, _| {
             view.shell
@@ -1979,7 +2205,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         );
         assert_eq!(
             view.wizard_configuration_summary(cx),
-            ("Custom Java".to_owned(), "Fullscreen".to_owned())
+            ("Custom Java · 2 GB".to_owned(), "Fullscreen".to_owned())
         );
         let original = view.shell.wizard.profile.as_ref().map(|profile| {
             (
@@ -2032,17 +2258,11 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
     });
 }
 
-/// Open the real Configuration section over the live setup page.
+/// Open Configuration as a page while retaining the live setup draft.
 fn open_configuration_section(view: &gpui::Entity<crate::Block>, cx: &mut gpui::VisualTestContext) {
     click(cx, "wizard-component-location");
     view.read_with(cx, |view, _| {
-        assert!(
-            view.shell.surfaces.top().is_some_and(|layer| matches!(
-                &layer.kind,
-                crate::shell::Surface::WizardSection(WizardPage::Location)
-            )),
-            "the Configuration card must open its own section surface"
-        );
+        assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));
     });
 }
@@ -2129,9 +2349,9 @@ fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mu
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-next");
+    click(cx, "wizard-kind-instance");
     reject_relative_installation_folder(&view, cx);
-    click(cx, "section-cancel");
+    click(cx, "cancel-instance");
     assert_section_cancelled_without_stale_validation(&view, cx);
     // A valid Configuration opened after the cancellation starts clean and commits.
     click(cx, "wizard-component-location");
@@ -2168,7 +2388,7 @@ fn configuration_section_escape_discards_the_rejected_validation(cx: &mut TestAp
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-next");
+    click(cx, "wizard-kind-instance");
     reject_relative_installation_folder(&view, cx);
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
@@ -2217,17 +2437,21 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
         view.snapshot.profile_mode = ProfileMode::Separated;
+        view.snapshot.instances[0].minecraft_version = "unknown-fixture".into();
         view.begin_game_wizard(cx);
-        view.wizard_kind(false, cx);
-        view.shell.wizard.step = WizardStep::Profile;
+        view
+    });
+    cx.simulate_resize(size(px(960.), px(600.)));
+    click(cx, "wizard-kind-profile");
+    view.update(cx, |view, cx| {
         if let Some(profile) = &view.shell.wizard.profile {
             profile.server.update(cx, |field, cx| {
                 field.set_value("play.example.test:25565", cx);
             });
         }
-        view
+        cx.notify();
     });
-    cx.simulate_resize(size(px(960.), px(600.)));
+    reveal_wizard_control(&view, cx, "wizard-profile-connect");
     click(cx, "wizard-profile-connect");
     view.read_with(cx, |view, cx| {
         assert!(
@@ -2258,7 +2482,7 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
     click(cx, "wizard-next");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.step),
-        WizardStep::Profile
+        WizardStep::Setup
     );
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.error_field),
@@ -2359,6 +2583,39 @@ fn loader_build(version: &str, stable: bool) -> block_launcher::install::fabric:
         version: version.into(),
         stable,
     }
+}
+
+#[gpui::test]
+fn preview_only_loader_requires_an_explicit_choice(cx: &mut TestAppContext) {
+    use block_launcher::catalog::LoaderKind;
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.begin_game_wizard(cx);
+        view.visual_only = true;
+        view
+    });
+    view.update(cx, |view, cx| {
+        view.open_game_wizard_page(Some(WizardPage::Loader), cx);
+        view.choose_wizard_loader(LoaderKind::Fabric, cx);
+        let request = view
+            .shell
+            .wizard
+            .loader_catalog
+            .as_ref()
+            .map(|catalog| catalog.request);
+        assert!(request.is_some(), "missing loader catalog request");
+        let Some(request) = request else {
+            return;
+        };
+        view.receive_loader_versions(request, Ok(vec![loader_build("0.20.0-beta.1", false)]), cx);
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.is_none()));
+        assert!(view.wizard_loader_issue(cx).is_some());
+        view.choose_wizard_loader_build("0.20.0-beta.1".into(), cx);
+        assert!(matches!(
+            &view.form,
+            Some(Form::Instance(form)) if form.loader_version.as_deref() == Some("0.20.0-beta.1")
+        ));
+    });
 }
 
 #[gpui::test]
@@ -2490,16 +2747,10 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-next");
+    click(cx, "wizard-kind-instance");
     click(cx, "wizard-component-loader");
     view.read_with(cx, |view, _| {
-        assert!(
-            view.shell.surfaces.top().is_some_and(|layer| matches!(
-                &layer.kind,
-                crate::shell::Surface::WizardSection(WizardPage::Loader)
-            )),
-            "the Mod loader card must open its own section surface"
-        );
+        assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Loader));
         assert!(matches!(&view.form, Some(Form::Instance(form))
             if form.loader == LoaderKind::Vanilla));
@@ -2540,7 +2791,7 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
         crate::test_support::control_bounds(cx, "wizard-error").is_some(),
         "the rejection must be painted in the section"
     );
-    click(cx, "section-cancel");
+    click(cx, "cancel-instance");
     view.read_with(cx, |view, _| {
         assert!(
             !view.shell.surfaces.is_open(),
@@ -2765,7 +3016,7 @@ fn wizard_footer_labels(
 fn wizard_footer_copy_is_chinese_for_a_chinese_view(cx: &mut TestAppContext) {
     assert_eq!(
         wizard_footer_labels(cx, Language::SimplifiedChinese),
-        (Some("继续".to_owned()), Some("取消".to_owned()))
+        (Some("创建并准备".to_owned()), Some("取消".to_owned()))
     );
 }
 
@@ -2773,7 +3024,10 @@ fn wizard_footer_copy_is_chinese_for_a_chinese_view(cx: &mut TestAppContext) {
 fn wizard_footer_copy_is_japanese_for_a_japanese_view(cx: &mut TestAppContext) {
     assert_eq!(
         wizard_footer_labels(cx, Language::Japanese),
-        (Some("次へ".to_owned()), Some("キャンセル".to_owned()))
+        (
+            Some("作成して準備".to_owned()),
+            Some("キャンセル".to_owned())
+        )
     );
 }
 

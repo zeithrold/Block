@@ -21,7 +21,6 @@ use super::{
     Block, UiAction,
     components::{self, ButtonVariant, ControlState},
     design::Icon,
-    first_run::Stage,
     modpack_import, note,
     scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
@@ -125,20 +124,10 @@ pub(super) enum Outcome {
     Cancelled,
 }
 
-/// What a discovery started from Welcome should do once its report arrives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DeferredDiscovery {
-    /// Nothing to present: the report was stale or belonged to an explicit import.
-    Ignored,
-    /// Show the source drawer because games can be imported.
-    OpenDrawer,
-    /// Skip the empty drawer and continue to the Account/Game overview.
-    ContinueToOverview,
-}
-
+/// A background scan the setup center started only reports a count, so this
+/// state never opens the drawer on its own.
 #[derive(Clone, Debug)]
 pub(super) struct State {
-    pub window: Option<gpui::AnyWindowHandle>,
     pub report: Option<DiscoveryReport>,
     pub discovery: Option<uuid::Uuid>,
     pub batch: Option<uuid::Uuid>,
@@ -149,9 +138,6 @@ pub(super) struct State {
     pub outcomes: BTreeMap<String, Outcome>,
     pub cancel: CancellationToken,
     pub running: bool,
-    /// The Welcome start button scans first and shows the drawer only when the
-    /// report contains games, so an empty scan cannot flash the drawer.
-    pub deferred_open: bool,
     pub scroll: ScrollHandle,
     pub source_scroll: ScrollHandle,
     pub list_scroll: ScrollHandle,
@@ -162,7 +148,6 @@ pub(super) struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            window: None,
             report: None,
             discovery: None,
             batch: None,
@@ -173,7 +158,6 @@ impl Default for State {
             outcomes: BTreeMap::new(),
             cancel: CancellationToken::new(),
             running: false,
-            deferred_open: false,
             scroll: ScrollHandle::new(),
             source_scroll: ScrollHandle::new(),
             list_scroll: ScrollHandle::new(),
@@ -365,97 +349,37 @@ impl Block {
         }
     }
     pub(super) fn open_import_games(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.begin_import_discovery(window, cx, false);
-    }
-
-    /// Start searching for importable games from Welcome without showing the
-    /// drawer yet. The resolved report decides whether the drawer is worth a
-    /// detour: games open it, an empty scan continues to the overview.
-    pub(super) fn start_welcome_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.begin_import_discovery(window, cx, true);
-    }
-
-    fn begin_import_discovery(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-        deferred: bool,
-    ) {
-        self.shell.import_games.window = Some(window.window_handle());
-        if self.shell.import_games.running {
-            return;
-        }
-        let request = uuid::Uuid::new_v4();
-        self.shell.import_games.discovery = Some(request);
-        self.shell.import_games.page = Page::Sources;
-        self.shell.import_games.deferred_open = false;
-        self.shell
-            .import_games
-            .motion
-            .borrow_mut()
-            .settle(Page::Sources);
-        self.shell.import_games.error = None;
-        // Without an engine no report will ever resolve a deferred scan, so
-        // keep the drawer immediate there to surface the error.
-        if let Some(engine) = &self.engine {
-            engine.discover_games(request, discovery_roots());
-            if deferred {
-                self.shell.import_games.deferred_open = true;
-                return;
-            }
-        } else {
-            self.shell.import_games.discovery = None;
-            self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
-        }
+        self.begin_import_discovery();
         self.shell
             .surfaces
             .open(Surface::Drawer(Drawer::ImportGames), window, cx);
     }
 
-    /// Resolve a discovery report, deciding whether a deferred Welcome scan
-    /// should open the drawer or continue past it. The caller applies the
-    /// window work with [`Self::apply_deferred_discovery`].
-    pub(super) fn resolve_game_discovery(
-        &mut self,
-        request: uuid::Uuid,
-        report: DiscoveryReport,
-    ) -> DeferredDiscovery {
-        if self.shell.import_games.discovery != Some(request) {
-            return DeferredDiscovery::Ignored;
-        }
-        let deferred = self.shell.import_games.deferred_open
-            && self.shell.first_run.enabled
-            && self.shell.first_run.stage == Stage::Welcome;
-        let empty = report.candidates.is_empty();
-        self.shell.import_games.deferred_open = false;
-        self.receive_game_discovery(request, report);
-        if !deferred {
-            DeferredDiscovery::Ignored
-        } else if empty {
-            DeferredDiscovery::ContinueToOverview
-        } else {
-            DeferredDiscovery::OpenDrawer
-        }
+    /// Scan the automatic sources for the setup center. The report only updates
+    /// the count the center shows: the drawer stays closed until the user asks
+    /// for it, so a discovered game never interrupts setup on its own.
+    pub(super) fn scan_games_for_setup(&mut self) {
+        self.begin_import_discovery();
     }
 
-    pub(super) fn apply_deferred_discovery(
-        &mut self,
-        decision: DeferredDiscovery,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if !self.shell.first_run.enabled || self.shell.first_run.stage != Stage::Welcome {
+    /// Restart the sheet at its source page and issue one discovery request. The
+    /// newest request owns the answer; an older report is dropped on arrival.
+    fn begin_import_discovery(&mut self) {
+        if self.shell.import_games.running {
             return;
         }
-        match decision {
-            DeferredDiscovery::Ignored => {}
-            DeferredDiscovery::OpenDrawer => {
-                self.shell
-                    .surfaces
-                    .open(Surface::Drawer(Drawer::ImportGames), window, cx);
-            }
-            DeferredDiscovery::ContinueToOverview => self.first_run_overview(window, cx),
-        }
+        let request = uuid::Uuid::new_v4();
+        let state = &mut self.shell.import_games;
+        state.discovery = Some(request);
+        state.page = Page::Sources;
+        state.motion.borrow_mut().settle(Page::Sources);
+        state.error = None;
+        let Some(engine) = &self.engine else {
+            self.shell.import_games.discovery = None;
+            self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
+            return;
+        };
+        engine.discover_games(request, discovery_roots());
     }
 
     pub(super) fn receive_game_discovery(&mut self, request: uuid::Uuid, report: DiscoveryReport) {
@@ -544,13 +468,16 @@ impl Block {
         state.page = Page::Results;
     }
 
-    pub(super) fn import_games_closed(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    /// Closing the sheet is not skipping setup. Only the work owned by the
+    /// closed sheet stops; whatever the center already shows stays.
+    pub(super) fn import_games_closed(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<'_, Self>,
+    ) {
         self.shell.import_games.discovery = None;
         if self.shell.import_games.running {
             self.shell.import_games.cancel.cancel();
-        }
-        if self.shell.first_run.enabled && self.shell.first_run.stage == Stage::Welcome {
-            self.first_run_overview(window, cx);
         }
     }
 
@@ -648,13 +575,34 @@ impl Block {
                     return;
                 }
                 self.shell.surfaces.close(window, &self.focus, cx);
-                self.first_run_overview(window, cx);
-                if matches!(action, Action::New) {
-                    self.handle_first_run(super::first_run::Action::Game, window, cx);
+                if self.setup_incomplete() {
+                    self.first_run_overview(window, cx);
+                    if matches!(action, Action::New) {
+                        self.handle_first_run(super::first_run::Action::Game, window, cx);
+                    }
+                } else if matches!(action, Action::New) {
+                    self.open_new_instance_setup(window, cx);
                 }
             }
         }
         cx.notify();
+    }
+
+    /// Continue an ordinary source selection into a new game's Setup.
+    ///
+    /// Choosing a new game keeps the entry that started the session: an open
+    /// draft is resumed as it is, so edits are never replaced, and only a
+    /// missing session starts one. Setup is the destination, because nothing
+    /// reaches the catalog until the user submits that draft.
+    fn open_new_instance_setup(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if !matches!(self.form, Some(super::Form::Instance(_))) {
+            self.handle(UiAction::CreateInstance, window, cx);
+        }
+        self.handle(
+            UiAction::WizardKind(super::game_wizard::CreationKind::NewInstance),
+            window,
+            cx,
+        );
     }
 
     fn proposed_import_parent(&self, candidates: &[GameCandidate]) -> PathBuf {
@@ -1087,12 +1035,14 @@ impl Block {
                 ))
                 .child(note(tr!(language, "import.footer.completedStay")));
         } else if state.page == Page::Results {
+            // At most one Primary answer: finishing leaves the sheet, retrying
+            // only picks up the games that did not arrive.
             if !state.pending().is_empty() {
                 footer = footer.child(self.button_with_variant(
                     "import-retry",
                     tr!(language, "import.footer.retry"),
                     UiAction::ImportGames(Action::Retry),
-                    ButtonVariant::Primary,
+                    ButtonVariant::Outline,
                     cx,
                 ));
             }

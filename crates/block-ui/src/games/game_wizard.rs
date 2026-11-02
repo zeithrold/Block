@@ -2,7 +2,7 @@
     clippy::redundant_pub_crate,
     reason = "Wizard state is shared only with the parent view and shell."
 )]
-//! Draft-only game setup. The final review is the only installation action.
+//! Draft-only game setup. The setup page owns the final creation action.
 
 #[cfg(test)]
 #[path = "game_wizard_tests.rs"]
@@ -21,7 +21,8 @@ use block_launcher::{
 };
 use gpui::{
     AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, ScrollHandle, Styled as _, Window, div, px, rgb,
+    ParentElement as _, ScrollHandle, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    rgb,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +47,7 @@ use super::{
     Block, Form, InstanceForm, Tab, UiAction,
     components::{self, BadgeVariant, ButtonVariant, ControlState, FieldOptions},
     design::Icon,
-    input, note, patterns,
+    input, modpack_import, note, patterns,
     scroll_area::ScrollAreaExt as _,
     text_input::TextInput,
 };
@@ -57,8 +58,6 @@ pub(super) enum WizardStep {
     GetStarted,
     #[default]
     Setup,
-    Profile,
-    Review,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,6 +65,7 @@ pub(super) enum CreationKind {
     #[default]
     NewInstance,
     ExistingInstance,
+    ImportPack,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,12 +135,15 @@ pub(super) struct WizardState {
     pub include_snapshots: bool,
     pub version_scroll: ScrollHandle,
     section_snapshot: Option<ComponentDraft>,
+    initial: Option<InitialDraft>,
+    pub discard_confirmed: Option<gpui::EntityId>,
     /// A retained product message or verbatim diagnostic.
     pub error: Option<WizardText>,
     version_notice: Option<WizardText>,
     pub separated: bool,
     pub kind: CreationKind,
     pub existing_instance: Option<String>,
+    pub context_instance: bool,
     pub profile: Option<ProfileDraft>,
     pub body_scroll: ScrollHandle,
     pub section_scroll: ScrollHandle,
@@ -254,7 +257,7 @@ impl ProfileDraft {
                 .parse::<u32>()
                 .is_ok_and(|value| (minimum..=maximum).contains(&value))
         };
-        if name.trim().is_empty() || name.len() > 80 || name.chars().any(char::is_control) {
+        if block_launcher::catalog::validate_name(name.trim()).is_err() {
             Some(WizardField::ProfileName)
         } else if self.server_preferences(cx).validate().is_err() {
             Some(WizardField::Server)
@@ -303,7 +306,7 @@ impl ProfileDraft {
         cx: &gpui::App,
     ) -> Result<super::engine::ProfileDraftValues, WizardText> {
         let name = self.name.read(cx).value().trim().to_owned();
-        if name.is_empty() || name.len() > 80 || name.chars().any(char::is_control) {
+        if block_launcher::catalog::validate_name(&name).is_err() {
             return Err(msg!("wizard.profile.defaultError"));
         }
         let defaults = super::settings::GameDefaults {
@@ -441,7 +444,26 @@ struct ComponentDraft {
     profile: Option<ProfileCheckpoint>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InitialDraft {
+    name: String,
+    version: String,
+    directory: String,
+    loader: LoaderKind,
+    loader_version: Option<String>,
+    optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
+    profile: Option<ProfileCheckpoint>,
+}
+
 impl WizardState {
+    pub(super) fn creation_focus(&self, item: &str, cx: &gpui::App) -> gpui::FocusHandle {
+        self.version_focus
+            .borrow_mut()
+            .entry(format!("wizard-creation-kind:{item}"))
+            .or_insert_with(|| cx.focus_handle())
+            .clone()
+    }
+
     pub(super) fn refresh_placeholders(&self, language: Language, cx: &mut Context<'_, Block>) {
         for (input, key) in [
             (
@@ -473,6 +495,9 @@ impl WizardState {
     pub(super) fn cancel_optifine_import(&mut self) {
         self.optifine_request = None;
         self.clear_error();
+    }
+    pub(super) fn suspend_optifine_request(&mut self) {
+        self.optifine_request = None;
     }
     pub(super) fn cancel_loader_request(&mut self) {
         self.loader_request = None;
@@ -513,11 +538,14 @@ impl WizardState {
             include_snapshots: self.include_snapshots,
             version_scroll,
             section_snapshot: self.section_snapshot.clone(),
+            initial: self.initial.clone(),
+            discard_confirmed: None,
             error: self.error.clone(),
             version_notice: self.version_notice.clone(),
             separated: self.separated,
             kind: self.kind,
             existing_instance: self.existing_instance.clone(),
+            context_instance: self.context_instance,
             profile: self.profile.as_ref().map(|profile| profile.snapshot(cx)),
             body_scroll,
             section_scroll,
@@ -584,37 +612,48 @@ impl WizardState {
     pub(super) fn next(&mut self) {
         if self.page.is_some() {
             self.open_page(None);
-        } else if self.step != WizardStep::Review {
-            self.step = match self.step {
-                WizardStep::GetStarted => WizardStep::Setup,
-                WizardStep::Setup if self.separated => WizardStep::Profile,
-                WizardStep::Setup | WizardStep::Profile | WizardStep::Review => WizardStep::Review,
-            };
-            // The Review leads with the decisions; its folded defaults open
-            // only when the user asks for them there. Setup shares the wizard's
-            // one expansion state, so entering the Review closes that state
-            // instead of letting a Setup expansion arrive already open.
-            if self.step == WizardStep::Review
-                && let Some(profile) = &mut self.profile
-            {
-                profile.options = false;
-            }
+        } else if self.step == WizardStep::GetStarted {
+            self.step = WizardStep::Setup;
             self.transition(false);
             self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
     }
 
+    /// The draft values that decide whether this session holds unsaved work.
+    ///
+    /// The instance draft is a parameter because a pack shortcut can hold the
+    /// parent draft while the view's own form belongs to the shortcut.
+    fn draft_values(&self, form: &InstanceForm, cx: &gpui::App) -> InitialDraft {
+        let profile = self.profile.as_ref().map(|profile| {
+            let mut values = profile.checkpoint(cx);
+            // Expanding a group is presentation, not a change to the draft.
+            values.options = false;
+            values
+        });
+        InitialDraft {
+            name: form.name.read(cx).value(),
+            version: form.version.read(cx).value(),
+            directory: form.directory.read(cx).value(),
+            loader: form.loader.clone(),
+            loader_version: form.loader_version.clone(),
+            optifine: form.optifine.clone(),
+            profile,
+        }
+    }
+
+    /// Whether `form` differs from the draft this session was last saved from.
+    /// One rule answers for the live draft and for a held-aside parent draft.
+    pub(super) fn is_dirty(&self, form: &InstanceForm, cx: &gpui::App) -> bool {
+        self.initial
+            .as_ref()
+            .is_some_and(|initial| initial != &self.draft_values(form, cx))
+    }
+
     pub(super) fn back(&mut self) {
         if self.page.is_some() {
             self.open_page(None);
-        } else if self.step != WizardStep::GetStarted
-            && (self.separated || self.step != WizardStep::Setup)
-        {
-            self.step = match self.step {
-                WizardStep::Review if self.separated => WizardStep::Profile,
-                WizardStep::Review | WizardStep::Profile => WizardStep::Setup,
-                WizardStep::Setup | WizardStep::GetStarted => WizardStep::GetStarted,
-            };
+        } else if self.step != WizardStep::GetStarted {
+            self.step = WizardStep::GetStarted;
             self.transition(true);
             self.body_scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
@@ -907,9 +946,14 @@ impl Block {
             && self.shell.wizard.page.is_none()
             && let Some(Form::Instance(form)) = &self.form
         {
-            if form.name.read(cx).value().trim().is_empty() {
+            let version = form.version.read(cx).value();
+            let invalid_version = version.trim().is_empty()
+                || version.len() > 80
+                || version.chars().any(char::is_control)
+                || self.wizard_version_restriction(version.trim()).is_some();
+            if block_launcher::catalog::validate_name(&form.name.read(cx).value()).is_err() {
                 field = Some(WizardField::GameName);
-            } else if form.version.read(cx).value().trim().is_empty() {
+            } else if invalid_version {
                 field = Some(WizardField::Version);
             } else if self.wizard_loader_text(cx).is_some() {
                 field = Some(WizardField::Loader);
@@ -948,11 +992,10 @@ impl Block {
             && field.is_some_and(|field| {
                 !matches!(
                     field,
-                    WizardField::GameName
-                        | WizardField::Version
-                        | WizardField::Directory
-                        | WizardField::ProfileName
-                )
+                    WizardField::GameName | WizardField::Version | WizardField::Directory
+                ) || field == WizardField::ProfileName
+                    && self.shell.wizard.separated
+                    && self.shell.wizard.kind == CreationKind::NewInstance
             })
         {
             profile.options = true;
@@ -969,6 +1012,22 @@ impl Block {
         let Some(field) = self.shell.wizard.error_field else {
             return false;
         };
+        if self.shell.wizard.page.is_none() {
+            let page = match field {
+                WizardField::Version => Some(WizardPage::Version),
+                WizardField::Loader => Some(WizardPage::Loader),
+                _ => None,
+            };
+            if let Some(page) = page {
+                let id = match page {
+                    WizardPage::Version => "version",
+                    WizardPage::Loader => "loader",
+                    WizardPage::OptiFine | WizardPage::Location => unreachable!(),
+                };
+                self.shell.wizard.creation_focus(id, cx).focus(window, cx);
+                return true;
+            }
+        }
         let instance_input = match &self.form {
             Some(Form::Instance(form)) => match field {
                 WizardField::GameName => Some(&form.name),
@@ -1041,6 +1100,8 @@ impl Block {
 
     pub(super) fn begin_game_wizard(&mut self, cx: &mut Context<'_, Self>) {
         let language = self.language();
+        self.pack_import_closed();
+        self.shell.pack_import = modpack_import::State::default();
         self.shell.wizard = WizardState::new(language, cx);
         self.shell.wizard.include_snapshots = self.saved_preferences.game.show_snapshots;
         self.shell.wizard.separated =
@@ -1062,10 +1123,10 @@ impl Block {
         self.router.navigate(Tab::Instances);
         self.router.enter_game_wizard();
         let version = self
-            .versions
-            .first()
-            .map_or("1.20.6", String::as_str)
-            .to_owned();
+            .version_catalog
+            .iter()
+            .find(|entry| entry.kind == block_launcher::manifest::model::VersionType::Release)
+            .map_or_else(String::new, |entry| entry.id.clone());
         self.form = Some(Form::Instance(InstanceForm {
             name: input(
                 &tr!(language, "wizard.setup.defaultGameName"),
@@ -1082,18 +1143,38 @@ impl Block {
             loader_version: None,
             optifine: None,
         }));
+        self.mark_game_wizard_clean(cx);
     }
 
-    pub(super) fn wizard_kind(&mut self, is_new: bool, _: &mut Context<'_, Self>) {
-        if is_new || !self.snapshot.instances.is_empty() {
-            self.shell.wizard.kind = if is_new {
-                CreationKind::NewInstance
-            } else {
-                CreationKind::ExistingInstance
-            };
+    pub(super) fn mark_game_wizard_clean(&mut self, cx: &gpui::App) {
+        let values = if let Some(Form::Instance(form)) = &self.form {
+            Some(self.shell.wizard.draft_values(form, cx))
+        } else {
+            None
+        };
+        self.shell.wizard.initial = values;
+    }
+
+    pub(super) fn game_wizard_changed(&self, cx: &gpui::App) -> bool {
+        let Some(Form::Instance(form)) = &self.form else {
+            return false;
+        };
+        self.shell.wizard.is_dirty(form, cx)
+    }
+
+    pub(super) fn wizard_kind(&mut self, kind: CreationKind, cx: &mut Context<'_, Self>) {
+        let unchanged = !self.game_wizard_changed(cx);
+        if self.shell.wizard.step == WizardStep::GetStarted
+            && (kind != CreationKind::ExistingInstance
+                || self.shell.wizard.separated && !self.snapshot.instances.is_empty())
+        {
+            self.shell.wizard.kind = kind;
             self.shell.wizard.clear_error();
-            if !is_new {
+            if kind == CreationKind::ExistingInstance {
                 self.normalize_wizard_target();
+            }
+            if unchanged {
+                self.mark_game_wizard_clean(cx);
             }
         }
     }
@@ -1233,12 +1314,31 @@ impl Block {
             self.shell.wizard.optifine_request = None;
         }
         self.shell.wizard.clear_error();
-        self.shell.wizard.open_section_page(page);
+        if page == Some(WizardPage::OptiFine) {
+            self.shell.wizard.open_section_page(page);
+        } else {
+            self.shell.wizard.open_page(page);
+        }
         if page == Some(WizardPage::Loader) {
             self.load_wizard_loader_versions(false, cx);
         } else if page.is_none() {
             self.shell.wizard.loader_request = None;
         }
+    }
+
+    pub(super) fn focus_wizard_card(
+        &self,
+        page: WizardPage,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let id = match page {
+            WizardPage::Version => "version",
+            WizardPage::Loader => "loader",
+            WizardPage::OptiFine => "optifine",
+            WizardPage::Location => "location",
+        };
+        self.shell.wizard.creation_focus(id, cx).focus(window, cx);
     }
 
     pub(super) fn choose_wizard_loader(&mut self, kind: LoaderKind, cx: &mut Context<'_, Self>) {
@@ -1401,7 +1501,6 @@ impl Block {
                     form.loader_version = builds
                         .iter()
                         .find(|build| build.stable)
-                        .or_else(|| builds.first())
                         .map(|build| build.version.clone());
                 }
                 catalog.builds = builds;
@@ -1671,7 +1770,14 @@ impl Block {
         None
     }
 
+    /// Apply the open component page and return to Setup. The only step
+    /// transition left is the source page, which chooses what Setup creates.
     pub(super) fn advance_game_wizard(&mut self, cx: &Context<'_, Self>) {
+        if self.shell.wizard.kind == CreationKind::ImportPack
+            && self.shell.wizard.step != WizardStep::GetStarted
+        {
+            return;
+        }
         if let Some(page) = self.shell.wizard.page {
             if self.validate_wizard_section(page, cx) {
                 self.shell.wizard.section_snapshot = None;
@@ -1680,56 +1786,22 @@ impl Block {
             }
             return;
         }
-        let needs_instance = self.shell.wizard.step == WizardStep::Setup
-            && self.shell.wizard.kind == CreationKind::NewInstance;
-        if needs_instance && !self.validate_instance_draft(cx) {
-            self.set_wizard_error(self.status.clone(), cx);
-            return;
-        }
-        if (self.shell.wizard.step == WizardStep::Profile
-            || !self.shell.wizard.separated && self.shell.wizard.step == WizardStep::Setup)
-            && !self.validate_wizard_connection(cx)
+        self.shell.wizard.section_snapshot = None;
+        self.shell.wizard.clear_error();
+        self.shell.wizard.next();
+    }
+
+    /// Commit the Setup page. Validation and the busy status stay here, so the
+    /// one remaining step can never submit a draft the page has not accepted.
+    pub(super) fn submit_game_wizard(&mut self, cx: &Context<'_, Self>) {
+        if self.busy
+            || self.shell.wizard.step != WizardStep::Setup
+            || self.shell.wizard.page.is_some()
+            || self.shell.wizard.kind == CreationKind::ImportPack
         {
             return;
         }
-        let state = &self.shell.wizard;
-        let issue =
-            if state.step == WizardStep::Setup && state.kind == CreationKind::ExistingInstance {
-                (!self
-                    .snapshot
-                    .instances
-                    .iter()
-                    .any(|instance| Some(&instance.id) == state.existing_instance.as_ref()))
-                .then(|| WizardText::message("wizard.error.chooseInstance"))
-            } else if state.step == WizardStep::Profile
-                || (!state.separated && state.step == WizardStep::Setup && state.page.is_none())
-            {
-                state.profile.as_ref().map_or_else(
-                    || Some(WizardText::message("wizard.error.profileDraftUnavailable")),
-                    |profile| profile.values(cx).err(),
-                )
-            } else {
-                None
-            };
-        if let Some(issue) = issue {
-            self.set_wizard_error(issue, cx);
-        } else {
-            self.shell.wizard.section_snapshot = None;
-            self.shell.wizard.clear_error();
-            self.shell.wizard.next();
-        }
-    }
-
-    pub(super) fn submit_game_wizard(&mut self, cx: &Context<'_, Self>) {
-        if self.busy || self.shell.wizard.step != WizardStep::Review {
-            return;
-        }
         if !self.validate_wizard_connection(cx) {
-            self.shell.wizard.step = if self.shell.wizard.separated {
-                WizardStep::Profile
-            } else {
-                WizardStep::Setup
-            };
             return;
         }
         let Some(Form::Instance(form)) = &self.form else {
@@ -1742,6 +1814,7 @@ impl Block {
         let optifine = form.optifine.as_deref().cloned();
         let kind = self.shell.wizard.kind;
         if kind == CreationKind::NewInstance && !self.validate_instance_draft(cx) {
+            self.set_wizard_error(self.status.clone(), cx);
             return;
         }
         let Some(profile) = &self.shell.wizard.profile else {
@@ -1752,12 +1825,6 @@ impl Block {
             Ok(values) => values,
             Err(error) => {
                 self.set_wizard_error(error, cx);
-                self.shell.wizard.step = if self.shell.wizard.separated {
-                    WizardStep::Profile
-                } else {
-                    WizardStep::Setup
-                };
-                self.shell.wizard.transition(true);
                 return;
             }
         };
@@ -1790,8 +1857,8 @@ impl Block {
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim()));
             let defaults = values.defaults.clone();
             // One decision routes the work and names it, so the busy status can
-            // never promise preparation this branch does not start: first-run
-            // Create only saves the setup, and Finish prepares game files.
+            // never promise work this branch does not start: a first-run Create
+            // only saves the setup, and ordinary Create prepares the game too.
             let saves_setup = self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled;
             self.begin_cancellable(
                 if saves_setup {
@@ -1835,7 +1902,15 @@ impl Block {
     }
 
     pub(super) fn back_game_wizard(&mut self, cx: &mut Context<'_, Self>) {
-        if self.shell.wizard.page.is_some() {
+        if self.shell.wizard.kind == CreationKind::ImportPack
+            && self.shell.wizard.step == WizardStep::Setup
+        {
+            if !self.suspend_pack_import() {
+                return;
+            }
+            self.shell.pack_import.clear_source_drawer_return();
+            self.shell.wizard.back();
+        } else if self.shell.wizard.page.is_some() {
             self.cancel_component_draft(cx);
         } else {
             self.shell.wizard.back();
@@ -1892,6 +1967,7 @@ impl Block {
         let language = self.language();
         let body = self.game_wizard_transition_body(form, WizardBodyOwner::Outer, window, cx);
         let (steps, current) = self.wizard_rail_progress(language);
+        let compact = super::page_host::compact_game_wizard(window);
         div()
             .id("game-wizard")
             .debug_selector(|| "game-wizard".into())
@@ -1899,9 +1975,13 @@ impl Block {
             .min_h_0()
             .child(self.host_wizard(
                 super::page_host::WizardSlots {
-                    rail: self.wizard_step_rail(&steps, current),
+                    rail: self.wizard_step_rail(&steps, current, compact),
                     body,
-                    footer: self.game_wizard_footer(language, cx),
+                    footer: if self.pack_wizard_active() {
+                        self.modpack_wizard_footer(language, compact, cx)
+                    } else {
+                        self.game_wizard_footer(language, compact, cx)
+                    },
                 },
                 super::page_host::WizardLayout::Game,
                 window,
@@ -1909,110 +1989,160 @@ impl Block {
             ))
     }
 
-    /// The wizard footer: a section page commits that page, Review installs the
-    /// draft, and every earlier step continues to the next one.
-    fn game_wizard_footer(&self, language: Language, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    /// The source page offers direct actions; a section applies its local draft
+    /// and the setup page creates the game or Profile.
+    fn game_wizard_footer(
+        &self,
+        language: Language,
+        compact: bool,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
         let page = self.wizard_outer_page();
-        let review = state.step == WizardStep::Review;
+        let source = state.step == WizardStep::GetStarted;
         let show_back = page.is_some()
-            || if state.separated {
-                state.step != WizardStep::GetStarted
-            } else {
-                review
-            };
+            || !source && !state.context_instance && self.router.tab() != Tab::Onboarding;
         let next_label = if page.is_some() {
-            tr!(language, "wizard.footer.done")
-        } else if review {
+            tr!(language, "common.apply_draft")
+        } else {
             if state.kind == CreationKind::ExistingInstance {
                 tr!(language, "wizard.footer.createProfile")
+            } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+                tr!(language, "wizard.footer.saveGame")
             } else {
                 tr!(language, "wizard.footer.createGame")
             }
-        } else {
-            tr!(language, "wizard.footer.continue")
         };
-        let next_action = if review && page.is_none() {
-            UiAction::SaveInstance
-        } else {
+        let next_action = if page.is_some() {
             UiAction::WizardNext
+        } else {
+            UiAction::SaveInstance
         };
+        let cancel = self.button(
+            "cancel-instance",
+            tr!(language, "common.cancel"),
+            UiAction::CancelForm,
+            cx,
+        );
+        let back = show_back.then(|| {
+            self.button(
+                "wizard-back",
+                tr!(language, "wizard.footer.back"),
+                UiAction::WizardBack,
+                cx,
+            )
+        });
+        if source {
+            return div().w_full().child(cancel).into_any_element();
+        }
+        let primary = self.button("wizard-next", next_label, next_action, cx);
+        let consequence = page.is_none().then(|| {
+            note(tr!(
+                language,
+                if state.kind == CreationKind::ExistingInstance {
+                    "wizard.footer.effectProfile"
+                } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+                    "wizard.footer.effectSave"
+                } else {
+                    "wizard.footer.effectCreate"
+                }
+            ))
+            .whitespace_normal()
+        });
+        if compact {
+            return div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .children(consequence)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .justify_between()
+                        .gap_2()
+                        .child(cancel)
+                        .children(back),
+                )
+                .child(primary.w_full())
+                .into_any_element();
+        }
         div()
             .w_full()
             .flex()
-            .justify_between()
-            .items_center()
-            .gap_3()
-            .child(self.button(
-                "cancel-instance",
-                tr!(language, "common.cancel"),
-                UiAction::CancelForm,
-                cx,
-            ))
+            .flex_col()
+            .gap_2()
+            .children(consequence)
             .child(
                 div()
+                    .w_full()
                     .flex()
-                    .gap_2()
-                    .children(show_back.then(|| {
-                        self.button(
-                            "wizard-back",
-                            tr!(language, "wizard.footer.back"),
-                            UiAction::WizardBack,
-                            cx,
-                        )
-                    }))
-                    .child(self.button("wizard-next", next_label, next_action, cx)),
+                    .justify_between()
+                    .items_center()
+                    .gap_3()
+                    .child(cancel)
+                    .child(div().flex().gap_2().children(back).child(primary)),
             )
             .into_any_element()
     }
 
-    /// The rail's step copy and the index of the step currently in progress.
-    /// A separated wizard walks Get Started, instance, profile and review; the
-    /// joined one folds everything into Setup.
-    fn wizard_rail_progress(&self, language: Language) -> (Vec<(String, String)>, usize) {
-        let state = &self.shell.wizard;
-        let review_detail = tr!(language, "wizard.rail.reviewDetail");
-        let steps = if state.separated {
-            vec![
-                (
-                    tr!(language, "wizard.rail.getStarted"),
-                    tr!(language, "wizard.rail.getStartedDetail"),
-                ),
-                (
-                    if state.kind == CreationKind::NewInstance {
-                        tr!(language, "wizard.rail.instance")
-                    } else {
-                        tr!(language, "wizard.rail.chooseInstance")
-                    },
-                    tr!(language, "wizard.rail.instanceDetail"),
-                ),
-                (
-                    tr!(language, "wizard.rail.profile"),
-                    tr!(language, "wizard.rail.profileDetail"),
-                ),
-                (tr!(language, "wizard.rail.review"), review_detail.clone()),
-            ]
+    fn pack_wizard_rail_progress(&self, language: Language) -> (Vec<(String, String)>, usize) {
+        let steps = vec![
+            (
+                tr!(language, "wizard.rail.getStarted"),
+                tr!(language, "wizard.rail.getStartedDetail"),
+            ),
+            (
+                tr!(language, "modpack.rail.pack"),
+                tr!(language, "modpack.rail.archiveDetail"),
+            ),
+            (
+                tr!(language, "modpack.rail.install"),
+                tr!(language, "modpack.rail.installDetail"),
+            ),
+        ];
+        let current = if self.shell.wizard.step == WizardStep::GetStarted {
+            0
         } else {
-            vec![
-                (
-                    tr!(language, "wizard.rail.setup"),
-                    tr!(language, "wizard.rail.setupDetail"),
-                ),
-                (tr!(language, "wizard.rail.review"), review_detail),
-            ]
-        };
-        let current = match state.step {
-            WizardStep::GetStarted => 0,
-            WizardStep::Setup => usize::from(state.separated),
-            WizardStep::Profile => 2,
-            WizardStep::Review => {
-                if state.separated {
-                    3
-                } else {
+            match self.shell.pack_import.phase {
+                modpack_import::Phase::Choose
+                | modpack_import::Phase::Inspecting
+                | modpack_import::Phase::Review => 1,
+                modpack_import::Phase::Blocked
+                    if self.shell.pack_import.operation_id.is_none()
+                        || self.shell.pack_import.inspection.is_none() =>
+                {
                     1
                 }
+                modpack_import::Phase::Blocked
+                | modpack_import::Phase::Stopped
+                | modpack_import::Phase::Installing
+                | modpack_import::Phase::Complete => 2,
             }
         };
+        (steps, current)
+    }
+
+    /// The rail describes the source and the setup page it opens.
+    fn wizard_rail_progress(&self, language: Language) -> (Vec<(String, String)>, usize) {
+        let state = &self.shell.wizard;
+        if state.kind == CreationKind::ImportPack {
+            return self.pack_wizard_rail_progress(language);
+        }
+        let has_start = self.router.tab() != Tab::Onboarding && !state.context_instance;
+        let mut steps = Vec::new();
+        if has_start {
+            steps.push((
+                tr!(language, "wizard.rail.getStarted"),
+                tr!(language, "wizard.rail.getStartedDetail"),
+            ));
+        }
+        steps.push((
+            tr!(language, "wizard.rail.setup"),
+            tr!(language, "wizard.rail.setupDetail"),
+        ));
+        let current = usize::from(has_start && state.step != WizardStep::GetStarted);
         (steps, current)
     }
 
@@ -2071,6 +2201,9 @@ impl Block {
         let state = &self.shell.wizard;
         let language = self.language();
         let (page, scroll, id) = match owner {
+            WizardBodyOwner::Outer if self.pack_wizard_active() => {
+                (None, &self.shell.pack_import.scroll, "wizard-body")
+            }
             WizardBodyOwner::Outer => (self.wizard_outer_page(), &state.body_scroll, "wizard-body"),
             WizardBodyOwner::Section(page) => {
                 (Some(page), &state.section_scroll, "wizard-section-body")
@@ -2114,43 +2247,58 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
-        let review = state.step == WizardStep::Review;
         match page {
             Some(WizardPage::Version) => self.wizard_version(form, cx).into_any_element(),
             Some(WizardPage::Loader) => self.wizard_loader(form, cx).into_any_element(),
             Some(WizardPage::OptiFine) => self.wizard_optifine(form, cx).into_any_element(),
             Some(WizardPage::Location) => self.wizard_location(form, cx).into_any_element(),
-            // The Review is ordinary content of the outer `wizard-body` viewport.
-            // A second viewport here would claim the shared `body_scroll` while
-            // sizing itself to its own content, so the outer page would keep the
-            // space and report no remaining range: the facts below the fold could
-            // never be scrolled above the fixed footer.
-            None if review => div()
-                .id("wizard-review-content")
-                .debug_selector(|| "wizard-review-content".into())
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(self.wizard_review(form, window, cx))
-                .into_any_element(),
+            None if self.pack_wizard_active() => self.render_modpack_import(window, cx),
             None if state.step == WizardStep::GetStarted => {
                 self.wizard_start(cx).into_any_element()
             }
-            None if state.step == WizardStep::Profile => {
-                self.wizard_profile(window, cx, true).into_any_element()
-            }
-            None if state.kind == CreationKind::ExistingInstance => {
-                self.wizard_instance_picker(cx).into_any_element()
-            }
+            None if state.kind == CreationKind::ExistingInstance => div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .children((!state.context_instance).then(|| self.wizard_instance_picker(cx)))
+                .child(self.wizard_profile(window, cx, true))
+                .into_any_element(),
             None => self.wizard_setup(form, window, cx).into_any_element(),
         }
     }
 
-    fn wizard_step_rail(&self, steps: &[(String, String)], current: usize) -> gpui::AnyElement {
+    fn wizard_step_rail(
+        &self,
+        steps: &[(String, String)],
+        current: usize,
+        compact: bool,
+    ) -> gpui::AnyElement {
         let language = self.language();
         let current_step = (current + 1).to_string();
         let total_steps = steps.len().to_string();
+        if compact {
+            return div()
+                .id("wizard-rail")
+                .debug_selector(|| "wizard-rail".into())
+                .w_full()
+                .px_4()
+                .py_2()
+                .border_b_1()
+                .border_color(rgb(self.palette.border))
+                .bg(rgb(self.palette.sidebar))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(div().min_w_0().flex_1().child(steps[current].0.clone()))
+                .child(note(text(
+                    language,
+                    "wizard.rail.stepOf",
+                    &[("current", &current_step), ("total", &total_steps)],
+                )))
+                .into_any_element();
+        }
         let rail = div()
             .id("wizard-rail")
             .debug_selector(|| "wizard-rail".into())
@@ -2233,96 +2381,74 @@ impl Block {
     fn wizard_start(&self, cx: &Context<'_, Self>) -> gpui::Div {
         let state = &self.shell.wizard;
         let language = self.language();
-        let group = self.wizard_radio_group(
-            "wizard-creation-kind",
-            &tr!(language, "wizard.start.creationType"),
-            vec![
-                components::RadioOption {
-                    id: "instance".into(),
-                    checked: state.kind == CreationKind::NewInstance,
-                    disabled: self.busy,
-                    action: UiAction::WizardKind(true),
-                },
-                components::RadioOption {
-                    id: "profile".into(),
-                    checked: state.kind == CreationKind::ExistingInstance,
-                    disabled: self.busy || self.snapshot.instances.is_empty(),
-                    action: UiAction::WizardKind(false),
-                },
-            ],
-            cx,
-        );
         div()
             .flex()
             .flex_col()
             .gap_4()
             .child(patterns::page_heading(
                 tr!(language, "wizard.start.heading"),
-                tr!(language, "wizard.start.subtitle"),
-            ))
-            .child(components::badge(
-                tr!(language, "wizard.start.badge"),
-                self.palette,
-                BadgeVariant::Outline,
-            ))
-            .child(
-                group
-                    .container()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .child(
-                        group.item(
-                            "instance",
-                            components::radio(
-                                "wizard-kind-instance",
-                                tr!(language, "wizard.start.newInstance"),
-                                state.kind == CreationKind::NewInstance,
-                                self.palette,
-                                ControlState {
-                                    disabled: self.busy,
-                                    ..ControlState::default()
-                                },
-                                cx.listener(|view, &(): &(), window, cx| {
-                                    view.handle(UiAction::WizardKind(true), window, cx)
-                                }),
-                            )
-                            .w_full()
-                            .rounded(px(14.))
-                            .border_color(rgb(self.palette.border))
-                            .p_4()
-                            .child(Icon::Blocks.render(20., self.palette.muted)),
-                        ),
-                    )
-                    .child(note(tr!(language, "wizard.start.newInstanceNote")))
-                    .child(
-                        group.item(
-                            "profile",
-                            components::radio(
-                                "wizard-kind-profile",
-                                tr!(language, "wizard.start.newProfile"),
-                                state.kind == CreationKind::ExistingInstance,
-                                self.palette,
-                                ControlState {
-                                    disabled: self.busy || self.snapshot.instances.is_empty(),
-                                    ..ControlState::default()
-                                },
-                                cx.listener(|view, &(): &(), window, cx| {
-                                    view.handle(UiAction::WizardKind(false), window, cx)
-                                }),
-                            )
-                            .w_full()
-                            .rounded(px(14.))
-                            .border_color(rgb(self.palette.border))
-                            .p_4()
-                            .child(Icon::Layers.render(20., self.palette.muted)),
-                        ),
-                    )
-                    .child(note(if self.snapshot.instances.is_empty() {
-                        tr!(language, "wizard.start.noInstancesNote")
+                tr!(
+                    language,
+                    if state.separated {
+                        "wizard.start.subtitle"
                     } else {
-                        tr!(language, "wizard.start.reuseNote")
-                    })),
+                        "wizard.start.subtitleBundled"
+                    }
+                ),
+            ))
+            .children(state.separated.then(|| {
+                components::badge(
+                    tr!(language, "wizard.start.badge"),
+                    self.palette,
+                    BadgeVariant::Outline,
+                )
+            }))
+            .child(
+                self.button_with_variant(
+                    "wizard-kind-instance",
+                    tr!(language, "wizard.start.newGame"),
+                    UiAction::WizardKind(CreationKind::NewInstance),
+                    ButtonVariant::Outline,
+                    cx,
+                )
+                .track_focus(&state.creation_focus("instance", cx)),
+            )
+            .child(note(tr!(language, "wizard.start.newGameNote")))
+            .child(
+                self.button_with_variant(
+                    "wizard-kind-pack",
+                    tr!(language, "modpack.action.import_pack"),
+                    UiAction::WizardKind(CreationKind::ImportPack),
+                    ButtonVariant::Outline,
+                    cx,
+                )
+                .track_focus(&state.creation_focus("pack", cx)),
+            )
+            .child(note(tr!(language, "modpack.entry.pack_note")))
+            .child(components::button(
+                "wizard-copy-games",
+                tr!(language, "setup.game_choice.import"),
+                self.palette,
+                ButtonVariant::Outline,
+                ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
+                cx.listener(|view, &(): &(), window, cx| {
+                    view.open_import_games(window, cx);
+                }),
+            ))
+            .children(
+                (state.separated && !self.snapshot.instances.is_empty()).then(|| {
+                    self.button_with_variant(
+                        "wizard-kind-profile",
+                        tr!(language, "wizard.start.newProfile"),
+                        UiAction::WizardKind(CreationKind::ExistingInstance),
+                        ButtonVariant::Outline,
+                        cx,
+                    )
+                    .track_focus(&state.creation_focus("profile", cx))
+                }),
             )
     }
 
@@ -2465,29 +2591,38 @@ impl Block {
                 (self.shell.wizard.kind == CreationKind::ExistingInstance)
                     .then(|| self.wizard_profile_targets(profile, cx)),
             )
-            .children(show_name.then(|| {
-                self.wizard_profile_options_trigger(
-                    "wizard-profile-options",
-                    &tr!(language, "wizard.profile.advanced"),
-                    cx,
-                )
-            }))
-            .children(show_name.then(|| {
-                super::motion::disclosure(
-                    "wizard-advanced",
-                    &self.shell.wizard.advanced.borrow(),
-                    self.motion_preferences(),
-                    if section_owns_advanced {
-                        div().into_any_element()
-                    } else {
-                        self.wizard_profile_advanced(profile, cx).into_any_element()
-                    },
-                    window,
-                    cx,
-                )
-            }))
             .children(
-                (!show_name && !section_owns_advanced)
+                (show_name && self.shell.wizard.kind == CreationKind::ExistingInstance).then(
+                    || {
+                        self.wizard_profile_options_trigger(
+                            "wizard-profile-options",
+                            &tr!(language, "wizard.profile.advanced"),
+                            cx,
+                        )
+                    },
+                ),
+            )
+            .children(
+                (show_name && self.shell.wizard.kind == CreationKind::ExistingInstance).then(
+                    || {
+                        super::motion::disclosure(
+                            "wizard-advanced",
+                            &self.shell.wizard.advanced.borrow(),
+                            self.motion_preferences(),
+                            if section_owns_advanced {
+                                div().into_any_element()
+                            } else {
+                                self.wizard_profile_advanced(profile, cx).into_any_element()
+                            },
+                            window,
+                            cx,
+                        )
+                    },
+                ),
+            )
+            .children(
+                ((!show_name || self.shell.wizard.kind == CreationKind::NewInstance)
+                    && !section_owns_advanced)
                     .then(|| self.wizard_profile_advanced(profile, cx)),
             )
     }
@@ -2853,8 +2988,34 @@ impl Block {
                 |entry| Self::wizard_version_kind(entry.kind, language),
             );
         let configuration = self.wizard_configuration_summary(cx);
-        let loader_original = tr!(language, "wizard.setup.originalGame");
-        let loader_version = form.loader_version.as_deref().unwrap_or(&loader_original);
+        // The card names the launch target Create writes, so a Loader build and
+        // an OptiFine selection stay readable as the one combination they form.
+        let loader_label = form.loader_label();
+        let loader_detail = if form.loader == LoaderKind::Vanilla {
+            tr!(language, "wizard.setup.originalGame")
+        } else if let Some(build) = &form.loader_version {
+            self.shell
+                .wizard
+                .loader_catalog
+                .as_ref()
+                .filter(|catalog| catalog.kind == form.loader && catalog.minecraft == version)
+                .and_then(|catalog| catalog.builds.iter().find(|entry| entry.version == *build))
+                .map_or_else(
+                    || build.clone(),
+                    |entry| {
+                        tr!(
+                            language,
+                            if entry.stable {
+                                "wizard.loader.stable"
+                            } else {
+                                "wizard.loader.preview"
+                            }
+                        )
+                    },
+                )
+        } else {
+            tr!(language, "wizard.loader.chooseBuild")
+        };
         div()
             .flex()
             .flex_col()
@@ -2875,6 +3036,9 @@ impl Block {
                     .debug_selector(|| "wizard-components".into())
                     .grid()
                     .grid_cols(2)
+                    .when(super::page_host::compact_game_wizard(window), |grid| {
+                        grid.grid_cols(1)
+                    })
                     .gap_3()
                     .child(self.wizard_card(
                         "version",
@@ -2886,11 +3050,10 @@ impl Block {
                     .child(self.wizard_card(
                         "loader",
                         &tr!(language, "wizard.setup.loaderCard"),
-                        (form.loader.name(), loader_version),
+                        (&loader_label, &loader_detail),
                         WizardPage::Loader,
                         cx,
                     ))
-                    .child(self.wizard_optifine_card(form, cx))
                     .child(self.wizard_card(
                         "location",
                         &tr!(language, "wizard.setup.configurationCard"),
@@ -2907,15 +3070,19 @@ impl Block {
                     .as_ref()
                     .map(|notice| self.wizard_version_notice(notice, language)),
             )
-            .children((!self.shell.wizard.separated).then(|| {
-                self.wizard_profile_options_trigger(
-                    "wizard-profile-options",
-                    &tr!(language, "wizard.setup.appearanceLaunch"),
-                    cx,
-                )
-            }))
-            .children((!self.shell.wizard.separated).then(|| {
-                let content = self.wizard_profile(window, cx, false).into_any_element();
+            .child(self.wizard_profile_options_trigger(
+                "wizard-profile-options",
+                &tr!(language, "wizard.setup.appearanceLaunch"),
+                cx,
+            ))
+            .child({
+                let content = div()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(self.wizard_optifine_card(form, cx))
+                    .child(self.wizard_profile(window, cx, self.shell.wizard.separated))
+                    .into_any_element();
                 super::motion::disclosure(
                     "wizard-appearance-launch",
                     &self.shell.wizard.advanced.borrow(),
@@ -2924,7 +3091,7 @@ impl Block {
                     window,
                     cx,
                 )
-            }))
+            })
     }
 
     pub(super) fn wizard_configuration_summary(&self, cx: &gpui::App) -> (String, String) {
@@ -2938,11 +3105,18 @@ impl Block {
             },
             |profile| {
                 (
-                    if profile.managed {
-                        tr!(language, "wizard.profile.automaticJava")
-                    } else {
-                        tr!(language, "wizard.config.customJava")
-                    },
+                    format!(
+                        "{} · {}",
+                        if profile.managed {
+                            tr!(language, "wizard.profile.automaticJava")
+                        } else {
+                            tr!(language, "wizard.config.customJava")
+                        },
+                        components::parse_memory_gb(&profile.memory.read(cx).value()).map_or_else(
+                            |_| profile.memory.read(cx).value(),
+                            components::memory_label,
+                        )
+                    ),
                     if profile.fullscreen {
                         tr!(language, "wizard.config.fullscreenValue")
                     } else {
@@ -2999,7 +3173,8 @@ impl Block {
         .justify_between()
         .min_h(px(96.))
         .gap_3()
-        .p_4();
+        .p_4()
+        .track_focus(&self.shell.wizard.creation_focus(id, cx));
         let card = card
             .child(
                 div()
@@ -3178,8 +3353,17 @@ impl Block {
             .wizard
             .version_focus
             .borrow()
-            .values()
-            .any(|focus| focus.is_focused(window));
+            .iter()
+            .any(|(id, focus)| id.starts_with("wizard-version-list:") && focus.is_focused(window));
+        let from_search = self
+            .shell
+            .wizard
+            .version_search
+            .as_ref()
+            .is_some_and(|search| search.read(cx).focus_handle(cx).is_focused(window));
+        if !from_row && !from_search {
+            return;
+        }
         let current = versions
             .iter()
             .position(|(version, _)| *version == selected);
@@ -3383,8 +3567,6 @@ impl Block {
             || {
                 if selected.trim().is_empty() {
                     tr!(language, "wizard.version.source.empty")
-                } else if self.version_catalog.is_empty() && selected.trim() == "1.20.6" {
-                    tr!(language, "wizard.version.source.installerDefault")
                 } else if self.version_catalog.is_empty() {
                     tr!(language, "wizard.version.source.unverified")
                 } else {
@@ -3995,489 +4177,10 @@ impl Block {
             }));
         if let Some(profile) = &self.shell.wizard.profile {
             fields = fields.child(self.wizard_runtime_window(profile, cx));
-            if self.router.tab() == Tab::Onboarding {
+            if self.shell.wizard.kind == CreationKind::NewInstance {
                 fields = fields.child(self.wizard_profile_advanced(profile, cx));
             }
         }
         fields.child(note(tr!(language, "wizard.config.draftNote")))
     }
-
-    /// The draft values the review states, resolved from the form for a new game
-    /// or from the Instance whose new Profile it describes.
-    fn review_values(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> ReviewValues {
-        let state = &self.shell.wizard;
-        let language = self.language();
-        let existing = state.kind == CreationKind::ExistingInstance;
-        let chosen = self
-            .snapshot
-            .instances
-            .iter()
-            .find(|instance| Some(&instance.id) == state.existing_instance.as_ref());
-        let game_name = if existing {
-            chosen.map_or_else(
-                || tr!(language, "wizard.review.unavailableInstance"),
-                |instance| instance.name.clone(),
-            )
-        } else {
-            form.name.read(cx).value()
-        };
-        let version = if existing {
-            chosen.map_or_else(String::new, |instance| instance.minecraft_version.clone())
-        } else {
-            form.version.read(cx).value()
-        };
-        let directory = if existing {
-            chosen.map_or_else(String::new, |instance| {
-                instance.directory.display().to_string()
-            })
-        } else {
-            form.directory.read(cx).value()
-        };
-        let profile = state.profile.as_ref();
-        let profile_name = if state.separated {
-            profile.map_or_else(String::new, |profile| profile.name.read(cx).value())
-        } else {
-            game_name.clone()
-        };
-        let launch_target = if existing {
-            chosen
-                .and_then(|instance| {
-                    instance.targets.iter().find(|target| {
-                        profile.is_some_and(|profile| target.id == profile.target_id)
-                    })
-                })
-                .map_or_else(
-                    || tr!(language, "wizard.review.chooseLaunchTarget"),
-                    |target| target.display_name(),
-                )
-        } else {
-            form.loader_label()
-        };
-        let defaults = &self.saved_preferences.game;
-        let memory_input = profile.map_or_else(
-            || components::memory_gb_text(defaults.memory_mib),
-            |profile| profile.memory.read(cx).value(),
-        );
-        let memory = components::parse_memory_gb(&memory_input)
-            .map_or_else(|_| memory_input.clone(), components::memory_label);
-        let java = profile.map_or_else(
-            || tr!(language, "wizard.config.automaticJavaManaged"),
-            |profile| {
-                if profile.managed {
-                    tr!(language, "wizard.config.automaticJavaManaged")
-                } else {
-                    profile.java.read(cx).value()
-                }
-            },
-        );
-        let server = profile.map_or_else(String::new, |profile| profile.server.read(cx).value());
-        let connect = profile.is_some_and(|profile| profile.connect_on_launch);
-        let jvm = profile.map_or_else(String::new, |profile| profile.jvm.read(cx).value());
-        let resolution = profile.map_or_else(
-            || {
-                text(
-                    language,
-                    "wizard.profile.windowSizeValue",
-                    &[
-                        ("width", &defaults.width.to_string()),
-                        ("height", &defaults.height.to_string()),
-                    ],
-                )
-            },
-            |profile| {
-                text(
-                    language,
-                    if profile.fullscreen {
-                        "wizard.review.windowFullscreen"
-                    } else {
-                        "wizard.profile.windowSizeValue"
-                    },
-                    &[
-                        ("width", &profile.width.read(cx).value()),
-                        ("height", &profile.height.read(cx).value()),
-                    ],
-                )
-            },
-        );
-        // Show an effective window choice when it differs from the built-in
-        // default or deliberately overrides the saved preference.
-        let ordinary_window = super::settings::GameDefaults::default();
-        let window_visible = profile.is_some_and(|profile| {
-            let width = profile.width.read(cx).value();
-            let height = profile.height.read(cx).value();
-            profile.fullscreen
-                || profile.window_custom
-                || profile.fullscreen != defaults.fullscreen
-                || width.trim() != defaults.width.to_string()
-                || height.trim() != defaults.height.to_string()
-                || width.trim() != ordinary_window.width.to_string()
-                || height.trim() != ordinary_window.height.to_string()
-        });
-        ReviewValues {
-            game_name,
-            version,
-            directory,
-            profile_name,
-            appearance: self.wizard_appearance(),
-            launch_target,
-            memory,
-            java,
-            server,
-            connect,
-            jvm,
-            resolution,
-            window_visible,
-        }
-    }
-
-    /// Identity first: what is being created and, for a separated Profile, whose
-    /// Profile it is.
-    fn wizard_review_identity(
-        &self,
-        values: &ReviewValues,
-        existing: bool,
-        separated: bool,
-    ) -> gpui::Stateful<gpui::Div> {
-        let eyebrow = if existing {
-            tr!(self.language(), "wizard.review.eyebrowExisting")
-        } else if separated {
-            tr!(self.language(), "wizard.review.eyebrowNew")
-        } else {
-            tr!(self.language(), "wizard.review.eyebrowGame")
-        };
-        components::card(self.palette)
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap_3()
-                    .child(Icon::Blocks.render(24., self.palette.muted))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(note(eyebrow))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .whitespace_normal()
-                                    .child(values.game_name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .gap_2()
-                                    .child(components::badge(
-                                        values.version.clone(),
-                                        self.palette,
-                                        BadgeVariant::Secondary,
-                                    ))
-                                    .child(
-                                        components::badge(
-                                            values.launch_target.clone(),
-                                            self.palette,
-                                            BadgeVariant::Outline,
-                                        )
-                                        .flex_col()
-                                        .items_stretch()
-                                        .max_w_full()
-                                        .min_w_0()
-                                        .h_auto()
-                                        .min_h(px(20.))
-                                        .whitespace_normal()
-                                        .line_height(px(18.))
-                                        .debug_selector(|| "wizard-review-launch-target".into()),
-                                    ),
-                            ),
-                    ),
-            )
-            .children(separated.then(|| {
-                div()
-                    .border_t_1()
-                    .border_color(rgb(self.palette.border))
-                    .pt_3()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(components::profile_avatar(
-                        values.appearance,
-                        self.palette,
-                        40.,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .child(note(tr!(self.language(), "wizard.review.newProfile")))
-                            .child(values.profile_name.clone()),
-                    )
-            }))
-            .id("wizard-review-identity")
-            .debug_selector(|| "wizard-review-identity".into())
-    }
-
-    fn wizard_review(
-        &self,
-        form: &InstanceForm,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        self.reconcile_wizard_disclosure(cx);
-        let state = &self.shell.wizard;
-        let language = self.language();
-        let existing = state.kind == CreationKind::ExistingInstance;
-        let values = self.review_values(form, cx);
-        let profile = state.profile.as_ref();
-        let summary = review_summary_facts(
-            &values,
-            self.automatic_connection(&values.version),
-            language,
-        );
-        let details = review_folded_facts(&values, language);
-        let title = if existing {
-            tr!(language, "wizard.review.titleExisting")
-        } else {
-            tr!(language, "wizard.review.titleNew")
-        };
-        let consequence = if existing {
-            tr!(language, "wizard.review.consequenceExisting")
-        } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
-            tr!(language, "wizard.review.consequenceFirstRun")
-        } else {
-            tr!(language, "wizard.review.consequence")
-        };
-        let fixed = if existing {
-            tr!(language, "wizard.review.fixedExisting")
-        } else {
-            tr!(language, "wizard.review.fixedNew")
-        };
-        // Identity first, then what Create does, then the runtime choices the
-        // user must weigh, and only then the folded unchanged defaults.
-        div()
-            .id("wizard-review")
-            .debug_selector(|| "wizard-review".into())
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(patterns::page_title(title))
-            .child(self.wizard_review_identity(&values, existing, state.separated))
-            .child(
-                div()
-                    .id("wizard-review-consequence")
-                    .debug_selector(|| "wizard-review-consequence".into())
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(note(consequence))
-                    .child(note(fixed)),
-            )
-            .child(
-                div()
-                    .id("wizard-review-summary")
-                    .debug_selector(|| "wizard-review-summary".into())
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_wrap()
-                    .gap_4()
-                    .child(review_fact(language, Fact::Java, values.java.clone()))
-                    .child(review_fact(language, Fact::Memory, values.memory.clone()))
-                    .children(
-                        summary
-                            .into_iter()
-                            .map(|(fact, value)| review_fact(language, fact, value)),
-                    ),
-            )
-            .children(profile.is_some().then(|| {
-                self.wizard_profile_options_trigger(
-                    "wizard-review-options",
-                    &tr!(language, "wizard.review.details"),
-                    cx,
-                )
-            }))
-            .children(profile.is_some().then(|| {
-                let content = div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(note(tr!(language, "wizard.review.detailsNote")))
-                    .child(
-                        div().flex().flex_wrap().gap_4().children(
-                            details
-                                .into_iter()
-                                .map(|(fact, value)| review_fact(language, fact, value)),
-                        ),
-                    )
-                    .into_any_element();
-                super::motion::disclosure(
-                    "wizard-review-details",
-                    &state.advanced.borrow(),
-                    self.motion_preferences(),
-                    content,
-                    window,
-                    cx,
-                )
-            }))
-            .children(existing.then(|| note(tr!(language, "wizard.review.existingNote"))))
-    }
-}
-
-/// The values the review states, resolved from the draft or from the existing
-/// Instance whose new Profile it describes.
-struct ReviewValues {
-    game_name: String,
-    version: String,
-    directory: String,
-    profile_name: String,
-    appearance: block_launcher::catalog::ProfileAppearance,
-    launch_target: String,
-    memory: String,
-    java: String,
-    server: String,
-    connect: bool,
-    jvm: String,
-    resolution: String,
-    window_visible: bool,
-}
-
-/// The identity of one review fact. Its debug selector comes from this stable
-/// name, never from the translated label.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Fact {
-    Server,
-    AutomaticConnection,
-    JvmArguments,
-    GameWindow,
-    GameFiles,
-    GameData,
-    Java,
-    Memory,
-}
-
-impl Fact {
-    const fn id(self) -> &'static str {
-        match self {
-            Self::Server => "server",
-            Self::AutomaticConnection => "automatic-connection",
-            Self::JvmArguments => "jvm-arguments",
-            Self::GameWindow => "game-window",
-            Self::GameFiles => "game-files",
-            Self::GameData => "game-data",
-            Self::Java => "java",
-            Self::Memory => "memory",
-        }
-    }
-
-    fn label(self, language: Language) -> String {
-        let key = match self {
-            Self::Server => "wizard.fact.server",
-            Self::AutomaticConnection => "wizard.fact.automaticConnection",
-            Self::JvmArguments => "wizard.fact.jvm",
-            Self::GameWindow => "wizard.fact.gameWindow",
-            Self::GameFiles => "wizard.fact.gameFiles",
-            Self::GameData => "wizard.fact.gameData",
-            Self::Java => "wizard.fact.java",
-            Self::Memory => "wizard.fact.memory",
-        };
-        tr!(language, key)
-    }
-}
-
-/// The summary carries every submitted value whose consequence the user must
-/// weigh, including values inherited from saved defaults: arguments, a server,
-/// an automatic connection, a location or a window choice all change what Create
-/// writes. The fold keeps only values that decide nothing.
-fn review_summary_facts(
-    values: &ReviewValues,
-    automatic_connection: Option<block_launcher::catalog::AutomaticConnection>,
-    language: Language,
-) -> Vec<(Fact, String)> {
-    let mut facts = Vec::new();
-    if !values.server.trim().is_empty() {
-        facts.push((Fact::Server, values.server.clone()));
-    }
-    if values.connect {
-        facts.push((
-            Fact::AutomaticConnection,
-            match automatic_connection {
-                Some(block_launcher::catalog::AutomaticConnection::Legacy) => {
-                    tr!(language, "wizard.review.automaticConnectionLegacy")
-                }
-                _ => tr!(language, "wizard.review.automaticConnectionQuickPlay"),
-            },
-        ));
-    }
-    if !values.jvm.trim().is_empty() {
-        facts.push((Fact::JvmArguments, values.jvm.clone()));
-    }
-    if values.window_visible {
-        facts.push((Fact::GameWindow, values.resolution.clone()));
-    }
-    if !values.directory.trim().is_empty() {
-        facts.push((Fact::GameFiles, values.directory.clone()));
-    }
-    facts
-}
-
-/// The values that need no decision, and never a non-empty value claimed as
-/// empty.
-fn review_folded_facts(values: &ReviewValues, language: Language) -> Vec<(Fact, String)> {
-    let mut facts = Vec::new();
-    if values.server.trim().is_empty() {
-        facts.push((Fact::Server, tr!(language, "wizard.review.chooseInGame")));
-    }
-    if !values.connect {
-        facts.push((
-            Fact::AutomaticConnection,
-            tr!(language, "wizard.review.connectionOff"),
-        ));
-    }
-    if values.jvm.trim().is_empty() {
-        facts.push((
-            Fact::JvmArguments,
-            tr!(language, "wizard.review.noArguments"),
-        ));
-    }
-    if !values.window_visible {
-        facts.push((Fact::GameWindow, values.resolution.clone()));
-    }
-    if values.directory.trim().is_empty() {
-        facts.push((
-            Fact::GameFiles,
-            tr!(language, "wizard.review.separateFolder"),
-        ));
-    }
-    // Every Profile this wizard creates owns an isolated data folder; it is a
-    // fixed policy rather than a choice, so it stays in the fold.
-    facts.push((
-        Fact::GameData,
-        tr!(language, "wizard.review.isolatedFolder"),
-    ));
-    facts
-}
-
-/// One review fact: a muted 12 px label above a wrapping 14 px value.
-fn review_fact(
-    language: Language,
-    fact: Fact,
-    value: impl Into<gpui::SharedString>,
-) -> gpui::Stateful<gpui::Div> {
-    let id = format!("wizard-review-{}", fact.id());
-    div()
-        .id(id.clone())
-        .debug_selector(move || id)
-        .w(px(240.))
-        // A fact longer than its column wraps instead of pushing out of view.
-        .max_w_full()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(note(fact.label(language)))
-        .child(div().text_sm().whitespace_normal().child(value.into()))
 }

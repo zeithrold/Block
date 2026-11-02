@@ -49,6 +49,8 @@ class ScenarioContractsTest(unittest.TestCase):
             contract("home-does-not-exist")
         names = scenario_names()
         for name in (
+            "wizard-review",
+            "auth-offline-complete",
             "welcome-1",
             "welcome-2",
             "welcome-3",
@@ -60,6 +62,24 @@ class ScenarioContractsTest(unittest.TestCase):
                 self.assertNotIn(name, names)
                 with self.assertRaises(KeyError):
                     contract(name)
+
+    def test_submission_boundaries_remain_distinguishable(self) -> None:
+        self.assertIn("Game name", contract("wizard-setup")["required"])
+        self.assertIn("Create and prepare", contract("wizard-setup")["required"])
+        self.assertIn(
+            "Creates the game and starts preparation. Minecraft and loader become fixed.",
+            contract("wizard-setup")["required"],
+        )
+        self.assertIn("Apply to draft", contract("wizard-configuration")["required"])
+        self.assertIn("Add and use", contract("auth-offline-information")["required"])
+        self.assertIn(
+            "Block is saving the local identity.",
+            contract("auth-offline-saving")["required"],
+        )
+        for name in ("auth-complete", "auth-authlib-complete"):
+            with self.subTest(name=name):
+                self.assertIn("Save and use", contract(name)["required"])
+        self.assertIn("Go to Home", contract("setup-overview")["required"])
 
     def test_first_run_scenarios_follow_their_page_titles_and_frames(self) -> None:
         for name in ("setup-welcome", "setup-import-sources", "setup-import-list"):

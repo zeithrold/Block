@@ -222,6 +222,11 @@ fn real_wizard_loader_group_changes_only_its_checkpoint_and_skips_unsupported_lo
             view.preferences.reduce_motion = true;
             view.handle(crate::UiAction::CreateInstance, window, cx);
             view.handle(
+                crate::UiAction::WizardKind(crate::game_wizard::CreationKind::NewInstance),
+                window,
+                cx,
+            );
+            view.handle(
                 crate::UiAction::WizardPage(Some(crate::WizardPage::Loader)),
                 window,
                 cx,

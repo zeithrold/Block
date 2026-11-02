@@ -509,6 +509,8 @@ pub(super) fn field_with(
                 .text_size(px(SMALL_FONT_SIZE))
                 .line_height(px(18.))
                 .text_color(rgb(palette.muted))
+                .min_w_0()
+                .whitespace_normal()
                 .child(hint),
         );
     }
@@ -521,8 +523,12 @@ pub(super) fn field_with(
                 .text_size(px(SMALL_FONT_SIZE))
                 .line_height(px(18.))
                 .text_color(rgb(palette.destructive))
-                .child(Icon::Error.render(14., palette.destructive))
-                .child(error),
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .child(Icon::Error.render(14., palette.destructive)),
+                )
+                .child(div().min_w_0().flex_1().whitespace_normal().child(error)),
         );
     }
     field

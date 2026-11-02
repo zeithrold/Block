@@ -24,6 +24,9 @@ impl Block {
             self.report(msg!("accounts.onboarding.finish_failed", error = error));
             return false;
         }
+        // Setup is over: a discovery the center started must not repopulate it,
+        // and its report is dropped when it finally arrives.
+        self.shell.import_games.discovery = None;
         if let Some(engine) = &self.engine {
             engine.discard_prepared_sign_in();
         }

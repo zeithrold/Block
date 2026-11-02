@@ -14,7 +14,7 @@ use crate::{
     Block, Form, OperationKind, ProfileForm, Tab, account_id,
     appearance::Appearance,
     authentication, browser, downloads, feedback, first_run,
-    game_wizard::WizardPage,
+    game_wizard::{CreationKind, WizardPage, WizardStep},
     import_games, modpack_import, motion, profile_editor, select,
     settings::SettingsDraft,
     shell::{Drawer, Surface},
@@ -51,7 +51,9 @@ pub(super) enum UiAction {
     WizardSnapshots,
     WizardOptiFineFile,
     WizardOptiFineRemove,
-    WizardKind(bool),
+    WizardKind(CreationKind),
+    ConfirmPackLeave,
+    ConfirmDiscardGame,
     WizardInstance(String),
     WizardProfileIcon(block_launcher::catalog::ProfileIcon),
     WizardProfileColor(block_launcher::catalog::ProfileColor),
@@ -78,6 +80,7 @@ pub(super) enum UiAction {
     SelectValue(Box<Self>),
     MinimizeWindow,
     CloseWindow,
+    QuitApplication,
     WizardPage(Option<WizardPage>),
     SetFullscreen,
     ShowSnapshots,
@@ -122,7 +125,6 @@ pub(super) enum UiAction {
     DefaultAccount(Option<String>),
     SignIn,
     Authenticate,
-    AuthNext,
     AuthBack,
     AuthMethod(authentication::Method),
     AuthProvider(block_auth::AccountProvider),
@@ -186,15 +188,22 @@ impl Block {
     ) {
         self.motion_dirty = true;
         self.motion.direction = motion_direction(&action);
-        if self.composition_in_progress(&action, cx) || !self.action_allowed(&action) {
+        if self.exit_blocked_by_auth_save(&action)
+            || self.composition_in_progress(&action, cx)
+            || !self.action_allowed(&action)
+            || self.confirm_pack_leave_if_needed(&action, window, cx)
+            || self.confirm_game_discard_if_needed(&action, window, cx)
+        {
             return;
         }
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
         let previous_page = (self.router.tab(), self.form.is_some());
         match action {
-            UiAction::FirstRun(action) => self.handle_first_run(action, window, cx),
+            UiAction::FirstRun(action) => self.route_first_run(action, window, cx),
             UiAction::ImportGames(action) => self.handle_import_games(action, window, cx),
             UiAction::PackImport(action) => self.handle_pack_import(action, window, cx),
+            UiAction::ConfirmPackLeave => self.confirm_pack_leave(window, cx),
+            UiAction::ConfirmDiscardGame => self.confirm_game_discard(window, cx),
             UiAction::AuthOtherOptions => self.toggle_auth_other_options(cx),
             UiAction::WizardOptiFineFile => self.browse_optifine(cx),
             UiAction::WizardOptiFineRemove => self.clear_wizard_optifine(),
@@ -257,7 +266,7 @@ impl Block {
             UiAction::SelectProfile(id) => self.select_profile(id, window, cx),
             UiAction::SelectAccount(id) => self.select_account(id, window, cx),
             UiAction::CreateInstance => self.start_creation(window, cx),
-            UiAction::WizardKind(is_new) => self.wizard_kind(is_new, cx),
+            UiAction::WizardKind(kind) => self.start_creation_kind(kind, window, cx),
             UiAction::WizardInstance(id) => self.wizard_instance(id),
             UiAction::WizardProfileIcon(icon) => self.wizard_profile_icon(icon),
             UiAction::WizardProfileColor(color) => self.wizard_profile_color(color),
@@ -292,7 +301,8 @@ impl Block {
             UiAction::WizardCustomWindow => self.wizard_custom_window(),
             UiAction::WizardProfileConnect => self.wizard_profile_connect(),
             UiAction::MinimizeWindow => window.minimize_window(),
-            UiAction::CloseWindow => window.remove_window(),
+            UiAction::CloseWindow => self.close_launcher_window(window),
+            UiAction::QuitApplication => Self::defer_application_quit(cx),
             UiAction::SelectValue(action) => self.select_value(*action, window, cx),
             UiAction::ProfileIcon(icon) => self.edit_profile_draft(|form| {
                 form.original.appearance.icon = icon;
@@ -302,7 +312,7 @@ impl Block {
             }),
             UiAction::WizardSnapshots => self.toggle_wizard_snapshots(),
             UiAction::WizardNext => self.advance_wizard_focus(window, cx),
-            UiAction::WizardBack => self.back_game_wizard(cx),
+            UiAction::WizardBack => self.back_wizard_focus(window, cx),
             UiAction::WizardPage(page) => {
                 if !self.select_wizard_page(page, window, cx) {
                     return;
@@ -319,7 +329,7 @@ impl Block {
             UiAction::ProfilePage(page) => self.open_profile_page(page, window, cx),
             UiAction::ProfilePageDone => self.finish_profile_page(false, window, cx),
             UiAction::ProfilePageCancel => self.finish_profile_page(true, window, cx),
-            UiAction::CancelForm => self.cancel_form(window, cx),
+            UiAction::CancelForm => self.cancel_or_finish_form(window, cx),
             UiAction::NewProfile => self.new_profile(cx),
             UiAction::ProfileActions => self.open_profile_actions_at(None, window, cx),
             UiAction::CopyProfileId(id) => self.copy_profile(id),
@@ -344,7 +354,6 @@ impl Block {
             UiAction::ProviderSave => self.save_provider(cx),
             UiAction::ProviderRemoveRequest(id) => self.request_remove_provider(id, window, cx),
             UiAction::ProviderRemove(id) => self.remove_provider(id, window, cx),
-            UiAction::AuthNext => self.auth_next(cx),
             UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
             UiAction::AuthBack => self.auth_back(window, cx),
             UiAction::AuthExternalProvider(id) => self.choose_external_provider(id, window, cx),
@@ -372,15 +381,89 @@ impl Block {
             UiAction::ToggleCommand => self.show_command = !self.show_command,
             UiAction::OpenLogs => self.open_launcher_logs(cx),
             UiAction::ExportLogs => self.export_launcher_logs(cx),
-            UiAction::CancelLogExport => {
-                if let Some(cancel) = &self.log_export_cancel {
-                    cancel.cancel();
-                }
-            }
+            UiAction::CancelLogExport => self.cancel_log_export(),
             UiAction::OpenRecipe => self.open_recipe(cx),
             UiAction::LaunchRecipe => self.launch_recipe(cx),
         }
         self.finish_action(previous_page, focus_first, window, cx);
+    }
+
+    fn route_first_run(
+        &mut self,
+        action: first_run::Action,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if matches!(action, first_run::Action::Back) && self.finish_completed_pack(window, cx) {
+            return;
+        }
+        if matches!(action, first_run::Action::Back) && self.router.game_wizard() {
+            if self.return_from_pack_shortcut(window, cx) {
+                return;
+            }
+            self.pack_import_closed();
+        }
+        self.handle_first_run(action, window, cx);
+    }
+
+    fn close_launcher_window(&mut self, window: &mut Window) {
+        self.select_completed_pack();
+        window.remove_window();
+    }
+
+    fn defer_application_quit(cx: &mut Context<'_, Self>) {
+        cx.defer(|cx| {
+            crate::request_application_quit(cx);
+        });
+    }
+
+    pub(super) fn allow_native_window_close(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if self.auth_save_pending()
+            || self.confirm_pack_leave_if_needed(&UiAction::CloseWindow, window, cx)
+            || self.confirm_game_discard_if_needed(&UiAction::CloseWindow, window, cx)
+        {
+            return false;
+        }
+        self.select_completed_pack();
+        true
+    }
+
+    pub(super) fn allow_application_quit(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        !self.auth_save_pending()
+            && !self.confirm_pack_leave_if_needed(&UiAction::QuitApplication, window, cx)
+            && !self.confirm_game_discard_if_needed(&UiAction::QuitApplication, window, cx)
+    }
+
+    fn cancel_log_export(&self) {
+        if let Some(cancel) = &self.log_export_cancel {
+            cancel.cancel();
+        }
+    }
+
+    fn cancel_or_finish_form(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if !self.finish_completed_pack(window, cx) {
+            self.cancel_form(window, cx);
+        }
+    }
+
+    fn back_wizard_focus(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let page = self.shell.wizard.page;
+        self.back_game_wizard(cx);
+        if self.shell.wizard.page.is_none()
+            && let Some(page) = page
+        {
+            self.focus_wizard_card(page, window, cx);
+        } else {
+            self.focus_field(false, window, cx);
+        }
     }
 
     /// Settle the frame after an action that changed launcher state: resize for a
@@ -406,6 +489,18 @@ impl Block {
         cx.notify();
     }
 
+    /// An authorized account save cannot be presented as a cancelled write.
+    fn exit_blocked_by_auth_save(&self, action: &UiAction) -> bool {
+        self.auth_save_pending()
+            && matches!(
+                action,
+                UiAction::CloseWindow
+                    | UiAction::QuitApplication
+                    | UiAction::Tab(_)
+                    | UiAction::FirstRun(_)
+            )
+    }
+
     /// A commit or page change must not interrupt an IME composition: the draft
     /// still holds the text being assembled.
     fn composition_in_progress(&self, action: &UiAction, cx: &Context<'_, Self>) -> bool {
@@ -417,13 +512,24 @@ impl Block {
                     .any(|field| field.read(cx).is_composing())
             });
         }
-        matches!(
+        (matches!(
             action,
             UiAction::SaveInstance | UiAction::SaveProfile | UiAction::WizardNext
         ) && self
             .form_inputs()
             .iter()
-            .any(|field| field.read(cx).is_composing())
+            .any(|field| field.read(cx).is_composing()))
+            || matches!(
+                action,
+                UiAction::PackImport(
+                    modpack_import::Action::Confirm | modpack_import::Action::Retry
+                )
+            ) && self
+                .shell
+                .pack_import
+                .name
+                .as_ref()
+                .is_some_and(|field| field.read(cx).is_composing())
     }
 
     /// Whether the dispatcher may run this action now. Everything waits for a
@@ -434,6 +540,191 @@ impl Block {
             return true;
         }
         self.can_activate(action)
+    }
+
+    /// An active pack installation must be explicitly stopped before leaving.
+    fn confirm_pack_leave_if_needed(
+        &mut self,
+        action: &UiAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let leaving = matches!(
+            action,
+            UiAction::CancelForm
+                | UiAction::Tab(_)
+                | UiAction::CloseWindow
+                | UiAction::QuitApplication
+                | UiAction::FirstRun(first_run::Action::Back)
+        );
+        if !leaving
+            || !self.pack_wizard_active()
+            || self.shell.pack_import.phase != modpack_import::Phase::Installing
+        {
+            return false;
+        }
+        if let UiAction::Tab(tab) = action
+            && !self.router.allows(*tab, self.setup_incomplete())
+        {
+            return false;
+        }
+        let Some(request) = self.shell.pack_import.request else {
+            return false;
+        };
+        if !self
+            .shell
+            .surfaces
+            .layers()
+            .any(|entry| matches!(entry.kind, Surface::StopPackImport { .. }))
+        {
+            self.shell.surfaces.open(
+                Surface::StopPackImport {
+                    request,
+                    exit: Box::new(action.clone()),
+                    window: window.window_handle(),
+                },
+                window,
+                cx,
+            );
+        }
+        cx.notify();
+        true
+    }
+
+    fn confirm_pack_leave(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some((request, exit)) = self
+            .shell
+            .surfaces
+            .top()
+            .and_then(|entry| match &entry.kind {
+                Surface::StopPackImport { request, exit, .. } => Some((*request, exit.clone())),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        self.shell.surfaces.close(window, &self.focus, cx);
+        if self.pack_wizard_active()
+            && self.shell.pack_import.phase == modpack_import::Phase::Installing
+            && self.shell.pack_import.accepts(request)
+        {
+            self.pack_import_closed();
+            self.handle(*exit, window, cx);
+        }
+    }
+
+    /// Returning to first-run keeps the live draft. Only exits that actually
+    /// destroy it require confirmation, and an untouched draft exits directly.
+    fn confirm_game_discard_if_needed(
+        &mut self,
+        action: &UiAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if let Some(draft) = self.shell.wizard.discard_confirmed.take()
+            && self.changed_game_draft_id(action, cx) == Some(draft)
+        {
+            return false;
+        }
+        if self.shell.auth.is_some()
+            && !matches!(
+                action,
+                UiAction::CloseWindow | UiAction::QuitApplication | UiAction::Tab(_)
+            )
+        {
+            return false;
+        }
+        let leaving = match action {
+            UiAction::CancelForm => {
+                self.pack_wizard_active()
+                    || self.router.game_wizard()
+                        && self.shell.wizard.page.is_none()
+                        && self.router.tab() != Tab::Onboarding
+            }
+            UiAction::CloseWindow
+            | UiAction::QuitApplication
+            | UiAction::FirstRun(first_run::Action::Skip) => true,
+            UiAction::Tab(tab) => {
+                (self.router.game_wizard() || self.shell.auth.is_some())
+                    && self.router.allows(*tab, self.setup_incomplete())
+            }
+            UiAction::FirstRun(first_run::Action::Continue) => self.first_run_continue_exits(),
+            UiAction::FirstRun(first_run::Action::Back) => {
+                self.pack_wizard_active()
+                    || self.router.game_wizard() && self.changed_pack_draft_id(cx).is_some()
+            }
+            _ => false,
+        };
+        let Some(draft) = leaving
+            .then(|| self.changed_game_draft_id(action, cx))
+            .flatten()
+        else {
+            return false;
+        };
+        self.shell.surfaces.open(
+            Surface::DiscardGameDraft {
+                draft,
+                exit: Box::new(action.clone()),
+            },
+            window,
+            cx,
+        );
+        cx.notify();
+        true
+    }
+
+    fn confirm_game_discard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some((draft, exit)) = self
+            .shell
+            .surfaces
+            .top()
+            .and_then(|entry| match &entry.kind {
+                Surface::DiscardGameDraft { draft, exit } => Some((*draft, exit.clone())),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        self.shell.surfaces.close(window, &self.focus, cx);
+        if self.changed_game_draft_id(&exit, cx) != Some(draft) {
+            return;
+        }
+        self.shell.wizard.discard_confirmed = Some(draft);
+        if matches!(*exit, UiAction::QuitApplication) {
+            Self::defer_application_quit(cx);
+        } else {
+            self.handle(*exit, window, cx);
+        }
+    }
+
+    fn changed_game_draft_id(&self, action: &UiAction, cx: &gpui::App) -> Option<gpui::EntityId> {
+        let pack_draft = self.router.game_wizard().then(|| {
+            self.changed_pack_draft_id(cx).or_else(|| {
+                matches!(
+                    action,
+                    UiAction::CloseWindow
+                        | UiAction::QuitApplication
+                        | UiAction::Tab(_)
+                        | UiAction::FirstRun(first_run::Action::Skip | first_run::Action::Continue)
+                )
+                .then(|| self.held_pack_parent_draft_id(cx))
+                .flatten()
+            })
+        });
+        pack_draft.flatten().or_else(|| {
+            let returns_to_source = self.pack_shortcut_preserves_current_draft()
+                && matches!(
+                    action,
+                    UiAction::CancelForm | UiAction::FirstRun(first_run::Action::Back)
+                );
+            if returns_to_source || !self.game_wizard_changed(cx) {
+                return None;
+            }
+            match &self.form {
+                Some(Form::Instance(form)) => Some(form.name.entity_id()),
+                _ => None,
+            }
+        })
     }
 
     /// Whether an action may run while another operation is in progress.
@@ -468,6 +759,7 @@ impl Block {
             action,
             UiAction::Stop
                 | UiAction::PackImport(modpack_import::Action::Stop)
+                | UiAction::QuitApplication
                 | UiAction::Tab(_)
                 | UiAction::Providers
                 | UiAction::ProvidersBack
@@ -517,6 +809,7 @@ impl Block {
             cx.notify();
             return false;
         }
+        self.select_completed_pack();
         if self.shell.providers.visible {
             self.close_providers(cx);
         }
@@ -529,18 +822,13 @@ impl Block {
         if tab == Tab::Settings && self.router.tab() != Tab::Settings {
             self.open_settings(cx);
         }
+        if self.router.game_wizard() {
+            self.pack_import_closed();
+        }
         self.initialize_browsers(cx);
         self.router.navigate(tab);
         self.form = None;
         self.shell.instance_editor = None;
-        if self
-            .shell
-            .surfaces
-            .layers()
-            .any(|entry| matches!(entry.kind, Surface::Drawer(Drawer::ImportPack)))
-        {
-            self.pack_import_closed(window, cx);
-        }
         self.shell.surfaces.clear(window, &self.focus, cx);
         self.request_frame_resize(window, cx);
         true
@@ -556,12 +844,8 @@ impl Block {
     ) -> bool {
         if self.setup_incomplete()
             && self.shell.first_run.enabled
-            && drawer.is_some_and(|drawer| {
-                !matches!(
-                    drawer,
-                    Drawer::ImportGames | Drawer::ImportPack | Drawer::Language
-                )
-            })
+            && drawer
+                .is_some_and(|drawer| !matches!(drawer, Drawer::ImportGames | Drawer::Language))
         {
             return false;
         }
@@ -592,14 +876,6 @@ impl Block {
             self.cancel_component_draft(cx);
             self.shell.surfaces.close(window, &self.focus, cx);
         } else {
-            if self
-                .shell
-                .surfaces
-                .top()
-                .is_some_and(|entry| matches!(entry.kind, Surface::Drawer(Drawer::ImportPack)))
-            {
-                self.pack_import_closed(window, cx);
-            }
             self.shell.surfaces.close(window, &self.focus, cx);
         }
         true
@@ -637,12 +913,17 @@ impl Block {
             return false;
         }
         self.open_game_wizard_page(page, cx);
-        if let Some(page) = page {
+        if page == Some(WizardPage::OptiFine) {
             self.shell
                 .surfaces
-                .open(Surface::WizardSection(page), window, cx);
-        } else if self.shell.wizard.page.is_none() {
+                .open(Surface::WizardSection(WizardPage::OptiFine), window, cx);
+        } else if page.is_none()
+            && self.shell.wizard.page.is_none()
+            && self.shell.surfaces.is_open()
+        {
             self.shell.surfaces.close(window, &self.focus, cx);
+        } else if page.is_some() {
+            self.focus_field(false, window, cx);
         }
         true
     }
@@ -650,12 +931,22 @@ impl Block {
     /// Back out of the open form: leave the setup guide, step back through the
     /// wizard, close the profile editor or drop an unattached game draft.
     fn cancel_form(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+        if self.router.game_wizard() && self.shell.wizard.page.is_none() {
+            if self.return_from_pack_shortcut(window, cx) {
+                return;
+            }
+            self.pack_import_closed();
+        }
+        if matches!(self.form, Some(Form::Instance(_))) && self.shell.wizard.page.is_some() {
+            let page = self.shell.wizard.page;
+            self.back_game_wizard(cx);
+            if let Some(page) = page {
+                self.focus_wizard_card(page, window, cx);
+            }
+        } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
             self.first_run_overview(window, cx);
         } else if self.shell.editor.page.is_some() && matches!(self.form, Some(Form::Profile(_))) {
             self.finish_profile_page(true, window, cx);
-        } else if matches!(self.form, Some(Form::Instance(_))) && self.shell.wizard.page.is_some() {
-            self.back_game_wizard(cx);
         } else if matches!(self.form, Some(Form::Profile(_))) {
             self.cancel_profile_editor(window, cx);
         } else if self.router.tab() != Tab::Onboarding {
@@ -754,23 +1045,47 @@ impl Block {
     /// Opening creation during setup enters the first-run game step instead of
     /// the free-standing wizard.
     fn start_creation(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.router.game_wizard() {
+            return;
+        }
         if self.setup_incomplete() && self.shell.first_run.enabled {
             self.handle_first_run(first_run::Action::Game, window, cx);
         } else {
             self.begin_game_wizard(cx);
+            self.shell.wizard.step = WizardStep::GetStarted;
         }
     }
 
-    /// Start a profile for the inspected game without leaving the wizard's
-    /// profile step.
+    fn start_creation_kind(
+        &mut self,
+        kind: CreationKind,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.wizard_kind(kind, cx);
+        if self.shell.wizard.step != WizardStep::GetStarted || self.shell.wizard.kind != kind {
+            return;
+        }
+        self.shell.wizard.next();
+        if kind == CreationKind::ImportPack {
+            self.handle_pack_import(modpack_import::Action::Choose, window, cx);
+        } else {
+            self.focus_field(false, window, cx);
+        }
+    }
+
+    /// Start a Profile directly for the inspected Instance.
     fn new_profile(&mut self, cx: &mut Context<'_, Self>) {
         let id = self
             .inspected_instance()
             .map(|instance| instance.id.clone());
         self.begin_game_wizard(cx);
-        self.wizard_kind(false, cx);
+        self.wizard_kind(CreationKind::ExistingInstance, cx);
         if let Some(id) = id {
             self.wizard_instance(id);
+            self.shell.wizard.context_instance = true;
+            self.shell.wizard.step = WizardStep::Setup;
+            self.mark_game_wizard_clean(cx);
         }
     }
 
@@ -947,8 +1262,15 @@ impl Block {
 
     /// Move the wizard forward, then settle focus on the page it opened.
     fn advance_wizard_focus(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let page = self.shell.wizard.page;
         self.advance_game_wizard(cx);
-        self.focus_field(false, window, cx);
+        if self.shell.wizard.page.is_none()
+            && let Some(page) = page
+        {
+            self.focus_wizard_card(page, window, cx);
+        } else {
+            self.focus_field(false, window, cx);
+        }
     }
 
     /// Commit the wizard's game step, then settle focus on the result.

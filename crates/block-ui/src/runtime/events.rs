@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     Block, OperationKind, PendingCrash, Tab, account_id, browser, components, engine::Message,
-    feedback, import_games,
+    feedback,
 };
 
 impl Block {
@@ -189,31 +189,13 @@ impl Block {
         cx.notify();
     }
 
-    /// A discovery that needs the import window is deferred to a later frame:
-    /// the window is borrowed while its own message is being handled.
     fn receive_discovery(
         &mut self,
         request: Uuid,
         report: DiscoveryReport,
-        cx: &mut Context<'_, Self>,
+        _cx: &mut Context<'_, Self>,
     ) {
-        let decision = self.resolve_game_discovery(request, report);
-        let deferred = matches!(
-            decision,
-            import_games::DeferredDiscovery::OpenDrawer
-                | import_games::DeferredDiscovery::ContinueToOverview
-        );
-        if deferred && let Some(handle) = self.shell.import_games.window {
-            let owner = cx.entity();
-            cx.defer(move |cx| {
-                let _ = handle.update(cx, |_, window, cx| {
-                    owner.update(cx, |view, cx| {
-                        view.apply_deferred_discovery(decision, window, cx);
-                        cx.notify();
-                    });
-                });
-            });
-        }
+        self.receive_game_discovery(request, report);
     }
 
     fn receive_catalog(&mut self, result: Result<Snapshot, String>, cx: &mut Context<'_, Self>) {

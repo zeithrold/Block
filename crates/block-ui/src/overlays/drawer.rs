@@ -682,7 +682,7 @@ impl Render for DrawerLayer {
         let (body, popups) = owner.update(cx, |view, cx| {
             let body = view.render_surface_sheet_body(&frame.kind, window, cx);
             let popups = if view.shell.surfaces.contains(frame.revision) {
-                view.render_popups(true, cx)
+                view.render_popups(true, window, cx)
             } else {
                 Vec::new()
             };

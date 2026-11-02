@@ -15,6 +15,11 @@
     "zh-Hans": "保存",
     "ja": "保存"
   },
+  "common.apply_draft": {
+    "en": "Apply to draft",
+    "zh-Hans": "应用到草稿",
+    "ja": "下書きに反映"
+  },
   "common.in_progress": {
     "en": "In progress",
     "zh-Hans": "进行中",

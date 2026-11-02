@@ -1,5 +1,7 @@
-//! Explicit account preparation followed by final persistence.
-//! Browser authorization URLs are transient and never included in `Debug` output.
+//! Account preparation and its single explicit save.
+//!
+//! Authorization URLs and device codes are transient and never included in
+//! `Debug` output.
 
 #![expect(
     clippy::redundant_pub_crate,
@@ -12,8 +14,8 @@ use std::fmt;
 use block_auth::{Account, AccountProvider, SignInStage};
 use gpui::{
     AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, ScrollHandle, Size, StatefulInteractiveElement as _, Styled as _,
-    Window, div, point, px, rgb,
+    ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window, div,
+    point, px, rgb,
 };
 
 use super::{
@@ -22,6 +24,18 @@ use super::{
     design::Icon,
     note, patterns,
 };
+
+/// The account page's single reading column. Its footer aligns to the same width
+/// and horizontal padding, so the page reads as one column at any window size.
+const AUTH_CONTENT_WIDTH: f32 = 608.;
+
+/// Microsoft owns most Java Edition accounts and is therefore the page's
+/// default; the other types follow it in the alternatives list.
+const ACCOUNT_TYPES: [AccountProvider; 3] = [
+    AccountProvider::Microsoft,
+    AccountProvider::Authlib,
+    AccountProvider::Offline,
+];
 
 /// A retained account-surface message.
 ///
@@ -103,9 +117,9 @@ impl gpui::RenderOnce for ProviderPassword {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
+    /// The account page itself: the sign-in form for the selected account type.
     #[default]
-    Choose,
-    Information,
+    Connect,
     Preparing,
     Waiting,
     Verifying,
@@ -116,6 +130,10 @@ enum Phase {
     Saved,
 }
 
+/// The identity the shared page host animates the account page against.
+///
+/// It is a motion key only: the page reports progress in place and keeps no
+/// numbered step list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AuthStep {
     Choose,
@@ -124,22 +142,15 @@ pub(super) enum AuthStep {
     Complete,
 }
 
-impl AuthStep {
-    const fn index(self) -> usize {
-        match self {
-            Self::Choose => 0,
-            Self::SignIn => 1,
-            Self::Verification => 2,
-            Self::Complete => 3,
-        }
-    }
-}
-
 impl Phase {
+    /// The page identity motion and content switching use.
+    ///
+    /// Waiting and verification belong to the page that started the attempt,
+    /// so they keep that page's identity instead of becoming steps of their own.
     const fn step(self) -> AuthStep {
         match self {
-            Self::Choose => AuthStep::Choose,
-            Self::Information | Self::Preparing | Self::Waiting | Self::Failed => AuthStep::SignIn,
+            Self::Connect => AuthStep::Choose,
+            Self::Preparing | Self::Waiting | Self::Failed => AuthStep::SignIn,
             Self::Verifying | Self::Characters => AuthStep::Verification,
             Self::Complete | Self::Saving | Self::Saved => AuthStep::Complete,
         }
@@ -147,6 +158,14 @@ impl Phase {
 
     const fn pending(self) -> bool {
         matches!(self, Self::Preparing | Self::Waiting | Self::Verifying)
+    }
+
+    /// Whether an exit can still revoke the attempt.
+    ///
+    /// A pending save is an authorized write: it finishes on its own, so the
+    /// page offers no exit that would read as cancelling it.
+    const fn committed(self) -> bool {
+        matches!(self, Self::Saving | Self::Saved)
     }
 }
 
@@ -174,6 +193,7 @@ pub(crate) struct AuthProviderDraft {
     pub(crate) error: Option<AccountMessage>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
     saved: Option<uuid::Uuid>,
+    scroll: ScrollHandle,
 }
 
 impl AuthWizard {
@@ -248,11 +268,12 @@ pub(super) struct AuthWizard {
     browser_url: Option<String>,
     prepared_account: Option<Account>,
     error: Option<AccountMessage>,
-    return_size: Size<Pixels>,
+    /// The last attempt failed while persisting an already verified identity.
+    /// Its credential is spent, so recovery starts a fresh sign-in.
+    save_failed: bool,
     return_window: Option<gpui::AnyWindowHandle>,
     focus: Option<FocusHandle>,
     body_scroll: ScrollHandle,
-    rail_scroll: ScrollHandle,
 }
 
 impl fmt::Debug for AuthWizard {
@@ -275,28 +296,25 @@ impl AuthWizard {
         cx: &mut Context<'_, Block>,
     ) {
         self.phase = match name {
-            "auth-information"
-            | "auth-authlib-information"
-            | "auth-authlib-http-warning"
-            | "auth-authlib-provider-add"
-            | "auth-offline-information" => Phase::Information,
             "auth-authlib-characters" => Phase::Characters,
-            "auth-authlib-complete" | "auth-offline-complete" | "auth-complete" => Phase::Complete,
+            "auth-authlib-complete" | "auth-complete" => Phase::Complete,
             "auth-offline-error" | "auth-error" => Phase::Failed,
             "auth-device-preparing" => Phase::Preparing,
             "auth-device-waiting" | "auth-waiting" => Phase::Waiting,
             "auth-verifying" => Phase::Verifying,
-            "auth-saving" => Phase::Saving,
-            _ => Phase::Choose,
+            "auth-saving" | "auth-offline-saving" => Phase::Saving,
+            _ => Phase::Connect,
         };
-        if matches!(
-            name,
-            "auth-complete" | "auth-saving" | "auth-offline-complete"
-        ) {
+        // The account page with its alternatives revealed.
+        self.other_sign_in_options = name == "auth-choose";
+        if matches!(name, "auth-complete" | "auth-saving") {
             self.prepared_account = account.clone();
         }
         if name.starts_with("auth-offline-") {
             self.provider = AccountProvider::Offline;
+            if name == "auth-offline-saving" {
+                self.prepared_account = super::engine::offline_account("Pixel").ok();
+            }
             if let Some(field) = &self.username {
                 field.update(cx, |field, cx| {
                     field.set_value(
@@ -382,8 +400,6 @@ impl AuthWizard {
     pub(super) fn snapshot(&self, cx: &Context<'_, Block>) -> Self {
         let body_scroll = ScrollHandle::new();
         body_scroll.set_offset(self.body_scroll.offset());
-        let rail_scroll = ScrollHandle::new();
-        rail_scroll.set_offset(self.rail_scroll.offset());
         Self {
             phase: self.phase,
             provider: self.provider,
@@ -406,11 +422,10 @@ impl AuthWizard {
             browser_url: None,
             prepared_account: self.prepared_account.clone(),
             error: self.error.clone(),
-            return_size: self.return_size,
+            save_failed: self.save_failed,
             return_window: self.return_window,
             focus: Some(cx.focus_handle()),
             body_scroll,
-            rail_scroll,
         }
     }
 
@@ -429,6 +444,7 @@ impl AuthWizard {
     fn failed(&mut self, error: AccountMessage) {
         self.browser_url = None;
         self.device_code = None;
+        self.save_failed = false;
         self.error = Some(match self.provider {
             AccountProvider::Offline => {
                 AccountMessage::product("accounts.auth.error.offline_save_failed")
@@ -470,7 +486,7 @@ impl Block {
         if self.busy
             || self.shell.auth.as_ref().is_none_or(|s| {
                 s.provider != AccountProvider::Authlib
-                    || !matches!(s.phase, Phase::Information | Phase::Failed)
+                    || !matches!(s.phase, Phase::Connect | Phase::Failed)
             })
         {
             return;
@@ -517,6 +533,7 @@ impl Block {
                 error: None,
                 attempt: None,
                 saved: None,
+                scroll: ScrollHandle::new(),
             };
             if let Some(state) = &mut self.shell.auth {
                 state.provider_draft = Some(draft);
@@ -703,7 +720,7 @@ impl Block {
             state.accepted_http = None;
             state.error = None;
             state.provider_draft = None;
-            state.transition(Phase::Information);
+            state.transition(Phase::Connect);
         }
         self.shell.surfaces.close(window, &self.focus, cx);
         cx.notify();
@@ -789,7 +806,11 @@ impl Block {
         true
     }
 
-    pub(super) fn render_auth_provider_add(&self, cx: &Context<'_, Self>) -> gpui::Div {
+    pub(super) fn render_auth_provider_add(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
         let Some(draft) = self
             .shell
             .auth
@@ -895,46 +916,62 @@ impl Block {
                     }),
                 ));
         }
-        form.children(
-            draft
-                .error
-                .as_ref()
-                .map(|error| note(error.render(language))),
-        )
-        .child(
+        let form = form
+            .children(
+                draft
+                    .error
+                    .as_ref()
+                    .map(|error| note(error.render(language))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(self.auth_button(
+                        "auth-provider-cancel",
+                        tr!(language, "common.cancel"),
+                        UiAction::AuthProviderCancel,
+                        ButtonVariant::Ghost,
+                        ControlState::default(),
+                        cx,
+                    ))
+                    .child(self.auth_button(
+                        "auth-provider-save",
+                        if existing.is_some() {
+                            tr!(language, "accounts.auth.provider_add.use_saved")
+                        } else {
+                            tr!(language, "accounts.auth.provider_add.add")
+                        },
+                        UiAction::AuthProviderSave,
+                        ButtonVariant::Primary,
+                        ControlState {
+                            busy: draft.attempt.is_some(),
+                            disabled: self.busy
+                                || existing.is_none()
+                                    && parsed.as_ref().is_some_and(|a| {
+                                        a.insecure
+                                            && draft.accepted_http.as_deref()
+                                                != Some(a.url.as_str())
+                                    }),
+                            ..Default::default()
+                        },
+                        cx,
+                    )),
+            );
+        let max_height = (window.viewport_size().height - px(80.)).max(px(0.));
+        div().w_full().child(
             div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(self.auth_button(
-                    "auth-provider-cancel",
-                    tr!(language, "common.cancel"),
-                    UiAction::AuthProviderCancel,
-                    ButtonVariant::Ghost,
-                    ControlState::default(),
-                    cx,
-                ))
-                .child(self.auth_button(
-                    "auth-provider-save",
-                    if existing.is_some() {
-                        tr!(language, "accounts.auth.provider_add.use_saved")
-                    } else {
-                        tr!(language, "accounts.auth.provider_add.add")
-                    },
-                    UiAction::AuthProviderSave,
-                    ButtonVariant::Primary,
-                    ControlState {
-                        busy: draft.attempt.is_some(),
-                        disabled: self.busy
-                            || existing.is_none()
-                                && parsed.as_ref().is_some_and(|a| {
-                                    a.insecure
-                                        && draft.accepted_http.as_deref() != Some(a.url.as_str())
-                                }),
-                        ..Default::default()
-                    },
-                    cx,
-                )),
+                .id("auth-provider-scroll")
+                .debug_selector(|| "auth-provider-scroll".into())
+                .max_h(max_height)
+                .scroll_area(
+                    &draft.scroll,
+                    "accounts.auth.provider_add",
+                    self.palette,
+                    false,
+                )
+                .child(form),
         )
     }
 
@@ -1140,7 +1177,7 @@ impl Block {
         };
         if let Some(state) = &mut self.shell.auth
             && state.provider == AccountProvider::Authlib
-            && matches!(state.phase, Phase::Information | Phase::Failed)
+            && matches!(state.phase, Phase::Connect | Phase::Failed)
         {
             if state.external_provider != Some(id)
                 || state.external_api.as_deref() != Some(api.as_str())
@@ -1155,7 +1192,7 @@ impl Block {
                 }
             }
             state.error = None;
-            state.transition(Phase::Information);
+            state.transition(Phase::Connect);
             if self
                 .shell
                 .surfaces
@@ -1173,7 +1210,7 @@ impl Block {
             return;
         }
         if let Some(state) = &mut self.shell.auth
-            && matches!(state.phase, Phase::Information | Phase::Failed)
+            && matches!(state.phase, Phase::Connect | Phase::Failed)
             && let Some(provider) = self
                 .shell
                 .providers
@@ -1195,7 +1232,7 @@ impl Block {
     pub(super) fn auth_provider_choices(&self) -> Vec<super::select::SelectChoice<UiAction>> {
         if self.shell.auth.as_ref().is_none_or(|state| {
             state.provider != AccountProvider::Authlib
-                || !matches!(state.phase, Phase::Information | Phase::Failed)
+                || !matches!(state.phase, Phase::Connect | Phase::Failed)
                 || state.provider_draft.is_some()
         }) {
             return Vec::new();
@@ -1221,32 +1258,68 @@ impl Block {
         provider: AccountProvider,
         cx: &mut Context<'_, Self>,
     ) {
-        if let Some(state) = &mut self.shell.auth
-            && state.phase == Phase::Choose
-            && !self.busy
-        {
-            state.provider = provider;
-            state.error = None;
-            state.prepared_account = None;
-            cx.notify();
+        let Some(state) = &mut self.shell.auth else {
+            return;
+        };
+        if state.phase != Phase::Connect || self.busy || state.provider == provider {
+            return;
+        }
+        state.provider = provider;
+        state.error = None;
+        state.save_failed = false;
+        state.prepared_account = None;
+        // The alternatives are found at the bottom of a compact page, so an
+        // explicit account type starts the page over at its own form.
+        state.body_scroll.set_offset(point(px(0.), px(0.)));
+        let window = state.return_window;
+        if let Some(window) = window {
+            let owner = cx.entity();
+            cx.defer(move |cx| {
+                let _ = window.update(cx, |_, window, cx| {
+                    owner.update(cx, |view, cx| view.focus_auth_form(window, cx));
+                });
+            });
+        }
+        cx.notify();
+    }
+
+    /// Focus where the account page now starts: the chosen type's first field,
+    /// or the page itself for the type whose next step is the footer action.
+    ///
+    /// Anything the page opened or a phase that moved on in the meantime keeps
+    /// its own focus.
+    fn focus_auth_form(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(state) = &self.shell.auth else {
+            return;
+        };
+        if state.phase != Phase::Connect || self.shell.surfaces.is_open() {
+            return;
+        }
+        match state.provider {
+            AccountProvider::Offline => {
+                if let Some(field) = &state.username {
+                    field.read(cx).focus_handle(cx).focus(window, cx);
+                }
+            }
+            AccountProvider::Authlib => self
+                .shell
+                .surfaces
+                .trigger_focus("auth-provider-picker", cx)
+                .focus(window, cx),
+            AccountProvider::Microsoft => {
+                if let Some(focus) = &state.focus {
+                    focus.focus(window, cx);
+                }
+            }
         }
     }
 
     pub(super) fn toggle_auth_other_options(&mut self, cx: &mut Context<'_, Self>) {
         if let Some(state) = &mut self.shell.auth
-            && state.phase == Phase::Choose
+            && state.phase == Phase::Connect
             && !self.busy
         {
             state.other_sign_in_options = !state.other_sign_in_options;
-            cx.notify();
-        }
-    }
-
-    pub(super) fn auth_next(&mut self, cx: &mut Context<'_, Self>) {
-        if let Some(state) = &mut self.shell.auth
-            && state.phase == Phase::Choose
-        {
-            state.transition(Phase::Information);
             cx.notify();
         }
     }
@@ -1269,25 +1342,19 @@ impl Block {
     }
 
     pub(super) fn auth_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(phase) = self.shell.auth.as_ref().map(|state| state.phase) else {
+        let Some(state) = &self.shell.auth else {
             return;
         };
-        if matches!(phase, Phase::Choose | Phase::Saving | Phase::Saved)
-            || phase == Phase::Complete
-                && self
-                    .shell
-                    .auth
-                    .as_ref()
-                    .is_none_or(|state| state.provider != AccountProvider::Offline)
+        let phase = state.phase;
+        // A verified identity is either saved or closed, and a save in flight
+        // has no earlier page to return to.
+        if matches!(phase, Phase::Complete | Phase::Saving | Phase::Saved)
+            || phase == Phase::Connect && state.provider == AccountProvider::Microsoft
         {
             return;
         }
-        if self
-            .shell
-            .auth
-            .as_ref()
-            .is_some_and(|state| state.provider_draft.is_some())
-        {
+        let drafting = state.provider_draft.is_some();
+        if drafting {
             self.cancel_auth_provider(cx);
             let handle = self
                 .shell
@@ -1323,17 +1390,24 @@ impl Block {
             state.browser_url = None;
             state.device_code = None;
             state.stage = None;
+            state.method = Method::Browser;
             state.prepared_account = None;
             state.error = None;
-            state.transition(if phase == Phase::Information {
-                Phase::Choose
-            } else {
-                Phase::Information
-            });
+            state.save_failed = false;
+            if phase == Phase::Connect {
+                // The alternatives lead back to the default Microsoft page.
+                state.provider = AccountProvider::Microsoft;
+            }
+            state.transition(Phase::Connect);
         }
         cx.notify();
     }
 
+    /// Switch the Microsoft page between its two real authorization modes.
+    ///
+    /// The device code is a request of its own, so choosing it starts it. A
+    /// browser authorization stays the page's single primary action, so
+    /// switching back only returns the page to that state.
     pub(super) fn change_auth_method(
         &mut self,
         method: Method,
@@ -1343,10 +1417,7 @@ impl Block {
         if self.shell.auth.as_ref().is_none_or(|state| {
             state.provider != AccountProvider::Microsoft
                 || state.method == method
-                || matches!(
-                    state.phase,
-                    Phase::Choose | Phase::Complete | Phase::Saving | Phase::Saved
-                )
+                || matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved)
         }) {
             return;
         }
@@ -1358,7 +1429,8 @@ impl Block {
             state.stage = None;
             state.prepared_account = None;
             state.error = None;
-            state.transition(Phase::Information);
+            state.save_failed = false;
+            state.transition(Phase::Connect);
         }
         if method == Method::Device {
             self.start_auth(window, cx);
@@ -1432,7 +1504,7 @@ impl Block {
                 ) || view.shell.auth.as_ref().is_none_or(|state| {
                     state.provider != AccountProvider::Authlib
                         || state.password.as_ref() != Some(&input)
-                        || !matches!(state.phase, Phase::Information | Phase::Failed)
+                        || !matches!(state.phase, Phase::Connect | Phase::Failed)
                 }) {
                     return;
                 }
@@ -1471,7 +1543,6 @@ impl Block {
                 .records
                 .first()
                 .map(|p| p.api_url.clone()),
-            return_size: window.viewport_size(),
             return_window: Some(window.window_handle()),
             focus: Some(focus.clone()),
             provider: AccountProvider::Microsoft,
@@ -1521,18 +1592,25 @@ impl Block {
                     field.read(cx).value().trim().to_owned()
                 });
             let result = super::engine::offline_account(&name);
-            if let Some(state) = &mut self.shell.auth {
-                match result {
-                    Ok(account) => {
-                        state.prepared_account = Some(account);
-                        state.error = None;
-                        state.transition(Phase::Complete);
-                    }
-                    Err(error) => {
-                        state.error = Some(AccountMessage::diagnostic(error.to_string()));
+            let prepared = match result {
+                Ok(account) => Some(account),
+                // The only name a local identity can fail on is its own player
+                // name, so the page states the rule instead of a raw diagnostic.
+                Err(_) => {
+                    if let Some(state) = &mut self.shell.auth {
+                        state.prepared_account = None;
+                        state.save_failed = false;
+                        state.error =
+                            Some(AccountMessage::product("accounts.auth.error.offline_name"));
                         state.transition(Phase::Failed);
                     }
+                    None
                 }
+            };
+            // A local identity has no provider to confirm with, so its name page
+            // saves it directly; there is no second confirmation step.
+            if let Some(account) = prepared {
+                self.begin_save(account, cx);
             }
             cx.notify();
             return;
@@ -1552,6 +1630,7 @@ impl Block {
         state.stage = None;
         state.prepared_account = None;
         state.error = None;
+        state.save_failed = false;
         if !self.busy {
             state.failed(AccountMessage::product(
                 "accounts.auth.error.microsoft_start",
@@ -1658,8 +1737,13 @@ impl Block {
     }
 
     pub(super) fn auth_finished(&mut self, result: &Result<crate::i18n::UiText, String>) {
+        let saving = self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.phase == Phase::Saving);
         if let Some(state) = &mut self.shell.auth
-            && (state.phase.pending() || state.phase == Phase::Saving)
+            && (state.phase.pending() || saving)
         {
             match result {
                 Err(error)
@@ -1670,7 +1754,15 @@ impl Block {
                     state.error = Some(AccountMessage::diagnostic(error.clone()));
                     state.transition(Phase::Characters);
                 }
-                Err(error) => state.failed(AccountMessage::diagnostic(error.clone())),
+                Err(error) => {
+                    state.failed(AccountMessage::diagnostic(error.clone()));
+                    // A failed save has spent the verified credential, so the
+                    // only recovery the page can offer is signing in again.
+                    if saving {
+                        state.save_failed = true;
+                        state.prepared_account = None;
+                    }
+                }
                 Ok(_) => state.failed(AccountMessage::product(
                     "accounts.auth.error.ended_without_identity",
                 )),
@@ -1679,13 +1771,14 @@ impl Block {
     }
 
     pub(super) fn cancel_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.router.auth_return() == Some(Tab::Onboarding)
-            && self
-                .shell
-                .auth
-                .as_ref()
-                .is_some_and(|state| state.phase == Phase::Saving)
+        if self
+            .shell
+            .auth
+            .as_ref()
+            .is_some_and(|state| state.phase == Phase::Saving)
         {
+            // Finish authorized a durable write. Every exit refuses alike while
+            // it runs, so none of them can read as revoking it.
             return;
         }
         self.cancel_auth_provider(cx);
@@ -1701,17 +1794,11 @@ impl Block {
             .shell
             .auth
             .as_ref()
-            .is_some_and(|state| matches!(state.phase, Phase::Saving | Phase::Saved));
-        // Finish authorizes a durable save. Closing the page does not cancel
-        // that transaction, so only an uncommitted attempt returns to its page.
+            .is_some_and(|state| state.phase == Phase::Saved);
         if !committing {
             self.abandon_auth_attempt();
         }
-        if committing {
-            self.close_auth_context(window, cx);
-        } else {
-            self.abandon_auth_context(window, cx);
-        }
+        self.leave_auth_context(window, cx);
     }
 
     pub(super) fn finish_auth(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1727,31 +1814,42 @@ impl Block {
         let Some(account) = account else {
             return;
         };
-        if self.engine.is_none() {
-            if let Some(state) = &mut self.shell.auth {
-                state.failed(AccountMessage::product(
-                    "accounts.auth.error.save_unavailable",
-                ));
-            }
-            cx.notify();
-            return;
-        }
+        self.begin_save(account, cx);
+    }
+
+    /// Persist one verified identity.
+    ///
+    /// Online accounts reach this from the review page that confirms them; a
+    /// local identity reaches it from its own name page.
+    fn begin_save(&mut self, account: Account, cx: &mut Context<'_, Self>) {
         self.begin(
             msg!("accounts.auth.status.saving"),
             super::ui_logging::Operation::SaveAccount,
         );
         self.operation_kind = super::OperationKind::Account;
-        if let Some(state) = &mut self.shell.auth {
-            state.transition(Phase::Saving);
-            state.attempt = Some((self.operation_revision, self.cancel.clone()));
+        let busy = self.busy;
+        let attempt = (self.operation_revision, self.cancel.clone());
+        let Some(state) = &mut self.shell.auth else {
+            return;
+        };
+        state.error = None;
+        state.save_failed = false;
+        if !busy {
+            state.prepared_account = None;
+            state.failed(AccountMessage::product(
+                "accounts.auth.error.save_unavailable",
+            ));
+            cx.notify();
+            return;
         }
+        state.prepared_account = Some(account.clone());
+        state.attempt = Some(attempt);
+        state.transition(Phase::Saving);
         if let Some(engine) = &self.engine {
-            if account.provider == AccountProvider::Offline {
-                engine.save_offline_account(account);
-            } else if account.provider == AccountProvider::Authlib {
-                engine.save_authlib_sign_in(account.identity_key());
-            } else {
-                engine.save_sign_in(account.reference);
+            match account.provider {
+                AccountProvider::Offline => engine.save_offline_account(account),
+                AccountProvider::Authlib => engine.save_authlib_sign_in(account.identity_key()),
+                AccountProvider::Microsoft => engine.save_sign_in(account.reference),
             }
         }
         cx.notify();
@@ -1809,35 +1907,20 @@ impl Block {
         if self.router.auth_return() == Some(Tab::Onboarding) {
             self.shell.onboarding.account = Some(id.clone());
             self.shell.onboarding.account_decided = true;
-        } else {
-            self.shell.accounts.inspected = Some(id.clone());
         }
         self.selected_account = Some(id.clone());
         self.shell.accounts.inspected = Some(id);
         self.status = msg!("accounts.auth.status.saved", name = account.player_name);
-        self.close_auth_context(window, cx);
+        self.leave_auth_context(window, cx);
     }
 
-    /// Finish path: first-run preparation returns to its setup page; a normal
-    /// Add account stays on Accounts, which now shows the saved account.
-    fn close_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(state) = self.shell.auth.take() else {
+    /// Leave the account page for the destination that opened it, keeping that
+    /// page's draft — whether the identity was saved or the attempt abandoned.
+    fn leave_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.shell.auth.take().is_none() {
             return;
-        };
-        if self.router.end_auth(false) == Some(Tab::Onboarding) {
-            window.resize(state.return_size);
-            self.focus.focus(window, cx);
         }
-        cx.notify();
-    }
-
-    /// Cancel path: abandon the page and return to the page and size that opened
-    /// it, preserving any draft there.
-    fn abandon_auth_context(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(_state) = self.shell.auth.take() else {
-            return;
-        };
-        let _ = self.router.end_auth(true);
+        self.router.end_auth();
         self.request_frame_resize(window, cx);
         self.focus.focus(window, cx);
         cx.notify();
@@ -1853,7 +1936,9 @@ impl Block {
         };
         let content = self.host_wizard(
             super::page_host::WizardSlots {
-                rail: self.auth_rail(state).into_any_element(),
+                // The account page is one full-width form. The shared host keeps
+                // the slot, and this page has no sidebar to put in it.
+                rail: div().into_any_element(),
                 body: self.render_auth_transition_body(cx),
                 footer: self.auth_footer(state, cx).into_any_element(),
             },
@@ -1882,6 +1967,8 @@ impl Block {
         div().size_full().min_h_0().child(root.child(content))
     }
 
+    /// The page's only scrolling region, laid out as one reading column that the
+    /// footer aligns to.
     pub(super) fn render_auth_transition_body(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let Some(state) = &self.shell.auth else {
             return div().into_any_element();
@@ -1899,110 +1986,17 @@ impl Block {
                 false,
             )
             .p_8()
-            .child(self.auth_body(state, cx))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(AUTH_CONTENT_WIDTH))
+                    .mx_auto()
+                    .child(self.auth_body(state, cx)),
+            )
             .into_any_element()
     }
 
-    fn auth_rail(
-        &self,
-        state: &AuthWizard,
-    ) -> super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>> {
-        let language = self.language();
-        let mut rail = div()
-            .id("auth-rail")
-            .w(px(super::design::SIDEBAR_WIDTH))
-            .flex_shrink_0()
-            .h_full()
-            .min_h_0()
-            .scroll_area(
-                &state.rail_scroll,
-                "accounts.auth.rail",
-                self.palette,
-                false,
-            )
-            .p_6()
-            .flex()
-            .flex_col()
-            .gap_6()
-            .border_r_1()
-            .border_color(rgb(self.palette.border))
-            .bg(rgb(self.palette.sidebar))
-            .child(
-                div()
-                    .text_sm()
-                    .child(tr!(language, "accounts.auth.setup.title")),
-            );
-        let entries = [
-            (
-                tr!(language, "accounts.auth.step.type.title"),
-                tr!(language, "accounts.auth.step.type.description"),
-            ),
-            (
-                tr!(language, "accounts.auth.step.sign_in.title"),
-                match state.provider {
-                    AccountProvider::Offline => {
-                        tr!(language, "accounts.auth.step.sign_in.offline")
-                    }
-                    AccountProvider::Authlib => {
-                        tr!(language, "accounts.auth.step.sign_in.authlib")
-                    }
-                    AccountProvider::Microsoft => {
-                        tr!(language, "accounts.auth.step.sign_in.microsoft")
-                    }
-                },
-            ),
-            (
-                tr!(language, "accounts.auth.step.verification.title"),
-                match state.provider {
-                    AccountProvider::Offline => {
-                        tr!(language, "accounts.auth.step.verification.offline")
-                    }
-                    AccountProvider::Authlib => {
-                        tr!(language, "accounts.auth.step.verification.authlib")
-                    }
-                    AccountProvider::Microsoft => {
-                        tr!(language, "accounts.auth.step.verification.microsoft")
-                    }
-                },
-            ),
-            (
-                tr!(language, "accounts.auth.step.complete.title"),
-                tr!(language, "accounts.auth.step.complete.description"),
-            ),
-        ];
-        let steps = entries
-            .iter()
-            .enumerate()
-            .map(|(index, (title, description))| components::StepperStep {
-                title,
-                description,
-                complete: match index {
-                    0 => state.phase != Phase::Choose,
-                    1 => matches!(
-                        state.phase,
-                        Phase::Verifying | Phase::Characters | Phase::Complete
-                    ),
-                    2 => matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved),
-                    3 => state.phase == Phase::Saved,
-                    _ => false,
-                },
-            })
-            .collect::<Vec<_>>();
-        rail = rail.child(components::stepper(
-            "auth-steps",
-            "Account setup steps",
-            &steps,
-            state.phase.step().index(),
-            self.palette,
-        ));
-        rail.child(div().flex_1()).child(note(tr!(
-            language,
-            "accounts.auth.step.progress",
-            step = state.phase.step().index() + 1
-        )))
-    }
-
-    /// The localized heading for the sign-in step the wizard is on.
+    /// The localized heading for the state the page is in.
     fn auth_heading(&self, state: &AuthWizard) -> (String, String) {
         let language = self.language();
         let (title, description) = auth_heading_keys(state);
@@ -2026,59 +2020,14 @@ impl Block {
                 .child(note(description)),
         );
         body = match state.phase {
-            Phase::Choose => body.child(self.auth_choices(state, cx)),
-            Phase::Information => body.child(self.auth_information(state, cx)),
-            Phase::Preparing | Phase::Waiting if state.provider == AccountProvider::Authlib => {
+            Phase::Connect => body.child(self.auth_connect(state, cx)),
+            // Waiting and verification happen on the page the attempt started
+            // from, so they replace its form instead of becoming steps.
+            Phase::Preparing | Phase::Waiting | Phase::Verifying => {
                 body.child(self.auth_waiting(state, cx))
             }
-            Phase::Preparing | Phase::Waiting => body
-                .child(self.auth_information(state, cx))
-                .child(self.auth_waiting(state, cx)),
-            Phase::Verifying => body.child(self.auth_waiting(state, cx)),
-            Phase::Characters => {
-                let mut choices = components::card(self.palette).gap_3();
-                for character in &state.characters {
-                    let id = character.id;
-                    choices = choices
-                        .child(components::radio(
-                            format!("auth-character-{id}"),
-                            character.name.clone(),
-                            state.character == Some(id),
-                            self.palette,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx.listener(move |view, (), window, cx| {
-                                view.handle(UiAction::AuthCharacter(id), window, cx)
-                            }),
-                        ))
-                        .child(note(character.id.to_string()));
-                }
-                body.child(choices).children(
-                    state
-                        .error
-                        .as_ref()
-                        .map(|error| note(error.render(language))),
-                )
-            }
-            Phase::Failed if state.provider == AccountProvider::Offline => body
-                .child(self.auth_information(state, cx))
-                .children(state.error.as_ref().map(|error| {
-                    div()
-                        .text_sm()
-                        .text_color(rgb(self.palette.destructive))
-                        .child(error.render(language))
-                })),
-            Phase::Failed => body.child(self.auth_information(state, cx)).child(
-                components::card(self.palette)
-                    .border_color(rgb(self.palette.destructive))
-                    .child(Icon::Error.render(24., self.palette.destructive))
-                    .child(note(state.error.as_ref().map_or_else(
-                        || tr!(language, "accounts.auth.error.fallback"),
-                        |error| error.render(language),
-                    ))),
-            ),
+            Phase::Characters => body.child(self.auth_character_choice(state, cx)),
+            Phase::Failed => body.child(self.auth_failed(state, cx)),
             Phase::Complete | Phase::Saved => body.child(self.auth_complete(state)),
             Phase::Saving => body.child(components::progress(
                 ProgressState::Indeterminate,
@@ -2087,54 +2036,20 @@ impl Block {
             )),
         };
         body.children(
-            (self.busy
-                && !state.phase.pending()
-                && !matches!(state.phase, Phase::Saving | Phase::Saved))
-            .then(|| note(tr!(language, "accounts.auth.busy_notice"))),
+            (self.busy && !state.phase.pending() && !state.phase.committed())
+                .then(|| note(tr!(language, "accounts.auth.busy_notice"))),
         )
     }
 
-    /// Microsoft is the primary account path on every entry. The provider
-    /// alternatives stay behind one disclosure, and the option the user already
-    /// selected never disappears when the disclosure is collapsed.
-    fn auth_choices(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+    /// The account page: one sign-in form, with the other account types one
+    /// disclosure away and switched in place.
+    fn auth_connect(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let mut choices = div()
+        let mut page = div()
             .flex()
             .flex_col()
             .gap_4()
-            .child(self.auth_provider_choice(
-                "auth-microsoft",
-                tr!(language, "accounts.auth.provider.microsoft.label"),
-                tr!(language, "accounts.auth.provider.microsoft.description"),
-                AccountProvider::Microsoft,
-                state.provider,
-                cx,
-            ));
-        // Each alternative follows the disclosure, and the one the user has
-        // already selected stays listed so a collapsed section never hides the
-        // current choice.
-        if state.other_sign_in_options || state.provider == AccountProvider::Authlib {
-            choices = choices.child(self.auth_provider_choice(
-                "auth-authlib",
-                tr!(language, "accounts.auth.provider.authlib.label"),
-                tr!(language, "accounts.auth.provider.authlib.description"),
-                AccountProvider::Authlib,
-                state.provider,
-                cx,
-            ));
-        }
-        if state.other_sign_in_options || state.provider == AccountProvider::Offline {
-            choices = choices.child(self.auth_provider_choice(
-                "auth-offline",
-                tr!(language, "accounts.auth.provider.offline.label"),
-                tr!(language, "accounts.auth.provider.offline.description"),
-                AccountProvider::Offline,
-                state.provider,
-                cx,
-            ));
-        }
-        choices
+            .child(self.auth_form(state, cx))
             .child(
                 self.auth_button(
                     "auth-other-options",
@@ -2148,170 +2063,218 @@ impl Block {
                     ControlState::default(),
                     cx,
                 )
-                // The label states the action; assistive technology also reads
-                // the disclosure's current state from this flag.
+                // The label states the action; assistive technology reads the
+                // disclosure's current state from this flag as well.
                 .aria_expanded(state.other_sign_in_options),
-            )
-            .child(note(tr!(language, "accounts.auth.choices.note")))
-    }
-
-    fn auth_provider_choice(
-        &self,
-        id: &'static str,
-        label: impl Into<gpui::SharedString>,
-        description: impl Into<gpui::SharedString>,
-        provider: AccountProvider,
-        selected: AccountProvider,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        components::card(self.palette)
-            .child(components::radio(
-                id,
-                label,
-                provider == selected,
-                self.palette,
-                ControlState::default(),
-                cx.listener(move |view, (), window, cx| {
-                    view.handle(UiAction::AuthProvider(provider), window, cx);
-                }),
-            ))
-            .child(note(description))
-    }
-
-    fn auth_information(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        if state.provider == AccountProvider::Authlib {
-            let provider = self
-                .shell
-                .providers
-                .records
-                .iter()
-                .find(|p| Some(p.id) == state.external_provider);
-            let picker_value = provider.map_or_else(
-                || tr!(language, "accounts.auth.provider.picker.empty"),
-                |provider| provider.name.clone(),
             );
-            let mut card = components::card(self.palette)
-                .gap_3()
-                .child(
-                    div()
-                        .flex()
-                        .items_end()
-                        .gap_2()
-                        .child(div().flex_1().min_w_0().child(self.product_select_field(
-                            "auth-provider-picker",
-                            tr!(language, "select.auth_provider"),
-                            &picker_value,
-                            super::select::ProductChoice::AuthProvider,
-                            cx,
-                        )))
-                        .child(self.auth_button(
-                            "auth-provider-add",
-                            "+",
-                            UiAction::AuthProviderAdd,
-                            ButtonVariant::Outline,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx,
-                        )),
-                )
-                .children(provider.map(|p| note(p.api_url.clone())));
-            if let Some(error) = &self.shell.providers.load_error {
-                card = card.child(note(error.clone()));
-            }
-            if self.shell.providers.loaded && self.shell.providers.records.is_empty() {
-                card = card.child(note(tr!(language, "accounts.auth.provider.none")));
-            }
-            if state.provider_draft.is_some() {
-                card = card.child(note(tr!(language, "accounts.auth.provider.dialog_open")));
-            }
-            if provider.is_some_and(|provider| {
-                state.external_api.as_deref() != Some(provider.api_url.as_str())
-            }) {
-                card = card.child(note(tr!(
-                    language,
-                    "accounts.auth.provider.address_changed"
-                )));
-            }
-            if let Some(provider) = provider
-                && provider.api_url.starts_with("http:")
-            {
-                card = card.child(
-                    div()
-                        .p_3()
-                        .rounded_lg()
-                        .border_1()
-                        .border_color(rgb(self.palette.destructive))
-                        .child(note(tr!(language, "accounts.auth.provider.http_warning")))
-                        .child(components::checkbox(
-                            "auth-http-consent",
-                            tr!(language, "accounts.auth.http_consent"),
-                            state.accepted_http.as_deref() == Some(provider.api_url.as_str()),
-                            self.palette,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx.listener(|view, (), window, cx| {
-                                view.handle(UiAction::AuthHttpConsent, window, cx);
-                            }),
-                        )),
-                );
-            }
-            let mut fields = div().flex().gap_4();
-            if let Some(login) = &state.login {
-                fields = fields.child(div().flex_1().min_w_0().child(components::field_with(
-                    tr!(language, "accounts.auth.login.label"),
-                    login,
-                    self.palette,
-                    components::FieldOptions {
-                        required: true,
-                        ..components::FieldOptions::default()
-                    },
-                )));
-            }
-            let password_focus = state.password.clone();
-            fields = fields.child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .id("auth-password-label")
-                            .text_size(px(super::design::BODY_FONT_SIZE))
-                            .line_height(px(super::design::BODY_LINE_HEIGHT))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .cursor(gpui::CursorStyle::IBeam)
-                            .on_click(move |_, window, cx| {
-                                if let Some(password) = &password_focus {
-                                    password.read(cx).focus_handle(cx).focus(window, cx);
-                                }
-                                cx.stop_propagation();
-                            })
-                            .child(format!(
-                                "{} *",
-                                tr!(language, "accounts.auth.password.label")
-                            )),
-                    )
-                    .children(state.password.as_ref().map(|state| ProviderPassword {
-                        state: state.clone(),
-                        palette: self.palette,
-                    })),
+        if state.other_sign_in_options {
+            page = page.child(
+                div().flex().flex_col().gap_3().children(
+                    ACCOUNT_TYPES
+                        .iter()
+                        .copied()
+                        .filter(|provider| *provider != state.provider)
+                        .map(|provider| self.provider_option(provider, cx)),
+                ),
             );
-            return card
-                .child(fields)
-                .child(note(tr!(language, "accounts.auth.password.note")));
         }
-        if state.provider == AccountProvider::Offline {
-            let mut card = components::card(self.palette)
-                .child(note(tr!(language, "accounts.auth.offline.card_note")));
-            if let Some(field) = &state.username {
-                card = card.child(components::field_with(
+        page
+    }
+
+    /// One account type the page can switch its form to.
+    fn provider_option(&self, provider: AccountProvider, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        components::card(self.palette)
+            .gap_2()
+            .child(self.auth_button(
+                provider_selector(provider),
+                provider_label(language, provider),
+                UiAction::AuthProvider(provider),
+                ButtonVariant::Outline,
+                ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
+                cx,
+            ))
+            .child(note(provider_description(language, provider)))
+    }
+
+    /// The form the selected account type signs in with.
+    fn auth_form(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        match state.provider {
+            AccountProvider::Microsoft => self.microsoft_form(cx),
+            AccountProvider::Authlib => self.authlib_form(state, cx),
+            AccountProvider::Offline => self.offline_form(state),
+        }
+    }
+
+    /// The default page: one browser authorization, with the device code as an
+    /// explicit action instead of a mode chosen by selecting a control.
+    fn microsoft_form(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        components::card(self.palette)
+            .debug_selector(|| "auth-microsoft".into())
+            .gap_3()
+            .child(note(tr!(language, "accounts.auth.microsoft.card_note")))
+            .child(self.auth_button(
+                "auth-device-code-action",
+                tr!(language, "accounts.auth.microsoft.device_action"),
+                UiAction::AuthMethod(Method::Device),
+                ButtonVariant::Outline,
+                ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
+                cx,
+            ))
+            .child(note(tr!(language, "accounts.auth.microsoft.device_note")))
+    }
+
+    /// A community provider signs in with its own account and password, sent to
+    /// the address the form states.
+    fn authlib_form(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        let provider = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|p| Some(p.id) == state.external_provider);
+        let picker_value = provider.map_or_else(
+            || tr!(language, "accounts.auth.provider.picker.empty"),
+            |provider| provider.name.clone(),
+        );
+        let mut card = components::card(self.palette)
+            .debug_selector(|| "auth-authlib".into())
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_end()
+                    .gap_2()
+                    .child(div().flex_1().min_w_0().child(self.product_select_field(
+                        "auth-provider-picker",
+                        tr!(language, "select.auth_provider"),
+                        &picker_value,
+                        super::select::ProductChoice::AuthProvider,
+                        cx,
+                    )))
+                    .child(self.auth_button(
+                        "auth-provider-add",
+                        "+",
+                        UiAction::AuthProviderAdd,
+                        ButtonVariant::Outline,
+                        ControlState {
+                            disabled: self.busy,
+                            ..ControlState::default()
+                        },
+                        cx,
+                    )),
+            )
+            // The address that receives the account and password stays visible.
+            .children(provider.map(|p| note(p.api_url.clone())));
+        if let Some(error) = &self.shell.providers.load_error {
+            card = card.child(note(error.clone()));
+        }
+        if self.shell.providers.loaded && self.shell.providers.records.is_empty() {
+            card = card.child(note(tr!(language, "accounts.auth.provider.none")));
+        }
+        if state.provider_draft.is_some() {
+            card = card.child(note(tr!(language, "accounts.auth.provider.dialog_open")));
+        }
+        if provider.is_some_and(|provider| {
+            state.external_api.as_deref() != Some(provider.api_url.as_str())
+        }) {
+            card = card.child(note(tr!(
+                language,
+                "accounts.auth.provider.address_changed"
+            )));
+        }
+        if let Some(provider) = provider
+            && provider.api_url.starts_with("http:")
+        {
+            card = card.child(
+                div()
+                    .p_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(self.palette.destructive))
+                    .child(note(tr!(language, "accounts.auth.provider.http_warning")))
+                    .child(components::checkbox(
+                        "auth-http-consent",
+                        tr!(language, "accounts.auth.http_consent"),
+                        state.accepted_http.as_deref() == Some(provider.api_url.as_str()),
+                        self.palette,
+                        ControlState {
+                            disabled: self.busy,
+                            ..ControlState::default()
+                        },
+                        cx.listener(|view, (), window, cx| {
+                            view.handle(UiAction::AuthHttpConsent, window, cx);
+                        }),
+                    )),
+            );
+        }
+        let mut fields = div().flex().flex_col().gap_4();
+        if let Some(login) = &state.login {
+            fields = fields.child(components::field_with(
+                tr!(language, "accounts.auth.login.label"),
+                login,
+                self.palette,
+                components::FieldOptions {
+                    required: true,
+                    ..components::FieldOptions::default()
+                },
+            ));
+        }
+        card.child(fields.child(self.password_field(state)))
+            .child(note(tr!(language, "accounts.auth.password.note")))
+    }
+
+    /// The masked password editor beside the label that focuses it.
+    fn password_field(&self, state: &AuthWizard) -> gpui::Div {
+        let language = self.language();
+        let password_focus = state.password.clone();
+        div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .gap_2()
+            .child(
+                div()
+                    .id("auth-password-label")
+                    .text_size(px(super::design::BODY_FONT_SIZE))
+                    .line_height(px(super::design::BODY_LINE_HEIGHT))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .cursor(gpui::CursorStyle::IBeam)
+                    .on_click(move |_, window, cx| {
+                        if let Some(password) = &password_focus {
+                            password.read(cx).focus_handle(cx).focus(window, cx);
+                        }
+                        cx.stop_propagation();
+                    })
+                    .child(format!(
+                        "{} *",
+                        tr!(language, "accounts.auth.password.label")
+                    )),
+            )
+            .children(state.password.as_ref().map(|state| ProviderPassword {
+                state: state.clone(),
+                palette: self.palette,
+            }))
+    }
+
+    /// A local identity is added from this form: its name is the whole input, so
+    /// the page saves and selects it without another confirmation.
+    fn offline_form(&self, state: &AuthWizard) -> gpui::Div {
+        let language = self.language();
+        let mut card = components::card(self.palette)
+            .debug_selector(|| "auth-offline".into())
+            .child(note(tr!(language, "accounts.auth.offline.card_note")));
+        if let Some(field) = &state.username {
+            card = card.child(
+                components::field_with(
                     tr!(language, "accounts.auth.offline.name.label"),
                     field,
                     self.palette,
@@ -2319,37 +2282,81 @@ impl Block {
                         required: true,
                         ..components::FieldOptions::default()
                     },
-                ));
-            }
-            return card.child(note(tr!(language, "accounts.auth.offline.name.rule")));
+                )
+                .id("auth-offline-name")
+                .debug_selector(|| "auth-offline-name".into()),
+            );
         }
-        components::card(self.palette)
-            .child(note(tr!(language, "accounts.auth.microsoft.card_note")))
+        card.child(note(tr!(language, "accounts.auth.offline.name.rule")))
+    }
+
+    /// The failure of the attempt this page started, with the form it started
+    /// from still in reach.
+    fn auth_failed(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        let message = state.error.as_ref().map_or_else(
+            || tr!(language, "accounts.auth.error.fallback"),
+            |error| error.render(language),
+        );
+        if state.provider == AccountProvider::Offline {
+            return div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(self.offline_form(state))
+                .child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap_2()
+                        .text_sm()
+                        .text_color(rgb(self.palette.destructive))
+                        .child(Icon::Error.render(14., self.palette.destructive))
+                        .child(message),
+                );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
             .child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .child(components::radio(
-                        "auth-method-browser",
-                        tr!(language, "accounts.auth.method.browser"),
-                        state.method == Method::Browser,
-                        self.palette,
-                        ControlState::default(),
-                        cx.listener(|view, (), window, cx| {
-                            view.handle(UiAction::AuthMethod(Method::Browser), window, cx)
-                        }),
-                    ))
-                    .child(components::radio(
-                        "auth-method-device",
-                        tr!(language, "accounts.auth.method.device"),
-                        state.method == Method::Device,
-                        self.palette,
-                        ControlState::default(),
-                        cx.listener(|view, (), window, cx| {
-                            view.handle(UiAction::AuthMethod(Method::Device), window, cx)
-                        }),
-                    )),
+                components::card(self.palette)
+                    .border_color(rgb(self.palette.destructive))
+                    .gap_2()
+                    .child(Icon::Error.render(24., self.palette.destructive))
+                    .child(note(message)),
             )
+            .child(self.auth_form(state, cx))
+    }
+
+    /// The characters the provider returned; the chosen one becomes the account.
+    fn auth_character_choice(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        let mut choices = components::card(self.palette).gap_3();
+        for character in &state.characters {
+            let id = character.id;
+            choices = choices
+                .child(components::radio(
+                    format!("auth-character-{id}"),
+                    character.name.clone(),
+                    state.character == Some(id),
+                    self.palette,
+                    ControlState {
+                        disabled: self.busy,
+                        ..ControlState::default()
+                    },
+                    cx.listener(move |view, (), window, cx| {
+                        view.handle(UiAction::AuthCharacter(id), window, cx)
+                    }),
+                ))
+                .child(note(character.id.to_string()));
+        }
+        div().flex().flex_col().gap_3().child(choices).children(
+            state
+                .error
+                .as_ref()
+                .map(|error| note(error.render(language))),
+        )
     }
 
     fn auth_waiting(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
@@ -2357,9 +2364,7 @@ impl Block {
         if state.provider == AccountProvider::Authlib {
             return self.authlib_waiting(state, language);
         }
-        if state.method == Method::Device
-            && matches!(state.phase, Phase::Preparing | Phase::Waiting)
-        {
+        if state.method == Method::Device && state.phase != Phase::Verifying {
             return self.device_waiting(state, language, cx);
         }
         self.browser_waiting(state, language, cx)
@@ -2409,6 +2414,17 @@ impl Block {
             ProgressState::Indeterminate,
             self.palette,
             tr!(language, "common.in_progress"),
+        ))
+        .child(self.auth_button(
+            "auth-use-browser",
+            tr!(language, "accounts.auth.device.browser_action"),
+            UiAction::AuthMethod(Method::Browser),
+            ButtonVariant::Outline,
+            ControlState {
+                disabled: self.busy,
+                ..ControlState::default()
+            },
+            cx,
         ))
     }
 
@@ -2488,22 +2504,43 @@ impl Block {
                 self.palette,
                 tr!(language, "common.in_progress"),
             ))
-            .child(note(tr!(language, "accounts.auth.waiting.moment")));
+            .child(note(if state.method == Method::Device {
+                tr!(language, "accounts.auth.waiting.device.moment")
+            } else {
+                tr!(language, "accounts.auth.waiting.moment")
+            }));
         if let Some(stage) = state.stage {
             card = card
                 .child(note(tr!(language, auth_stage_key(stage))))
                 .children(self.stage_boundary_rows(stage, language));
         }
-        if state.browser_url.is_some() || self.visual_only && state.phase == Phase::Waiting {
+        if state.phase == Phase::Waiting && (state.browser_url.is_some() || self.visual_only) {
             card = card
-                .child(self.auth_button(
-                    "auth-reopen",
-                    tr!(language, "accounts.auth.waiting.reopen"),
-                    UiAction::AuthReopen,
-                    ButtonVariant::Outline,
-                    ControlState::default(),
-                    cx,
-                ))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(self.auth_button(
+                            "auth-reopen",
+                            tr!(language, "accounts.auth.waiting.reopen"),
+                            UiAction::AuthReopen,
+                            ButtonVariant::Outline,
+                            ControlState::default(),
+                            cx,
+                        ))
+                        .child(self.auth_button(
+                            "auth-use-device-code",
+                            tr!(language, "accounts.auth.microsoft.device_action"),
+                            UiAction::AuthMethod(Method::Device),
+                            ButtonVariant::Outline,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx,
+                        )),
+                )
                 .child(note(tr!(language, "accounts.auth.waiting.reopen_note")));
         }
         card
@@ -2593,16 +2630,34 @@ impl Block {
             }))
     }
 
+    /// Whether the page has an earlier state to return to.
+    fn can_go_back(state: &AuthWizard) -> bool {
+        match state.phase {
+            Phase::Connect => state.provider != AccountProvider::Microsoft,
+            Phase::Complete | Phase::Saving | Phase::Saved => false,
+            _ => true,
+        }
+    }
+
+    /// Whether acting on this failure can change its outcome in this process.
+    ///
+    /// A missing engine and a system without any secure credential store are
+    /// settled, so the page offers neither as a retry.
+    fn can_retry(&self, state: &AuthWizard) -> bool {
+        self.engine.is_some()
+            && state.error.as_ref()
+                != Some(&AccountMessage::product(
+                    "accounts.auth.error.store_unsupported",
+                ))
+    }
+
     fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
         let language = self.language();
-        let mut footer = patterns::management_footer(self.palette)
-            .id("auth-footer")
-            .debug_selector(|| "auth-footer".into())
-            .justify_between();
-        footer = footer.child(
-            div()
-                .flex()
-                .gap_2()
+        let mut exits = div().flex().flex_wrap().items_center().gap_2();
+        // A save in flight already authorizes the write, so no exit presents
+        // itself as revoking it.
+        if !state.phase.committed() {
+            exits = exits
                 .child(self.auth_button(
                     "auth-cancel",
                     if state.phase.pending() {
@@ -2612,48 +2667,25 @@ impl Block {
                     },
                     UiAction::AuthCancel,
                     ButtonVariant::Ghost,
-                    ControlState {
-                        disabled: self.router.auth_return() == Some(Tab::Onboarding)
-                            && state.phase == Phase::Saving,
-                        ..ControlState::default()
-                    },
+                    ControlState::default(),
                     cx,
                 ))
-                .children(
-                    (!matches!(
-                        state.phase,
-                        Phase::Choose | Phase::Complete | Phase::Saving | Phase::Saved
-                    ) || state.provider == AccountProvider::Offline
-                        && state.phase == Phase::Complete)
-                        .then(|| {
-                            self.auth_button(
-                                "auth-back",
-                                tr!(language, "accounts.auth.footer.back"),
-                                UiAction::AuthBack,
-                                ButtonVariant::Ghost,
-                                ControlState::default(),
-                                cx,
-                            )
-                        }),
-                ),
-        );
+                .children(Self::can_go_back(state).then(|| {
+                    self.auth_button(
+                        "auth-back",
+                        tr!(language, "accounts.auth.footer.back"),
+                        UiAction::AuthBack,
+                        ButtonVariant::Ghost,
+                        ControlState::default(),
+                        cx,
+                    )
+                }));
+        }
         let (label, action, busy) = match state.phase {
-            Phase::Choose => (
-                tr!(language, "accounts.auth.footer.continue"),
-                UiAction::AuthNext,
-                false,
-            ),
-            Phase::Information => (
+            Phase::Connect => (
                 match state.provider {
-                    AccountProvider::Offline => {
-                        tr!(language, "accounts.auth.footer.continue")
-                    }
-                    AccountProvider::Authlib => {
-                        tr!(language, "accounts.auth.footer.sign_in")
-                    }
-                    AccountProvider::Microsoft if state.method == Method::Device => {
-                        tr!(language, "accounts.auth.footer.request_code")
-                    }
+                    AccountProvider::Offline => tr!(language, "accounts.auth.footer.add_and_use"),
+                    AccountProvider::Authlib => tr!(language, "accounts.auth.footer.sign_in"),
                     AccountProvider::Microsoft => {
                         tr!(language, "accounts.auth.footer.open_browser")
                     }
@@ -2667,7 +2699,11 @@ impl Block {
                 true,
             ),
             Phase::Failed => (
-                tr!(language, "accounts.auth.footer.try_again"),
+                if state.save_failed && state.provider != AccountProvider::Offline {
+                    tr!(language, "accounts.auth.footer.sign_in_again")
+                } else {
+                    tr!(language, "accounts.auth.footer.try_again")
+                },
                 UiAction::AuthRetry,
                 false,
             ),
@@ -2677,7 +2713,7 @@ impl Block {
                 false,
             ),
             Phase::Complete => (
-                tr!(language, "accounts.auth.footer.finish"),
+                tr!(language, "accounts.auth.footer.save_and_use"),
                 UiAction::AuthFinish,
                 false,
             ),
@@ -2693,7 +2729,7 @@ impl Block {
             ),
         };
         let provider_blocked = state.provider == AccountProvider::Authlib
-            && matches!(state.phase, Phase::Information | Phase::Failed)
+            && matches!(state.phase, Phase::Connect | Phase::Failed)
             && self
                 .shell
                 .providers
@@ -2705,28 +2741,46 @@ impl Block {
                         || provider.api_url.starts_with("http:")
                             && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
                 });
-        footer.child(self.auth_button(
-            "auth-primary",
-            label,
-            action,
-            ButtonVariant::Primary,
-            ControlState {
-                busy,
-                disabled: state.provider_draft.is_some()
-                    || provider_blocked
-                    || self.busy
-                        && matches!(
-                            state.phase,
-                            Phase::Choose
-                                | Phase::Information
-                                | Phase::Failed
-                                | Phase::Complete
-                                | Phase::Characters
-                        ),
-                ..ControlState::default()
-            },
-            cx,
-        ))
+        let settled = state.phase == Phase::Failed && !self.can_retry(state);
+        patterns::management_footer(self.palette)
+            .id("auth-footer")
+            .debug_selector(|| "auth-footer".into())
+            .h_auto()
+            .min_h(px(super::design::MANAGEMENT_FOOTER))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(AUTH_CONTENT_WIDTH))
+                    .mx_auto()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(exits)
+                    .child(self.auth_button(
+                        "auth-primary",
+                        label,
+                        action,
+                        ButtonVariant::Primary,
+                        ControlState {
+                            busy,
+                            disabled: state.provider_draft.is_some()
+                                || provider_blocked
+                                || settled
+                                || self.busy
+                                    && matches!(
+                                        state.phase,
+                                        Phase::Connect
+                                            | Phase::Failed
+                                            | Phase::Complete
+                                            | Phase::Characters
+                                    ),
+                            ..ControlState::default()
+                        },
+                        cx,
+                    )),
+            )
     }
 
     fn auth_button(
@@ -2751,17 +2805,13 @@ impl Block {
     }
 }
 
-/// The semantic keys of the heading and description for the step the wizard is on.
+/// The semantic keys of the heading and description for the page state.
 ///
 /// The keys stay unresolved so the view renders them in its current language,
 /// including after a language change.
 fn auth_heading_keys(state: &AuthWizard) -> (&'static str, &'static str) {
     match state.phase {
-        Phase::Choose => (
-            "accounts.auth.choose.title",
-            "accounts.auth.choose.description",
-        ),
-        Phase::Information => match state.provider {
+        Phase::Connect => match state.provider {
             AccountProvider::Offline => (
                 "accounts.auth.info.title.offline",
                 "accounts.auth.info.description.offline",
@@ -2813,11 +2863,7 @@ fn auth_heading_keys(state: &AuthWizard) -> (&'static str, &'static str) {
         ),
         Phase::Complete => (
             "accounts.auth.complete.title",
-            if state.provider == AccountProvider::Offline {
-                "accounts.auth.complete.description.offline"
-            } else {
-                "accounts.auth.complete.description.online"
-            },
+            "accounts.auth.complete.description.online",
         ),
         Phase::Saving => (
             "accounts.auth.saving.title",
@@ -2843,7 +2889,13 @@ fn sign_in_error(error: &str) -> AccountMessage {
     let lower = error.to_lowercase();
     if lower.contains("cancel") {
         AccountMessage::product("accounts.auth.error.cancelled")
-    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("expired")
+    } else if lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("expired")
+        // A prepared identity is single use: once the save took it there is
+        // nothing left to persist and only a fresh sign-in can help.
+        || lower.contains("no longer available")
+        || lower.contains("prepared sign-in is unavailable")
     {
         AccountMessage::product("accounts.auth.error.expired")
     } else if lower.contains("ownership")
@@ -2909,9 +2961,31 @@ pub(super) fn provider_label(language: Language, provider: AccountProvider) -> S
     tr!(language, key)
 }
 
+/// What signing in with an account type means, in the reader's language.
+fn provider_description(language: Language, provider: AccountProvider) -> String {
+    let key = match provider {
+        AccountProvider::Microsoft => "accounts.auth.provider.microsoft.description",
+        AccountProvider::Authlib => "accounts.auth.provider.authlib.description",
+        AccountProvider::Offline => "accounts.auth.provider.offline.description",
+    };
+    tr!(language, key)
+}
+
+/// The stable selector of an account type on this page.
+///
+/// Exactly one element carries it at a time: the type's form while it is the one
+/// in use, or its row in the alternatives list.
+const fn provider_selector(provider: AccountProvider) -> &'static str {
+    match provider {
+        AccountProvider::Microsoft => "auth-microsoft",
+        AccountProvider::Authlib => "auth-authlib",
+        AccountProvider::Offline => "auth-offline",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use gpui::{TestAppContext, px, size};
+    use gpui::{Focusable as _, TestAppContext, px, size};
 
     use super::{AuthWizard, Phase};
     use crate::{Form, Tab, test_support::test_account};
@@ -3040,7 +3114,6 @@ mod tests {
                 view.shell.providers.loaded = true;
                 view.open_auth_wizard(window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
-                view.auth_next(cx);
                 let password = view
                     .shell
                     .auth
@@ -3084,7 +3157,7 @@ mod tests {
                     "PARENT_SYNTHETIC_PASSWORD"
                 );
                 assert!(view.shell.auth.as_ref().is_some_and(|state| state.phase
-                    == Phase::Information
+                    == Phase::Connect
                     && state.provider_draft.is_none()));
                 view.open_auth_provider_add(window, cx);
                 if let Some(draft) = view
@@ -3120,9 +3193,9 @@ mod tests {
                 view.busy = true;
                 view.auth_back(window, cx);
                 assert!(pending.is_cancelled());
-                assert!(view.shell.auth.as_ref().is_some_and(
-                    |state| state.phase == Phase::Choose && state.provider_draft.is_none()
-                ));
+                assert!(view.shell.auth.as_ref().is_some_and(|state| state.phase
+                    == Phase::Connect
+                    && state.provider_draft.is_none()));
                 assert!(!view.auth_provider_saved(&provider.id.to_string(), cx));
                 view.cancel_auth(window, cx);
             })
@@ -3150,7 +3223,6 @@ mod tests {
                 view.shell.providers.loaded = true;
                 view.open_auth_wizard(window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
-                view.auth_next(cx);
                 let password = view
                     .shell
                     .auth
@@ -3199,19 +3271,18 @@ mod tests {
                 }));
                 view.auth_back(window, cx);
                 assert_eq!(password.read(cx).value().as_ref(), "");
-                assert!(
-                    view.shell
-                        .auth
-                        .as_ref()
-                        .is_some_and(|state| state.phase == Phase::Information)
-                );
+                // Back from a failed attempt returns to the page the attempt
+                // started on, which is still the community provider's form.
+                assert!(view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Connect
+                        && state.provider == block_auth::AccountProvider::Authlib
+                }));
                 view.auth_back(window, cx);
-                assert!(
-                    view.shell
-                        .auth
-                        .as_ref()
-                        .is_some_and(|state| state.phase == Phase::Choose)
-                );
+                // The alternatives lead back to the default Microsoft page.
+                assert!(view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Connect
+                        && state.provider == block_auth::AccountProvider::Microsoft
+                }));
                 view.cancel_auth(window, cx);
                 assert!(view.shell.auth.is_none());
             })
@@ -3227,7 +3298,6 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.open_auth_wizard(window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
-                view.auth_next(cx);
                 if let Some(state) = &mut view.shell.auth {
                     state.external_provider = Some(uuid::Uuid::from_u128(1));
                 }
@@ -3321,64 +3391,119 @@ mod tests {
     }
 
     #[gpui::test]
-    fn offline_preparation_validates_edits_and_cancel_preserves_saved_accounts(
-        cx: &mut TestAppContext,
-    ) {
+    fn a_local_identity_is_validated_and_saved_by_its_own_name_page(cx: &mut TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view
+            });
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.preferences.reduce_motion = true;
+                    view.router.navigate(Tab::Accounts);
+                    view.open_auth_wizard(window, cx);
+                    view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
+                    view.start_auth(window, cx);
+                });
+            });
+            // An unusable name keeps the page on its own form and states the
+            // rule it broke instead of a backend diagnostic.
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Failed
+                        && state.prepared_account.is_none()
+                        && state.error
+                            == Some(super::AccountMessage::product(
+                                "accounts.auth.error.offline_name",
+                            ))
+                }) && view.accounts.is_empty()
+            }));
+            let account = crate::engine::offline_account("Local_Player")?;
+            let id = crate::account_id(&account);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    if let Some(field) = view
+                        .shell
+                        .auth
+                        .as_ref()
+                        .and_then(|state| state.username.clone())
+                    {
+                        field.update(cx, |field, cx| field.set_value("Local_Player", cx));
+                    }
+                    view.start_auth(window, cx);
+                });
+            });
+            // The name page adds and uses the identity: it saves directly and
+            // never asks for a separate confirmation.
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Saving
+                        && state.prepared_account.as_ref().is_some_and(|prepared| {
+                            prepared.identity_key() == account.identity_key()
+                        })
+                })
+            }));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while view.read_with(cx, |view, _| view.shell.auth.is_some())
+                && std::time::Instant::now() < deadline
+            {
+                cx.update(|_, cx| {
+                    view.update(cx, |view, cx| view.poll(cx));
+                });
+                cx.run_until_parked();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.is_none()
+                    && view.selected_account.as_deref() == Some(id.as_str())
+                    && view
+                        .accounts
+                        .iter()
+                        .any(|saved| saved.identity_key() == account.identity_key())
+            }));
+            let saved = crate::global_config::read(root.path())?;
+            assert!(saved.is_some_and(|config| {
+                config
+                    .accounts
+                    .iter()
+                    .any(|saved| saved.identity_key() == account.identity_key())
+            }));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn leaving_the_local_name_page_before_adding_saves_nothing(cx: &mut TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
+                view.router.navigate(Tab::Accounts);
                 view.open_auth_wizard(window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
-                view.auth_next(cx);
-                view.start_auth(window, cx);
-                assert!(view.shell.auth.as_ref().is_some_and(
-                    |state| state.phase == Phase::Failed && state.prepared_account.is_none()
-                ));
-                let field = view
+                if let Some(field) = view
                     .shell
                     .auth
                     .as_ref()
-                    .and_then(|state| state.username.clone());
-                if let Some(field) = &field {
-                    field.update(cx, |field, cx| field.set_value("  Local_Player  ", cx));
+                    .and_then(|state| state.username.clone())
+                {
+                    field.update(cx, |field, cx| field.set_value("Typed_Only", cx));
                 }
-                view.start_auth(window, cx);
-                assert!(view.shell.auth.as_ref().is_some_and(|state| {
-                    state.phase == Phase::Complete
-                        && state
-                            .prepared_account
-                            .as_ref()
-                            .is_some_and(|account| account.player_name == "Local_Player")
-                }));
-                assert!(view.accounts.is_empty() && !view.busy);
-                view.auth_back(window, cx);
-                assert!(
-                    view.shell
-                        .auth
-                        .as_ref()
-                        .is_some_and(|state| state.phase == Phase::Information
-                            && state.prepared_account.is_none())
-                );
-                if let Some(field) = &field {
-                    field.update(cx, |field, cx| field.set_value("Another_Name", cx));
-                }
-                view.start_auth(window, cx);
-                assert!(
-                    view.shell
-                        .auth
-                        .as_ref()
-                        .and_then(|state| state.prepared_account.as_ref())
-                        .is_some_and(|account| account.player_name == "Another_Name")
-                );
                 view.cancel_auth(window, cx);
-                assert!(
-                    view.shell.auth.is_none()
-                        && view.accounts.is_empty()
-                        && view.selected_account.is_none()
-                );
             });
         });
-        assert!(cx.opened_url().is_none());
+        // A name nobody added is not an identity: closing the page saves nothing
+        // and selects nothing.
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.auth.is_none()
+                && view.accounts.is_empty()
+                && view.selected_account.is_none()
+                && !view.busy
+        }));
     }
 
     #[test]
@@ -3477,7 +3602,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn account_choices_disclose_other_sign_in_options_from_management(cx: &mut TestAppContext) {
+    fn the_account_page_switches_its_form_in_place_behind_one_disclosure(cx: &mut TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -3486,32 +3611,31 @@ mod tests {
                 view.open_auth_wizard(window, cx);
             });
         });
-        // The managed window must fit all three cards so the pointer reaches them.
+        // The managed window must fit the form and its alternatives so the
+        // pointer reaches them.
         cx.simulate_resize(size(px(1152.), px(720.)));
         cx.run_until_parked();
-        // The ordinary Accounts entry starts exactly like onboarding: Microsoft
-        // selected, provider alternatives collapsed behind the disclosure.
+        // The Accounts entry is the Microsoft form itself, with the device code
+        // as an action on it and the other account types collapsed.
         assert!(
-            view.read_with(cx, |view, _| view
-                .shell
-                .auth
-                .as_ref()
-                .is_some_and(|state| state.provider
-                    == block_auth::AccountProvider::Microsoft
-                    && !state.other_sign_in_options))
+            view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
+                |state| state.phase == Phase::Connect
+                    && state.provider == block_auth::AccountProvider::Microsoft
+                    && !state.other_sign_in_options
+            ))
         );
         assert_eq!(
             view.read_with(cx, |view, _| view.router.auth_return()),
             Some(Tab::Accounts)
         );
         assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
 
-        // Expanding reveals both alternatives without changing the choice.
-        view.update(cx, |view, cx| view.toggle_auth_other_options(cx));
-        cx.run_until_parked();
+        // One expansion reveals both alternatives without changing the form.
+        click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         assert!(view.read_with(cx, |view, _| {
@@ -3521,17 +3645,19 @@ mod tests {
                 .is_some_and(|state| state.provider == block_auth::AccountProvider::Microsoft)
         }));
 
-        // Select Offline, keep a draft, and walk through Information and back.
+        // Choosing one swaps the form on this page instead of opening a step.
         click(cx, "auth-offline");
         assert!(view.read_with(cx, |view, _| {
-            view.shell
-                .auth
-                .as_ref()
-                .is_some_and(|state| state.provider == block_auth::AccountProvider::Offline)
+            view.shell.auth.as_ref().is_some_and(|state| {
+                state.phase == Phase::Connect
+                    && state.provider == block_auth::AccountProvider::Offline
+            })
         }));
-        cx.update(|window, cx| {
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
+        // Microsoft is now an alternative, listed by the same disclosure.
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.auth_next(cx);
                 if let Some(field) = view
                     .shell
                     .auth
@@ -3540,27 +3666,34 @@ mod tests {
                 {
                     field.update(cx, |field, cx| field.set_value("Local_Draft", cx));
                 }
-                view.auth_back(window, cx);
             });
         });
-        cx.run_until_parked();
-        assert!(
-            view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
-                |state| state.phase == Phase::Choose
-                    && state.provider == block_auth::AccountProvider::Offline
-                    && state.other_sign_in_options
-            ))
-        );
 
-        // Collapsing hides the alternative that is not selected and keeps the
-        // selected provider and the typed draft visible and intact.
-        view.update(cx, |view, cx| view.toggle_auth_other_options(cx));
-        cx.run_until_parked();
-        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
+        // Collapsing hides the alternatives and keeps the form in use with its
+        // typed draft intact.
+        click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_none());
         assert!(
             view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
                 |state| state.provider == block_auth::AccountProvider::Offline
+                    && state
+                        .username
+                        .as_ref()
+                        .is_some_and(|field| field.read(cx).value() == "Local_Draft")
+            ))
+        );
+
+        // Back returns the page to its default Microsoft form and keeps both the
+        // disclosure state and the draft for the next visit.
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| view.auth_back(window, cx));
+        });
+        cx.run_until_parked();
+        assert!(
+            view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
+                |state| state.phase == Phase::Connect
+                    && state.provider == block_auth::AccountProvider::Microsoft
                     && !state.other_sign_in_options
                     && state
                         .username
@@ -3568,20 +3701,73 @@ mod tests {
                         .is_some_and(|field| field.read(cx).value() == "Local_Draft")
             ))
         );
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+    }
 
-        // Expanding again brings the remaining alternative back unchanged.
-        view.update(cx, |view, cx| view.toggle_auth_other_options(cx));
+    #[gpui::test]
+    fn the_page_requests_authorization_only_when_its_own_action_is_activated(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.router.navigate(Tab::Accounts);
+                view.open_auth_wizard(window, cx);
+            });
+        });
         cx.run_until_parked();
-        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
+        // Showing the page requests nothing: no authorization URL and no device
+        // code exist until an action asks for one.
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.auth.as_ref().is_some_and(|state| {
+                state.phase == Phase::Connect
+                    && state.method == super::Method::Browser
+                    && state.browser_url.is_none()
+                    && state.device_code.is_none()
+            }) && !view.busy
+        }));
+        // The device code is an action of the page, not a mode selected by a
+        // control, so no browser/device selection control exists.
+        assert!(crate::test_support::control_bounds(cx, "auth-method-browser").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-method-device").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-primary").is_some());
         assert!(
-            view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
-                |state| state.provider == block_auth::AccountProvider::Offline
-                    && state
-                        .username
-                        .as_ref()
-                        .is_some_and(|field| field.read(cx).value() == "Local_Draft")
+            view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
+                |state| state.method == super::Method::Browser && state.device_code.is_none()
             ))
         );
+        // Activating the page asks the backend for a browser authorization; the
+        // network-free fixture has no backend, so it reports that instead of
+        // falling back to a device code or claiming a session.
+        click(cx, "auth-primary");
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.auth.as_ref().is_some_and(|state| {
+                state.phase == Phase::Failed
+                    && state.error
+                        == Some(super::AccountMessage::product(
+                            "accounts.auth.error.microsoft_start",
+                        ))
+                    && state.device_code.is_none()
+            }) && !view.busy
+        }));
+        assert_eq!(cx.opened_url(), None);
+        // The device code is requested by its own explicit action, and only it
+        // can produce one.
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.change_auth_method(super::Method::Device, window, cx);
+            });
+        });
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.auth.as_ref().is_some_and(|state| {
+                state.method == super::Method::Device
+                    && state.device_code.is_none()
+                    && state.phase == Phase::Failed
+            })
+        }));
+        assert_eq!(cx.opened_url(), None);
     }
 
     #[gpui::test]
@@ -3618,7 +3804,7 @@ mod tests {
             });
             assert!(view.read_with(cx, |view, _| {
                 view.shell.auth.as_ref().is_some_and(|state| {
-                    state.phase == Phase::Choose && state.prepared_account.is_none()
+                    state.phase == Phase::Connect && state.prepared_account.is_none()
                 }) && view.accounts.len() == 1
             }));
             Ok(())
@@ -3817,7 +4003,7 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let account = test_account()?;
             for (width, height) in [(1152., 720.), (960., 600.)] {
-                for phase in [Phase::Choose, Phase::Waiting, Phase::Complete] {
+                for phase in [Phase::Connect, Phase::Waiting, Phase::Complete] {
                     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
                         let mut view = crate::tests::test_view(window, cx);
                         view.preferences.reduce_motion = true;
@@ -3962,7 +4148,7 @@ mod tests {
         });
         assert!(
             view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
-                |state| state.phase == Phase::Information
+                |state| state.phase == Phase::Connect
                     && state.method == super::Method::Browser
                     && state.device_code.is_none()
                     && state.prepared_account.is_none()
@@ -4001,46 +4187,553 @@ mod tests {
         }));
     }
     #[gpui::test]
-    fn a_save_finishing_after_its_window_closed_preserves_the_parent_game_draft(
+    fn a_save_in_flight_refuses_every_exit_and_keeps_the_parent_game_draft(
+        cx: &mut TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let account = test_account()?;
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            let (sender, receiver) = tokio::sync::mpsc::channel(3);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.begin_game_wizard(cx);
+                    view.open_auth_wizard(window, cx);
+                    if let Some(state) = &mut view.shell.auth {
+                        state.prepared_account = Some(account.clone());
+                        state.transition(Phase::Saving);
+                    }
+                    view.busy = true;
+                    view.operation_kind = crate::OperationKind::Account;
+                    view.messages = Some(receiver);
+                    // Escape and Close both route here. Finish already authorized
+                    // a durable write, so no exit can revoke it.
+                    view.cancel_auth(window, cx);
+                    let tab = view.router.tab();
+                    view.handle(crate::UiAction::Tab(Tab::Home), window, cx);
+                    assert_eq!(view.router.tab(), tab);
+                    view.handle(crate::UiAction::CloseWindow, window, cx);
+                });
+            });
+            assert!(view.read_with(cx, |view, _| {
+                view.busy && view.form.is_some() && view.shell.auth.is_some()
+            }));
+            assert!(!cx.simulate_close(), "native close must wait for the save");
+            cx.update(|_, cx| crate::initialize_application_quit(cx));
+            crate::test_support::press(cx, "cmd-q");
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.toast.as_ref().is_some_and(|toast| {
+                    toast.message.key() == Some("accounts.auth.saving.wait_exit")
+                }) && view.shell.auth.is_some()
+            }));
+            // The committed page offers no exit that would read as cancelling.
+            assert!(crate::test_support::control_bounds(cx, "auth-cancel").is_none());
+            assert!(crate::test_support::control_bounds(cx, "auth-back").is_none());
+            assert!(
+                sender
+                    .try_send(crate::engine::Message::Accounts(Ok(vec![account.clone()])))
+                    .is_ok()
+            );
+            assert!(
+                sender
+                    .try_send(crate::engine::Message::SignedIn(account.clone()))
+                    .is_ok()
+            );
+            assert!(
+                sender
+                    .try_send(crate::engine::Message::Finished(Ok("Account saved".into())))
+                    .is_ok()
+            );
+            view.update(cx, crate::Block::poll);
+            cx.run_until_parked();
+            assert!(view.read_with(cx, |view, _| {
+                !view.busy
+                    && view.form.is_some()
+                    && view.accounts.len() == 1
+                    && view.shell.auth.is_none()
+            }));
+            assert!(cx.simulate_close(), "native close resumes after the save");
+            assert!(cx.cx.update(crate::request_application_quit));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn a_failed_save_offers_signing_in_again_instead_of_another_finish(cx: &mut TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let account = test_account()?;
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view
+            });
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.router.navigate(Tab::Accounts);
+                    view.open_auth_wizard(window, cx);
+                    if let Some(state) = &mut view.shell.auth {
+                        state.prepared_account = Some(account.clone());
+                        state.transition(Phase::Complete);
+                    }
+                    view.finish_auth(window, cx);
+                });
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while view.read_with(cx, |view, _| view.busy) && std::time::Instant::now() < deadline {
+                cx.update(|_, cx| {
+                    view.update(cx, |view, cx| view.poll(cx));
+                });
+                cx.run_until_parked();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            // This engine holds no prepared sign-in for the identity, so the save
+            // fails. The verified credential is spent, so the page must not offer
+            // the same save again, only a fresh sign-in.
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.as_ref().is_some_and(|state| {
+                    state.phase == Phase::Failed
+                        && state.save_failed
+                        && state.prepared_account.is_none()
+                }) && view.accounts.is_empty()
+            }));
+            assert_eq!(
+                control_node(cx, "auth-primary").label(),
+                Some("Sign in again")
+            );
+            // The recovery is a fresh sign-in, and this process can still offer
+            // it: the engine is available and the credential store is not the
+            // settled unsupported case.
+            assert_ne!(control_node(cx, "auth-primary").disabled(), Some(true));
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// Home is the destination a normal launch starts from: a ready game, no
+    /// account yet, so its identity block offers the Add account action.
+    fn home_without_an_account(
+        view: &gpui::Entity<crate::Block>,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.snapshot = crate::test_support::ready_snapshot();
+            view.selected_instance = Some("instance-a".into());
+            view.selected_profile = Some("profile-a".into());
+            cx.notify();
+        });
+        view.update_in(cx, |view, window, cx| {
+            view.handle(crate::UiAction::Tab(Tab::Home), window, cx);
+        });
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+    }
+
+    /// Simulate the engine boundary once the confirmation has authorized the
+    /// save: the page is saving, and the engine reports the stored identity, the
+    /// account list and the finished operation.
+    fn complete_simulated_save(
+        view: &gpui::Entity<crate::Block>,
+        cx: &mut gpui::VisualTestContext,
+        account: &crate::Account,
+    ) -> anyhow::Result<()> {
+        assert!(view.read_with(cx, |view, _| {
+            view.busy
+                && view.operation_kind == crate::OperationKind::Account
+                && view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .is_some_and(|state| state.phase == Phase::Saving)
+        }));
+        let (sender, receiver) = tokio::sync::mpsc::channel(4);
+        sender.try_send(crate::engine::Message::Accounts(Ok(vec![account.clone()])))?;
+        sender.try_send(crate::engine::Message::SignedIn(account.clone()))?;
+        sender.try_send(crate::engine::Message::Finished(Ok("Account saved".into())))?;
+        view.update(cx, |view, cx| {
+            view.messages = Some(receiver);
+            view.poll(cx);
+        });
+        cx.run_until_parked();
+        Ok(())
+    }
+
+    fn assert_no_launch(view: &crate::Block) {
+        assert!(!view.busy, "a saved identity must not start an operation");
+        assert!(
+            !view.pending_play,
+            "a saved identity must not queue a launch"
+        );
+        assert!(view.active_run.is_none(), "a saved identity must not run");
+        assert_ne!(view.operation_kind, crate::OperationKind::Launch);
+    }
+
+    #[gpui::test]
+    fn saving_an_offline_identity_from_home_returns_to_home_without_launching(
+        cx: &mut TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.engine = Some(engine);
+                view.messages = Some(messages);
+                view
+            });
+            home_without_an_account(&view, cx);
+            // The real Home entry: its identity block adds an account.
+            click(cx, "home-sign-in");
+            assert!(view.read_with(cx, |view, _| view.shell.auth.is_some()
+                && view.router.auth_return() == Some(Tab::Home)));
+            let body = crate::test_support::control_bounds(cx, "auth-body")
+                .ok_or_else(|| anyhow::anyhow!("missing account page"))?;
+            assert!(scroll_into_view(cx, body, "auth-other-options"));
+            click(cx, "auth-other-options");
+            assert!(scroll_into_view(cx, body, "auth-offline"));
+            click(cx, "auth-offline");
+            cx.update(|_, cx| {
+                view.update(cx, |view, cx| {
+                    if let Some(field) = view
+                        .shell
+                        .auth
+                        .as_ref()
+                        .and_then(|state| state.username.clone())
+                    {
+                        field.update(cx, |field, cx| field.set_value("WizardNative", cx));
+                    }
+                    cx.notify();
+                });
+            });
+            // The local name page's own action adds and uses the identity.
+            click(cx, "auth-primary");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while view.read_with(cx, |view, _| view.shell.auth.is_some())
+                && std::time::Instant::now() < deadline
+            {
+                cx.update(|_, cx| {
+                    view.update(cx, |view, cx| view.poll(cx));
+                });
+                cx.run_until_parked();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let account = crate::engine::offline_account("WizardNative")?;
+            let id = crate::account_id(&account);
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.is_none()
+                    && view.router.tab() == Tab::Home
+                    && view.page_spec().page == crate::navigation::Page::Home
+                    && view.page_spec().frame == crate::navigation::FrameClass::Home
+                    && !view.page_spec().task
+                    && view.selected_account.as_deref() == Some(id.as_str())
+                    && view
+                        .accounts
+                        .iter()
+                        .any(|saved| saved.identity_key() == account.identity_key())
+            }));
+            view.read_with(cx, |view, _| assert_no_launch(view));
+            cx.update(|window, cx| {
+                view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
+            });
+            assert_eq!(
+                crate::global_config::read(root.path())?.map(|config| config.accounts.len()),
+                Some(1)
+            );
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn a_prepared_online_identity_saved_from_home_returns_to_home_without_launching(
+        cx: &mut TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, _receiver) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let account = test_account()?;
+            let id = crate::account_id(&account);
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.engine = Some(engine);
+                view
+            });
+            home_without_an_account(&view, cx);
+            click(cx, "home-sign-in");
+            cx.update(|_, cx| {
+                view.update(cx, |view, cx| {
+                    // The engine prepared this identity; confirming it saves it.
+                    if let Some(state) = &mut view.shell.auth {
+                        state.prepared_account = Some(account.clone());
+                        state.transition(Phase::Complete);
+                    }
+                    cx.notify();
+                });
+            });
+            click(cx, "auth-primary");
+            complete_simulated_save(&view, cx, &account)?;
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.is_none()
+                    && view.router.tab() == Tab::Home
+                    && view.page_spec().frame == crate::navigation::FrameClass::Home
+                    && view.selected_account.as_deref() == Some(id.as_str())
+                    && view
+                        .accounts
+                        .iter()
+                        .any(|saved| saved.identity_key() == account.identity_key())
+            }));
+            view.read_with(cx, |view, _| assert_no_launch(view));
+            cx.update(|window, cx| {
+                view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
+            });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn saving_an_identity_from_accounts_keeps_its_account_context(cx: &mut TestAppContext) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let (engine, _receiver) = crate::engine::Engine::with_root(root.path().to_owned())?;
+            let account = test_account()?;
+            let id = crate::account_id(&account);
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.router.navigate(Tab::Accounts);
+                view
+            });
+            cx.simulate_resize(size(px(1152.), px(720.)));
+            cx.run_until_parked();
+            // The Accounts page's own Add account action is the entry.
+            click(cx, "sign-in");
+            assert!(view.read_with(cx, |view, _| view.shell.auth.is_some()
+                && view.router.auth_return() == Some(Tab::Accounts)));
+            view.update(cx, |view, cx| {
+                if let Some(state) = &mut view.shell.auth {
+                    state.prepared_account = Some(account.clone());
+                    state.transition(Phase::Complete);
+                }
+                cx.notify();
+            });
+            click(cx, "auth-primary");
+            complete_simulated_save(&view, cx, &account)?;
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.auth.is_none()
+                    && view.router.tab() == Tab::Accounts
+                    && view.page_spec().frame == crate::navigation::FrameClass::Management
+                    && view.selected_account.as_deref() == Some(id.as_str())
+                    && view.shell.accounts.inspected.as_deref() == Some(id.as_str())
+            }));
+            assert_eq!(
+                view.read_with(cx, |view, _| view.page_spec().detail),
+                crate::navigation::DetailKey::Browser {
+                    tab: Tab::Accounts,
+                    inspected: Some(id.clone()),
+                    editor_page: None,
+                    profile_form: false,
+                    instance_editor: None,
+                }
+            );
+            view.read_with(cx, |view, _| assert_no_launch(view));
+            cx.update(|window, cx| {
+                view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
+            });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// Wheel the account page until `selector` is inside its scrolling viewport,
+    /// as the pointer reaches it on a page taller than the window.
+    fn scroll_into_view(
+        cx: &mut gpui::VisualTestContext,
+        viewport: gpui::Bounds<gpui::Pixels>,
+        selector: &'static str,
+    ) -> bool {
+        fn visible(
+            cx: &mut gpui::VisualTestContext,
+            viewport: gpui::Bounds<gpui::Pixels>,
+            selector: &'static str,
+        ) -> bool {
+            crate::test_support::control_bounds(cx, selector).is_some_and(|bounds| {
+                bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+            })
+        }
+        for _ in 0..12 {
+            if visible(cx, viewport, selector) {
+                return true;
+            }
+            let position = viewport.center();
+            cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position,
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-160.))),
+                ..gpui::ScrollWheelEvent::default()
+            });
+            cx.run_until_parked();
+        }
+        visible(cx, viewport, selector)
+    }
+
+    /// Choosing an account type at a compact size starts its form at the top of
+    /// the page with its first field focused, and switching back keeps the draft
+    /// that was typed there.
+    #[gpui::test]
+    fn choosing_an_account_type_at_a_compact_size_reveals_its_form_and_focuses_it(
         cx: &mut TestAppContext,
     ) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-        let (sender, receiver) = tokio::sync::mpsc::channel(2);
+        home_without_an_account(&view, cx);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.begin_game_wizard(cx);
-                view.open_auth_wizard(window, cx);
-                if let Some(state) = &mut view.shell.auth {
-                    state.transition(Phase::Saving);
-                }
-                view.busy = true;
-                view.operation_kind = crate::OperationKind::Account;
-                view.messages = Some(receiver);
-                view.cancel_auth(window, cx);
+                view.handle(crate::UiAction::SignIn, window, cx);
             });
         });
-        assert!(view.read_with(cx, |view, _| view.busy
-            && view.form.is_some()
-            && view.shell.auth.is_none()));
-        let account = test_account();
-        assert!(account.is_ok());
-        if let Ok(account) = account {
-            assert!(
-                sender
-                    .try_send(crate::engine::Message::Accounts(Ok(vec![account])))
-                    .is_ok()
-            );
-        }
+        // A window the manager keeps compact after the page asked for its width.
+        cx.simulate_resize(size(px(360.), px(540.)));
+        cx.run_until_parked();
+        let body = crate::test_support::control_bounds(cx, "auth-body");
+        assert!(body.is_some(), "the compact account page must scroll");
+        let Some(body) = body else {
+            return;
+        };
+        // The account types sit at the end of the page, behind the disclosure.
         assert!(
-            sender
-                .try_send(crate::engine::Message::Finished(Ok("Account saved".into())))
-                .is_ok()
+            scroll_into_view(cx, body, "auth-other-options"),
+            "the disclosure must be reachable"
         );
-        view.update(cx, crate::Block::poll);
-        assert!(view.read_with(cx, |view, _| !view.busy
-            && view.form.is_some()
-            && view.accounts.len() == 1
-            && view.shell.auth.is_none()));
+        click(cx, "auth-other-options");
+        assert!(
+            scroll_into_view(cx, body, "auth-offline"),
+            "the local account type must be reachable"
+        );
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
+                .auth
+                .as_ref()
+                .is_some_and(|state| state.body_scroll.offset().y < px(0.))
+        }));
+        click(cx, "auth-offline");
+        // The chosen type's own form is what the page now shows, from its start.
+        let card = crate::test_support::control_bounds(cx, "auth-offline");
+        assert!(
+            card.is_some_and(|card| card.top() >= body.top() && card.top() < body.bottom()),
+            "the local form must start inside the viewport: {card:?} in {body:?}"
+        );
+        let name = crate::test_support::control_bounds(cx, "auth-offline-name");
+        assert!(
+            name.is_some_and(|name| name.top() >= body.top() && name.bottom() <= body.bottom()),
+            "the local name field must be visible: {name:?} in {body:?}"
+        );
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let state = view.shell.auth.as_ref();
+                assert!(
+                    state.is_some_and(|state| {
+                        state.provider == block_auth::AccountProvider::Offline
+                            && state.body_scroll.offset().y == px(0.)
+                    }),
+                    "the page restarts at the form, not at the alternatives"
+                );
+                assert!(
+                    state
+                        .and_then(|state| state.username.as_ref())
+                        .is_some_and(|field| field.read(cx).focus_handle(cx).is_focused(window)),
+                    "the local name field takes the caret"
+                );
+                if let Some(field) = state.and_then(|state| state.username.clone()) {
+                    field.update(cx, |field, cx| field.set_value("Compact_Draft", cx));
+                }
+                cx.notify();
+            });
+        });
+        // Switching back and forth keeps the draft and starts each form afresh.
+        assert!(
+            scroll_into_view(cx, body, "auth-microsoft"),
+            "the Microsoft row must be reachable"
+        );
+        click(cx, "auth-microsoft");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let state = view.shell.auth.as_ref();
+                assert!(state.is_some_and(|state| {
+                    state.provider == block_auth::AccountProvider::Microsoft
+                        && state.body_scroll.offset().y == px(0.)
+                }));
+                assert!(
+                    state.is_some_and(|state| state
+                        .username
+                        .as_ref()
+                        .is_some_and(|field| field.read(cx).value() == "Compact_Draft")),
+                    "a non-sensitive draft survives the switch"
+                );
+                assert!(
+                    state
+                        .and_then(|state| state.focus.as_ref())
+                        .is_some_and(|focus| focus.is_focused(window)),
+                    "the account page takes focus back"
+                );
+            });
+        });
+        assert!(
+            scroll_into_view(cx, body, "auth-offline"),
+            "the local account type must stay reachable"
+        );
+        click(cx, "auth-offline");
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let state = view.shell.auth.as_ref();
+                assert!(state.is_some_and(|state| {
+                    state.provider == block_auth::AccountProvider::Offline
+                        && state.body_scroll.offset().y == px(0.)
+                }));
+                assert!(
+                    state
+                        .and_then(|state| state.username.as_ref())
+                        .is_some_and(|field| field.read(cx).focus_handle(cx).is_focused(window)),
+                    "the returning form focuses its name field"
+                );
+                assert!(
+                    state.is_some_and(|state| state
+                        .username
+                        .as_ref()
+                        .is_some_and(|field| field.read(cx).value() == "Compact_Draft")),
+                    "the returning form keeps its draft"
+                );
+            });
+        });
+        assert!(
+            scroll_into_view(cx, body, "auth-authlib"),
+            "the community account type must be reachable"
+        );
+        click(cx, "auth-authlib");
+        let picker = crate::test_support::control_bounds(cx, "auth-provider-picker");
+        assert!(
+            picker.is_some_and(|picker| {
+                picker.top() >= body.top() && picker.bottom() <= body.bottom()
+            }),
+            "the provider picker must be visible: {picker:?} in {body:?}"
+        );
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                assert!(
+                    view.shell
+                        .surfaces
+                        .trigger_focus("auth-provider-picker", cx)
+                        .is_focused(window),
+                    "the first community-provider control takes focus"
+                );
+            });
+        });
     }
 
     #[expect(
@@ -4074,21 +4767,31 @@ mod tests {
                 view.open_auth_wizard(window, cx);
             });
         });
-        assert_eq!(control_node(cx, "auth-primary").label(), Some("続行"));
+        // The default page starts the browser: its single primary action.
         assert_eq!(
-            control_node(cx, "auth-microsoft").label(),
-            Some("Microsoft アカウント")
+            control_node(cx, "auth-primary").label(),
+            Some("ブラウザーを開く")
+        );
+        assert_eq!(
+            control_node(cx, "auth-device-code-action").label(),
+            Some("デバイスコードで続行")
         );
         assert_eq!(
             control_node(cx, "auth-other-options").label(),
             Some("その他のサインインオプション")
+        );
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| view.toggle_auth_other_options(cx));
+        });
+        assert_eq!(
+            control_node(cx, "auth-offline").label(),
+            Some("オフラインモード")
         );
 
         // A classified failure is retained as its semantic key, so the same
         // preparation renders the recovery text in a newly selected language.
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.auth_next(cx);
                 if let Some(state) = view.shell.auth.as_mut() {
                     state.transition(Phase::Preparing);
                 }

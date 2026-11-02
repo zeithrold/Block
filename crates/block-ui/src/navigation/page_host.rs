@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, Div, InteractiveElement as _, IntoElement as _, ParentElement as _,
-    Styled as _, Window, div, px, rgb,
+    Styled as _, Window, div, prelude::FluentBuilder as _, px, rgb,
 };
 
 use super::{
@@ -27,6 +27,11 @@ pub(super) struct WizardSlots {
 pub(super) enum WizardLayout {
     Game,
     Authentication,
+}
+
+/// Keep at least 400 px for the wizard detail beside its 360 px rail.
+pub(super) fn compact_game_wizard(window: &Window) -> bool {
+    super::window_geometry::content_size(window).width < px(super::design::SIDEBAR_WIDTH + 400.)
 }
 
 impl Block {
@@ -155,9 +160,17 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        let compact_game = matches!(layout, WizardLayout::Game) && compact_game_wizard(window);
         let rail = self.shell.wizard_entrance.stagger(
-            self.frame_sidebar(div().h_full().min_h_0().flex_shrink_0().child(slots.rail))
-                .into_any_element(),
+            self.frame_sidebar(
+                div()
+                    .when(!compact_game, |rail| rail.h_full())
+                    .when(compact_game, |rail| rail.w_full())
+                    .min_h_0()
+                    .flex_shrink_0()
+                    .child(slots.rail),
+            )
+            .into_any_element(),
             Duration::ZERO,
             window,
             cx,
@@ -167,12 +180,22 @@ impl Block {
             .shell
             .wizard_entrance
             .stagger(body, Duration::from_millis(40), window, cx);
+        let rail = if compact_game {
+            div()
+                .w_full()
+                .flex_shrink_0()
+                .child(rail)
+                .into_any_element()
+        } else {
+            rail
+        };
         match layout {
             WizardLayout::Game => div()
                 .id("wizard-frame")
                 .size_full()
                 .min_h_0()
                 .flex()
+                .when(compact_game, |frame| frame.flex_col())
                 .child(rail)
                 .child(
                     self.frame_detail(
@@ -180,7 +203,7 @@ impl Block {
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
-                            .h_full()
+                            .when(!compact_game, |detail| detail.h_full())
                             .flex()
                             .flex_col()
                             .child(div().flex_1().min_h_0().child(body))
@@ -188,10 +211,13 @@ impl Block {
                                 super::patterns::management_footer(self.palette)
                                     .id("wizard-footer")
                                     .debug_selector(|| "wizard-footer".into())
+                                    .h_auto()
+                                    .min_h(px(super::design::MANAGEMENT_FOOTER))
+                                    .py_3()
                                     .child(
                                         div()
                                             .w_full()
-                                            .max_w(px(608.))
+                                            .max_w(px(544.))
                                             .mx_auto()
                                             .flex()
                                             .flex_col()
@@ -201,21 +227,15 @@ impl Block {
                     ),
                 )
                 .into_any_element(),
-            WizardLayout::Authentication => {
-                div()
-                    .size_full()
-                    .min_h_0()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div().flex_1().min_h_0().flex().child(rail).child(
-                            self.frame_detail(div().flex_1().min_h_0().min_w_0().child(body)),
-                        ),
-                    )
-                    .child(self.frame_detail(div().w_full().child(slots.footer)))
-                    .into_any_element()
-            }
+            WizardLayout::Authentication => div()
+                .size_full()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(self.frame_detail(div().flex_1().min_h_0().min_w_0().child(body)))
+                .child(self.frame_detail(div().w_full().child(slots.footer)))
+                .into_any_element(),
         }
     }
 }

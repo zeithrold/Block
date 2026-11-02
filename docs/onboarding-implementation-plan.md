@@ -2,6 +2,9 @@
 
 Date: 2026-10-24 (Asia/Taipei). Baseline: `f117471`.
 
+This is the historical plan and validation record for that baseline. Current
+first-run behavior is described in [Run](../README.md#run).
+
 The user authorized this entire implementation after reviewing the onboarding
 proposal and interactive import Drawer. Luna subagents may handle independent
 work. This document is the execution plan and acceptance record; implementation,

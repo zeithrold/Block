@@ -28,7 +28,7 @@ use super::{
     Block, Form, Language, Tab, TextInput, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
     design::Icon,
-    input, modpack_import, note, patterns,
+    input, note, patterns,
 };
 
 type DetailBody = super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>>;
@@ -625,21 +625,6 @@ impl Block {
                         .as_ref()
                         .map(|field| div().flex_1().min_w_0().child(field.clone())),
                 )
-                // A pack archive adds a Game/Instance without a version
-                // wizard, so it is offered beside the create action.
-                .children(
-                    matches!(kind, BrowserKind::Bundled | BrowserKind::Instances).then(|| {
-                        self.browser_control(
-                            "import-pack",
-                            tr!(language, "modpack.action.import_pack"),
-                            UiAction::PackImport(modpack_import::Action::Open),
-                            ButtonVariant::Ghost,
-                            self.busy,
-                            cx,
-                        )
-                        .child(Icon::Layers.render(14., self.palette.muted))
-                    }),
-                )
                 .child(
                     self.browser_control(
                         if kind == BrowserKind::Accounts {
@@ -1209,7 +1194,16 @@ impl Block {
                     )
                     .child(self.browser_control(
                         "repair-profile",
-                        tr!(language, "games.action.repair"),
+                        tr!(
+                            language,
+                            if instance.pack.as_ref().is_some_and(|pack| {
+                                pack.status == block_launcher::catalog::PackStatus::Pending
+                            }) {
+                                "home.continue_pack"
+                            } else {
+                                "games.action.repair"
+                            }
+                        ),
                         UiAction::RepairProfile(profile.id.clone()),
                         ButtonVariant::Outline,
                         self.busy,

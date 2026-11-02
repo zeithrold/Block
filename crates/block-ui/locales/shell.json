@@ -150,6 +150,11 @@
     "zh-Hans": "下载",
     "ja": "ダウンロード"
   },
+  "home.continue_pack": {
+    "en": "Continue pack installation",
+    "zh-Hans": "继续安装整合包",
+    "ja": "Mod パックのインストールを続ける"
+  },
   "home.repair_game": {
     "en": "Repair game",
     "zh-Hans": "修复游戏",

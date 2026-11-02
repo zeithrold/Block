@@ -8,11 +8,7 @@ use anyhow::Context as _;
 use block_launcher::{crash::CrashReport, session_host};
 use block_ui::{Block, CrashView, LaunchOptions};
 use clap::Parser as _;
-use gpui::{App, AppContext as _, KeyBinding, WindowBounds, WindowDecorations, WindowOptions};
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
-#[action(namespace = block)]
-struct Quit;
+use gpui::{App, AppContext as _, WindowBounds, WindowDecorations, WindowOptions};
 
 #[derive(Debug, clap::Parser)]
 #[command(version, about = "Block Minecraft launcher")]
@@ -202,8 +198,7 @@ fn install_logging_shutdown(cx: &App, logging: Logging) {
 fn configure_application(cx: &mut App, language: block_ui::Language) {
     block_ui::initialize_desktop_locale(cx, language);
     block_ui::initialize(cx);
-    cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+    block_ui::initialize_application_quit(cx);
     cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
             cx.quit();

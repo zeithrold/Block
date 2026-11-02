@@ -558,7 +558,17 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.motion.moving && self.motion.pending_focus.is_empty() {
+        let closed_select = self
+            .shell
+            .surfaces
+            .top()
+            .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Select(_)));
+        if closed_select {
+            self.shell.surfaces.close(window, &self.focus, cx);
+            self.motion_dirty = true;
+            cx.notify();
+        }
+        if !closed_select && !self.motion.moving && self.motion.pending_focus.is_empty() {
             super::base_overlay::advance_focus(backwards, window, cx);
             return;
         }
@@ -573,7 +583,7 @@ impl Block {
         if schedule {
             let owner = cx.weak_entity();
             // Next-frame callbacks precede painting. The second callback sees
-            // the dispatch tree painted without the outgoing controls.
+            // the dispatch tree without the outgoing controls or closed popup.
             window.on_next_frame(move |window, _| {
                 window.on_next_frame(move |window, cx| {
                     let _ = owner.update(cx, |view, cx| {
@@ -686,15 +696,7 @@ impl Block {
 
 impl ShellState {
     fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
-        let mut pack_import = self.pack_import.clone();
-        pack_import.scroll = frozen_scroll(&self.pack_import.scroll);
-        // The outgoing copy paints its own name editor so the live one keeps its
-        // draft, selection, composition and undo history.
-        let name = pack_import
-            .name
-            .as_ref()
-            .map(|field| frozen_input(field, cx));
-        pack_import.name = name;
+        let pack_import = self.pack_import.snapshot(cx);
         Self {
             home: self.home.clone(),
             connection: self.connection.clone(),

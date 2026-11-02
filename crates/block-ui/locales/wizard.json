@@ -25,20 +25,55 @@
     "zh-Hans": "继续",
     "ja": "次へ"
   },
-  "wizard.footer.done": {
-    "en": "Done",
-    "zh-Hans": "完成",
-    "ja": "完了"
-  },
   "wizard.footer.createGame": {
-    "en": "Create game",
-    "zh-Hans": "创建游戏",
-    "ja": "ゲームを作成"
+    "en": "Create and prepare",
+    "zh-Hans": "创建并准备",
+    "ja": "作成して準備"
   },
   "wizard.footer.createProfile": {
     "en": "Create Profile",
     "zh-Hans": "创建配置文件",
     "ja": "プロファイルを作成"
+  },
+  "wizard.footer.saveGame": {
+    "en": "Save game setup",
+    "zh-Hans": "保存游戏设置",
+    "ja": "ゲーム設定を保存"
+  },
+  "wizard.footer.effectProfile": {
+    "en": "Adds a Profile to this Instance; existing game files remain unchanged.",
+    "zh-Hans": "为此实例添加配置文件；现有游戏文件保持不变。",
+    "ja": "このインスタンスにプロファイルを追加します。既存のゲームファイルは変更されません。"
+  },
+  "wizard.footer.effectSave": {
+    "en": "Saves this game setup; preparation starts when you choose it from setup.",
+    "zh-Hans": "保存此游戏设置；在设置中心选择准备时才开始下载。",
+    "ja": "ゲーム設定を保存します。セットアップで準備を選ぶとダウンロードが始まります。"
+  },
+  "wizard.footer.effectCreate": {
+    "en": "Creates the game and starts preparation. Minecraft and loader become fixed.",
+    "zh-Hans": "创建游戏并开始准备；Minecraft 和加载器将固定。",
+    "ja": "ゲームを作成して準備を開始します。Minecraft とローダーは固定されます。"
+  },
+  "wizard.discard.title": {
+    "en": "Discard game draft?",
+    "zh-Hans": "丢弃游戏草稿？",
+    "ja": "ゲームの下書きを破棄しますか？"
+  },
+  "wizard.discard.note": {
+    "en": "Unsaved game setup changes will be lost.",
+    "zh-Hans": "未保存的游戏设置更改将丢失。",
+    "ja": "保存していないゲーム設定の変更は失われます。"
+  },
+  "wizard.discard.stay": {
+    "en": "Keep editing",
+    "zh-Hans": "继续编辑",
+    "ja": "編集を続ける"
+  },
+  "wizard.discard.confirm": {
+    "en": "Discard draft",
+    "zh-Hans": "丢弃草稿",
+    "ja": "下書きを破棄"
   },
   "wizard.rail.section": {
     "en": "Game setup",
@@ -131,9 +166,14 @@
     "ja": "何を作成しますか？"
   },
   "wizard.start.subtitle": {
-    "en": "Start fresh or add a new way to play an existing game.",
-    "zh-Hans": "从零开始，或为现有游戏添加新的玩法。",
-    "ja": "新規に始めるか、既存のゲームに新しい遊び方を追加します。"
+    "en": "Create a fresh game, import a pack, or use an existing Instance.",
+    "zh-Hans": "创建新游戏、导入整合包，或使用现有实例。",
+    "ja": "新しいゲームを作成するか、Mod パックをインポートするか、既存のインスタンスを使います。"
+  },
+  "wizard.start.subtitleBundled": {
+    "en": "Create a fresh game or import a local pack.",
+    "zh-Hans": "创建新游戏或导入本地整合包。",
+    "ja": "新しいゲームを作成するか、ローカルの Mod パックをインポートします。"
   },
   "wizard.start.badge": {
     "en": "Separated Profile",
@@ -144,6 +184,16 @@
     "en": "New Instance + Profile",
     "zh-Hans": "新实例 + 配置文件",
     "ja": "新しいインスタンス + プロファイル"
+  },
+  "wizard.start.newGame": {
+    "en": "Create a new game",
+    "zh-Hans": "创建新游戏",
+    "ja": "新しいゲームを作成"
+  },
+  "wizard.start.newGameNote": {
+    "en": "Choose a Minecraft version and configure a fresh game.",
+    "zh-Hans": "选择 Minecraft 版本并配置新游戏。",
+    "ja": "Minecraft のバージョンを選んで新しいゲームを設定します。"
   },
   "wizard.start.newInstanceNote": {
     "en": "A fresh Minecraft setup, with your first Profile ready to go.",
@@ -201,9 +251,9 @@
     "ja": "ゲームを作成"
   },
   "wizard.setup.subtitle": {
-    "en": "Choose the game components. Review everything before installation begins.",
-    "zh-Hans": "选择游戏组件。安装开始前请检查全部内容。",
-    "ja": "ゲームのコンポーネントを選択します。インストール開始前にすべてを確認してください。"
+    "en": "Choose the game components and launch settings before creating it.",
+    "zh-Hans": "创建前选择游戏组件和启动设置。",
+    "ja": "作成する前にゲームのコンポーネントと起動設定を選択してください。"
   },
   "wizard.setup.gameName": {
     "en": "Game name",
@@ -256,9 +306,9 @@
     "ja": "カードを開くと選択を変更できます。"
   },
   "wizard.setup.appearanceLaunch": {
-    "en": "Appearance & launch settings",
-    "zh-Hans": "外观与启动设置",
-    "ja": "外観と起動設定"
+    "en": "Advanced options",
+    "zh-Hans": "高级选项",
+    "ja": "詳細オプション"
   },
   "wizard.setup.unavailable": {
     "en": "Unavailable",
@@ -876,9 +926,9 @@
     "ja": "フルスクリーンで起動"
   },
   "wizard.profile.defaultError": {
-    "en": "Give the Profile a name of 1–80 characters.",
-    "zh-Hans": "配置文件名称需为 1–80 个字符。",
-    "ja": "プロファイル名は 1〜80 文字で入力してください。"
+    "en": "Use a Profile name of at most 160 UTF-8 bytes without control characters.",
+    "zh-Hans": "配置名称最多 160 个 UTF-8 字节，且不能包含控制字符。",
+    "ja": "プロファイル名は制御文字を含まない 160 UTF-8 バイト以内で入力してください。"
   },
   "wizard.profile.widthError": {
     "en": "Enter a whole number for window width.",
@@ -945,16 +995,6 @@
     "zh-Hans": "请选择 1 到 32 GB 之间的内存上限。",
     "ja": "1〜32 GB の範囲でメモリ上限を選択してください。"
   },
-  "wizard.error.chooseInstance": {
-    "en": "Choose an existing Instance.",
-    "zh-Hans": "请选择一个现有实例。",
-    "ja": "既存のインスタンスを選択してください。"
-  },
-  "wizard.error.profileDraftUnavailable": {
-    "en": "Profile draft is unavailable. Reopen game setup.",
-    "zh-Hans": "配置文件草稿不可用。请重新打开游戏设置。",
-    "ja": "プロファイルの下書きを利用できません。ゲーム設定を開き直してください。"
-  },
   "wizard.error.instanceGone": {
     "en": "The chosen Instance is no longer available. Go back and choose another.",
     "zh-Hans": "所选实例已不可用。请返回并选择其他实例。",
@@ -1016,9 +1056,9 @@
     "ja": "フォルダーを選択…"
   },
   "wizard.config.draftNote": {
-    "en": "These settings stay in your draft until the final review is saved.",
-    "zh-Hans": "在最终检查保存之前，这些设置只保留在草稿中。",
-    "ja": "最終確認が保存されるまで、これらの設定は下書きに保持されます。"
+    "en": "These settings stay in your draft until you create the game.",
+    "zh-Hans": "创建游戏之前，这些设置只保留在草稿中。",
+    "ja": "ゲームを作成するまで、これらの設定は下書きに保持されます。"
   },
   "wizard.config.automaticJavaManaged": {
     "en": "Automatic · managed by Block",
@@ -1039,166 +1079,6 @@
     "en": "Fullscreen",
     "zh-Hans": "全屏",
     "ja": "フルスクリーン"
-  },
-  "wizard.review.titleExisting": {
-    "en": "Review profile setup",
-    "zh-Hans": "检查配置文件设置",
-    "ja": "プロファイル設定を確認"
-  },
-  "wizard.review.titleNew": {
-    "en": "Review game setup",
-    "zh-Hans": "检查游戏设置",
-    "ja": "ゲーム設定を確認"
-  },
-  "wizard.review.consequenceExisting": {
-    "en": "Review the new Profile. Existing game files and other Profiles stay in place.",
-    "zh-Hans": "检查新配置文件。现有游戏文件和其他配置文件保持不变。",
-    "ja": "新しいプロファイルを確認します。既存のゲームファイルと他のプロファイルはそのまま残ります。"
-  },
-  "wizard.review.consequenceFirstRun": {
-    "en": "Create game saves this setup. Finish setup to begin preparing game files.",
-    "zh-Hans": "创建游戏会保存此设置。完成设置后将开始准备游戏文件。",
-    "ja": "ゲームを作成するとこの設定が保存されます。セットアップを完了するとゲームファイルの準備が始まります。"
-  },
-  "wizard.review.consequence": {
-    "en": "Create game saves your setup and begins verified downloads. You can follow installation on Home.",
-    "zh-Hans": "创建游戏会保存你的设置并开始已验证的下载。你可以在主页查看安装进度。",
-    "ja": "ゲームを作成すると設定が保存され、検証済みのダウンロードが始まります。インストールの進行状況はホームで確認できます。"
-  },
-  "wizard.review.fixedExisting": {
-    "en": "This Profile follows the Instance’s fixed Minecraft version and loader.",
-    "zh-Hans": "此配置文件跟随实例固定的 Minecraft 版本和加载器。",
-    "ja": "このプロファイルはインスタンス固定の Minecraft バージョンとローダーに従います。"
-  },
-  "wizard.review.fixedNew": {
-    "en": "Minecraft version and mod loader become fixed when this game is created.",
-    "zh-Hans": "创建此游戏后，Minecraft 版本和模组加载器将固定。",
-    "ja": "このゲームを作成すると、Minecraft バージョンと Mod ローダーは固定されます。"
-  },
-  "wizard.review.eyebrowExisting": {
-    "en": "EXISTING INSTANCE",
-    "zh-Hans": "现有实例",
-    "ja": "既存のインスタンス"
-  },
-  "wizard.review.eyebrowNew": {
-    "en": "NEW INSTANCE",
-    "zh-Hans": "新实例",
-    "ja": "新しいインスタンス"
-  },
-  "wizard.review.eyebrowGame": {
-    "en": "NEW GAME",
-    "zh-Hans": "新游戏",
-    "ja": "新しいゲーム"
-  },
-  "wizard.review.newProfile": {
-    "en": "NEW PROFILE",
-    "zh-Hans": "新配置文件",
-    "ja": "新しいプロファイル"
-  },
-  "wizard.review.details": {
-    "en": "Detailed settings",
-    "zh-Hans": "详细设置",
-    "ja": "詳細設定"
-  },
-  "wizard.review.detailsNote": {
-    "en": "Settings that need no decision.",
-    "zh-Hans": "无需决定即可使用的设置。",
-    "ja": "判断を必要としない設定。"
-  },
-  "wizard.review.existingNote": {
-    "en": "Only the new Profile is saved. Any missing files for its selected target are installed before play.",
-    "zh-Hans": "仅保存新配置文件。所选目标缺失的文件会在游玩前安装。",
-    "ja": "新しいプロファイルのみが保存されます。選択したターゲットに不足しているファイルはプレイ前にインストールされます。"
-  },
-  "wizard.review.automaticConnectionLegacy": {
-    "en": "On · server arguments",
-    "zh-Hans": "开启 · 服务器参数",
-    "ja": "オン · サーバー引数"
-  },
-  "wizard.review.automaticConnectionQuickPlay": {
-    "en": "On · Quick Play",
-    "zh-Hans": "开启 · 快速游玩",
-    "ja": "オン · クイックプレイ"
-  },
-  "wizard.review.connectionOff": {
-    "en": "Off",
-    "zh-Hans": "关闭",
-    "ja": "オフ"
-  },
-  "wizard.review.chooseInGame": {
-    "en": "Choose in game",
-    "zh-Hans": "在游戏内选择",
-    "ja": "ゲーム内で選択"
-  },
-  "wizard.review.noArguments": {
-    "en": "No extra arguments",
-    "zh-Hans": "无额外参数",
-    "ja": "追加引数なし"
-  },
-  "wizard.review.separateFolder": {
-    "en": "A separate folder in Block’s data directory",
-    "zh-Hans": "Block 数据目录中的独立文件夹",
-    "ja": "Block のデータディレクトリ内の独立したフォルダー"
-  },
-  "wizard.review.isolatedFolder": {
-    "en": "Isolated folder for this Profile",
-    "zh-Hans": "此配置文件的独立文件夹",
-    "ja": "このプロファイル専用の独立したフォルダー"
-  },
-  "wizard.review.unavailableInstance": {
-    "en": "Unavailable Instance",
-    "zh-Hans": "不可用的实例",
-    "ja": "利用できないインスタンス"
-  },
-  "wizard.review.chooseLaunchTarget": {
-    "en": "Choose a launch target",
-    "zh-Hans": "选择启动目标",
-    "ja": "起動ターゲットを選択"
-  },
-  "wizard.review.windowFullscreen": {
-    "en": "%{width} × %{height} · Fullscreen",
-    "zh-Hans": "%{width} × %{height} · 全屏",
-    "ja": "%{width} × %{height} · フルスクリーン"
-  },
-  "wizard.fact.java": {
-    "en": "Java",
-    "zh-Hans": "Java",
-    "ja": "Java"
-  },
-  "wizard.fact.memory": {
-    "en": "Memory",
-    "zh-Hans": "内存",
-    "ja": "メモリ"
-  },
-  "wizard.fact.server": {
-    "en": "Server",
-    "zh-Hans": "服务器",
-    "ja": "サーバー"
-  },
-  "wizard.fact.automaticConnection": {
-    "en": "Automatic connection",
-    "zh-Hans": "自动连接",
-    "ja": "自動接続"
-  },
-  "wizard.fact.jvm": {
-    "en": "JVM arguments",
-    "zh-Hans": "JVM 参数",
-    "ja": "JVM 引数"
-  },
-  "wizard.fact.gameWindow": {
-    "en": "Game window",
-    "zh-Hans": "游戏窗口",
-    "ja": "ゲームウィンドウ"
-  },
-  "wizard.fact.gameFiles": {
-    "en": "Game files",
-    "zh-Hans": "游戏文件",
-    "ja": "ゲームファイル"
-  },
-  "wizard.fact.gameData": {
-    "en": "Game data",
-    "zh-Hans": "游戏数据",
-    "ja": "ゲームデータ"
   },
   "import.cannot_import_detail": {
     "en": "Cannot import this game. Check its directory and local metadata. Details: %{detail}",

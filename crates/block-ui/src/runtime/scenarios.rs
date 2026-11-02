@@ -19,7 +19,7 @@ use crate::{
     appearance::Appearance,
     browser::CollectionLoad,
     first_run::{self, Stage as FirstRunStage},
-    game_wizard::{WizardPage, WizardStep},
+    game_wizard::WizardPage,
     import_games, onboarding,
     shell::{Drawer, Surface},
     tasks::DownloadTracker,
@@ -35,7 +35,6 @@ pub const SCENARIOS: &[&str] = &[
     "games-detail",
     "games-instance-settings",
     "wizard-setup",
-    "wizard-review",
     "wizard-optifine",
     "wizard-optifine-selected",
     "accounts-list",
@@ -54,7 +53,7 @@ pub const SCENARIOS: &[&str] = &[
     "auth-authlib-provider-add",
     "auth-offline-information",
     "auth-offline-error",
-    "auth-offline-complete",
+    "auth-offline-saving",
     "auth-device-preparing",
     "auth-device-waiting",
     "auth-waiting",
@@ -290,16 +289,13 @@ impl Block {
         }
     }
 
-    /// Wizard fixtures: the real draft, opened on Review or on one component
-    /// page, with a synthetic catalog wherever the page needs one.
+    /// Wizard fixtures use the real setup or a component page with a synthetic
+    /// catalog wherever the page needs one.
     fn wizard_scenario(&mut self, name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if !name.starts_with("wizard-") {
             return;
         }
         self.begin_game_wizard(cx);
-        if name == "wizard-review" {
-            self.shell.wizard.step = WizardStep::Review;
-        }
         if name.starts_with("wizard-optifine") {
             self.set_wizard_version("1.21.1".into(), cx);
         }

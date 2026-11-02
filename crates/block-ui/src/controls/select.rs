@@ -971,6 +971,7 @@ impl Block {
     pub(super) fn select_options(
         &self,
         state: &SelectState<UiAction>,
+        max_height: Pixels,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let revision = self.shell.surfaces.layers().find_map(|layer| {
@@ -1061,7 +1062,7 @@ impl Block {
         });
         let content = content
             .id("select-options")
-            .max_h(px(624.))
+            .max_h(max_height)
             .children(options);
         if state.menu.is_some() {
             content

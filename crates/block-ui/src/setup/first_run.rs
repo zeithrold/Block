@@ -1,4 +1,9 @@
-//! First-run task overview; completed Wizards own their individual saves.
+//! First-run setup center.
+//!
+//! Welcome records that setup started and then hands over to the center: games
+//! first, accounts second, each step saving on its own. Discovery runs in the
+//! background, so the center can only report how many games are importable, and
+//! finishing setup rejects a report that is still in flight.
 #![expect(
     clippy::redundant_pub_crate,
     reason = "Private first-run presentation."
@@ -14,9 +19,10 @@ use super::{
     patterns::page_heading,
 };
 use crate::Language;
+use block_launcher::catalog::{InstallStatus, PackStatus};
 use gpui::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, Styled as _,
-    Window, div, px, rgb,
+    Window, div, prelude::FluentBuilder as _, px, rgb,
 };
 use std::{
     path::{Path, PathBuf},
@@ -43,9 +49,42 @@ pub(super) enum Action {
     Back,
     BackToWelcome,
     Import,
+    /// Start the one step the saved game still needs, chosen from its state.
+    Prepare,
+    /// Scan the automatic sources again without touching the rest of setup.
+    Rescan,
     Skip,
     /// A concrete language choice from the first-setup selector.
     Language(Language),
+}
+
+/// What the selected game still needs, which decides the center's single repair
+/// action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GameState {
+    /// No saved game is selected, so there is nothing to repair.
+    None,
+    /// The saved game is ready to play as it is.
+    Ready,
+    /// The instance's modpack installation never completed.
+    PendingPack,
+    /// The launch target still needs its game files prepared.
+    Unprepared,
+}
+
+/// What the center knows about the background scan. One state at a time, so a
+/// loading scan, a failure, a found count and an empty result never read as
+/// each other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Scan {
+    /// A request is in flight.
+    Searching,
+    /// The scan could not run; its detail is shown as the failure text.
+    Failed(String),
+    /// This many games can be imported.
+    Found(usize),
+    /// The scan finished and nothing importable was found.
+    Empty,
 }
 
 /// Product feedback retained by the first-run flow.
@@ -125,8 +164,21 @@ impl Block {
                 .unwrap_or_else(|| automatic_game_parent(&fallback)),
         );
         self.shell.onboarding.account = self.selected_account.clone();
+        if self.shell.first_run.stage == Stage::Overview {
+            self.ensure_setup_scan();
+        }
         self.motion_dirty = true;
         cx.notify();
+    }
+
+    /// Ensure the center has a discovery result. One scan covers the session: a
+    /// report or an in-flight request is reused.
+    fn ensure_setup_scan(&mut self) {
+        let state = &self.shell.import_games;
+        if state.report.is_some() || state.discovery.is_some() || state.running {
+            return;
+        }
+        self.scan_games_for_setup();
     }
 
     pub(super) fn first_run_account_ready(&self) -> bool {
@@ -145,17 +197,71 @@ impl Block {
     fn recommended_setup_version(&self) -> Option<&str> {
         self.version_catalog
             .iter()
-            .find(|version| format!("{:?}", version.kind) == "Release")
+            .find(|version| version.kind == block_launcher::manifest::model::VersionType::Release)
             .map(|version| version.id.as_str())
-            .or_else(|| {
-                (self.version_catalog.is_empty() && !self.saved_preferences.game.show_snapshots)
-                    .then(|| self.versions.first().map(String::as_str))
-                    .flatten()
-            })
     }
 
     pub(super) fn first_run_game_ready(&self) -> bool {
-        !self.snapshot.profiles.is_empty()
+        !self.snapshot.instances.is_empty()
+    }
+
+    /// What the center knows about the background scan, or nothing before the
+    /// first request.
+    pub(super) fn first_run_scan(&self, language: Language) -> Option<Scan> {
+        let state = &self.shell.import_games;
+        if state.discovery.is_some() {
+            return Some(Scan::Searching);
+        }
+        if let Some(error) = &state.error {
+            return Some(Scan::Failed(error.text(language)));
+        }
+        let report = state.report.as_ref()?;
+        let found = report
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.importable)
+            .count();
+        Some(if found == 0 {
+            Scan::Empty
+        } else {
+            Scan::Found(found)
+        })
+    }
+
+    /// What the selected game still needs. It reads the selected profile, which
+    /// is exactly what the center's repair action acts on, so the center never
+    /// offers a step that could not run.
+    fn first_run_game_state(&self) -> GameState {
+        let Some(profile) = self.profile() else {
+            return GameState::None;
+        };
+        let Some(instance) = self
+            .snapshot
+            .instances
+            .iter()
+            .find(|instance| instance.id == profile.instance_id)
+        else {
+            return GameState::None;
+        };
+        if instance
+            .pack
+            .as_ref()
+            .is_some_and(|pack| pack.status == PackStatus::Pending)
+        {
+            GameState::PendingPack
+        } else if instance
+            .targets
+            .iter()
+            .any(|target| target.id == profile.target_id && target.status == InstallStatus::Ready)
+        {
+            GameState::Ready
+        } else {
+            GameState::Unprepared
+        }
+    }
+
+    pub(super) fn first_run_continue_exits(&self) -> bool {
+        self.first_run_game_state() != GameState::PendingPack
     }
 
     pub(super) fn first_run_game_parent(&self) -> PathBuf {
@@ -254,6 +360,11 @@ impl Block {
     }
 
     pub(super) fn first_run_overview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        // The center exists only while setup is incomplete; a late action from
+        // inside the flow cannot revive it after Finish.
+        if !self.shell.first_run.enabled || self.preferences.onboarding_complete {
+            return;
+        }
         self.shell.wizard.cancel_loader_request();
         let leaving_welcome = self.shell.first_run.stage == Stage::Welcome;
         // Freeze the leaving Welcome page before the stage changes.
@@ -261,6 +372,8 @@ impl Block {
         self.shell.first_run.stage = Stage::Overview;
         self.router.leave_task();
         self.shell.first_run.entered = None;
+        // Entering the center is what asks the automatic sources for a count.
+        self.ensure_setup_scan();
         self.motion_dirty = true;
         if let Some(outgoing) = outgoing.filter(|_| !self.motion_preferences().reduced()) {
             // Sequence: slide Welcome away, resize the frame, slide Overview in.
@@ -289,28 +402,21 @@ impl Block {
         match action {
             Action::Language(language) => self.choose_first_run_language(language, window, cx),
             Action::Start => {
+                // The marker is the only thing that remembers setup started. A
+                // failed write stays on Welcome with its notice rather than
+                // pretending the center can be resumed later.
                 if !self.mark_first_run_started() {
                     return;
                 }
-                self.start_welcome_import(window, cx);
+                self.first_run_overview(window, cx);
             }
             Action::Continue => {
-                if !self.first_run_account_ready() {
-                    self.handle_first_run(Action::Account, window, cx);
-                } else if !self.first_run_game_ready() {
-                    self.handle_first_run(Action::Game, window, cx);
+                let state = self.first_run_game_state();
+                if state == GameState::PendingPack {
+                    self.handle_first_run(Action::Prepare, window, cx);
                 } else if self.complete_onboarding() {
                     self.request_frame_resize(window, cx);
-                    if self.profile().is_some_and(|profile| {
-                        self.snapshot
-                            .selection(&profile.id)
-                            .is_ok_and(|(_, _, target)| {
-                                !matches!(
-                                    target.status,
-                                    block_launcher::catalog::InstallStatus::Ready
-                                )
-                            })
-                    }) {
+                    if state == GameState::Unprepared {
                         self.handle(UiAction::Repair, window, cx);
                     }
                 }
@@ -328,12 +434,16 @@ impl Block {
                 self.request_frame_resize(window, cx);
             }
             Action::Recommended | Action::Custom => {
-                let recommended = matches!(action, Action::Recommended);
-                if !recommended && matches!(self.form, Some(Form::Instance(_))) {
+                // Any game entry resumes the draft the user already has instead
+                // of replacing it with a fresh one.
+                if matches!(self.form, Some(Form::Instance(_))) {
                     self.shell.first_run.stage = Stage::GameWizard;
                     self.router.enter_game_wizard();
+                    self.focus_field(false, window, cx);
+                    cx.notify();
                     return;
                 }
+                let recommended = matches!(action, Action::Recommended);
                 let version = self.recommended_setup_version().map(str::to_owned);
                 if recommended && version.is_none() {
                     self.shell.first_run.notice = Some(Notice::VersionsUnavailable);
@@ -342,12 +452,7 @@ impl Block {
                 self.begin_game_wizard(cx);
                 self.router.navigate(Tab::Onboarding);
                 self.router.enter_game_wizard();
-                self.shell.wizard.separated = false;
-                self.shell.wizard.step = if recommended {
-                    WizardStep::Review
-                } else {
-                    WizardStep::Setup
-                };
+                self.shell.wizard.step = WizardStep::Setup;
                 self.shell.first_run.stage = Stage::GameWizard;
                 self.shell.first_run.entered = Some(cx.background_executor().now());
                 let directory = self
@@ -358,12 +463,13 @@ impl Block {
                         field.set_value(&directory.display().to_string(), cx)
                     });
                 }
+                // Recommended only pre-fills the same Setup page; the draft is
+                // saved when the user asks for it.
                 if recommended && let Some(version) = version {
                     self.set_wizard_version(version, cx);
                 }
-                if recommended {
-                    self.submit_game_wizard(cx);
-                }
+                self.mark_game_wizard_clean(cx);
+                self.focus_field(false, window, cx);
             }
             Action::Back => {
                 self.shell.surfaces.clear(window, &self.focus, cx);
@@ -395,6 +501,18 @@ impl Block {
                 }
             }
             Action::Import => self.open_import_games(window, cx),
+            Action::Prepare => match self.first_run_game_state() {
+                GameState::PendingPack => {
+                    if let Some(instance) =
+                        self.profile().map(|profile| profile.instance_id.clone())
+                    {
+                        self.resume_pack_import(instance, window, cx);
+                    }
+                }
+                GameState::Unprepared => self.handle(UiAction::Repair, window, cx),
+                GameState::None | GameState::Ready => {}
+            },
+            Action::Rescan => self.scan_games_for_setup(),
             Action::Skip => {
                 if self.complete_onboarding() {
                     self.request_frame_resize(window, cx);
@@ -412,7 +530,7 @@ impl Block {
         if self.shell.first_run.stage == Stage::Welcome {
             return self.first_run_welcome(window, cx);
         }
-        self.first_run_progress_page(cx)
+        self.first_run_progress_page(window, cx)
     }
 
     /// Welcome is the only full-height page: the invitation control is centred
@@ -538,7 +656,7 @@ impl Block {
 
     /// Overview and Game choice share one scrollable body; only Overview owns a
     /// footer, because those are the two steps it tracks.
-    fn first_run_progress_page(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    fn first_run_progress_page(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let error = self.first_run_feedback(self.language()).map(|message| {
             div()
                 .id("setup-notice")
@@ -552,7 +670,7 @@ impl Block {
         } else {
             self.first_run_tasks(cx)
         };
-        let footer = self.first_run_footer(cx);
+        let footer = self.first_run_footer(super::page_host::compact_game_wizard(window), cx);
         div()
             .id("setup-overview")
             .debug_selector(|| "setup-overview".into())
@@ -563,6 +681,7 @@ impl Block {
             .child(
                 div()
                     .id("setup-scroll")
+                    .debug_selector(|| "setup-scroll".into())
                     .flex_1()
                     .min_h_0()
                     .scroll_area(
@@ -577,7 +696,7 @@ impl Block {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .p_6()
+                            .p_8()
                             .child(
                                 div()
                                     .w_full()
@@ -594,35 +713,69 @@ impl Block {
             .into_any_element()
     }
 
-    /// Only Overview tracks the two steps, so only it offers Continue.
-    fn first_run_footer(&self, cx: &Context<'_, Self>) -> Option<gpui::Div> {
+    /// The primary action names what happens to the selected game and where
+    /// setup goes next. Leaving without preparing remains an explicit choice.
+    fn first_run_footer(
+        &self,
+        compact: bool,
+        cx: &Context<'_, Self>,
+    ) -> Option<gpui::Stateful<gpui::Div>> {
         if self.shell.first_run.stage != Stage::Overview {
             return None;
         }
-        let ready = self.first_run_account_ready() && self.first_run_game_ready();
+        let state = self.first_run_game_state();
         let language = self.language();
+        let later = matches!(state, GameState::Unprepared | GameState::PendingPack).then(|| {
+            self.button_with_variant(
+                "setup-later",
+                tr!(language, "setup.footer.home_later"),
+                UiAction::FirstRun(Action::Skip),
+                ButtonVariant::Ghost,
+                cx,
+            )
+            .when(compact, |button| {
+                button.w_full().h_auto().min_h(px(36.)).whitespace_normal()
+            })
+        });
         Some(
-            super::patterns::management_footer(self.palette).child(
-                div()
-                    .w_full()
-                    .max_w(px(620.))
-                    .mx_auto()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap_3()
-                    .child(self.button_with_variant(
-                        "setup-continue",
-                        if ready {
-                            tr!(language, "setup.footer.finish")
-                        } else {
-                            tr!(language, "setup.footer.continue")
-                        },
-                        UiAction::FirstRun(Action::Continue),
-                        ButtonVariant::Primary,
-                        cx,
-                    )),
-            ),
+            super::patterns::management_footer(self.palette)
+                .id("setup-footer")
+                .debug_selector(|| "setup-footer".into())
+                .h_auto()
+                .min_h(px(super::design::MANAGEMENT_FOOTER))
+                .py_3()
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(620.))
+                        .mx_auto()
+                        .flex()
+                        .flex_wrap()
+                        .when(compact, |footer| footer.flex_col().items_stretch())
+                        .items_center()
+                        .justify_end()
+                        .gap_3()
+                        .children(later)
+                        .child(
+                            self.button_with_variant(
+                                "setup-continue",
+                                tr!(
+                                    language,
+                                    match state {
+                                        GameState::Unprepared => "setup.footer.prepare_home",
+                                        GameState::PendingPack => "setup.game.continue_import",
+                                        GameState::None | GameState::Ready => "setup.footer.home",
+                                    }
+                                ),
+                                UiAction::FirstRun(Action::Continue),
+                                ButtonVariant::Primary,
+                                cx,
+                            )
+                            .when(compact, |button| {
+                                button.w_full().h_auto().min_h(px(36.)).whitespace_normal()
+                            }),
+                        ),
+                ),
         )
     }
 
@@ -664,6 +817,13 @@ impl Block {
                 cx,
             ))
             .child(self.button_with_variant(
+                "setup-import-pack",
+                tr!(language, "modpack.action.import_pack"),
+                UiAction::PackImport(super::modpack_import::Action::Open),
+                ButtonVariant::Outline,
+                cx,
+            ))
+            .child(self.button_with_variant(
                 "setup-reload-versions",
                 tr!(language, "setup.game_choice.reload"),
                 UiAction::ReloadVersions,
@@ -673,7 +833,9 @@ impl Block {
             .into_any_element()
     }
 
-    /// The two setup steps, each naming its own current state.
+    /// Games first, accounts second, then the facts that decide what the
+    /// center still offers. Every row states one thing and owns at most one
+    /// action.
     fn first_run_tasks(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let language = self.language();
         let account = self.first_run_account_ready();
@@ -692,17 +854,9 @@ impl Block {
                 div()
                     .w_full()
                     .flex()
+                    .flex_col()
                     .items_stretch()
                     .gap_4()
-                    .child(self.setup_task_card(
-                        "setup-account",
-                        &tr!(language, "setup.account.title"),
-                        &account_description,
-                        Icon::Account,
-                        account,
-                        Action::Account,
-                        cx,
-                    ))
                     .child(self.setup_task_card(
                         "setup-game",
                         &tr!(language, "setup.game.title"),
@@ -711,13 +865,193 @@ impl Block {
                         game,
                         Action::Game,
                         cx,
+                    ))
+                    .child(self.setup_task_card(
+                        "setup-account",
+                        &tr!(language, "setup.account.title"),
+                        &account_description,
+                        Icon::Account,
+                        account,
+                        Action::Account,
+                        cx,
                     )),
             )
+            .children(
+                (matches!(
+                    self.shell.games.load,
+                    super::browser::CollectionLoad::Failed(_)
+                ) || matches!(
+                    self.shell.accounts.load,
+                    super::browser::CollectionLoad::Failed(_)
+                ))
+                .then(|| {
+                    self.button_with_variant(
+                        "setup-retry-library",
+                        tr!(language, "setup.library.retry"),
+                        UiAction::ReloadLibrary,
+                        ButtonVariant::Outline,
+                        cx,
+                    )
+                }),
+            )
+            .child(self.first_run_notes(cx))
             .into_any_element()
+    }
+
+    /// The center's own state: where games are saved, what the background scan
+    /// found, the draft it can resume, the one step the saved game still needs
+    /// and the language entry a returning user needs.
+    fn first_run_notes(&self, cx: &Context<'_, Self>) -> gpui::Div {
+        let language = self.language();
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(rgb(self.palette.border))
+            .p_4()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(note(tr!(language, "setup.library.label")))
+                    .child(
+                        div()
+                            .text_sm()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .child(self.first_run_game_parent().display().to_string()),
+                    ),
+            )
+            .children(self.first_run_import_note(cx))
+            .children(self.first_run_draft_note(cx))
+            .children(self.first_run_prepare_note())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(note(tr!(language, "setup.language.description")))
+                    .child(self.button_with_variant(
+                        "setup-language-entry",
+                        tr!(language, "setup.language.label"),
+                        UiAction::Drawer(Some(super::Drawer::Language)),
+                        ButtonVariant::Ghost,
+                        cx,
+                    )),
+            )
+    }
+
+    /// The background scan, which can only report a number: searching, a
+    /// failure with its retry, how many games are importable, or an explicit
+    /// empty result. The drawer opens only when the user asks for it.
+    fn first_run_import_note(&self, cx: &Context<'_, Self>) -> Option<gpui::AnyElement> {
+        let language = self.language();
+        match self.first_run_scan(language)? {
+            Scan::Searching => {
+                Some(note(tr!(language, "setup.import.scanning")).into_any_element())
+            }
+            Scan::Failed(detail) => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(note(detail))
+                    .child(self.button_with_variant(
+                        "setup-rescan",
+                        tr!(language, "setup.import.retry"),
+                        UiAction::FirstRun(Action::Rescan),
+                        ButtonVariant::Ghost,
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+            Scan::Empty => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(note(tr!(language, "setup.import.none")))
+                    .child(self.button_with_variant(
+                        "setup-rescan",
+                        tr!(language, "setup.import.retry"),
+                        UiAction::FirstRun(Action::Rescan),
+                        ButtonVariant::Ghost,
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+            Scan::Found(count) => Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(note(tr!(language, "setup.import.found", count = count)))
+                    .child(self.button_with_variant(
+                        "setup-import",
+                        tr!(language, "setup.import.open"),
+                        UiAction::FirstRun(Action::Import),
+                        ButtonVariant::Ghost,
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+        }
+    }
+
+    /// A game draft that was left in the wizard stays resumable here; nothing
+    /// is written until its own save runs.
+    fn first_run_draft_note(&self, cx: &Context<'_, Self>) -> Option<gpui::AnyElement> {
+        matches!(self.form, Some(Form::Instance(_))).then(|| {
+            let language = self.language();
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(note(tr!(language, "setup.draft.found")))
+                .child(self.button_with_variant(
+                    "setup-draft-continue",
+                    tr!(language, "setup.draft.continue"),
+                    UiAction::FirstRun(Action::Custom),
+                    ButtonVariant::Ghost,
+                    cx,
+                ))
+                .into_any_element()
+        })
+    }
+
+    /// The saved game's one remaining step, separate from leaving for Home.
+    fn first_run_prepare_note(&self) -> Option<gpui::AnyElement> {
+        let language = self.language();
+        let description = match self.first_run_game_state() {
+            GameState::PendingPack => tr!(language, "setup.game.pack_pending"),
+            GameState::Unprepared => tr!(language, "setup.game.unprepared"),
+            GameState::None | GameState::Ready => return None,
+        };
+        Some(note(description).into_any_element())
     }
 
     /// The selected account's player name, or the step that is still missing.
     fn first_run_account_description(&self, language: Language) -> String {
+        match &self.shell.accounts.load {
+            super::browser::CollectionLoad::Loading => {
+                return tr!(language, "games.browser.loading_records");
+            }
+            super::browser::CollectionLoad::Failed(error) => {
+                return tr!(
+                    language,
+                    "setup.library.failed",
+                    detail = error.text(language)
+                );
+            }
+            super::browser::CollectionLoad::Ready => {}
+        }
         self.shell
             .onboarding
             .account
@@ -734,9 +1068,23 @@ impl Block {
             )
     }
 
-    /// How many games are saved, or the step that is still missing.
-    fn first_run_game_description(&self, language: Language) -> String {
-        let count = self.snapshot.profiles.len();
+    /// How many games are saved, or the step that is still missing. The count is
+    /// of Instances: a game is one Instance, however many Profiles launch it.
+    pub(super) fn first_run_game_description(&self, language: Language) -> String {
+        match &self.shell.games.load {
+            super::browser::CollectionLoad::Loading => {
+                return tr!(language, "games.browser.loading_records");
+            }
+            super::browser::CollectionLoad::Failed(error) => {
+                return tr!(
+                    language,
+                    "setup.library.failed",
+                    detail = error.text(language)
+                );
+            }
+            super::browser::CollectionLoad::Ready => {}
+        }
+        let count = self.snapshot.instances.len();
         if self.first_run_game_ready() {
             if count == 1 {
                 tr!(language, "setup.game.saved_one", count = count)
@@ -792,6 +1140,7 @@ impl Block {
         action: Action,
         cx: &Context<'_, Self>,
     ) -> components::Control {
+        let game = matches!(action, Action::Game);
         self.button_with_variant(
             id,
             "",
@@ -802,7 +1151,8 @@ impl Block {
         .flex_1()
         .min_w_0()
         .h_auto()
-        .p_6()
+        .p_4()
+        .when(game, |card| card.p_6())
         .items_start()
         .justify_start()
         .child(
@@ -814,7 +1164,7 @@ impl Block {
                 .flex_col()
                 .items_start()
                 .gap_4()
-                .child(icon.render(28., self.palette.foreground))
+                .child(icon.render(if game { 28. } else { 20. }, self.palette.foreground))
                 .child(
                     div()
                         .w_full()

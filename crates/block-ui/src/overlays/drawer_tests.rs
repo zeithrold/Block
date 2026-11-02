@@ -2,7 +2,9 @@
 use std::time::Duration;
 
 use crate::{
-    Block, UiAction,
+    Block, Form, Tab, UiAction,
+    first_run::Stage as FirstRunStage,
+    game_wizard::{CreationKind, WizardStep},
     import_games::Page,
     shell::{Drawer, Surface},
 };
@@ -289,7 +291,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
     );
     cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
     cx.run_until_parked();
-    assert_control_color(cx, "import-retry", crate::Palette::DARK.primary);
+    assert_control_color(cx, "import-retry", crate::Palette::DARK.background);
     assert_control_color(cx, "import-done", crate::Palette::DARK.primary);
 }
 
@@ -776,4 +778,120 @@ fn reduced_motion_enters_with_settled_panel_and_backdrop(cx: &mut TestAppContext
         bounds(cx, "block-drawer-backdrop").bottom() - panel.size.height
     );
     assert!((scrim_alpha(cx) - 0.1).abs() < 0.0001);
+}
+
+/// Scroll the wizard body to its end so a control below the fold stays clickable
+/// in the compact layout.
+fn scroll_wizard_to_end(view: &Entity<Block>, cx: &mut VisualTestContext) {
+    view.update(cx, |view, cx| {
+        let scroll = &view.shell.wizard.body_scroll;
+        scroll.set_offset(point(px(0.), -scroll.max_offset().y));
+        cx.notify();
+    });
+    cx.run_until_parked();
+}
+
+/// Choosing a hand-made game from the source sheet continues into the Setup the
+/// ordinary creation entry already owns. The sheet is only the first step; the
+/// destination is the open draft, so nothing reaches the catalog here.
+#[gpui::test]
+fn import_new_opens_the_ordinary_new_instance_setup(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    let instances = view.read_with(cx, |view, _| view.snapshot.instances.len());
+    act(&view, UiAction::CreateInstance, cx);
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.wizard.step),
+        WizardStep::GetStarted
+    );
+
+    scroll_wizard_to_end(&view, cx);
+    click(cx, "wizard-copy-games");
+    assert!(crate::test_support::control_bounds(cx, "import-new").is_some());
+    click(cx, "import-new");
+
+    view.read_with(cx, |view, _| {
+        assert!(
+            !view.shell.surfaces.is_open(),
+            "the sheet leaves once a new game owns the page"
+        );
+        assert_eq!(view.router.tab(), Tab::Instances);
+        assert_eq!(view.shell.wizard.kind, CreationKind::NewInstance);
+        assert_eq!(view.shell.wizard.step, WizardStep::Setup);
+        assert!(
+            matches!(view.form, Some(Form::Instance(_))),
+            "a draft owns the page instead of a saved game"
+        );
+        assert_eq!(view.snapshot.instances.len(), instances);
+        assert!(!view.busy);
+        assert!(!view.shell.import_games.running);
+        assert!(view.shell.import_games.batch.is_none());
+        assert!(view.shell.import_games.outcomes.is_empty());
+    });
+    assert!(crate::test_support::control_bounds(cx, "wizard-field-GameName").is_some());
+    assert!(crate::test_support::control_bounds(cx, "wizard-next").is_some());
+
+    // The draft that is already open is resumed, not replaced with a fresh one.
+    click(cx, "wizard-back");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.wizard.step),
+        WizardStep::GetStarted
+    );
+    view.update(cx, |view, cx| {
+        if let Some(Form::Instance(form)) = &view.form {
+            form.name
+                .update(cx, |field, cx| field.set_value("Hand made", cx));
+        }
+    });
+    cx.run_until_parked();
+    scroll_wizard_to_end(&view, cx);
+    click(cx, "wizard-copy-games");
+    click(cx, "import-new");
+    view.read_with(cx, |view, cx| {
+        assert_eq!(view.shell.wizard.step, WizardStep::Setup);
+        let name = match &view.form {
+            Some(Form::Instance(form)) => form.name.read(cx).value(),
+            _ => String::new(),
+        };
+        assert_eq!(name, "Hand made", "the open draft survives the sheet");
+    });
+}
+
+/// Setup keeps its own contract: a new game chosen from the sheet returns to its
+/// game step and never starts the ordinary Setup draft beside it.
+#[gpui::test]
+fn import_new_returns_first_run_to_its_game_step(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    cx.simulate_resize(size(px(1152.), px(1000.)));
+    view.update(cx, |view, cx| {
+        view.preferences.onboarding_complete = false;
+        view.saved_preferences.onboarding_complete = false;
+        view.shell.first_run.enabled = true;
+        view.shell.first_run.stage = FirstRunStage::Overview;
+        view.router.navigate(Tab::Onboarding);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let instances = view.read_with(cx, |view, _| view.snapshot.instances.len());
+
+    click(cx, "setup-game");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.first_run.stage),
+        FirstRunStage::GameChoice
+    );
+    click(cx, "setup-import-game");
+    assert!(crate::test_support::control_bounds(cx, "import-new").is_some());
+    click(cx, "import-new");
+
+    view.read_with(cx, |view, _| {
+        assert!(!view.shell.surfaces.is_open());
+        assert_eq!(view.shell.first_run.stage, FirstRunStage::GameChoice);
+        assert!(
+            view.form.is_none(),
+            "setup keeps its own game step rather than a draft"
+        );
+        assert_eq!(view.router.tab(), Tab::Onboarding);
+        assert_eq!(view.snapshot.instances.len(), instances);
+        assert!(!view.busy);
+    });
+    assert!(crate::test_support::control_bounds(cx, "setup-custom").is_some());
 }

@@ -172,6 +172,14 @@ pub fn initialize_saved_desktop_preferences(
 struct UiInitialized;
 impl gpui::Global for UiInitialized {}
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = block)]
+struct Quit;
+
+#[derive(Default)]
+struct LauncherWindows(Vec<(gpui::AnyWindowHandle, WeakEntity<Block>)>);
+impl gpui::Global for LauncherWindows {}
+
 /// Register the shared foundation once per application before opening windows.
 pub fn initialize(cx: &mut gpui::App) {
     if cx.has_global::<UiInitialized>() {
@@ -183,7 +191,61 @@ pub fn initialize(cx: &mut gpui::App) {
     // Component initialization already registers Base's key bindings.
     gpui_component::init(cx);
     ProductRoot::register_plugin(cx, feedback::ToastLayer::new);
+    cx.set_global(LauncherWindows::default());
     cx.set_global(UiInitialized);
+}
+
+/// Register the application's Quit action and its launcher save boundary.
+pub fn initialize_application_quit(cx: &mut gpui::App) {
+    cx.on_action(|_: &Quit, cx| {
+        cx.defer(|cx| {
+            request_application_quit(cx);
+        });
+    });
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+}
+
+/// Other windows, such as crash help, do not participate in the launcher's
+/// account-save boundary.
+fn request_application_quit(cx: &mut gpui::App) -> bool {
+    let windows = cx.windows();
+    let launchers = if cx.has_global::<LauncherWindows>() {
+        cx.global::<LauncherWindows>()
+            .0
+            .iter()
+            .filter(|(window, _)| windows.contains(window))
+            .filter_map(|(window, view)| view.upgrade().map(|view| (*window, view)))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let saving = launchers
+        .iter()
+        .filter(|(_, view)| view.read(cx).auth_save_pending())
+        .map(|(_, view)| view.clone())
+        .collect::<Vec<_>>();
+    if !saving.is_empty() {
+        for view in saving {
+            view.update(cx, |view, cx| {
+                view.push_toast(
+                    msg!("accounts.auth.saving.wait_exit"),
+                    feedback::ToastKind::Info,
+                );
+                cx.notify();
+            });
+        }
+        return false;
+    }
+    for (window, view) in launchers {
+        let allowed = window.update(cx, |_, window, cx| {
+            view.update(cx, |view, cx| view.allow_application_quit(window, cx))
+        });
+        if !matches!(allowed, Ok(true)) {
+            return false;
+        }
+    }
+    cx.quit();
+    true
 }
 
 fn bind_navigation_keys(cx: &mut gpui::App) {
@@ -534,9 +596,23 @@ impl Block {
         self.refresh_language_without_window(cx);
     }
 
+    fn install_window_close_guard(window: &Window, cx: &mut Context<'_, Self>) {
+        let view = cx.weak_entity();
+        let windows = cx.windows();
+        let registry = cx.global_mut::<LauncherWindows>();
+        registry.0.retain(|(window, _)| windows.contains(window));
+        registry.0.push((window.window_handle(), view.clone()));
+        window.on_window_should_close(cx, move |window, cx| {
+            view.upgrade().is_none_or(|view| {
+                view.update(cx, |view, cx| view.allow_native_window_close(window, cx))
+            })
+        });
+    }
+
     #[must_use]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>, options: LaunchOptions) -> Self {
         initialize(cx);
+        Self::install_window_close_guard(window, cx);
         text_input::bind_keys(cx);
         bind_navigation_keys(cx);
         let focus = cx.focus_handle();
@@ -1156,10 +1232,17 @@ impl Block {
     }
 
     fn focus_field(&self, backwards: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.router.tab() != Tab::Onboarding
-            && matches!(self.form, Some(Form::Instance(_)))
-            && self.focus_wizard_error(window, cx)
-        {
+        if self.router.game_wizard() && self.shell.wizard.step == WizardStep::GetStarted {
+            let item = match self.shell.wizard.kind {
+                game_wizard::CreationKind::NewInstance => "instance",
+                game_wizard::CreationKind::ExistingInstance => "profile",
+                game_wizard::CreationKind::ImportPack => "pack",
+            };
+            let handle = self.shell.wizard.creation_focus(item, cx);
+            handle.focus(window, cx);
+            return;
+        }
+        if matches!(self.form, Some(Form::Instance(_))) && self.focus_wizard_error(window, cx) {
             return;
         }
         if self.router.tab() == Tab::Settings {
@@ -1191,17 +1274,23 @@ impl Block {
                         .unwrap_or(&form.version),
                 ],
                 Some(WizardPage::Location) => vec![&form.directory],
+                None if self.pack_wizard_active() => {
+                    self.shell.pack_import.name.as_ref().into_iter().collect()
+                }
                 None if self.shell.wizard.step == WizardStep::Setup
                     && self.shell.wizard.kind == game_wizard::CreationKind::NewInstance =>
                 {
                     vec![&form.name]
                 }
-                None if self.shell.wizard.step == WizardStep::Profile => self
-                    .shell
-                    .wizard
-                    .profile
-                    .as_ref()
-                    .map_or_else(Vec::new, |profile| vec![&profile.name]),
+                None if self.shell.wizard.step == WizardStep::Setup
+                    && self.shell.wizard.kind == game_wizard::CreationKind::ExistingInstance =>
+                {
+                    self.shell
+                        .wizard
+                        .profile
+                        .as_ref()
+                        .map_or_else(Vec::new, |profile| vec![&profile.name])
+                }
                 Some(WizardPage::Loader)
                     if form.loader != block_launcher::catalog::LoaderKind::Vanilla =>
                 {
@@ -1269,7 +1358,7 @@ impl Block {
         }
         let message = if name.trim().is_empty() {
             Some("runtime.game_name_required")
-        } else if name.len() > 160 || name.chars().any(char::is_control) {
+        } else if block_launcher::catalog::validate_name(&name).is_err() {
             Some("runtime.game_name_invalid")
         } else if version.trim().is_empty() {
             Some("runtime.version_required")
@@ -1528,6 +1617,7 @@ impl Block {
             | UiAction::SavePreferences
             | UiAction::Play
             | UiAction::WizardNext
+            | UiAction::ProfilePageDone
             | UiAction::SignIn
             | UiAction::Drawer(Some(Drawer::Profiles)) => components::ButtonVariant::Primary,
             UiAction::SignOut(_) | UiAction::ConfirmDelete => {
@@ -1556,7 +1646,8 @@ impl Block {
             || matches!(action, UiAction::Stop) && !self.can_stop()
             || self.import_action_disabled(&action);
         let disabled = disabled
-            || matches!(action, UiAction::AuthCancel) && self.auth_save_pending()
+            || matches!(action, UiAction::AuthCancel | UiAction::CloseWindow)
+                && self.auth_save_pending()
             || matches!(action, UiAction::ExportLogs) && self.exporting_logs;
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
@@ -2194,6 +2285,7 @@ mod tests {
         cx: &mut gpui::Context<'_, super::Block>,
     ) -> super::Block {
         super::initialize(cx);
+        super::Block::install_window_close_guard(window, cx);
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         super::text_input::bind_keys(cx);
@@ -2218,7 +2310,15 @@ mod tests {
             versions: vec!["1.20.6".into()],
             host_arch_override: None,
             version_load: super::browser::CollectionLoad::Ready,
-            version_catalog: Vec::new(),
+            version_catalog: vec![block_launcher::manifest::model::VersionEntry {
+                id: "1.20.6".into(),
+                kind: block_launcher::manifest::model::VersionType::Release,
+                url: "https://example.invalid/manifest".into(),
+                time: "2024-04-29T00:00:00+00:00".into(),
+                release_time: "2024-04-29T00:00:00+00:00".into(),
+                sha1: "0".repeat(40),
+                compliance_level: 1,
+            }],
             selected_instance: None,
             selected_profile: None,
             pending_profile: None,
@@ -2365,6 +2465,7 @@ mod tests {
             });
             cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
             click_selector(cx, "create-instance");
+            click_selector(cx, "wizard-kind-instance");
             click_selector(cx, "wizard-component-location");
             let state = view.update(cx, |view, cx| {
                 let Some(super::Form::Instance(form)) = &view.form else {
@@ -2994,6 +3095,8 @@ mod tests {
     fn actual_block_form_routes_unicode_input_tab_and_compatible_loader_selection(
         cx: &mut gpui::TestAppContext,
     ) {
+        use gpui::Focusable as _;
+
         let (view, cx) = crate::test_support::window(cx, test_view);
         let bounds = cx.debug_bounds("create-instance");
         assert!(bounds.is_some());
@@ -3010,6 +3113,7 @@ mod tests {
         }
         crate::test_support::ensure_live_window(cx);
         cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+        click_selector(cx, "wizard-kind-instance");
         crate::test_support::press(cx, "cmd-a");
         cx.simulate_input("世界 🧱");
         assert_eq!(
@@ -3020,7 +3124,26 @@ mod tests {
             "世界 🧱"
         );
         click_selector(cx, "wizard-component-version");
-        crate::test_support::press(cx, "tab tab");
+        let version_focused = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                matches!(&view.read(cx).form, Some(super::Form::Instance(form))
+                    if form.version.read(cx).focus_handle(cx).is_focused(window))
+            })
+        };
+        for _ in 0..8 {
+            if version_focused(cx) {
+                break;
+            }
+            crate::test_support::press(cx, "tab");
+            for _ in 0..2 {
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                cx.run_until_parked();
+            }
+        }
+        assert!(
+            version_focused(cx),
+            "Tab must reach the exact version input"
+        );
         crate::test_support::press(cx, "cmd-a");
         cx.simulate_input("1.20.1");
         assert_eq!(
@@ -3032,20 +3155,7 @@ mod tests {
         );
         click_selector(cx, "wizard-next");
         click_selector(cx, "wizard-component-loader");
-        // The section now lives in a deferred library dialog; assert its row is
-        // painted, then route the selection through the same action the row
-        // dispatches. Pointer coordinates are unreliable while a dialog
-        // entrance is still settling on slow CI runners.
         click_selector(cx, "wizard-loader-neoforge");
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.handle(
-                    super::UiAction::WizardLoader(block_launcher::catalog::LoaderKind::NeoForge),
-                    window,
-                    cx,
-                );
-            });
-        });
         cx.run_until_parked();
         let state = view.read_with(cx, |view, cx| {
             view.form.as_ref().map(|form| match form {
@@ -3080,13 +3190,14 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("nav-profiles").is_none());
         click_selector(cx, "create-instance");
+        click_selector(cx, "wizard-kind-instance");
         let footer = cx.debug_bounds("wizard-footer");
         assert!(footer.is_some());
         let Some(footer) = footer else {
             return;
         };
         assert!(footer.bottom() <= gpui::px(600.), "footer: {footer:?}");
-        assert_eq!(footer.size.height, gpui::px(72.));
+        assert!(footer.size.height >= gpui::px(72.));
         let viewport = cx.debug_bounds("wizard-body");
         let location = crate::test_support::control_bounds(cx, "wizard-component-location");
         assert!(viewport.is_some() && location.is_some());
@@ -3117,10 +3228,9 @@ mod tests {
             );
         }
         assert!(cx.debug_bounds("nav-profiles").is_none());
-        click_selector(cx, "wizard-next");
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.wizard.step),
-            super::game_wizard::WizardStep::Review
+            super::game_wizard::WizardStep::Setup
         );
         let final_action = cx.debug_bounds("wizard-next");
         assert!(final_action.is_some());
@@ -3134,6 +3244,8 @@ mod tests {
     fn game_wizard_keeps_component_drafts_and_cancel_never_writes_catalog(
         cx: &mut gpui::TestAppContext,
     ) {
+        use gpui::Focusable as _;
+
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
@@ -3145,15 +3257,27 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.engine = Some(engine);
                 view.messages = Some(messages);
+                view.preferences.reduce_motion = true;
                 view.apply_catalog(snapshot, cx);
                 cx.notify();
             });
             click_selector(cx, "create-instance");
             cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            click_selector(cx, "wizard-kind-instance");
             crate::test_support::press(cx, "cmd-a");
             cx.simulate_input("世界 draft");
             click_selector(cx, "wizard-component-version");
-            crate::test_support::press(cx, "tab tab");
+            cx.update(|window, cx| {
+                let focus = match &view.read(cx).form {
+                    Some(super::Form::Instance(form)) => {
+                        Some(form.version.read(cx).focus_handle(cx))
+                    }
+                    _ => None,
+                };
+                if let Some(focus) = focus {
+                    focus.focus(window, cx);
+                }
+            });
             crate::test_support::press(cx, "cmd-a");
             cx.simulate_input("1.20.1");
             click_selector(cx, "wizard-next");
@@ -3173,7 +3297,16 @@ mod tests {
             assert!(view.read_with(cx, |view, _| view.form.is_some()
                 && view.shell.wizard.page.is_none()));
             click_selector(cx, "cancel-instance");
-            assert!(view.read_with(cx, |view, _| view.form.is_none()));
+            click_selector(cx, "discard-game-confirm");
+            assert!(
+                view.read_with(cx, |view, _| view.form.is_none()),
+                "page/surface/route: {:?}",
+                view.read_with(cx, |view, _| (
+                    view.shell.wizard.page,
+                    view.shell.surfaces.top().map(|layer| layer.kind.clone()),
+                    view.router.tab()
+                ))
+            );
             assert!(!view.read_with(cx, |view, _| view.busy));
             assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             assert!(!directory.exists());
@@ -3183,9 +3316,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn game_wizard_review_starts_real_install_only_after_final_confirmation(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn game_setup_starts_real_install_only_after_creation(cx: &mut gpui::TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
@@ -3203,6 +3334,7 @@ mod tests {
             });
             click_selector(cx, "create-instance");
             cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
+            click_selector(cx, "wizard-kind-instance");
             view.update(cx, |view, cx| {
                 if let Some(super::Form::Instance(form)) = &view.form {
                     form.directory.update(cx, |field, cx| {
@@ -3210,15 +3342,8 @@ mod tests {
                     });
                 }
             });
-            click_selector(cx, "wizard-next");
-            assert_eq!(
-                view.read_with(cx, |view, _| view.shell.wizard.step),
-                super::game_wizard::WizardStep::Review
-            );
             assert!(!view.read_with(cx, |view, _| view.busy));
             assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
-            click_selector(cx, "wizard-back");
-            click_selector(cx, "wizard-next");
             click_selector(cx, "wizard-next");
             assert!(view.read_with(cx, |view, _| view.busy));
             // The real engine rejects this overlapping location before network

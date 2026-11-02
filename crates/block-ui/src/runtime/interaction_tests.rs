@@ -148,7 +148,27 @@ fn ime_escape_keeps_the_current_form_open_until_composition_finishes(
     let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
             view.handle(UiAction::CreateInstance, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    let create = crate::test_support::control_bounds(cx, "wizard-kind-instance");
+    assert!(
+        create.is_some(),
+        "the source page exposes the new-game action"
+    );
+    let Some(create) = create else {
+        return;
+    };
+    cx.simulate_click(create.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.wizard.step),
+        crate::game_wizard::WizardStep::Setup
+    );
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
             if let Some(super::Form::Instance(form)) = &view.form {
                 form.name.update(cx, |field, cx| {
                     field.focus_handle(cx).focus(window, cx);
@@ -170,6 +190,19 @@ fn ime_escape_keeps_the_current_form_open_until_composition_finishes(
         });
     });
     crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| {
+        view.form.is_some()
+            && view.shell.surfaces.top().is_some_and(|layer| {
+                matches!(layer.kind, crate::shell::Surface::DiscardGameDraft { .. })
+            })
+    }));
+    let confirm = crate::test_support::control_bounds(cx, "discard-game-confirm");
+    assert!(confirm.is_some(), "the changed draft requires confirmation");
+    if let Some(confirm) = confirm {
+        cx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    }
     assert!(view.read_with(cx, |view, _| view.form.is_none()));
 }
 #[gpui::test]
@@ -210,4 +243,126 @@ fn games_route_during_setup_keeps_the_setup_page_with_a_status(cx: &mut gpui::Te
         crate::test_support::control_bounds(cx, "game-wizard").is_some(),
         "setup must render a meaningful page after the blocked Games route"
     );
+}
+
+#[gpui::test]
+fn native_close_confirms_a_changed_game_draft(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.handle(UiAction::CreateInstance, window, cx);
+            view.handle(
+                UiAction::WizardKind(crate::game_wizard::CreationKind::NewInstance),
+                window,
+                cx,
+            );
+            if let Some(super::Form::Instance(form)) = &view.form {
+                form.name
+                    .update(cx, |field, cx| field.set_value("Keep this draft", cx));
+            }
+        });
+    });
+    assert!(!cx.simulate_close());
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.surfaces.top().is_some_and(|layer| {
+            matches!(layer.kind, crate::shell::Surface::DiscardGameDraft { .. })
+        })
+    }));
+    let stay = crate::test_support::control_bounds(cx, "discard-game-stay");
+    assert!(stay.is_some());
+    if let Some(stay) = stay {
+        cx.simulate_click(stay.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    }
+    assert!(view.read_with(cx, |view, cx| {
+        matches!(&view.form, Some(super::Form::Instance(form))
+            if form.name.read(cx).value() == "Keep this draft")
+    }));
+}
+
+#[gpui::test]
+fn application_quit_confirms_the_current_draft_and_ignores_a_stale_confirmation(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    cx.update(|window, cx| {
+        crate::initialize_application_quit(cx);
+        view.update(cx, |view, cx| {
+            view.preferences.reduce_motion = true;
+            view.handle(UiAction::CreateInstance, window, cx);
+            view.handle(
+                UiAction::WizardKind(crate::game_wizard::CreationKind::NewInstance),
+                window,
+                cx,
+            );
+            if let Some(super::Form::Instance(form)) = &view.form {
+                form.name
+                    .update(cx, |field, cx| field.set_value("First draft", cx));
+            }
+        });
+    });
+    crate::test_support::press(cx, "cmd-q");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.surfaces.top().is_some_and(|layer| {
+            matches!(
+                &layer.kind,
+                crate::shell::Surface::DiscardGameDraft {
+                    exit,
+                    ..
+                } if matches!(exit.as_ref(), UiAction::QuitApplication)
+            )
+        })
+    }));
+    let stay = crate::test_support::control_bounds(cx, "discard-game-stay");
+    assert!(stay.is_some());
+    if let Some(stay) = stay {
+        cx.simulate_click(stay.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    }
+    assert!(view.read_with(cx, |view, cx| {
+        matches!(&view.form, Some(super::Form::Instance(form))
+            if form.name.read(cx).value() == "First draft")
+            && !view.shell.surfaces.is_open()
+    }));
+
+    crate::test_support::press(cx, "cmd-q");
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        view.begin_game_wizard(cx);
+        if let Some(super::Form::Instance(form)) = &view.form {
+            form.name
+                .update(cx, |field, cx| field.set_value("Replacement draft", cx));
+        }
+        cx.notify();
+    });
+    let confirm = crate::test_support::control_bounds(cx, "discard-game-confirm");
+    assert!(confirm.is_some());
+    if let Some(confirm) = confirm {
+        cx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    }
+    assert!(view.read_with(cx, |view, cx| {
+        matches!(&view.form, Some(super::Form::Instance(form))
+            if form.name.read(cx).value() == "Replacement draft")
+            && !view.shell.surfaces.is_open()
+    }));
+    crate::test_support::press(cx, "cmd-q");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.surfaces.top().is_some_and(|layer| {
+            matches!(layer.kind, crate::shell::Surface::DiscardGameDraft { .. })
+        })
+    }));
+    let confirm = crate::test_support::control_bounds(cx, "discard-game-confirm");
+    assert!(confirm.is_some());
+    if let Some(confirm) = confirm {
+        cx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    }
+    assert!(view.read_with(cx, |view, _| {
+        !view.shell.surfaces.is_open() && view.shell.wizard.discard_confirmed.is_none()
+    }));
 }

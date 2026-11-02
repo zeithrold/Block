@@ -8,7 +8,7 @@ use block_launcher::crash::{CrashContext, CrashReport, ExitOutcome};
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, px, size};
 
 use super::{
-    Tab, UiAction, WizardPage, WizardStep, account_id,
+    Tab, UiAction, WizardPage, account_id,
     test_support::{ready_snapshot, test_account},
 };
 
@@ -104,20 +104,25 @@ fn busy_home_keeps_stop_reachable_and_cancels_the_operation(cx: &mut TestAppCont
 
 #[gpui::test]
 fn game_wizard_subpages_keep_scrolling_content_above_the_action_rail(cx: &mut TestAppContext) {
-    for (page, step) in [
-        (None, WizardStep::Setup),
-        (Some(WizardPage::Version), WizardStep::Setup),
-        (Some(WizardPage::Loader), WizardStep::Setup),
-        (Some(WizardPage::Location), WizardStep::Setup),
-        (None, WizardStep::Review),
+    for page in [
+        None,
+        Some(WizardPage::Version),
+        Some(WizardPage::Loader),
+        Some(WizardPage::Location),
     ] {
         let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.handle(UiAction::CreateInstance, window, cx);
-                view.shell.wizard.page = page;
-                view.shell.wizard.step = step;
+                view.handle(
+                    UiAction::WizardKind(crate::game_wizard::CreationKind::NewInstance),
+                    window,
+                    cx,
+                );
+                if let Some(page) = page {
+                    view.handle(UiAction::WizardPage(Some(page)), window, cx);
+                }
                 cx.notify();
             });
         });

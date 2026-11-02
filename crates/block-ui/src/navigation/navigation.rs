@@ -4,6 +4,7 @@ use super::{
     authentication::AuthStep,
     first_run::Stage,
     game_wizard::{WizardPage, WizardStep},
+    modpack_import::Phase as PackPhase,
     motion::MotionStyle,
     profile_editor::EditorPage,
     providers::ProviderKey,
@@ -65,6 +66,10 @@ impl Router {
         self.current.task = Some(Task::GameWizard);
     }
 
+    pub(super) fn game_wizard(&self) -> bool {
+        self.current.task == Some(Task::GameWizard)
+    }
+
     pub(super) fn leave_task(&mut self) {
         self.current.task = None;
     }
@@ -89,14 +94,13 @@ impl Router {
         }
     }
 
-    pub(super) fn end_auth(&mut self, restore: bool) -> Option<Tab> {
-        let destination = self.auth_return.take()?;
-        if restore || destination.tab == Tab::Onboarding {
+    /// The account page is a task over the destination that opened it, so
+    /// leaving it — saved, cancelled or failed alike — returns to that
+    /// destination and its own task.
+    pub(super) fn end_auth(&mut self) {
+        if let Some(destination) = self.auth_return.take() {
             self.current = destination;
-        } else {
-            self.current.task = None;
         }
-        Some(destination.tab)
     }
 }
 
@@ -150,6 +154,7 @@ pub(super) enum DetailKey {
 pub(super) enum WizardKey {
     Authentication(AuthStep),
     Game(WizardStep, Option<WizardPage>),
+    Pack(PackPhase),
 }
 
 /// Content selection and motion use the same page and region identity.
@@ -224,8 +229,13 @@ impl PageSpec {
             Some(WizardKey::Authentication(AuthStep::Complete)) => "auth_complete",
             Some(WizardKey::Game(WizardStep::GetStarted, _)) => "game_get_started",
             Some(WizardKey::Game(WizardStep::Setup, _)) => "game_setup",
-            Some(WizardKey::Game(WizardStep::Profile, _)) => "game_profile",
-            Some(WizardKey::Game(WizardStep::Review, _)) => "game_review",
+            Some(WizardKey::Pack(PackPhase::Choose)) => "pack_choose",
+            Some(WizardKey::Pack(PackPhase::Inspecting)) => "pack_inspecting",
+            Some(WizardKey::Pack(PackPhase::Review)) => "pack_review",
+            Some(WizardKey::Pack(PackPhase::Installing)) => "pack_installing",
+            Some(WizardKey::Pack(PackPhase::Blocked)) => "pack_blocked",
+            Some(WizardKey::Pack(PackPhase::Stopped)) => "pack_stopped",
+            Some(WizardKey::Pack(PackPhase::Complete)) => "pack_complete",
         }
     }
 }
@@ -280,6 +290,8 @@ impl Block {
         };
         let wizard = if let Some(auth) = &self.shell.auth {
             Some(WizardKey::Authentication(auth.motion_key()))
+        } else if self.pack_wizard_active() {
+            Some(WizardKey::Pack(self.shell.pack_import.phase))
         } else if matches!(self.form, Some(Form::Instance(_))) {
             Some(WizardKey::Game(
                 self.shell.wizard.step,
@@ -332,16 +344,28 @@ mod tests {
     }
 
     #[test]
-    fn cancelling_auth_restores_the_task_destination_not_just_its_tab() {
+    fn leaving_auth_restores_the_task_destination_not_just_its_tab() {
         let mut router = Router::new(Tab::Instances);
         router.enter_game_wizard();
         router.begin_auth();
         assert_eq!(router.tab(), Tab::Accounts);
         assert_eq!(router.auth_return(), Some(Tab::Instances));
-        assert_eq!(router.end_auth(true), Some(Tab::Instances));
+        router.end_auth();
         assert_eq!(router.tab(), Tab::Instances);
         assert_eq!(router.current.task, Some(Task::GameWizard));
         assert_eq!(router.auth_return(), None);
+    }
+
+    #[test]
+    fn leaving_auth_returns_to_whatever_destination_opened_it() {
+        for tab in [Tab::Home, Tab::Onboarding, Tab::Accounts, Tab::Profiles] {
+            let mut router = Router::new(tab);
+            router.begin_auth();
+            assert_eq!(router.tab(), Tab::Accounts);
+            router.end_auth();
+            assert_eq!(router.tab(), tab);
+            assert_eq!(router.current.task, None);
+        }
     }
 
     #[test]

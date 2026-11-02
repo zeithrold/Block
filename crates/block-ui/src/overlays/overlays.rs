@@ -264,6 +264,8 @@ impl Overlays {
             let build_owner = owner.clone();
             let body = body.clone();
             let close = close.clone();
+            let available_width = (window.viewport_size().width - px(32.)).max(px(0.));
+            let dialog_width = available_width.min(px(520.));
             window.open_dialog(cx, move |dialog, _dialog_window, dialog_cx| {
                 let Some(view) = build_owner.upgrade() else {
                     return dialog;
@@ -277,21 +279,21 @@ impl Overlays {
                 let dialog = if section {
                     dialog
                         .font_family(super::design::FONT_FAMILY)
-                        .w(px(760.))
+                        .w(available_width.min(px(760.)))
                         .px(px(0.))
                         .pt(px(0.))
                         .pb(px(0.))
                 } else if matches!(kind, Surface::AuthProviderAdd) {
                     dialog
                         .font_family(super::design::FONT_FAMILY)
-                        .w(px(460.))
+                        .w(dialog_width.min(px(460.)))
                         .px(px(0.))
                         .pt(px(24.))
                         .pb(px(0.))
                 } else {
                     dialog
                         .font_family(super::design::FONT_FAMILY)
-                        .w(px(520.))
+                        .w(dialog_width)
                         .px(px(0.))
                         .pt(px(24.))
                         .pb(px(0.))
@@ -505,7 +507,6 @@ impl Block {
         self.shell.surfaces.trace_change(&entry, "closed");
         match entry.kind {
             Surface::Drawer(Drawer::ImportGames) => self.import_games_closed(window, cx),
-            Surface::Drawer(Drawer::ImportPack) => self.pack_import_closed(window, cx),
             Surface::WizardSection(_) => {
                 self.cancel_component_draft(cx);
             }
@@ -532,7 +533,6 @@ impl Surface {
     const fn log_label(&self) -> &'static str {
         match self {
             Self::Drawer(Drawer::ImportGames) => "import_games",
-            Self::Drawer(Drawer::ImportPack) => "import_pack",
             Self::Drawer(Drawer::Language) => "language",
             Self::Drawer(Drawer::Menu) => "menu",
             Self::Drawer(Drawer::Accounts) => "accounts",
@@ -543,6 +543,8 @@ impl Surface {
             Self::RemoveAccount(_) => "remove_account",
             Self::RemoveProvider(_) => "remove_provider",
             Self::SeparateProfiles => "separate_profiles",
+            Self::StopPackImport { .. } => "stop_pack_import",
+            Self::DiscardGameDraft { .. } => "discard_game_draft",
             Self::GamesHelp => "games_help",
             Self::WizardSection(super::WizardPage::Version) => "wizard_version",
             Self::WizardSection(super::WizardPage::Loader) => "wizard_loader",
@@ -571,12 +573,13 @@ impl Surface {
             Self::Drawer(Drawer::Profiles) => tr!(language, "action.switch_game"),
             Self::Drawer(Drawer::Downloads) => tr!(language, "surface.downloads"),
             Self::Drawer(Drawer::ImportGames) => tr!(language, "surface.import_games"),
-            Self::Drawer(Drawer::ImportPack) => tr!(language, "modpack.action.import_pack"),
             Self::DownloadFiles(group) => group.label(language),
             Self::DeleteProfile(_) => tr!(language, "action.delete_profile"),
             Self::RemoveAccount(_) => tr!(language, "action.remove_account"),
             Self::RemoveProvider(_) => tr!(language, "action.remove_provider"),
             Self::SeparateProfiles => tr!(language, "action.enable_separated"),
+            Self::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
+            Self::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
             Self::GamesHelp => tr!(language, "surface.games_help"),
             Self::WizardSection(page) => match page {
                 super::WizardPage::Version => tr!(language, "surface.wizard_version"),
@@ -599,7 +602,6 @@ impl Surface {
                 | Drawer::Profiles
                 | Drawer::Downloads
                 | Drawer::ImportGames
-                | Drawer::ImportPack
                 | Drawer::Language,
             ) => Some(OverlayPresentation::Sheet),
             Self::DownloadFiles(_)
@@ -609,6 +611,8 @@ impl Surface {
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)
             | Self::SeparateProfiles
+            | Self::StopPackImport { .. }
+            | Self::DiscardGameDraft { .. }
             | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
         }
     }

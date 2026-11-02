@@ -15,86 +15,6 @@
     "zh-Hans": "离线模式",
     "ja": "オフラインモード"
   },
-  "accounts.auth.setup.title": {
-    "en": "Account setup",
-    "zh-Hans": "账户设置",
-    "ja": "アカウント設定"
-  },
-  "accounts.auth.rail.label": {
-    "en": "Account setup navigation",
-    "zh-Hans": "账户设置导航",
-    "ja": "アカウント設定のナビゲーション"
-  },
-  "accounts.auth.body.label": {
-    "en": "Authentication steps",
-    "zh-Hans": "身份验证步骤",
-    "ja": "認証の手順"
-  },
-  "accounts.auth.step.type.title": {
-    "en": "Account type",
-    "zh-Hans": "账户类型",
-    "ja": "アカウントの種類"
-  },
-  "accounts.auth.step.type.description": {
-    "en": "Choose how to sign in",
-    "zh-Hans": "选择登录方式",
-    "ja": "サインイン方法を選択"
-  },
-  "accounts.auth.step.sign_in.title": {
-    "en": "Sign in",
-    "zh-Hans": "登录",
-    "ja": "サインイン"
-  },
-  "accounts.auth.step.sign_in.offline": {
-    "en": "Choose a local player name",
-    "zh-Hans": "选择本地玩家名称",
-    "ja": "ローカルプレイヤー名を選択"
-  },
-  "accounts.auth.step.sign_in.authlib": {
-    "en": "Your provider account",
-    "zh-Hans": "你的验证服务器账户",
-    "ja": "認証サーバーのアカウント"
-  },
-  "accounts.auth.step.sign_in.microsoft": {
-    "en": "Continue with Microsoft",
-    "zh-Hans": "使用 Microsoft 继续",
-    "ja": "Microsoft で続行"
-  },
-  "accounts.auth.step.verification.title": {
-    "en": "Verification",
-    "zh-Hans": "验证",
-    "ja": "確認"
-  },
-  "accounts.auth.step.verification.offline": {
-    "en": "Validate the local identity",
-    "zh-Hans": "验证本地身份",
-    "ja": "ローカル ID を検証"
-  },
-  "accounts.auth.step.verification.authlib": {
-    "en": "Select your provider character",
-    "zh-Hans": "选择验证服务器角色",
-    "ja": "認証サーバーのキャラクターを選択"
-  },
-  "accounts.auth.step.verification.microsoft": {
-    "en": "Ownership and player profile",
-    "zh-Hans": "游戏所有权与玩家档案",
-    "ja": "所有権とプレイヤープロフィール"
-  },
-  "accounts.auth.step.complete.title": {
-    "en": "Complete",
-    "zh-Hans": "完成",
-    "ja": "完了"
-  },
-  "accounts.auth.step.complete.description": {
-    "en": "Review and save your account",
-    "zh-Hans": "检查并保存账户",
-    "ja": "アカウントを確認して保存"
-  },
-  "accounts.auth.step.progress": {
-    "en": "Step %{step} of 4",
-    "zh-Hans": "第 %{step} 步，共 4 步",
-    "ja": "ステップ %{step} / 4"
-  },
   "accounts.auth.error.drop_wayland": {
     "en": "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.",
     "zh-Hans": "拖放不可用：此版本不支持 Wayland 窗口；请使用 X11 会话。",
@@ -109,16 +29,6 @@
     "en": "Drag and drop is unavailable: %{detail}",
     "zh-Hans": "拖放不可用：%{detail}",
     "ja": "ドラッグ＆ドロップを利用できません: %{detail}"
-  },
-  "accounts.auth.choose.title": {
-    "en": "Add an account",
-    "zh-Hans": "添加账户",
-    "ja": "アカウントを追加"
-  },
-  "accounts.auth.choose.description": {
-    "en": "Choose an account you own to play Minecraft: Java Edition.",
-    "zh-Hans": "选择一个你拥有的账户来游玩 Minecraft: Java 版。",
-    "ja": "所有しているアカウントを選択して Minecraft: Java Edition をプレイします。"
   },
   "accounts.auth.info.title.offline": {
     "en": "Your local player",
@@ -136,9 +46,9 @@
     "ja": "Microsoft でサインイン"
   },
   "accounts.auth.info.description.offline": {
-    "en": "Choose a name for local play without an authentication service.",
-    "zh-Hans": "为无需身份验证服务的本地游戏选择一个名称。",
-    "ja": "認証サービスを使わないローカルプレイ用の名前を選択します。"
+    "en": "Choose a name for local play without an authentication service. Adding saves it on this device and selects it.",
+    "zh-Hans": "为无需身份验证服务的本地游戏选择一个名称。添加后会在此设备上保存并选中它。",
+    "ja": "認証サービスを使わないローカルプレイ用の名前を選択します。追加するとこのデバイスに保存され、選択されます。"
   },
   "accounts.auth.info.description.authlib": {
     "en": "Choose your server and enter its account credentials.",
@@ -146,9 +56,9 @@
     "ja": "サーバーを選択し、そのアカウントの資格情報を入力します。"
   },
   "accounts.auth.info.description.microsoft": {
-    "en": "Choose browser sign-in or enter a device code on another device.",
-    "zh-Hans": "选择浏览器登录，或在其他设备上输入设备代码。",
-    "ja": "ブラウザーでのサインインを選ぶか、別のデバイスでデバイスコードを入力します。"
+    "en": "Sign in with the Microsoft account that owns Minecraft: Java Edition. Block opens Microsoft's website in your browser.",
+    "zh-Hans": "使用拥有 Minecraft: Java 版的 Microsoft 账户登录。Block 会在浏览器中打开 Microsoft 网站。",
+    "ja": "Minecraft: Java Edition を所有する Microsoft アカウントでサインインします。Block はブラウザーで Microsoft のサイトを開きます。"
   },
   "accounts.auth.preparing.title": {
     "en": "Preparing secure sign-in",
@@ -235,30 +145,30 @@
     "zh-Hans": "你的账户已就绪",
     "ja": "アカウントの準備ができました"
   },
-  "accounts.auth.complete.description.offline": {
-    "en": "Your local identity is valid. Finish saves it; closing discards this preparation.",
-    "zh-Hans": "你的本地身份有效。完成会保存它；关闭会丢弃这次准备。",
-    "ja": "ローカル ID は有効です。「完了」で保存され、閉じるとこの準備は破棄されます。"
-  },
   "accounts.auth.complete.description.online": {
-    "en": "Your identity is verified. Finish saves this account securely; closing discards this preparation.",
-    "zh-Hans": "你的身份已验证。完成会安全地保存此账户；关闭会丢弃这次准备。",
-    "ja": "ID は確認済みです。「完了」でこのアカウントを安全に保存し、閉じるとこの準備は破棄されます。"
+    "en": "Your identity is verified. Saving stores this account securely on this device and selects it; closing discards this sign-in.",
+    "zh-Hans": "你的身份已验证。保存会在此设备上安全保存此账户并将其选中；关闭会丢弃此登录。",
+    "ja": "ID は確認済みです。「保存」でこのアカウントをこのデバイスに安全に保存して選択します。閉じるとこのサインインは破棄されます。"
   },
   "accounts.auth.saving.title": {
     "en": "Saving your account",
     "zh-Hans": "正在保存你的账户",
     "ja": "アカウントを保存しています"
   },
+  "accounts.auth.saving.wait_exit": {
+    "en": "Wait for the account save to finish before quitting.",
+    "zh-Hans": "请等待账户保存完成后再退出。",
+    "ja": "アカウントの保存が終わってから終了してください。"
+  },
   "accounts.auth.saving.description.offline": {
-    "en": "Block is saving the local identity. This finishes even if you close the window.",
-    "zh-Hans": "Block 正在保存本地身份。即使关闭窗口也会完成。",
-    "ja": "Block はローカル ID を保存しています。ウィンドウを閉じても完了します。"
+    "en": "Block is saving the local identity. This page returns to the launcher when the save finishes.",
+    "zh-Hans": "Block 正在保存本地身份。保存完成后此页面会返回启动器。",
+    "ja": "Block はローカル ID を保存しています。保存が終わるとこのページはランチャーに戻ります。"
   },
   "accounts.auth.saving.description.online": {
-    "en": "Block is saving the refresh credential and account metadata. This finishes even if you close the window.",
-    "zh-Hans": "Block 正在保存刷新凭据和账户元数据。即使关闭窗口也会完成。",
-    "ja": "Block はリフレッシュ資格情報とアカウントのメタデータを保存しています。ウィンドウを閉じても完了します。"
+    "en": "Block is saving the refresh credential and account metadata. This page returns to the launcher when the save finishes.",
+    "zh-Hans": "Block 正在保存刷新凭据和账户元数据。保存完成后此页面会返回启动器。",
+    "ja": "Block はリフレッシュ資格情報とアカウントのメタデータを保存しています。保存が終わるとこのページはランチャーに戻ります。"
   },
   "accounts.auth.saved.title": {
     "en": "Account saved",
@@ -280,35 +190,35 @@
     "zh-Hans": "登录未能完成。请重试。",
     "ja": "サインインを完了できませんでした。もう一度お試しください。"
   },
-  "accounts.auth.provider.microsoft.label": {
-    "en": "Microsoft account",
-    "zh-Hans": "Microsoft 账户",
-    "ja": "Microsoft アカウント"
-  },
   "accounts.auth.provider.microsoft.description": {
     "en": "Sign in securely in your browser. Block never asks for your Microsoft password.",
     "zh-Hans": "在浏览器中安全登录。Block 绝不会索取你的 Microsoft 密码。",
     "ja": "ブラウザーで安全にサインインします。Block が Microsoft のパスワードを求めることはありません。"
-  },
-  "accounts.auth.provider.authlib.label": {
-    "en": "Authlib-Injector",
-    "zh-Hans": "Authlib-Injector",
-    "ja": "Authlib-Injector"
   },
   "accounts.auth.provider.authlib.description": {
     "en": "A community authentication provider. Its account and password are separate from Microsoft.",
     "zh-Hans": "社区验证服务器。其账户和密码与 Microsoft 相互独立。",
     "ja": "コミュニティの認証サーバーです。そのアカウントとパスワードは Microsoft とは別です。"
   },
-  "accounts.auth.provider.offline.label": {
-    "en": "Offline Mode",
-    "zh-Hans": "离线模式",
-    "ja": "オフラインモード"
-  },
   "accounts.auth.provider.offline.description": {
     "en": "A local player identity. Does not grant access to authenticated online services.",
     "zh-Hans": "本地玩家身份。不会获得需要验证的在线服务的访问权限。",
     "ja": "ローカルのプレイヤー ID です。認証が必要なオンラインサービスにはアクセスできません。"
+  },
+  "accounts.auth.microsoft.device_action": {
+    "en": "Use a device code instead",
+    "zh-Hans": "改用设备代码登录",
+    "ja": "デバイスコードで続行"
+  },
+  "accounts.auth.microsoft.device_note": {
+    "en": "Without a browser on this device? Request a short code here and approve it on Microsoft's website from any device.",
+    "zh-Hans": "此设备上没有浏览器？请在此请求短期代码，并在任意设备上通过 Microsoft 网站批准它。",
+    "ja": "このデバイスにブラウザーがない場合は、ここで一時コードを要求し、任意のデバイスで Microsoft のサイトから承認してください。"
+  },
+  "accounts.auth.device.browser_action": {
+    "en": "Use the browser instead",
+    "zh-Hans": "改用浏览器登录",
+    "ja": "ブラウザーで続行"
   },
   "accounts.auth.other.show": {
     "en": "Other sign-in options",
@@ -319,11 +229,6 @@
     "en": "Hide other sign-in options",
     "zh-Hans": "隐藏其他登录选项",
     "ja": "その他のサインインオプションを非表示"
-  },
-  "accounts.auth.choices.note": {
-    "en": "Finish saves the account securely on this device.",
-    "zh-Hans": "完成会在此设备上安全保存账户。",
-    "ja": "「完了」でこのデバイスにアカウントを安全に保存します。"
   },
   "accounts.auth.provider.missing": {
     "en": "Missing provider",
@@ -406,19 +311,9 @@
     "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。名前は大文字と小文字を区別します。"
   },
   "accounts.auth.microsoft.card_note": {
-    "en": "Block never asks for your Microsoft password. Authorize only on Microsoft's website.",
-    "zh-Hans": "Block 绝不会索取你的 Microsoft 密码。请仅在 Microsoft 网站上授权。",
-    "ja": "Block が Microsoft のパスワードを求めることはありません。Microsoft の Web サイトでのみ認可してください。"
-  },
-  "accounts.auth.method.browser": {
-    "en": "Browser",
-    "zh-Hans": "浏览器",
-    "ja": "ブラウザー"
-  },
-  "accounts.auth.method.device": {
-    "en": "Device Code",
-    "zh-Hans": "设备代码",
-    "ja": "デバイスコード"
+    "en": "Block never asks for your Microsoft password. Finish in the browser; Block verifies ownership before it offers to save the account.",
+    "zh-Hans": "Block 绝不会索取你的 Microsoft 密码。请在浏览器中完成操作；Block 会先验证所有权，再提供保存账户的选项。",
+    "ja": "Block が Microsoft のパスワードを求めることはありません。ブラウザーでの操作を終えると、Block は所有権を確認してからアカウントの保存を提案します。"
   },
   "accounts.auth.waiting.authlib.verifying": {
     "en": "Confirming the selected character with your provider…",
@@ -454,6 +349,11 @@
     "en": "Requesting your device code…",
     "zh-Hans": "正在请求设备代码…",
     "ja": "デバイスコードを要求しています…"
+  },
+  "accounts.auth.waiting.device.moment": {
+    "en": "This can take a moment after you approve the code.",
+    "zh-Hans": "批准代码后，这可能需要一点时间。",
+    "ja": "コードを承認してから、少し時間がかかる場合があります。"
   },
   "accounts.auth.waiting.ownership_note": {
     "en": "After authorization, Block verifies Java Edition ownership and resolves your player profile. You review the identity before saving it.",
@@ -526,9 +426,9 @@
     "ja": "アカウントは保存され、使用できる状態です。"
   },
   "accounts.auth.complete.note.ready": {
-    "en": "Finish saves this account securely and selects it. Closing now discards this sign-in.",
-    "zh-Hans": "完成会安全保存此账户并将其选中。现在关闭会丢弃此登录。",
-    "ja": "「完了」でこのアカウントを安全に保存し、選択します。ここで閉じるとこのサインインは破棄されます。"
+    "en": "Save and use stores this account securely and selects it. Closing now discards this sign-in.",
+    "zh-Hans": "「保存并使用」会安全保存此账户并将其选中。现在关闭会丢弃此登录。",
+    "ja": "「保存して使用」でこのアカウントを安全に保存して選択します。ここで閉じるとこのサインインは破棄されます。"
   },
   "accounts.auth.footer.cancel_sign_in": {
     "en": "Cancel sign-in",
@@ -550,15 +450,25 @@
     "zh-Hans": "登录",
     "ja": "サインイン"
   },
-  "accounts.auth.footer.request_code": {
-    "en": "Request a code",
-    "zh-Hans": "请求代码",
-    "ja": "コードを要求"
-  },
   "accounts.auth.footer.open_browser": {
     "en": "Open browser",
     "zh-Hans": "打开浏览器",
     "ja": "ブラウザーを開く"
+  },
+  "accounts.auth.footer.add_and_use": {
+    "en": "Add and use",
+    "zh-Hans": "添加并使用",
+    "ja": "追加して使用"
+  },
+  "accounts.auth.footer.save_and_use": {
+    "en": "Save and use",
+    "zh-Hans": "保存并使用",
+    "ja": "保存して使用"
+  },
+  "accounts.auth.footer.sign_in_again": {
+    "en": "Sign in again",
+    "zh-Hans": "重新登录",
+    "ja": "もう一度サインイン"
   },
   "accounts.auth.footer.waiting": {
     "en": "Waiting…",
@@ -569,11 +479,6 @@
     "en": "Try again",
     "zh-Hans": "重试",
     "ja": "もう一度試す"
-  },
-  "accounts.auth.footer.finish": {
-    "en": "Finish",
-    "zh-Hans": "完成",
-    "ja": "完了"
   },
   "accounts.auth.footer.saving": {
     "en": "Saving…",

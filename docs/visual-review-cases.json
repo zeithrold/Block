@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "title": "Milestone II visual review semantic cases",
-  "description": "Exact filenames are candidate lookup only. Capture semantics and provenance are reviewed independently. Unknown archive fields are intentionally null/unknown.",
+  "description": "Historical Milestone II comparison, not the current Wizard acceptance contract. Scenario names, source locations and React/native correspondence below describe that review and may have been retired by the subsequent Wizard redesign. Use scripts/scenario_contracts.py for current capture expectations; new captures do not retroactively validate these archived comparisons. Exact filenames are candidate lookup only. Capture semantics and provenance are reviewed independently. Unknown archive fields are intentionally null/unknown.",
   "capture_receipt_schema": {
     "schema_version": 1,
     "sidecar_path": "<image>.capture.json (either <stem>.capture.json or <stem>.png.capture.json)",

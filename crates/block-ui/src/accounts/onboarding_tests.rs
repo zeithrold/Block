@@ -1,10 +1,6 @@
 //! First-run completion and account state stay shared with the setup page.
 
-use crate::{
-    Tab,
-    first_run::{Action as FirstRunAction, Stage as FirstRunStage},
-    test_support::test_account,
-};
+use crate::{Tab, first_run::Stage as FirstRunStage, test_support::test_account};
 use gpui::{TestAppContext, VisualTestContext};
 
 fn first_run_engine(
@@ -30,7 +26,6 @@ fn prepare_local_identity(
 ) {
     view.open_auth_wizard(window, cx);
     view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
-    view.auth_next(cx);
     let username = view
         .shell
         .auth
@@ -40,7 +35,6 @@ fn prepare_local_identity(
         username.update(cx, |field, cx| field.set_value(name, cx));
     }
     view.start_auth(window, cx);
-    view.finish_auth(window, cx);
 }
 
 fn apply_engine_messages(
@@ -229,7 +223,7 @@ fn first_run_completion_saves_the_account_draft_and_retries_after_failure(cx: &m
 }
 
 #[gpui::test]
-fn saved_account_unblocks_first_run_continue_without_a_game(cx: &mut TestAppContext) {
+fn saved_account_returns_to_center_and_game_task_remains_available(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         std::fs::write(root.path().join("setup-started"), b"1")?;
@@ -254,16 +248,72 @@ fn saved_account_unblocks_first_run_continue_without_a_game(cx: &mut TestAppCont
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].player_name, "Footer_Player");
 
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.handle_first_run(FirstRunAction::Continue, window, cx);
-            });
-        });
+        cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(1000.)));
+        let game = crate::test_support::control_bounds(cx, "setup-game")
+            .ok_or_else(|| anyhow::anyhow!("game task is not rendered"))?;
+        cx.simulate_click(game.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
             view.shell.first_run.stage == FirstRunStage::GameChoice
         }));
         assert_eq!(saved_accounts(root.path())?, accounts);
         assert!(!root.path().join("block.toml").exists());
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn a_saved_identity_returns_from_first_run_to_its_center(cx: &mut TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("setup-started"), b"1")?;
+        let (engine, mut receiver) = first_run_engine(root.path())?;
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
+                view.engine = Some(engine);
+                view.begin_first_run(cx);
+                // The center's own Add account action opens the page.
+                view.handle(
+                    crate::UiAction::FirstRun(crate::first_run::Action::Account),
+                    window,
+                    cx,
+                );
+                view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
+                let username = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.username.clone());
+                if let Some(username) = &username {
+                    username.update(cx, |field, cx| field.set_value("Center_Player", cx));
+                }
+                view.start_auth(window, cx);
+            });
+        });
+        finish_local_account_save(&view, cx, &mut receiver, "Center_Player")?;
+        cx.run_until_parked();
+        let account = crate::engine::offline_account("Center_Player")?;
+        let id = crate::account_id(&account);
+        assert!(view.read_with(cx, |view, _| {
+            view.router.tab() == Tab::Onboarding
+                && view.page_spec().page == crate::navigation::Page::FirstRun
+                && view.page_spec().frame == crate::navigation::FrameClass::Management
+                && !view.page_spec().task
+                && view.shell.first_run.stage == FirstRunStage::Overview
+                && view.shell.onboarding.account.as_deref() == Some(id.as_str())
+                && view.selected_account.as_deref() == Some(id.as_str())
+                && view.first_run_account_ready()
+                && !view.busy
+                && !view.pending_play
+                && view.active_run.is_none()
+        }));
+        cx.update(|window, cx| {
+            view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
+        });
+        assert_eq!(saved_accounts(root.path())?.len(), 1);
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -282,7 +332,6 @@ fn cancelling_first_run_account_setup_leaves_no_account_behind(cx: &mut TestAppC
                 view.begin_first_run(cx);
                 view.open_auth_wizard(window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Offline, cx);
-                view.auth_next(cx);
                 let username = view
                     .shell
                     .auth
@@ -291,7 +340,6 @@ fn cancelling_first_run_account_setup_leaves_no_account_behind(cx: &mut TestAppC
                 if let Some(username) = &username {
                     username.update(cx, |field, cx| field.set_value("Cancelled_Player", cx));
                 }
-                view.start_auth(window, cx);
                 view.cancel_auth(window, cx);
                 assert!(view.shell.auth.is_none());
                 assert!(!view.first_run_account_ready());

@@ -34,17 +34,17 @@ rustup component add rustfmt clippy
 just run
 ```
 
-On first launch, Block opens a Home-sized welcome screen, then an Account/Game setup overview. Sign in first or create/import games first; each completed Wizard saves its own result. Recommended setup pins a stable Vanilla release and prepares Java automatically; Custom setup keeps explicit component choices. A source Drawer detects adjacent `.minecraft` games and Minecraft Launcher installations, supports batch selection, and copies games into independent directories without importing credentials or modifying originals. Finish returns Home and begins resource preparation without waiting for downloads. Skip setup preserves any work already saved; unfinished setup resumes after restart. See the [onboarding plan and validation record](docs/onboarding-implementation-plan.md). You can also sign in and create games later, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
+On first launch, Block opens a welcome screen followed by a setup center. You can create or import a game, add an account, or go to Home and do either later; each completed task saves its own result. Recommended setup pre-fills a stable Vanilla release with the current launch defaults for you to review and save. The source Drawer detects adjacent `.minecraft` games and Minecraft Launcher installations, supports batch selection, and copies games into independent directories without importing credentials or modifying originals. The center offers preparation before entering Home, or lets you enter without preparing; an unfinished pack offers to continue its import. Unfinished setup resumes at the center after restart, while unsaved drafts remain in memory only. See the [onboarding plan and validation record](docs/onboarding-implementation-plan.md). You can also sign in and create games later, choose Minecraft and its supported Loader, then select a Profile and Account and press **Play**. Installation shows resource progress and the current task. **Repair** checks and restores declared immutable files while preserving corrupt copies for diagnosis; it does not remove worlds or configuration. Closing Block leaves an accepted game session running; reopening Block reconnects to its supervisor. **Stop** explicitly cancels preparation or asks that supervisor to terminate its game. An abnormal exit or failed start opens local crash help in Block, or in a separate window if the launcher is closed. See [session supervision and crash help](docs/session-supervisor.md) for diagnostics, privacy limits, and interrupted-monitor recovery.
 
-**Import pack** inspects a local Modrinth `.mrpack`, CurseForge manifest ZIP,
-Prism/MultiMC instance ZIP, or plain Minecraft game ZIP before creating a new
-Instance. Modrinth downloads are checked against their declared size, SHA-1 and
-SHA-512; optional client files can be selected, and client overrides are applied
-after common overrides. A plain archive with an uncertain Minecraft or Loader
-target needs an explicit selection. Launcher credentials, local Java paths and
-pack hooks are not imported or executed. An interrupted installation can be
-retried on the same Instance; after restarting Block, choose the original
-archive again to resume.
+**Add Game → Import pack** inspects a local Modrinth `.mrpack`, CurseForge
+manifest ZIP, Prism/MultiMC instance ZIP, or plain Minecraft game ZIP before
+creating a new Instance. Modrinth downloads are checked against their declared
+size, SHA-1 and SHA-512; optional client files can be selected, and client
+overrides are applied after common overrides. A plain archive with an uncertain
+Minecraft or Loader target needs an explicit selection. Launcher credentials,
+local Java paths and pack hooks are not imported or executed. An interrupted
+installation can be retried on the same Instance; after restarting Block, choose
+the original archive again to resume.
 
 Standard CurseForge manifests identify files only by project and file IDs, not
 by a verifiable filename or hash. Block lists those entries and links to the
@@ -106,6 +106,11 @@ Both interfaces reuse `block-launcher`. Source parsers and the pure compiler pro
 The launcher targets macOS ARM64, Windows AMD64/ARM64 and Linux AMD64/ARM64. Planning can target another OS and CPU architecture; execution requires a matching host and Java architecture. Available Java runtimes and native libraries vary by Minecraft version. Linux ARM64 uses explicit official LWJGL substitutions and provisions official Azul runtimes for supported legacy versions. Windows ARM64 also uses official LWJGL substitutions; launcher installation/account/restart flows passed, while game rendering on the test VM is blocked by its missing OpenGL ICD. macOS ARM64 1.16.5 has a recorded GLFW window-icon failure. LWJGL 2-era versions are disabled on ARM64 because the official native binaries are x86/x64 only. See [the platform and legacy compatibility tables](docs/STATUS.md) for tested combinations and remaining limits.
 
 The captured 919-version corpus exercises parsing and planning across all three x64 OS families. It does not establish graphical launch support for every version and platform. Native Pilot checks cover modern and older loader representatives, including legacy Forge and official OptiFine imports; they do not promise every version/loader combination. Actual Microsoft login, world gameplay, normal exit and relaunch remain distinct evidence; a menu or synthetic protocol test does not establish them.
+
+Cmd-Q and normal launcher-window close protect active account saves and ask
+before discarding modified game drafts or stopping a pack import. macOS Dock
+Quit bypasses these guards; finish saving and stop an active import before
+quitting through the Dock.
 
 ## Development commands
 
