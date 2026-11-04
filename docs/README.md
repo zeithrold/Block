@@ -32,6 +32,10 @@ These documents explain feature decisions and implementation scope. Consult
 - [UI refinement plan](ui-refinement-plan.md): the first Milestone III interaction package.
 - [UI and crate boundaries](ui-architecture-proposal.md): manifest ownership, typed navigation and shared page layouts.
 - [Home and management frame](home-management-frame.md): dimensions, navigation and shell transitions.
+- [Task composition research](ui-task-composition-research.md): complex workflows, settings alternatives and reassessment of window geometry.
+- [Visual, flow and motion research](ui-visual-flow-motion-research.md): page hierarchy, continuous player tasks and purposeful transitions.
+- [Settings layout comparison](settings-layout-comparison.md): paired single-content and compact-navigation skeletons with shared content and draft semantics.
+- [Single-pane Settings navigation](settings-single-pane-navigation.md): selected A direction, shared Home dimensions, category guidance and draft-aware return paths.
 - [Crash help design](crash-help-design.md): reference research, recovery overview and log-reader implementation.
 - [Toast and Drawer implementation](toast-drawer-implementation.md): behavior and timing.
 - [First-run onboarding](onboarding-implementation-plan.md): agreed flow, implementation and review.

@@ -1,0 +1,280 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="4910" viewBox="0 0 1580 4910" role="img" aria-labelledby="title desc">
+  <title id="title">Settings comparison: navigation, General, Profile mode and Storage</title>
+  <desc id="desc">Paired design examples. Left is a single-content category index and drill-in page; right is compact persistent category navigation and a bounded content column. Both use the same settings and draft semantics. Values and paths are examples, not observations.</desc>
+  <style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0a0a0a; font-size: 14px }
+    .board-title { font-size: 24px; font-weight: 650 }
+    .board-note { font-size: 14px; fill: #525252 }
+    .panel-label { font-size: 15px; font-weight: 600; fill: #404040 }
+    .chrome-title { font-size: 14px; font-weight: 600 }
+    .title { font-size: 22px; font-weight: 650 }
+    .description { font-size: 14px; fill: #737373 }
+    .label { font-size: 14px; font-weight: 600 }
+    .hint { font-size: 12px; fill: #737373 }
+    .small { font-size: 12px }
+    .nav { font-size: 14px; fill: #525252 }
+    .nav-active { font-size: 14px; font-weight: 600 }
+    .button-label { font-size: 13px; font-weight: 600 }
+    .button-primary { fill: #fafafa; font-size: 13px; font-weight: 600 }
+    .surface { fill: #fff; stroke: #e5e5e5 }
+    .field { fill: #fff; stroke: #d4d4d4 }
+    .subtle { fill: #f5f5f5 }
+    .primary { fill: #171717 }
+    .separator { stroke: #e5e5e5 }
+    .icon { fill: none; stroke: #737373; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+  </style>
+  <defs>
+    <g id="a-frame">
+      <rect class="surface" width="620" height="720" rx="12"/>
+      <path class="icon" d="M27 22 l-6 6 6 6 M21 28 h15"/>
+      <text class="chrome-title" x="47" y="33">设置分类</text>
+      <text class="hint" x="556" y="33">Block</text>
+      <path class="separator" d="M0 56 H620"/>
+    </g>
+    <g id="a-index-frame">
+      <rect class="surface" width="620" height="720" rx="12"/>
+      <text class="chrome-title" x="30" y="33">设置</text>
+      <text class="hint" x="556" y="33">Block</text>
+      <path class="separator" d="M0 56 H620"/>
+    </g>
+    <g id="a-frame-en">
+      <rect class="surface" width="620" height="720" rx="12"/>
+      <path class="icon" d="M27 22 l-6 6 6 6 M21 28 h15"/>
+      <text class="chrome-title" x="47" y="33">Settings categories</text>
+      <text class="hint" x="556" y="33">Block</text>
+      <path class="separator" d="M0 56 H620"/>
+    </g>
+    <g id="b-frame">
+      <rect class="surface" width="864" height="720" rx="12"/>
+      <text class="chrome-title" x="24" y="33">设置</text>
+      <text class="hint" x="800" y="33">Block</text>
+      <path class="separator" d="M0 56 H864"/>
+      <rect class="subtle" x="1" y="57" width="207" height="590"/>
+      <path class="separator" d="M208 56 V648"/>
+      <text class="hint" x="26" y="91">设置分类</text>
+      <text class="nav" x="30" y="130">常规</text>
+      <text class="nav" x="30" y="174">游戏默认设置</text>
+      <text class="nav" x="30" y="218">配置模式</text>
+      <text class="nav" x="30" y="262">下载与网络</text>
+      <text class="nav" x="30" y="306">存储</text>
+    </g>
+    <g id="b-frame-en">
+      <rect class="surface" width="864" height="720" rx="12"/>
+      <text class="chrome-title" x="24" y="33">Settings</text>
+      <text class="hint" x="800" y="33">Block</text>
+      <path class="separator" d="M0 56 H864"/>
+      <rect class="subtle" x="1" y="57" width="207" height="590"/>
+      <path class="separator" d="M208 56 V648"/>
+      <text class="hint" x="26" y="91">Settings categories</text>
+      <text class="nav" x="30" y="130">General</text>
+      <text class="nav" x="30" y="174">Game defaults</text>
+      <text class="nav" x="30" y="218">Profile mode</text>
+      <text class="nav" x="30" y="262">Downloads &amp; network</text>
+      <rect x="14" y="282" width="180" height="36" rx="8" fill="#e5e5e5"/>
+      <text class="nav-active" x="30" y="306">Storage</text>
+    </g>
+    <g id="nav-general"><rect x="14" y="106" width="180" height="36" rx="8" fill="#e5e5e5"/><text class="nav-active" x="30" y="130">常规</text></g>
+    <g id="nav-profiles"><rect x="14" y="194" width="180" height="36" rx="8" fill="#e5e5e5"/><text class="nav-active" x="30" y="218">配置模式</text></g>
+    <g id="nav-storage"><rect x="14" y="282" width="180" height="36" rx="8" fill="#e5e5e5"/><text class="nav-active" x="30" y="306">存储</text></g>
+    <g id="a-footer">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="398" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="420" y="701">取消</text>
+      <rect class="primary" x="478" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="511" y="701">保存更改</text>
+    </g>
+    <g id="a-footer-no-reset">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="398" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="420" y="701">取消</text>
+      <rect class="primary" x="478" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="511" y="701">保存更改</text>
+    </g>
+    <g id="a-footer-no-reset-en">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="669">Unsaved preferences · Save all; Cancel discards and exits</text>
+      <rect class="field" x="398" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="409" y="701">Cancel</text>
+      <rect class="primary" x="478" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="494" y="701">Save changes</text>
+    </g>
+    <g id="b-footer">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="642" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="664" y="701">取消</text>
+      <rect class="primary" x="722" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="755" y="701">保存更改</text>
+    </g>
+    <g id="b-footer-no-reset">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="642" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="664" y="701">取消</text>
+      <rect class="primary" x="722" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="755" y="701">保存更改</text>
+    </g>
+    <g id="b-footer-no-reset-en">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="669">Unsaved preferences · Save all; Cancel discards and exits</text>
+      <rect class="field" x="642" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="653" y="701">Cancel</text>
+      <rect class="primary" x="722" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="738" y="701">Save changes</text>
+    </g>
+    <g id="a-footer-saved">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="669">没有未保存的更改</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="398" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="420" y="701">取消</text>
+      <rect x="478" y="680" width="118" height="32" rx="8" fill="#e5e5e5"/>
+      <text class="hint" x="511" y="701">保存更改</text>
+    </g>
+    <g id="b-footer-saved">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="669">没有未保存的更改</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="642" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="664" y="701">取消</text>
+      <rect x="722" y="680" width="118" height="32" rx="8" fill="#e5e5e5"/>
+      <text class="hint" x="755" y="701">保存更改</text>
+    </g>
+    <g id="a-storage-footer">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="689">位置只读。其他分类的编辑仍属于设置草稿。</text>
+      <rect class="field" x="526" y="668" width="70" height="32" rx="8"/>
+      <text class="button-label" x="548" y="689">关闭</text>
+    </g>
+    <g id="b-storage-footer">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="689">位置只读。其他分类的编辑仍属于设置草稿。</text>
+      <rect class="field" x="770" y="668" width="70" height="32" rx="8"/>
+      <text class="button-label" x="792" y="689">关闭</text>
+    </g>
+    <g id="a-storage-footer-en">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="689">Read-only. Edits in other categories remain in the settings draft.</text>
+      <rect class="field" x="526" y="668" width="70" height="32" rx="8"/>
+      <text class="button-label" x="542" y="689">Close</text>
+    </g>
+    <g id="b-storage-footer-en">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="689">Read-only. Edits in other categories remain in the settings draft.</text>
+      <rect class="field" x="770" y="668" width="70" height="32" rx="8"/>
+      <text class="button-label" x="786" y="689">Close</text>
+    </g>
+    <g id="index-content" transform="translate(30 0)">
+      <text class="title" x="0" y="103">设置</text>
+      <text class="description" x="0" y="130">选择要更改的设置分类。</text>
+      <rect class="field" x="0" y="160" width="560" height="370" rx="10"/>
+      <text class="label" x="18" y="190">常规</text><text class="hint" x="18" y="211">语言 · 外观 · 减少动画</text><path class="icon" d="M530 187 l6 6 -6 6"/>
+      <path class="separator" d="M0 234 H560"/>
+      <text class="label" x="18" y="264">游戏默认设置</text><text class="hint" x="18" y="285">新游戏的内存 · Java · 窗口</text><path class="icon" d="M530 261 l6 6 -6 6"/>
+      <path class="separator" d="M0 308 H560"/>
+      <text class="label" x="18" y="338">配置模式</text><text class="hint" x="18" y="359">实例与配置的组织方式</text><path class="icon" d="M530 335 l6 6 -6 6"/>
+      <path class="separator" d="M0 382 H560"/>
+      <text class="label" x="18" y="412">下载与网络</text><text class="hint" x="18" y="433">下载限制 · 代理 · 连接测试</text><path class="icon" d="M530 409 l6 6 -6 6"/>
+      <path class="separator" d="M0 456 H560"/>
+      <text class="label" x="18" y="486">存储</text><text class="hint" x="18" y="507">自动管理的游戏和缓存位置</text><path class="icon" d="M530 483 l6 6 -6 6"/>
+    </g>
+    <g id="general">
+      <text class="title" x="0" y="103">常规</text>
+      <text class="description" x="0" y="130">让 Block 更符合你的习惯。</text>
+      <text class="label" x="0" y="169">语言</text>
+      <rect class="field" x="0" y="180" width="560" height="36" rx="8"/>
+      <text x="14" y="203">简体中文</text><path class="icon" d="M528 195 l6 6 6 -6"/>
+      <text class="hint" x="0" y="240">立即生效。保存更改会保留此语言；取消会恢复已保存的语言。</text>
+      <text class="label" x="0" y="285">外观</text>
+      <rect class="field" x="0" y="296" width="560" height="36" rx="8"/>
+      <text x="14" y="319">浅色</text><path class="icon" d="M528 311 l6 6 6 -6"/>
+      <text class="label" x="0" y="382">减少动画</text>
+      <rect x="518" y="364" width="42" height="24" rx="12" fill="#d4d4d4"/><circle cx="530" cy="376" r="9" fill="#fff"/>
+      <text class="hint" x="0" y="410">在整个 Block 中使用更简单的过渡动画。</text>
+      <text class="hint" x="0" y="429">始终遵循系统的减少动态效果设置。</text>
+      <rect class="subtle" x="0" y="470" width="560" height="70" rx="10"/>
+      <text class="hint" x="14" y="497">外观和语言会立即预览。保存更改会保留这些选择；</text>
+      <text class="hint" x="14" y="517">取消会恢复已保存的选择。</text>
+    </g>
+    <g id="profile">
+      <text class="title" x="0" y="103">配置模式</text>
+      <text class="description" x="0" y="130">选择实例与配置如何协同工作。</text>
+      <rect x="0" y="158" width="560" height="96" rx="10" fill="#fff" stroke="#a3a3a3" stroke-width="2"/>
+      <text class="label" x="16" y="186">内置配置</text>
+      <rect class="subtle" x="496" y="167" width="48" height="24" rx="7"/><text class="small" x="508" y="184">当前</text>
+      <text class="hint" x="16" y="215">推荐新手使用。一个实例有一个配置及其独立的启动偏好。</text>
+      <rect class="field" x="0" y="267" width="560" height="96" rx="10"/>
+      <text class="label" x="16" y="295">分离配置</text>
+      <text class="hint" x="16" y="324">在多个配置间复用同一个实例，各自拥有独立的账户、内存和 JVM 参数。</text>
+      <text class="hint" x="0" y="398">你可以切换到分离配置一次。现有的实例、配置和文件保持不变。</text>
+      <text class="hint" x="0" y="418">此操作无法撤销。</text>
+      <rect class="field" x="0" y="445" width="200" height="36" rx="8"/>
+      <text class="button-label" x="15" y="468">切换到分离配置…</text>
+      <text class="hint" x="0" y="519">模式更改会立即生效。</text>
+      <text class="hint" x="0" y="541">下方保存和取消仅针对偏好草稿，不会撤销模式转换。</text>
+    </g>
+    <g id="storage">
+      <text class="title" x="0" y="103">存储</text>
+      <text class="description" x="0" y="130">Block 会自动选择游戏和下载的存放位置。</text>
+      <text class="hint" x="0" y="174">便携版将游戏保存在应用旁边；安装版使用全局应用数据文件夹。</text>
+      <text class="hint" x="0" y="194">这些位置由 Block 自动选择，无法在此更改。</text>
+      <text class="label" x="0" y="240">游戏存储</text>
+      <rect class="subtle" x="0" y="252" width="560" height="54" rx="8"/>
+      <text x="14" y="285">/home/player/.local/share/block/games</text>
+      <text class="label" x="0" y="347">下载缓存</text>
+      <rect class="subtle" x="0" y="359" width="560" height="54" rx="8"/>
+      <text x="14" y="392">/home/player/.cache/block/downloads</text>
+      <text class="hint" x="0" y="461">存储位置由 Block 自动管理。</text>
+    </g>
+    <g id="storage-en">
+      <text class="title" x="0" y="103">Storage</text>
+      <text class="description" x="0" y="130">Block chooses where games and downloads live automatically.</text>
+      <text class="hint" x="0" y="174">Portable builds keep games beside the app; installed builds use the global</text>
+      <text class="hint" x="0" y="194">app-data folder. These locations are chosen automatically and cannot be changed here.</text>
+      <text class="label" x="0" y="240">Game storage</text>
+      <rect class="subtle" x="0" y="252" width="560" height="76" rx="8"/>
+      <text x="14" y="280">/home/player/.local/share/block/very-long-library-name/</text>
+      <text x="14" y="301">minecraft-installations-and-profiles</text>
+      <text class="label" x="0" y="369">Download cache</text>
+      <rect class="subtle" x="0" y="381" width="560" height="54" rx="8"/>
+      <text x="14" y="414">/home/player/.cache/block/downloads</text>
+      <text class="hint" x="0" y="483">Locations are managed automatically.</text>
+    </g>
+  </defs>
+  <rect width="1580" height="4910" fill="#f5f5f5"/>
+  <text class="board-title" x="32" y="42">01 / Settings: navigation and context</text>
+  <text class="board-note" x="32" y="70">Design examples, not screenshots. Left A: 620 × 720; right B: 864 × 720 with a 208-wide navigator. Dimensions are hypotheses.</text>
+  <text class="board-note" x="32" y="92">Values, paths and copy added for the comparison are illustrative. The same 560-wide reading column is used in both details.</text>
+
+  <text class="panel-label" x="32" y="132">A · Category index / back returns here</text><text class="panel-label" x="684" y="132">B · Categories remain visible</text>
+  <g transform="translate(32 146)"><use href="#a-index-frame"/><use href="#index-content"/><use href="#a-footer-no-reset"/></g>
+  <g transform="translate(684 146)"><use href="#b-frame"/><use href="#nav-general"/><use href="#general" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="932">A · General / one focused page</text><text class="panel-label" x="684" y="932">B · General / direct category switching</text>
+  <g transform="translate(32 946)"><use href="#a-frame"/><use href="#general" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 946)"><use href="#b-frame"/><use href="#nav-general"/><use href="#general" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="1732">A · Profile mode / conversion is separate</text><text class="panel-label" x="684" y="1732">B · Same immediate, one-way action</text>
+  <g transform="translate(32 1746)"><use href="#a-frame"/><use href="#profile" transform="translate(30 0)"/><use href="#a-footer-no-reset"/></g>
+  <g transform="translate(684 1746)"><use href="#b-frame"/><use href="#nav-profiles"/><use href="#profile" transform="translate(248 0)"/><use href="#b-footer-no-reset"/></g>
+
+  <text class="panel-label" x="32" y="2532">A · Storage / read-only locations</text><text class="panel-label" x="684" y="2532">B · Storage / draft still visible</text>
+  <g transform="translate(32 2546)"><use href="#a-frame"/><use href="#storage" transform="translate(30 0)"/><use href="#a-storage-footer"/></g>
+  <g transform="translate(684 2546)"><use href="#b-frame"/><use href="#nav-storage"/><use href="#storage" transform="translate(248 0)"/><use href="#b-storage-footer"/></g>
+
+  <text class="panel-label" x="32" y="3332">A · Long English text and path / example</text><text class="panel-label" x="684" y="3332">B · Same reading width / example</text>
+  <g transform="translate(32 3346)"><use href="#a-frame-en"/><use href="#storage-en" transform="translate(30 0)"/><use href="#a-storage-footer-en"/></g>
+  <g transform="translate(684 3346)"><use href="#b-frame-en"/><use href="#storage-en" transform="translate(248 0)"/><use href="#b-storage-footer-en"/></g>
+
+  <text class="panel-label" x="32" y="4132">A · General / no unsaved changes</text><text class="panel-label" x="684" y="4132">B · Same disabled Save state</text>
+  <g transform="translate(32 4146)"><use href="#a-frame"/><use href="#general" transform="translate(30 0)"/><use href="#a-footer-saved"/></g>
+  <g transform="translate(684 4146)"><use href="#b-frame"/><use href="#nav-general"/><use href="#general" transform="translate(248 0)"/><use href="#b-footer-saved"/></g>
+</svg>

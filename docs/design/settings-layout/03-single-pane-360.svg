@@ -1,0 +1,289 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1184" height="3360" viewBox="0 0 1184 3360" role="img" aria-labelledby="title desc">
+  <title id="title">Block: 360 by 720 single-pane Settings storyboard</title>
+  <desc id="desc">Twelve static, numbered design frames. Read left to right, then down. The sequence covers categories, shared drafts, scrolling, cross-category validation, correction and leaving. The final two frames inspect English content. All windows are 360 by 720 logical pixels. Example values are illustrative. The exit and saved states are alternative outcomes, not results of executed software.</desc>
+  <style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; fill: #171717 }
+    .heading { font-size: 18px; font-weight: 600 }
+    .label { font-weight: 600 }
+    .small { font-size: 12px; fill: #737373 }
+    .muted { fill: #737373 }
+    .caption { font-size: 12px; fill: #525252 }
+    .board { font-size: 24px; font-weight: 600 }
+    .line { fill: none; stroke: #e5e5e5 }
+    .field { fill: #fff; stroke: #d4d4d4 }
+    .icon { fill: none; stroke: #737373; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+    .primary { fill: #fff; font-weight: 600 }
+    .error { fill: #b42318 }
+    .error-small { font-size: 12px; fill: #b42318 }
+  </style>
+  <defs>
+    <g id="back"><path class="icon" d="M19 12 H5 M12 5 l-7 7 7 7"/></g>
+    <g id="next"><path class="icon" d="m9 5 7 7-7 7"/></g>
+    <g id="down"><path class="icon" d="m6 9 6 6 6-6"/></g>
+    <g id="frame">
+      <rect width="360" height="720" rx="12" fill="#fff" stroke="#dedede"/>
+      <path class="line" d="M0 56 H360 M0 632 H360"/>
+      <use href="#back" x="20" y="16"/>
+      <path class="icon" d="m326 23 10 10 m0-10-10 10"/>
+    </g>
+    <g id="dirty-footer">
+      <text class="small" x="24" y="653">有未保存的更改 · 返回分类不会丢失</text>
+      <rect x="24" y="668" width="312" height="32" rx="10" fill="#171717"/>
+      <text class="primary" x="180" y="689" text-anchor="middle">保存全部更改</text>
+    </g>
+    <g id="clean-footer">
+      <text class="small" x="24" y="653">所有更改已保存</text>
+      <rect x="24" y="668" width="312" height="32" rx="10" fill="#f2f2f2"/>
+      <text class="muted" x="180" y="689" text-anchor="middle">保存全部更改</text>
+    </g>
+    <g id="index-content">
+      <text class="heading" x="56" y="35">设置</text>
+      <text class="muted" x="24" y="92">选择要调整的内容</text>
+      <text class="label" x="24" y="138">常规</text>
+      <text class="small" x="24" y="162">语言、外观与动画</text>
+      <use href="#next" x="312" y="130"/>
+      <path class="line" d="M24 188 H336"/>
+      <text class="label" x="24" y="222">游戏默认设置</text>
+      <text class="small" x="24" y="246">内存、Java 与游戏窗口</text>
+      <use href="#next" x="312" y="214"/>
+      <path class="line" d="M24 272 H336"/>
+      <text class="label" x="24" y="306">配置模式</text>
+      <text class="small" x="24" y="330">实例与配置如何配合</text>
+      <use href="#next" x="312" y="298"/>
+      <path class="line" d="M24 356 H336"/>
+      <text class="label" x="24" y="390">下载与网络</text>
+      <text class="small" x="24" y="414">下载限制、重试与代理</text>
+      <use href="#next" x="312" y="382"/>
+      <path class="line" d="M24 440 H336"/>
+      <text class="label" x="24" y="474">存储</text>
+      <text class="small" x="24" y="498">查看数据与游戏位置</text>
+      <use href="#next" x="312" y="466"/>
+    </g>
+    <g id="game-top">
+      <text class="heading" x="56" y="35">游戏默认设置</text>
+      <text class="small" x="24" y="92">用于默认启动偏好；独立配置可另行调整。</text>
+      <text class="label" x="24" y="136">内存</text>
+      <text x="24" y="168">最大内存（MiB）</text>
+      <rect class="field" x="24" y="182" width="312" height="32" rx="10"/>
+      <text x="36" y="203">4096</text>
+      <text class="small" x="24" y="236">为游戏分配的最大内存。</text>
+      <text class="label" x="24" y="284">Java</text>
+      <text x="24" y="316">Java 来源</text>
+      <rect class="field" x="24" y="330" width="312" height="32" rx="10"/>
+      <text x="36" y="351">自定义 Java</text><use href="#down" x="304" y="334"/>
+      <text x="24" y="394">Java 路径</text>
+      <rect class="field" x="24" y="408" width="312" height="32" rx="10"/>
+      <text x="36" y="429">/opt/jdk-21/bin/java</text>
+      <text class="small" x="24" y="462">填写 Java 可执行文件的位置。</text>
+      <text class="label" x="24" y="510">游戏窗口</text>
+      <text x="24" y="542">窗口尺寸</text>
+      <rect class="field" x="24" y="556" width="312" height="32" rx="10"/>
+      <text x="36" y="577">自定义</text><use href="#down" x="304" y="560"/>
+      <rect x="352" y="80" width="3" height="230" rx="1.5" fill="#d4d4d4"/>
+    </g>
+    <g id="proxy-fields">
+      <text class="label" x="24" y="238">连接</text>
+      <text x="24" y="270">代理</text>
+      <rect class="field" x="24" y="284" width="312" height="32" rx="10"/>
+      <text x="36" y="305">手动代理</text><use href="#down" x="304" y="288"/>
+      <text x="24" y="350">代理地址</text>
+      <text class="small" x="24" y="442">支持 HTTP、HTTPS 与 SOCKS5 URL。</text>
+      <text class="small" x="24" y="462">不支持凭据。测试连接不会保存设置。</text>
+      <rect class="field" x="24" y="486" width="120" height="32" rx="10"/>
+      <text x="84" y="507" text-anchor="middle">测试连接</text>
+      <rect x="352" y="286" width="3" height="260" rx="1.5" fill="#d4d4d4"/>
+    </g>
+  </defs>
+  <rect width="1184" height="3360" fill="#f5f5f5"/>
+  <text class="board" x="24" y="38">Block · 单面板设置 · 360 × 720</text>
+  <text class="caption" x="24" y="64">静态流程研究；窗口与 Home 同尺寸。数字是图板顺序，不是产品中的步骤。数值与路径为示例。</text>
+
+  <text class="label" x="24" y="106">01 · 分类首页 / 无修改</text>
+  <text class="label" x="412" y="106">02 · 修改常规 / 即时预览</text>
+  <text class="label" x="800" y="106">03 · 返回分类 / 草稿仍在</text>
+  <g transform="translate(24 120)">
+    <use href="#frame"/><use href="#index-content"/>
+    <text class="small" x="24" y="653">没有未保存的更改</text>
+    <rect x="24" y="668" width="312" height="32" rx="10" fill="#f2f2f2"/>
+    <text class="muted" x="180" y="689" text-anchor="middle">保存全部更改</text>
+  </g>
+  <g transform="translate(412 120)">
+    <use href="#frame"/><text class="heading" x="56" y="35">常规</text>
+    <text class="muted" x="24" y="92">让 Block 更符合你的习惯。</text>
+    <text class="label" x="24" y="140">语言</text>
+    <rect class="field" x="24" y="154" width="312" height="32" rx="10"/>
+    <text x="36" y="175">简体中文</text><use href="#down" x="304" y="158"/>
+    <text class="label" x="24" y="232">外观</text>
+    <rect class="field" x="24" y="246" width="312" height="32" rx="10"/>
+    <text x="36" y="267">浅色</text><use href="#down" x="304" y="250"/>
+    <text class="label" x="24" y="328">减少动画</text>
+    <rect x="296" y="310" width="40" height="24" rx="12" fill="#171717"/>
+    <circle cx="324" cy="322" r="9" fill="#fff"/>
+    <text class="small" x="24" y="360">始终遵循系统的减少动态效果设置。</text>
+    <path class="line" d="M24 400 H336"/>
+    <text class="small" x="24" y="430">语言、外观和动画会即时预览。</text>
+    <text class="small" x="24" y="450">保存以保留；放弃更改会恢复已保存的偏好。</text>
+    <rect class="field" x="24" y="510" width="168" height="32" rx="10"/>
+    <text x="108" y="531" text-anchor="middle">恢复本分类默认值</text>
+    <use href="#dirty-footer"/>
+  </g>
+  <g transform="translate(800 120)">
+    <use href="#frame"/><use href="#index-content"/>
+    <rect x="240" y="120" width="58" height="24" rx="6" fill="#f2f2f2"/>
+    <text class="small" x="269" y="136" text-anchor="middle">已修改</text>
+    <rect x="20" y="112" width="320" height="64" rx="10" fill="none" stroke="#737373" stroke-width="2"/>
+    <use href="#dirty-footer"/>
+  </g>
+  <text class="caption" x="24" y="866">进入分类，不改变窗口尺寸。</text>
+  <text class="caption" x="412" y="866">开启减少动画；返回不等于取消。</text>
+  <text class="caption" x="800" y="866">恢复常规行焦点；再选择游戏默认设置。</text>
+
+  <text class="label" x="24" y="926">04 · 游戏默认 / 表单顶部</text>
+  <text class="label" x="412" y="926">05 · 同一表单 / 向下滚动</text>
+  <text class="label" x="800" y="926">06 · 下载草稿 / 返回后统一保存</text>
+  <g transform="translate(24 940)">
+    <use href="#frame"/><use href="#game-top"/><use href="#dirty-footer"/>
+  </g>
+  <g transform="translate(412 940)">
+    <use href="#frame"/><text class="heading" x="56" y="35">游戏默认设置</text>
+    <text class="label" x="24" y="92">游戏窗口</text>
+    <text x="24" y="124">宽度（px）</text>
+    <rect class="field" x="24" y="138" width="312" height="32" rx="10"/>
+    <text x="36" y="159">1280</text>
+    <text x="24" y="204">高度（px）</text>
+    <rect class="field" x="24" y="218" width="312" height="32" rx="10"/>
+    <text x="36" y="239">720</text>
+    <text x="24" y="288">全屏</text>
+    <rect x="296" y="270" width="40" height="24" rx="12" fill="#d4d4d4"/><circle cx="308" cy="282" r="9" fill="#fff"/>
+    <text class="label" x="24" y="342">高级</text>
+    <text x="24" y="374">附加 JVM 参数</text>
+    <rect class="field" x="24" y="388" width="312" height="32" rx="10"/>
+    <text class="muted" x="36" y="409">未填写</text>
+    <text x="24" y="458">显示快照版本</text>
+    <rect x="296" y="440" width="40" height="24" rx="12" fill="#d4d4d4"/><circle cx="308" cy="452" r="9" fill="#fff"/>
+    <rect class="field" x="24" y="522" width="168" height="32" rx="10"/>
+    <text x="108" y="543" text-anchor="middle">恢复本分类默认值</text>
+    <rect x="352" y="370" width="3" height="230" rx="1.5" fill="#d4d4d4"/>
+    <use href="#dirty-footer"/>
+  </g>
+  <g transform="translate(800 940)">
+    <use href="#frame"/><text class="heading" x="56" y="35">下载与网络</text>
+    <text x="24" y="100">并行下载数</text>
+    <rect class="field" x="24" y="114" width="312" height="32" rx="10"/><text x="36" y="135">8</text>
+    <text x="24" y="180">重试次数</text>
+    <rect class="field" x="24" y="194" width="312" height="32" rx="10"/><text x="36" y="215">2</text>
+    <text x="24" y="260">下载速度限制（MB/s）</text>
+    <rect class="field" x="24" y="274" width="312" height="32" rx="10"/><text x="36" y="295">0</text>
+    <text class="small" x="24" y="328">0 表示不限速。</text>
+    <text x="24" y="370">代理</text>
+    <rect class="field" x="24" y="384" width="312" height="32" rx="10"/>
+    <text x="36" y="405">手动代理</text><use href="#down" x="304" y="388"/>
+    <text x="24" y="450">代理地址</text>
+    <rect class="field" x="24" y="464" width="312" height="32" rx="10"/><text x="36" y="485">http://</text>
+    <text class="small" x="24" y="530">支持 HTTP、HTTPS 与 SOCKS5 URL。</text>
+    <text class="small" x="24" y="550">不支持凭据。测试连接不会保存设置。</text>
+    <rect class="field" x="24" y="576" width="120" height="32" rx="10"/>
+    <text x="84" y="597" text-anchor="middle">测试连接</text>
+    <use href="#dirty-footer"/>
+  </g>
+  <text class="caption" x="24" y="1686">内存、Java 与路径纵向排列，不缩小正文。</text>
+  <text class="caption" x="412" y="1686">固定导航和保存区；只有正文滚动。</text>
+  <text class="caption" x="800" y="1686">返回分类首页，点击保存全部更改。</text>
+
+  <text class="label" x="24" y="1746">07 · 保存失败 / 定位代理地址</text>
+  <text class="label" x="412" y="1746">08 · 修正输入 / 尚未保存</text>
+  <text class="label" x="800" y="1746">09 · 有草稿时离开设置</text>
+  <g transform="translate(24 1760)">
+    <use href="#frame"/><text class="heading" x="56" y="35">下载与网络</text>
+    <rect x="24" y="80" width="312" height="80" rx="10" fill="#fff3f0"/>
+    <text class="label error" x="36" y="106">更改未保存</text>
+    <text x="36" y="130">请检查下方的代理地址。</text>
+    <text class="small" x="24" y="192">其他分类的修改仍保留在草稿中。</text>
+    <use href="#proxy-fields"/>
+    <rect x="22" y="362" width="316" height="36" rx="11" fill="none" stroke="#737373" stroke-width="2"/>
+    <rect x="24" y="364" width="312" height="32" rx="10" fill="#fff" stroke="#b42318"/>
+    <text x="36" y="385">http://</text><path d="M76 371 V389" stroke="#171717"/>
+    <text class="error-small" x="24" y="419">请输入完整地址，例如 http://127.0.0.1:8080</text>
+    <use href="#dirty-footer"/>
+  </g>
+  <g transform="translate(412 1760)">
+    <use href="#frame"/><text class="heading" x="56" y="35">下载与网络</text>
+    <text class="small" x="24" y="106">修正后保存全部更改，或返回继续编辑。</text>
+    <use href="#proxy-fields"/>
+    <rect class="field" x="24" y="364" width="312" height="32" rx="10"/>
+    <text x="36" y="385">http://127.0.0.1:8080</text>
+    <text class="small" x="24" y="558">尚未测试连接。保存不代表网络测试成功。</text>
+    <use href="#dirty-footer"/>
+  </g>
+  <g transform="translate(800 1760)">
+    <use href="#frame"/><use href="#index-content"/><use href="#dirty-footer"/>
+    <rect x="1" y="1" width="358" height="718" rx="12" fill="#171717" opacity=".22"/>
+    <rect x="16" y="214" width="328" height="296" rx="14" fill="#fff" stroke="#dedede"/>
+    <text class="heading" x="40" y="250">离开设置？</text>
+    <text x="40" y="282">有尚未保存的更改。</text>
+    <text class="small" x="40" y="308">保存将包含所有分类的偏好修改。</text>
+    <rect x="40" y="334" width="280" height="36" rx="10" fill="#171717"/>
+    <text class="primary" x="180" y="357" text-anchor="middle">保存并离开</text>
+    <rect class="field" x="40" y="382" width="280" height="36" rx="10"/>
+    <text class="error" x="180" y="405" text-anchor="middle">放弃更改</text>
+    <rect class="field" x="40" y="430" width="280" height="36" rx="10"/>
+    <text x="180" y="453" text-anchor="middle">继续编辑</text>
+    <rect x="37" y="427" width="286" height="42" rx="12" fill="none" stroke="#737373" stroke-width="2"/>
+    <text class="small" x="40" y="492">关闭对话框会继续编辑，不会放弃更改。</text>
+  </g>
+  <text class="caption" x="24" y="2506">从分类首页保存后到达这里；返回仍去分类首页。</text>
+  <text class="caption" x="412" y="2506">错误解除不等于保存；可返回后选择离开。</text>
+  <text class="caption" x="800" y="2506">保存成功才回 Home；失败则保留草稿并定位问题。</text>
+
+  <text class="label" x="24" y="2566">10 · 普通保存成功 / 留在设置</text>
+  <text class="label" x="412" y="2566">11 · English / 分类名称检查</text>
+  <text class="label" x="800" y="2566">12 · English / 长路径检查</text>
+  <g transform="translate(24 2580)">
+    <use href="#frame"/><use href="#index-content"/>
+    <use href="#clean-footer"/>
+  </g>
+  <g transform="translate(412 2580)">
+    <use href="#frame"/><text class="heading" x="56" y="35">Settings</text>
+    <text class="muted" x="24" y="92">Choose what to adjust</text>
+    <text class="label" x="24" y="138">General</text>
+    <text class="small" x="24" y="162">Language, appearance and motion</text><use href="#next" x="312" y="130"/>
+    <path class="line" d="M24 188 H336"/>
+    <text class="label" x="24" y="222">Game defaults</text>
+    <text class="small" x="24" y="246">Memory, Java and game windows</text><use href="#next" x="312" y="214"/>
+    <path class="line" d="M24 272 H336"/>
+    <text class="label" x="24" y="306">Profile mode</text>
+    <text class="small" x="24" y="330">How instances and profiles work together</text><use href="#next" x="312" y="298"/>
+    <path class="line" d="M24 356 H336"/>
+    <text class="label" x="24" y="390">Downloads &amp; network</text>
+    <text class="small" x="24" y="414">Download limits, retries and proxy</text><use href="#next" x="312" y="382"/>
+    <path class="line" d="M24 440 H336"/>
+    <text class="label" x="24" y="474">Storage</text>
+    <text class="small" x="24" y="498">View data and game locations</text><use href="#next" x="312" y="466"/>
+    <text class="small" x="24" y="653">All changes saved</text>
+    <rect x="24" y="668" width="312" height="32" rx="10" fill="#f2f2f2"/>
+    <text class="muted" x="180" y="689" text-anchor="middle">Save all changes</text>
+  </g>
+  <g transform="translate(800 2580)">
+    <use href="#frame"/><text class="heading" x="56" y="35">Game defaults</text>
+    <text class="label" x="24" y="100">Java</text>
+    <text x="24" y="134">Java source</text>
+    <rect class="field" x="24" y="148" width="312" height="32" rx="10"/>
+    <text x="36" y="169">Custom Java</text><use href="#down" x="304" y="152"/>
+    <text x="24" y="218">Java executable</text>
+    <rect class="field" x="24" y="232" width="312" height="32" rx="10"/>
+    <text x="36" y="253">/home/player/.local/share/…</text>
+    <text class="small" x="24" y="290">Full path</text>
+    <rect x="24" y="306" width="312" height="112" rx="10" fill="#f5f5f5"/>
+    <text x="36" y="334">/home/player/.local/share/</text>
+    <text x="36" y="358">block/runtime/java/</text>
+    <text x="36" y="382">temurin-21.0.7+6/bin/java</text>
+    <text class="small" x="24" y="452">Use the Java executable,</text>
+    <text class="small" x="24" y="472">not its containing folder.</text>
+    <text class="small" x="24" y="653">Unsaved changes · Back keeps your draft</text>
+    <rect x="24" y="668" width="312" height="32" rx="10" fill="#171717"/>
+    <text class="primary" x="180" y="689" text-anchor="middle">Save all changes</text>
+  </g>
+  <text class="caption" x="24" y="3326">分支：点击普通保存，成功反馈不把用户带离设置。</text>
+  <text class="caption" x="412" y="3326">五个入口仍可扫描；不依赖底部横向标签栏。</text>
+  <text class="caption" x="800" y="3326">路径按目录分行示意；不证明原生换行或选择行为。</text>
+</svg>

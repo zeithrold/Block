@@ -2,6 +2,10 @@
 
 Date: 2026-10-24. This is the user-authorized Milestone III geometry/navigation increment. Accepted remains Pending.
 
+Settings has a selected [single-pane design direction](settings-single-pane-navigation.md)
+with the same dimensions as Home. The expanded Settings layout described below
+records the current implementation, not the target for that redesign.
+
 ## Dimensions and rationale
 
 All dimensions below are logical **visible content** pixels. Linux client-frame shadow/border insets are added to the outer window separately.

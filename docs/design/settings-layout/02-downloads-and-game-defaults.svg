@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1580" height="5710" viewBox="0 0 1580 5710" role="img" aria-labelledby="title desc">
+  <title id="title">Settings comparison: Downloads and network, and Game defaults</title>
+  <desc id="desc">Paired design examples show the same manual proxy, validation, test result and expanded game-default fields in a single-content page on the left and a compact navigator plus page on the right. Values, errors and test responses are illustrative, not real diagnostics.</desc>
+  <style>
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #0a0a0a; font-size: 14px }
+    .board-title { font-size: 24px; font-weight: 650 }
+    .board-note { font-size: 14px; fill: #525252 }
+    .panel-label { font-size: 15px; font-weight: 600; fill: #404040 }
+    .chrome-title { font-size: 14px; font-weight: 600 }
+    .title { font-size: 22px; font-weight: 650 }
+    .description { font-size: 14px; fill: #737373 }
+    .label { font-size: 14px; font-weight: 600 }
+    .hint { font-size: 12px; fill: #737373 }
+    .error { font-size: 12px; fill: #e7001b }
+    .success { font-size: 12px; fill: #15803d }
+    .nav { font-size: 14px; fill: #525252 }
+    .nav-active { font-size: 14px; font-weight: 600 }
+    .button-label { font-size: 13px; font-weight: 600 }
+    .button-primary { fill: #fafafa; font-size: 13px; font-weight: 600 }
+    .surface { fill: #fff; stroke: #e5e5e5 }
+    .field { fill: #fff; stroke: #d4d4d4 }
+    .subtle { fill: #f5f5f5 }
+    .primary { fill: #171717 }
+    .separator { stroke: #e5e5e5 }
+    .icon { fill: none; stroke: #737373; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+  </style>
+  <defs>
+    <g id="a-frame">
+      <rect class="surface" width="620" height="720" rx="12"/>
+      <path class="icon" d="M27 22 l-6 6 6 6 M21 28 h15"/>
+      <text class="chrome-title" x="47" y="33">设置分类</text>
+      <text class="hint" x="556" y="33">Block</text>
+      <path class="separator" d="M0 56 H620"/>
+    </g>
+    <g id="b-frame">
+      <rect class="surface" width="864" height="720" rx="12"/>
+      <text class="chrome-title" x="24" y="33">设置</text>
+      <text class="hint" x="800" y="33">Block</text>
+      <path class="separator" d="M0 56 H864"/>
+      <rect class="subtle" x="1" y="57" width="207" height="590"/>
+      <path class="separator" d="M208 56 V648"/>
+      <text class="hint" x="26" y="91">设置分类</text>
+      <text class="nav" x="30" y="130">常规</text>
+      <text class="nav" x="30" y="174">游戏默认设置</text>
+      <text class="nav" x="30" y="218">配置模式</text>
+      <text class="nav" x="30" y="262">下载与网络</text>
+      <text class="nav" x="30" y="306">存储</text>
+    </g>
+    <g id="nav-game"><rect x="14" y="150" width="180" height="36" rx="8" fill="#e5e5e5"/><text class="nav-active" x="30" y="174">游戏默认设置</text></g>
+    <g id="nav-downloads"><rect x="14" y="238" width="180" height="36" rx="8" fill="#e5e5e5"/><text class="nav-active" x="30" y="262">下载与网络</text></g>
+    <g id="a-footer">
+      <path class="separator" d="M0 648 H620"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="398" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="420" y="701">取消</text>
+      <rect class="primary" x="478" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="511" y="701">保存更改</text>
+    </g>
+    <g id="b-footer">
+      <path class="separator" d="M0 648 H864"/>
+      <text class="hint" x="24" y="669">有未保存的偏好 · 保存全部，取消则放弃并离开</text>
+      <rect class="field" x="24" y="680" width="138" height="32" rx="8"/>
+      <text class="button-label" x="36" y="701">恢复默认设置</text>
+      <rect class="field" x="642" y="680" width="70" height="32" rx="8"/>
+      <text class="button-label" x="664" y="701">取消</text>
+      <rect class="primary" x="722" y="680" width="118" height="32" rx="8"/>
+      <text class="button-primary" x="755" y="701">保存更改</text>
+    </g>
+    <g id="downloads-base">
+      <text class="title" x="0" y="103">下载与网络</text>
+      <text class="description" x="0" y="130">控制下载限制和连接偏好。</text>
+      <text class="label" x="0" y="162">下载限制</text>
+      <text x="0" y="194">并行下载数</text>
+      <rect class="field" x="460" y="173" width="100" height="32" rx="8"/><text x="474" y="194">8</text>
+      <text class="hint" x="0" y="214">1–16 个活动对象传输。</text>
+      <text x="0" y="250">重试次数</text>
+      <rect class="field" x="460" y="229" width="100" height="32" rx="8"/><text x="474" y="250">2</text>
+      <text class="hint" x="0" y="270">0–10 次额外尝试。</text>
+      <text x="0" y="306">下载速度限制（MB/s）</text>
+      <rect class="field" x="460" y="285" width="100" height="32" rx="8"/><text x="474" y="306">0</text>
+      <text class="hint" x="0" y="327">0 或留空表示不限速。1 MB/s = 1,000,000 字节/秒；元数据不受限速。</text>
+      <text class="label" x="0" y="366">连接</text>
+      <text x="0" y="398">代理</text>
+      <rect class="field" x="330" y="377" width="230" height="32" rx="8"/><text x="344" y="398">手动代理</text><path class="icon" d="M530 389 l6 6 6 -6"/>
+      <text class="label" x="0" y="440">代理地址</text>
+    </g>
+    <g id="downloads-idle">
+      <use href="#downloads-base"/>
+      <rect class="field" x="0" y="450" width="560" height="34" rx="8"/><text x="14" y="472">http://127.0.0.1:8080</text>
+      <text class="hint" x="0" y="507">支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。</text>
+      <text class="hint" x="0" y="526">不支持凭据。</text>
+      <rect class="field" x="0" y="545" width="112" height="34" rx="8"/><text class="button-label" x="22" y="567">测试连接</text>
+      <text class="hint" x="0" y="607">使用此草稿检查 Mojang 的元数据端点。不会保存任何设置。</text>
+    </g>
+    <g id="downloads-error">
+      <use href="#downloads-base"/>
+      <rect x="-2" y="448" width="564" height="38" rx="9" fill="none" stroke="#a3a3a3" stroke-width="2"/>
+      <rect x="0" y="450" width="560" height="34" rx="8" fill="#fff" stroke="#e7001b" stroke-width="2"/>
+      <text x="14" y="472">http://</text><path d="M59 457 V477" stroke="#0a0a0a"/>
+      <text class="error" x="0" y="505">代理设置无效：请输入完整的代理地址。（示例）</text>
+      <text class="hint" x="0" y="526">支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。</text>
+      <text class="hint" x="0" y="545">不支持凭据。</text>
+      <rect class="field" x="0" y="558" width="112" height="34" rx="8"/><text class="button-label" x="22" y="580">测试连接</text>
+      <text class="hint" x="0" y="616">测试前先验证下载草稿；测试不会保存设置。</text>
+    </g>
+    <g id="downloads-result">
+      <use href="#downloads-base"/>
+      <rect class="field" x="0" y="450" width="560" height="34" rx="8"/><text x="14" y="472">http://127.0.0.1:8080</text>
+      <text class="hint" x="0" y="507">支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。</text>
+      <text class="hint" x="0" y="526">不支持凭据。</text>
+      <rect class="field" x="0" y="545" width="112" height="34" rx="8"/><text class="button-label" x="22" y="567">测试连接</text>
+      <text class="success" x="0" y="605">Mojang 元数据返回 HTTP 200。此测试仅验证该端点；</text>
+      <text class="success" x="0" y="624">设置仍是草稿。（示例结果）</text>
+    </g>
+    <g id="downloads-pending">
+      <use href="#downloads-base"/>
+      <rect class="field" x="0" y="450" width="560" height="34" rx="8"/><text x="14" y="472">http://127.0.0.1:8080</text>
+      <text class="hint" x="0" y="507">支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。</text>
+      <text class="hint" x="0" y="526">不支持凭据。</text>
+      <rect x="0" y="545" width="150" height="34" rx="8" fill="#f5f5f5" stroke="#e5e5e5"/>
+      <text class="hint" x="16" y="567">正在测试连接…</text>
+      <text class="hint" x="0" y="607">正在测试当前草稿的连接…</text>
+    </g>
+    <g id="downloads-failed">
+      <use href="#downloads-base"/>
+      <rect class="field" x="0" y="450" width="560" height="34" rx="8"/><text x="14" y="472">http://127.0.0.1:8080</text>
+      <text class="hint" x="0" y="507">支持 HTTP、HTTPS 和 SOCKS5 URL。使用 socks5h:// 通过代理解析主机名。</text>
+      <text class="hint" x="0" y="526">不支持凭据。</text>
+      <rect class="field" x="0" y="545" width="112" height="34" rx="8"/><text class="button-label" x="22" y="567">测试连接</text>
+      <text class="error" x="0" y="607">连接测试失败：示例连接失败。（示例结果）</text>
+    </g>
+    <g id="game-top">
+      <text class="title" x="0" y="103">游戏默认设置</text>
+      <text class="description" x="0" y="130">为新游戏设置提供舒适的起点。</text>
+      <rect class="subtle" x="0" y="150" width="560" height="54" rx="9"/>
+      <text class="hint" x="14" y="173">默认值会应用于新的实例和配置。现有设置保留当前设置。</text>
+      <text class="label" x="0" y="244">默认内存（GB）</text>
+      <rect class="field" x="402" y="222" width="158" height="34" rx="8"/>
+      <text x="420" y="244">4</text><path class="separator" d="M468 222 V256 M514 222 V256"/>
+      <path class="icon" d="M484 239 h14 M530 239 h14 M537 232 v14"/>
+      <text class="hint" x="0" y="277">允许范围：1–32 GB。步进：1 GB。上下方向键可调整当前值。</text>
+      <text class="label" x="0" y="322">默认 Java 运行时</text>
+      <rect class="field" x="0" y="333" width="560" height="34" rx="8"/><text x="14" y="355">自定义可执行文件</text><path class="icon" d="M528 345 l6 6 6 -6"/>
+      <text class="label" x="0" y="407">Java 可执行文件路径</text>
+      <rect class="field" x="0" y="418" width="560" height="34" rx="8"/><text x="14" y="440">/usr/lib/jvm/java-21-openjdk/bin/java</text>
+      <text class="hint" x="0" y="477">新游戏使用的 Java 可执行文件的绝对路径。</text>
+      <text class="label" x="0" y="522">默认窗口大小</text>
+      <rect class="field" x="0" y="533" width="560" height="34" rx="8"/><text x="14" y="555">1280 × 720 · 自定义</text><path class="icon" d="M528 545 l6 6 6 -6"/>
+      <text class="hint" x="0" y="606">向下滚动以查看窗口尺寸、JVM 参数和其他选项。</text>
+    </g>
+    <g id="game-bottom">
+      <text class="label" x="0" y="94">默认窗口大小</text>
+      <rect class="field" x="0" y="105" width="560" height="34" rx="8"/><text x="14" y="127">1280 × 720 · 自定义</text><path class="icon" d="M528 117 l6 6 6 -6"/>
+      <text class="label" x="0" y="182">窗口宽度（px）</text>
+      <rect class="field" x="400" y="161" width="160" height="32" rx="8"/><text x="414" y="182">1280</text>
+      <text class="hint" x="0" y="205">允许范围：320–16384 像素。</text>
+      <text class="label" x="0" y="248">窗口高度（px）</text>
+      <rect class="field" x="400" y="227" width="160" height="32" rx="8"/><text x="414" y="248">720</text>
+      <text class="hint" x="0" y="271">允许范围：240–16384 像素。</text>
+      <text class="label" x="0" y="315">以全屏启动游戏</text>
+      <rect x="518" y="297" width="42" height="24" rx="12" fill="#d4d4d4"/><circle cx="530" cy="309" r="9" fill="#fff"/>
+      <text class="label" x="0" y="360">默认额外 JVM 参数</text>
+      <rect class="field" x="0" y="371" width="560" height="34" rx="8"/><text x="14" y="393">-Dfile.encoding=UTF-8</text>
+      <text class="hint" x="0" y="430">内存已在上方设置。除非需要额外的启动参数，否则请留空。</text>
+      <text class="label" x="0" y="480">包含快照版本</text>
+      <rect x="518" y="462" width="42" height="24" rx="12" fill="#d4d4d4"/><circle cx="530" cy="474" r="9" fill="#fff"/>
+    </g>
+    <g id="a-scroll-top"><rect x="606" y="67" width="4" height="570" rx="2" fill="#f5f5f5"/><rect x="606" y="67" width="4" height="270" rx="2" fill="#d4d4d4"/></g>
+    <g id="a-scroll-bottom"><rect x="606" y="67" width="4" height="570" rx="2" fill="#f5f5f5"/><rect x="606" y="367" width="4" height="270" rx="2" fill="#d4d4d4"/></g>
+    <g id="b-scroll-top"><rect x="850" y="67" width="4" height="570" rx="2" fill="#f5f5f5"/><rect x="850" y="67" width="4" height="270" rx="2" fill="#d4d4d4"/></g>
+    <g id="b-scroll-bottom"><rect x="850" y="67" width="4" height="570" rx="2" fill="#f5f5f5"/><rect x="850" y="367" width="4" height="270" rx="2" fill="#d4d4d4"/></g>
+  </defs>
+  <rect width="1580" height="5710" fill="#f5f5f5"/>
+  <text class="board-title" x="32" y="42">02 / Settings: technical fields and recovery</text>
+  <text class="board-note" x="32" y="70">Design examples, not screenshots. Left A: 620 × 720; right B: 864 × 720. Both show the same 560-wide content.</text>
+  <text class="board-note" x="32" y="92">All addresses, validation details and HTTP results are illustrative, not observed diagnostics or connection evidence.</text>
+
+  <text class="panel-label" x="32" y="132">A · Downloads / manual proxy expanded</text><text class="panel-label" x="684" y="132">B · Same draft and test action</text>
+  <g transform="translate(32 146)"><use href="#a-frame"/><use href="#downloads-idle" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 146)"><use href="#b-frame"/><use href="#nav-downloads"/><use href="#downloads-idle" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="932">A · Save from General finds an off-page error</text><text class="panel-label" x="684" y="932">B · Same destination, input and focus</text>
+  <g transform="translate(32 946)"><use href="#a-frame"/><use href="#downloads-error" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 946)"><use href="#b-frame"/><use href="#nav-downloads"/><use href="#downloads-error" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="1732">A · Corrected draft / illustrative test response</text><text class="panel-label" x="684" y="1732">B · Same endpoint-only result</text>
+  <g transform="translate(32 1746)"><use href="#a-frame"/><use href="#downloads-result" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 1746)"><use href="#b-frame"/><use href="#nav-downloads"/><use href="#downloads-result" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="2532">A · Game defaults / custom Java and window</text><text class="panel-label" x="684" y="2532">B · Same expanded fields / top of scroll</text>
+  <g transform="translate(32 2546)"><use href="#a-frame"/><use href="#game-top" transform="translate(30 0)"/><use href="#a-scroll-top"/><use href="#a-footer"/></g>
+  <g transform="translate(684 2546)"><use href="#b-frame"/><use href="#nav-game"/><use href="#game-top" transform="translate(248 0)"/><use href="#b-scroll-top"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="3332">A · Game defaults / continued below</text><text class="panel-label" x="684" y="3332">B · Same continuation and draft</text>
+  <g transform="translate(32 3346)"><use href="#a-frame"/><use href="#game-bottom" transform="translate(30 0)"/><use href="#a-scroll-bottom"/><use href="#a-footer"/></g>
+  <g transform="translate(684 3346)"><use href="#b-frame"/><use href="#nav-game"/><use href="#game-bottom" transform="translate(248 0)"/><use href="#b-scroll-bottom"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="4132">A · Connection test / pending</text><text class="panel-label" x="684" y="4132">B · Same pending draft</text>
+  <g transform="translate(32 4146)"><use href="#a-frame"/><use href="#downloads-pending" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 4146)"><use href="#b-frame"/><use href="#nav-downloads"/><use href="#downloads-pending" transform="translate(248 0)"/><use href="#b-footer"/></g>
+
+  <text class="panel-label" x="32" y="4932">A · Connection test / example failure and retry</text><text class="panel-label" x="684" y="4932">B · Same failure and editable draft</text>
+  <g transform="translate(32 4946)"><use href="#a-frame"/><use href="#downloads-failed" transform="translate(30 0)"/><use href="#a-footer"/></g>
+  <g transform="translate(684 4946)"><use href="#b-frame"/><use href="#nav-downloads"/><use href="#downloads-failed" transform="translate(248 0)"/><use href="#b-footer"/></g>
+</svg>
