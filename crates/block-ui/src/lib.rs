@@ -1823,14 +1823,7 @@ impl Render for Block {
         };
         feedback::ToastLayer::reserve_actions(px(action_rail + 12.), window, cx);
         self.prepare_motion(window, cx);
-        let title = self.navigation_title();
-        window.set_window_title(
-            &if self.router.tab() == Tab::Home && self.shell.auth.is_none() {
-                "Block".to_owned()
-            } else {
-                format!("Block · {title}")
-            },
-        );
+        window.set_window_title(&self.native_window_title());
         self.render_shell(window, cx).into_any_element()
     }
 }

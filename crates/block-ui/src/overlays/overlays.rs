@@ -277,6 +277,7 @@ impl Overlays {
                 let gate = build_owner.clone();
                 let confirm = build_owner.clone();
                 let dismiss = build_owner.clone();
+                let title_owner = build_owner.clone();
                 let dialog = if section {
                     dialog
                         .font_family(super::design::FONT_FAMILY)
@@ -303,6 +304,9 @@ impl Overlays {
                                 .px(px(24.))
                                 .flex()
                                 .items_center()
+                                .on_key_down(move |event, window, cx| {
+                                    settings_dialog_back(&title_owner, revision, event, window, cx);
+                                })
                                 .child(
                                     div()
                                         .flex_1()
@@ -408,6 +412,9 @@ impl Render for SurfaceOverlayBody {
         div()
             .relative()
             .w_full()
+            .on_key_down(cx.listener(move |body, event, window, cx| {
+                settings_dialog_back(&body.owner, revision, event, window, cx);
+            }))
             .child(body)
             .children(self.close.as_ref().map(|close| {
                 div()
@@ -416,6 +423,39 @@ impl Render for SurfaceOverlayBody {
                     .right(px(8.))
                     .child(close.clone())
             }))
+    }
+}
+
+fn settings_dialog_back(
+    owner: &WeakEntity<Block>,
+    revision: usize,
+    event: &gpui::KeyDownEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !super::settings::is_back_key(event) {
+        return;
+    }
+    let allowed = owner.upgrade().is_some_and(|owner| {
+        let view = owner.read(cx);
+        view.router.tab() == super::Tab::Settings
+            && view.shell.surfaces.top().is_some_and(|entry| {
+                entry.revision == revision
+                    && matches!(
+                        entry.kind,
+                        Surface::SeparateProfiles | Surface::SettingsExit(_)
+                    )
+            })
+            && !view.settings_form.as_ref().is_some_and(|draft| {
+                draft
+                    .fields()
+                    .iter()
+                    .any(|field| field.read(cx).is_composing())
+            })
+    });
+    if allowed {
+        window.dispatch_action(Box::new(gpui_base::actions::Cancel), cx);
+        cx.stop_propagation();
     }
 }
 
@@ -459,6 +499,18 @@ impl Block {
             .iter()
             .find(|entry| entry.revision == revision)?;
         match &entry.kind {
+            Surface::SeparateProfiles => Some(
+                self.shell
+                    .surfaces
+                    .trigger_focus("cancel-separate", cx)
+                    .tab_stop(true),
+            ),
+            Surface::SettingsExit(_) => Some(
+                self.shell
+                    .surfaces
+                    .trigger_focus("settings-exit-stay", cx)
+                    .tab_stop(true),
+            ),
             Surface::Drawer(Drawer::Accounts | Drawer::Profiles) => self
                 .shell
                 .selector

@@ -442,10 +442,21 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
             view.handle(UiAction::Tab(Tab::Home), window, cx);
         });
     });
-    click(cx, "settings-exit-discard");
-    assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::Home
-        && view.settings_form.is_none()
-        && view.preferences == view.saved_preferences));
+    let discard = click(cx, "settings-exit-discard");
+    let state = view.read_with(cx, |view, _| {
+        (
+            view.router.tab(),
+            view.settings_form.is_none(),
+            view.preferences == view.saved_preferences,
+            view.shell.surfaces.is_open(),
+        )
+    });
+    let viewport = cx.update(|window, _| window.viewport_size());
+    assert_eq!(
+        state,
+        (Tab::Home, true, true, false),
+        "discard={discard:?}, viewport={viewport:?}"
+    );
 }
 
 #[gpui::test]

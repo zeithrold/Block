@@ -585,6 +585,7 @@ impl Block {
         }
         if !closed_select && !self.motion.moving && self.motion.pending_focus.is_empty() {
             super::base_overlay::advance_focus(backwards, window, cx);
+            self.queue_settings_focus_reveal(window, cx);
             return;
         }
         let schedule = self.motion.pending_focus.is_empty();
@@ -604,6 +605,7 @@ impl Block {
                     let _ = owner.update(cx, |view, cx| {
                         for backwards in std::mem::take(&mut view.motion.pending_focus) {
                             super::base_overlay::advance_focus(backwards, window, cx);
+                            view.queue_settings_focus_reveal(window, cx);
                         }
                     });
                 });

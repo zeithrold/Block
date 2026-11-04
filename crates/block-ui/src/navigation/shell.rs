@@ -211,13 +211,7 @@ impl Block {
                 cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
             )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                let modifiers = event.keystroke.modifiers;
-                if event.keystroke.key == "left"
-                    && modifiers.alt
-                    && !modifiers.control
-                    && !modifiers.platform
-                    && !modifiers.shift
-                    && !modifiers.function
+                if super::settings::is_back_key(event)
                     && view.router.tab() == Tab::Settings
                     && !view.composition_in_progress(&UiAction::SettingsBack, cx)
                 {
@@ -327,6 +321,18 @@ impl Block {
             Some(4) => tr!(language, "settings.navigation.storage"),
             _ => tr!(language, "nav.settings"),
         }
+    }
+
+    pub(super) fn native_window_title(&self) -> String {
+        if self.router.tab() == Tab::Home && self.shell.auth.is_none() {
+            return "Block".to_owned();
+        }
+        let title = if self.page_spec().page == super::navigation::Page::Settings {
+            tr!(self.language(), "nav.settings")
+        } else {
+            self.navigation_title()
+        };
+        format!("Block · {title}")
     }
 
     /// Window-chrome icon button: the same Ghost geometry as minimize/close so
@@ -1237,13 +1243,20 @@ impl Block {
             return content.into_any_element();
         }
         let actions = div().px(px(24.)).w_full().flex().gap_2();
-        let (actions, buttons) = if matches!(kind, Surface::SettingsExit(_)) {
-            (actions.flex_col(), self.settings_exit_actions(cx))
+        let compact = matches!(kind, Surface::SettingsExit(_))
+            || matches!(kind, Surface::SeparateProfiles)
+                && super::window_geometry::content_size(window).width < px(520.);
+        let buttons = if matches!(kind, Surface::SettingsExit(_)) {
+            self.settings_exit_actions(cx)
         } else {
-            (
-                actions.justify_end(),
-                self.surface_dialog_actions(&kind, cx),
-            )
+            self.surface_dialog_actions(&kind, cx)
+        };
+        let actions = if compact {
+            actions
+                .flex_col()
+                .children(buttons.into_iter().map(|button| button.w_full()))
+        } else {
+            actions.justify_end().children(buttons)
         };
         // The separator spans the dialog edge to edge, while the actions keep
         // the same inset as the body.
@@ -1258,7 +1271,7 @@ impl Block {
                     .border_color(rgb(self.palette.border))
                     .flex()
                     .justify_end()
-                    .child(actions.children(buttons)),
+                    .child(actions),
             )
             .into_any_element()
     }
@@ -1587,7 +1600,7 @@ impl Block {
                 None => view.handle(UiAction::Drawer(None), window, cx),
             }
         });
-        super::components::button(
+        let control = super::components::button(
             id,
             label,
             self.palette,
@@ -1597,7 +1610,12 @@ impl Block {
                 ..Default::default()
             },
             on_activate,
-        )
+        );
+        if matches!(id, "cancel-separate" | "settings-exit-stay") {
+            control.track_focus(&self.shell.surfaces.trigger_focus(id, cx).tab_stop(true))
+        } else {
+            control
+        }
     }
 }
 

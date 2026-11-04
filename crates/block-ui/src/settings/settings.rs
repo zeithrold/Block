@@ -5,7 +5,12 @@
 //! Validated settings drafts, with defaults applied only to newly created games.
 
 use super::scroll_area::ScrollAreaExt as _;
-use std::{cell::Cell, fmt, path::PathBuf, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    fmt,
+    path::PathBuf,
+    rc::Rc,
+};
 
 use anyhow::ensure;
 use block_launcher::{
@@ -16,10 +21,11 @@ use block_launcher::{
     recipe::{Compatibility, RuntimeSelection},
 };
 use gpui::{
-    Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Window, div, px, rgb,
+    Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement as _, ParentElement as _, Pixels, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
+use gpui_base::ElementExt as _;
 use serde::{Deserialize, Serialize};
 
 use super::components::{ControlState, FieldOptions};
@@ -30,6 +36,16 @@ use super::{
 };
 
 pub(super) const WINDOW_PRESETS: [(u32, u32); 3] = [(854, 480), (1280, 720), (1920, 1080)];
+
+pub(super) fn is_back_key(event: &gpui::KeyDownEvent) -> bool {
+    let modifiers = event.keystroke.modifiers;
+    event.keystroke.key == "left"
+        && modifiers.alt
+        && !modifiers.control
+        && !modifiers.platform
+        && !modifiers.shift
+        && !modifiers.function
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -248,6 +264,106 @@ impl Default for StorageState {
     }
 }
 
+struct FocusRegion {
+    id: String,
+    focus: FocusHandle,
+    bounds: Option<Bounds<Pixels>>,
+}
+
+#[derive(Default)]
+struct SettingsFocus {
+    regions: Rc<RefCell<Vec<FocusRegion>>>,
+}
+
+impl SettingsFocus {
+    fn focus(&self, id: &str, cx: &gpui::App) -> FocusHandle {
+        let mut regions = self.regions.borrow_mut();
+        if let Some(region) = regions.iter().find(|region| region.id == id) {
+            region.focus.clone()
+        } else {
+            let focus = cx.focus_handle();
+            regions.push(FocusRegion {
+                id: id.to_owned(),
+                focus: focus.clone(),
+                bounds: None,
+            });
+            focus
+        }
+    }
+
+    fn observe<E>(&self, id: impl Into<String>, element: E, cx: &gpui::App) -> E
+    where
+        E: gpui::InteractiveElement + gpui::ParentElement,
+    {
+        let id = id.into();
+        let focus = self.focus(&id, cx);
+        self.record(id, element.track_focus(&focus), focus)
+    }
+
+    fn observe_control(
+        &self,
+        id: &'static str,
+        control: components::Control,
+        cx: &gpui::App,
+    ) -> components::Control {
+        let focus = self.focus(id, cx);
+        self.record(id.to_owned(), control.track_focus(&focus), focus)
+    }
+
+    fn record<E>(&self, id: String, element: E, focus: FocusHandle) -> E
+    where
+        E: gpui::ParentElement,
+    {
+        let mut registered = self.regions.borrow_mut();
+        if !registered.iter().any(|region| region.focus == focus) {
+            registered.push(FocusRegion {
+                id,
+                focus: focus.clone(),
+                bounds: None,
+            });
+        }
+        drop(registered);
+        let regions = self.regions.clone();
+        element.on_prepaint(move |bounds, _, _| {
+            let mut regions = regions.borrow_mut();
+            if let Some(region) = regions.iter_mut().find(|region| region.focus == focus) {
+                region.bounds = Some(bounds);
+            }
+        })
+    }
+
+    fn reveal(&self, scroll: &ScrollHandle, window: &Window, cx: &gpui::App) -> bool {
+        let regions = self.regions.borrow();
+        let Some(bounds) = regions.iter().find_map(|region| {
+            region
+                .focus
+                .contains_focused(window, cx)
+                .then_some(region.bounds)
+                .flatten()
+        }) else {
+            return false;
+        };
+        let viewport = scroll.bounds();
+        let top = viewport.top() + px(4.);
+        let bottom = viewport.bottom() - px(4.);
+        let delta = if bounds.size.height > bottom - top || bounds.top() < top {
+            top - bounds.top()
+        } else if bounds.bottom() > bottom {
+            bottom - bounds.bottom()
+        } else {
+            px(0.)
+        };
+        let mut offset = scroll.offset();
+        let next = (offset.y + delta).clamp(-scroll.max_offset().y.max(px(0.)), px(0.));
+        if next == offset.y {
+            return false;
+        }
+        offset.y = next;
+        scroll.set_offset(offset);
+        true
+    }
+}
+
 #[expect(
     clippy::struct_excessive_bools,
     reason = "Independent preferences and retained custom editor modes can coexist."
@@ -273,6 +389,8 @@ pub(super) struct SettingsDraft {
     pub error: Option<SettingsError>,
     pub notice: Option<SettingsNotice>,
     heading: FocusHandle,
+    category_focus: [FocusHandle; 5],
+    focus_regions: SettingsFocus,
     scroll: ScrollHandle,
     category_scroll: [ScrollHandle; 5],
     navigation_scroll: ScrollHandle,
@@ -334,6 +452,8 @@ impl SettingsDraft {
             error: self.error.clone(),
             notice: self.notice,
             heading: cx.focus_handle(),
+            category_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            focus_regions: SettingsFocus::default(),
             scroll,
             category_scroll,
             navigation_scroll,
@@ -382,6 +502,8 @@ impl SettingsDraft {
             error: None,
             notice: None,
             heading: cx.focus_handle(),
+            category_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            focus_regions: SettingsFocus::default(),
             reveal: Rc::new(Cell::new(None)),
             scroll,
             category_scroll,
@@ -843,7 +965,11 @@ impl Block {
             draft.page = page;
             draft.scroll = draft.category_scroll[usize::from(page)].clone();
             draft.error = None;
-            draft.heading.focus(window, cx);
+            if draft.scroll.offset().y < px(0.) {
+                draft.category_focus[usize::from(page)].focus(window, cx);
+            } else {
+                draft.heading.focus(window, cx);
+            }
         }
         cx.notify();
     }
@@ -863,6 +989,38 @@ impl Block {
         if let Some(draft) = &self.settings_form {
             draft.heading.focus(window, cx);
         }
+    }
+
+    pub(super) fn reveal_settings_focus(&self, window: &Window, cx: &mut Context<'_, Self>) {
+        if self.router.tab() != Tab::Settings {
+            return;
+        }
+        if let Some(draft) = &self.settings_form {
+            let scroll = if self.shell.settings_page.is_some() {
+                &draft.scroll
+            } else {
+                &draft.navigation_scroll
+            };
+            if draft.focus_regions.reveal(scroll, window, cx) {
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn queue_settings_focus_reveal(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.router.tab() != Tab::Settings {
+            return;
+        }
+        // Base dispatches Tab after this handler returns. Wait for that focus
+        // change, then use the last painted region bounds to reveal it.
+        let owner = cx.weak_entity();
+        window.on_next_frame(move |window, cx| {
+            let _ = owner.update(cx, |view, cx| view.reveal_settings_focus(window, cx));
+        });
     }
 
     pub(super) fn reset_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1069,7 +1227,8 @@ impl Block {
                 } else {
                     format!("{label}, {description}")
                 };
-                components::button(
+                let focus = draft.navigation_focus[usize::from(index)].clone();
+                let button = components::button(
                     format!("settings-page-{id}"),
                     "",
                     self.palette,
@@ -1080,7 +1239,7 @@ impl Block {
                     }),
                 )
                 .aria_label(accessible)
-                .track_focus(&draft.navigation_focus[usize::from(index)])
+                .track_focus(&focus)
                 .w_full()
                 .h_auto()
                 .min_h(px(72.))
@@ -1101,7 +1260,10 @@ impl Block {
                         .child(note(description).whitespace_normal())
                         .children(modified.then(|| note(modified_label))),
                 )
-                .child(Icon::ChevronRight.render(16., self.palette.muted))
+                .child(Icon::ChevronRight.render(16., self.palette.muted));
+                draft
+                    .focus_regions
+                    .record(format!("index-{id}"), button, focus)
             }))
             .into_any_element()
     }
@@ -1172,6 +1334,7 @@ impl Block {
             .min_h_0()
             .min_w_0()
             .scroll_area(&draft.scroll, "settings.fields", self.palette, false)
+            .track_focus(&draft.category_focus[usize::from(page)])
             .px_6()
             .py_4()
             .flex()
@@ -1190,10 +1353,14 @@ impl Block {
             }))
             .child(body)
             .children(matches!(page, 0 | 1 | 3).then(|| {
-                self.button(
+                draft.focus_regions.observe_control(
                     "reset-preferences",
-                    tr!(language, "settings.restore_defaults"),
-                    UiAction::ResetPreferences,
+                    self.button(
+                        "reset-preferences",
+                        tr!(language, "settings.restore_defaults"),
+                        UiAction::ResetPreferences,
+                        cx,
+                    ),
                     cx,
                 )
             }))
@@ -1207,7 +1374,7 @@ impl Block {
     ) -> gpui::AnyElement {
         match draft.page {
             1 => self.settings_fields(draft, cx),
-            2 => self.settings_profile_mode(cx),
+            2 => self.settings_profile_mode(draft, cx),
             3 => self.settings_downloads(draft, cx),
             4 => self.settings_storage(),
             _ => self.settings_appearance(draft, cx),
@@ -1259,19 +1426,37 @@ impl Block {
 
     fn settings_control(
         &self,
+        draft: &SettingsDraft,
         id: &'static str,
         label: impl Into<SharedString>,
         checked: bool,
         action: UiAction,
         cx: &Context<'_, Self>,
     ) -> components::Control {
-        components::checkbox(
+        let control = components::checkbox(
             id,
             label,
             checked,
             self.palette,
             ControlState::default(),
             cx.listener(move |view, (): &(), window, cx| view.handle(action.clone(), window, cx)),
+        );
+        draft.focus_regions.observe_control(id, control, cx)
+    }
+
+    fn settings_select(
+        &self,
+        draft: &SettingsDraft,
+        id: &'static str,
+        label: impl Into<SharedString>,
+        value: &str,
+        kind: super::select::ProductChoice,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        draft.focus_regions.observe(
+            id,
+            self.product_select_field(id, label, value, kind, cx),
+            cx,
         )
     }
 
@@ -1281,6 +1466,7 @@ impl Block {
         field: SettingsField,
         label: impl Into<SharedString>,
         hint: Option<SharedString>,
+        cx: &Context<'_, Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let language = self.language();
         let error = draft
@@ -1291,7 +1477,7 @@ impl Block {
                 let detail = error.message(language);
                 tr!(language, "settings.error.not_saved", detail = detail).into()
             });
-        patterns::reveal_field(
+        let element = patterns::reveal_field(
             components::field_with(
                 label,
                 draft.input(field),
@@ -1307,7 +1493,10 @@ impl Block {
             field,
         )
         .id(SharedString::from(format!("settings-field-{field:?}")))
-        .debug_selector(move || format!("settings-field-{field:?}"))
+        .debug_selector(move || format!("settings-field-{field:?}"));
+        draft
+            .focus_regions
+            .observe(format!("field-{field:?}"), element, cx)
     }
 
     fn adjust_settings_memory(&mut self, increase: bool, cx: &mut Context<'_, Self>) {
@@ -1350,12 +1539,13 @@ impl Block {
         );
 
         let step = |increase: bool| {
-            components::button_sized(
-                if increase {
-                    "settings-memory-increase"
-                } else {
-                    "settings-memory-decrease"
-                },
+            let id = if increase {
+                "settings-memory-increase"
+            } else {
+                "settings-memory-decrease"
+            };
+            let control = components::button_sized(
+                id,
                 "",
                 self.palette,
                 components::ButtonVariant::Outline,
@@ -1377,7 +1567,8 @@ impl Block {
             .child(
                 if increase { Icon::Plus } else { Icon::Minus }
                     .render(14., self.palette.foreground),
-            )
+            );
+            draft.focus_regions.observe_control(id, control, cx)
         };
         div()
             .min_w_0()
@@ -1389,6 +1580,7 @@ impl Block {
                 SettingsField::Memory,
                 tr!(language, "settings.game.memory.label"),
                 Some(tr!(language, "settings.game.memory.hint").into()),
+                cx,
             ))
             .child(
                 div()
@@ -1424,8 +1616,9 @@ impl Block {
             .flex()
             .flex_col()
             .gap_6()
-            .child(self.settings_language(cx))
-            .child(self.product_select_field(
+            .child(self.settings_language(draft, cx))
+            .child(self.settings_select(
+                draft,
                 "settings-appearance",
                 tr!(language, "select.appearance"),
                 &appearance,
@@ -1438,6 +1631,7 @@ impl Block {
                     .flex_col()
                     .gap_2()
                     .child(self.settings_control(
+                        draft,
                         "reduce-motion",
                         tr!(language, "settings.reduce_motion.label"),
                         draft.reduce_motion,
@@ -1451,13 +1645,14 @@ impl Block {
 
     /// The live language preview on the General page.
     ///
-    fn settings_language(&self, cx: &Context<'_, Self>) -> gpui::Div {
+    fn settings_language(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.product_select_field(
+            .child(self.settings_select(
+                draft,
                 "settings-language",
                 tr!(language, "settings.language.label"),
                 language.self_name(),
@@ -1508,7 +1703,8 @@ impl Block {
                     .gap_4()
                     .child(self.settings_memory_field(draft, cx).flex_1())
                     .child(
-                        self.product_select_field(
+                        self.settings_select(
+                            draft,
                             "settings-default-java",
                             tr!(language, "select.default_java"),
                             &java,
@@ -1524,6 +1720,7 @@ impl Block {
                     SettingsField::Java,
                     tr!(language, "settings.game.java.path.label"),
                     Some(tr!(language, "settings.game.java.path.hint").into()),
+                    cx,
                 )
             }))
             .children(
@@ -1551,7 +1748,8 @@ impl Block {
                         )
                 }),
             )
-            .child(self.product_select_field(
+            .child(self.settings_select(
+                draft,
                 "settings-default-window",
                 tr!(language, "select.default_window"),
                 &window,
@@ -1569,6 +1767,7 @@ impl Block {
                             SettingsField::Width,
                             tr!(language, "settings.game.window.width.label"),
                             Some(tr!(language, "settings.game.window.width.hint").into()),
+                            cx,
                         )
                         .flex_1(),
                     )
@@ -1578,11 +1777,13 @@ impl Block {
                             SettingsField::Height,
                             tr!(language, "settings.game.window.height.label"),
                             Some(tr!(language, "settings.game.window.height.hint").into()),
+                            cx,
                         )
                         .flex_1(),
                     )
             }))
             .child(self.settings_control(
+                draft,
                 "settings-fullscreen",
                 tr!(language, "settings.game.fullscreen.label"),
                 draft.fullscreen,
@@ -1594,8 +1795,10 @@ impl Block {
                 SettingsField::Jvm,
                 tr!(language, "settings.game.jvm.label"),
                 Some(tr!(language, "settings.game.jvm.hint").into()),
+                cx,
             ))
             .child(self.settings_control(
+                draft,
                 "settings-snapshots",
                 tr!(language, "settings.game.snapshots.label"),
                 draft.show_snapshots,
@@ -1626,6 +1829,7 @@ impl Block {
                             SettingsField::Concurrent,
                             tr!(language, "settings.downloads.concurrent.label"),
                             Some(tr!(language, "settings.downloads.concurrent.hint").into()),
+                            cx,
                         )
                         .flex_1(),
                     )
@@ -1635,6 +1839,7 @@ impl Block {
                             SettingsField::Retries,
                             tr!(language, "settings.downloads.retries.label"),
                             Some(tr!(language, "settings.downloads.retries.hint").into()),
+                            cx,
                         )
                         .flex_1(),
                     ),
@@ -1644,8 +1849,10 @@ impl Block {
                 SettingsField::Rate,
                 tr!(language, "settings.downloads.rate.label"),
                 Some(tr!(language, "settings.downloads.rate.hint").into()),
+                cx,
             ))
-            .child(self.product_select_field(
+            .child(self.settings_select(
+                draft,
                 "settings-proxy",
                 tr!(language, "select.proxy"),
                 &proxy,
@@ -1658,9 +1865,14 @@ impl Block {
                     SettingsField::ProxyUrl,
                     tr!(language, "settings.downloads.proxy_url.label"),
                     Some(tr!(language, "settings.downloads.proxy_url.hint").into()),
+                    cx,
                 )
             }))
-            .child(self.render_connection_test(cx))
+            .child(draft.focus_regions.observe(
+                "test-proxy-connection",
+                self.render_connection_test(cx),
+                cx,
+            ))
     }
 
     fn settings_storage(&self) -> gpui::Div {
@@ -1728,7 +1940,7 @@ impl Block {
             )
     }
 
-    fn settings_profile_mode(&self, cx: &Context<'_, Self>) -> gpui::Div {
+    fn settings_profile_mode(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         let separated = self.snapshot.profile_mode == ProfileMode::Separated;
         let card = |title, description, active| {
@@ -1786,10 +1998,14 @@ impl Block {
             )
             .child(note(mode_note))
             .children((!separated).then(|| {
-                self.button(
+                draft.focus_regions.observe_control(
                     "separate-profiles",
-                    tr!(language, "settings.profile_mode.switch"),
-                    UiAction::ConfirmSeparate(true),
+                    self.button(
+                        "separate-profiles",
+                        tr!(language, "settings.profile_mode.switch"),
+                        UiAction::ConfirmSeparate(true),
+                        cx,
+                    ),
                     cx,
                 )
             }))

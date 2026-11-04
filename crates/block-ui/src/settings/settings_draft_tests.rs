@@ -425,6 +425,9 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
         });
         let focus = cx.update(|window, cx| window.focused(cx));
         assert!(focus.is_some());
+        crate::test_support::press(cx, "alt-left");
+        assert!(view.read_with(cx, |view, _| view.shell.settings_page == Some(1)));
+        assert!(input.read_with(cx, |input, _| input.is_composing()));
         for (language, expected_label) in [
             (Language::SimplifiedChinese, "保存全部更改"),
             (Language::Japanese, "すべての変更を保存"),
@@ -1062,6 +1065,19 @@ fn returning_restores_index_and_category_scroll_positions(cx: &mut gpui::TestApp
             .as_ref()
             .is_some_and(|draft| draft.navigation_focus[4].is_focused(window))
     }));
+    crate::test_support::press(cx, "shift-tab");
+    cx.update(|window, cx| window.simulate_next_frame(cx));
+    settings_frame(cx);
+    let downloads = cx.debug_bounds("settings-page-downloads");
+    assert!(cx.update(|window, cx| {
+        view.read(cx).settings_form.as_ref().is_some_and(|draft| {
+            draft.navigation_focus[3].is_focused(window)
+                && downloads.is_some_and(|row| {
+                    let viewport = draft.navigation_scroll.bounds();
+                    row.top() >= viewport.top() && row.bottom() <= viewport.bottom()
+                })
+        })
+    }));
     view.update_in(cx, |view, window, cx| {
         view.handle(UiAction::SettingsPage(1), window, cx)
     });
@@ -1091,6 +1107,81 @@ fn returning_restores_index_and_category_scroll_positions(cx: &mut gpui::TestApp
             .map(|draft| draft.scroll.offset())),
         game_offset
     );
+    assert!(cx.update(|window, cx| {
+        view.read(cx)
+            .settings_form
+            .as_ref()
+            .is_some_and(|draft| !draft.heading.is_focused(window))
+    }));
+    crate::test_support::press(cx, "tab");
+    cx.update(|window, cx| window.simulate_next_frame(cx));
+    settings_frame(cx);
+    let field = cx.debug_bounds("settings-field-Memory");
+    let focus_state = cx.update(|window, cx| {
+        view.read(cx).settings_form.as_ref().map(|draft| {
+            (
+                window.focused(cx),
+                draft.memory.read(cx).focus_handle(cx),
+                draft.scroll.bounds(),
+                draft.scroll.offset(),
+            )
+        })
+    });
+    assert!(
+        cx.update(|window, cx| {
+            view.read(cx).settings_form.as_ref().is_some_and(|draft| {
+                draft.memory.read(cx).focus_handle(cx).is_focused(window)
+                    && field.is_some_and(|field| {
+                        let viewport = draft.scroll.bounds();
+                        field.top() >= viewport.top() && field.bottom() <= viewport.bottom()
+                    })
+            })
+        }),
+        "focus={focus_state:?}, field={field:?}"
+    );
+    for (index, key) in [
+        "tab",
+        "tab",
+        "tab",
+        "tab",
+        "tab",
+        "tab",
+        "shift-tab",
+        "shift-tab",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        crate::test_support::press(cx, key);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        settings_frame(cx);
+        let focused = cx.update(|window, cx| {
+            view.read(cx).settings_form.as_ref().and_then(|draft| {
+                let viewport = draft.scroll.bounds();
+                draft
+                    .focus_regions
+                    .regions
+                    .borrow()
+                    .iter()
+                    .find_map(|region| {
+                        region.focus.contains_focused(window, cx).then_some((
+                            region.id.clone(),
+                            region.bounds,
+                            viewport,
+                        ))
+                    })
+            })
+        });
+        assert!(
+            focused.as_ref().is_some_and(|(_, bounds, viewport)| {
+                bounds.is_some_and(|bounds| {
+                    bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+                })
+            }),
+            "{index} {key}: {focused:?}, focused={:?}",
+            cx.update(|window, cx| window.focused(cx))
+        );
+    }
 }
 
 #[gpui::test]
@@ -1283,4 +1374,134 @@ fn alt_left_dismisses_select_before_returning_to_the_index(cx: &mut gpui::TestAp
         view.read_with(cx, |view, _| view.shell.settings_page.is_none()
             && view.router.tab() == Tab::Settings)
     );
+}
+
+#[gpui::test]
+fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpui::TestAppContext) {
+    use gpui_component::WindowExt as _;
+
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.router.navigate(Tab::Home);
+        view.preferences.reduce_motion = true;
+        view.saved_preferences.reduce_motion = true;
+        view
+    });
+    cx.simulate_resize(size(px(360.), px(720.)));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::Tab(Tab::Settings), window, cx);
+        view.handle(UiAction::SettingsPage(2), window, cx);
+        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+    });
+    settings_frame(cx);
+    assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+    let initial_focus = cx.update(|window, cx| window.focused(cx));
+    crate::test_support::press(cx, "shift-tab");
+    settings_frame(cx);
+    assert_ne!(cx.update(|window, cx| window.focused(cx)), initial_focus);
+    crate::test_support::press(cx, "alt-left");
+    settings_frame(cx);
+    assert!(view.read_with(cx, |view, _| {
+        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(2)
+    }));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+    });
+    settings_frame(cx);
+    let initial_focus = cx.update(|window, cx| window.focused(cx));
+    crate::test_support::press(cx, "tab");
+    settings_frame(cx);
+    assert_ne!(cx.update(|window, cx| window.focused(cx)), initial_focus);
+    crate::test_support::press(cx, "alt-left");
+    settings_frame(cx);
+    assert!(view.read_with(cx, |view, _| {
+        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(2)
+    }));
+    view.update_in(cx, |view, window, cx| {
+        view.preview_appearance(Appearance::Dark);
+        view.handle(UiAction::SettingsBack, window, cx);
+        view.handle(UiAction::SettingsBack, window, cx);
+    });
+    settings_frame(cx);
+    assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+    crate::test_support::press(cx, "alt-left");
+    settings_frame(cx);
+    assert!(view.read_with(cx, |view, _| {
+        !view.shell.surfaces.is_open()
+            && view.shell.settings_page.is_none()
+            && view.router.tab() == Tab::Settings
+            && view.preferences.appearance == Appearance::Dark
+    }));
+}
+
+#[gpui::test]
+fn separated_profile_confirmation_actions_fit_the_home_frame(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.router.navigate(Tab::Settings);
+        view.preferences.reduce_motion = true;
+        view.open_settings(cx);
+        view.select_settings_page(2, window, cx);
+        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+        view
+    });
+    cx.simulate_resize(size(px(360.), px(720.)));
+    settings_frame(cx);
+    let cancel = crate::test_support::control_bounds(cx, "cancel-separate");
+    let confirm = crate::test_support::control_bounds(cx, "confirm-separate");
+    assert!(
+        cancel.zip(confirm).is_some_and(|(cancel, confirm)| {
+            cancel.left() >= px(0.)
+                && cancel.right() <= px(360.)
+                && confirm.left() >= px(0.)
+                && confirm.right() <= px(360.)
+                && cancel.bottom() <= confirm.top()
+        }),
+        "cancel={cancel:?}, confirm={confirm:?}"
+    );
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::ConfirmSeparate(false), window, cx);
+    });
+    cx.simulate_resize(size(px(960.), px(720.)));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+    });
+    settings_frame(cx);
+    let cancel = crate::test_support::control_bounds(cx, "cancel-separate");
+    let confirm = crate::test_support::control_bounds(cx, "confirm-separate");
+    assert!(
+        cancel.zip(confirm).is_some_and(|(cancel, confirm)| {
+            cancel.left() >= px(0.)
+                && confirm.right() <= px(960.)
+                && cancel.right() <= confirm.left()
+                && cancel.top() == confirm.top()
+        }),
+        "cancel={cancel:?}, confirm={confirm:?}"
+    );
+}
+
+#[gpui::test]
+fn native_settings_title_stays_stable_while_chrome_names_each_category(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.router.navigate(Tab::Settings);
+        view.preferences.language = Some(Language::English);
+        view.open_settings(cx);
+        view
+    });
+    for (page, title) in [
+        (0, "General"),
+        (1, "Game defaults"),
+        (2, "Profile mode"),
+        (3, "Downloads & network"),
+        (4, "Storage"),
+    ] {
+        view.update_in(cx, |view, window, cx| {
+            view.select_settings_page(page, window, cx);
+            assert_eq!(view.native_window_title(), "Block · Settings");
+            assert_eq!(view.navigation_title(), title);
+        });
+    }
 }
