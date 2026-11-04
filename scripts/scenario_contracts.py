@@ -115,6 +115,20 @@ _add("auth-complete", "Your account is ready", "Zeithrold", "Save and use")
 _add("auth-saving", "Saving your account", "Block is saving the refresh credential")
 _add("auth-error", "Sign-in needs your attention", "The authorization request expired.")
 
+_add("settings-index", "Choose what to adjust", "Game defaults", "Downloads & network")
+_add(
+    "settings-exit-dirty",
+    "Return to Home?",
+    "Save and leave",
+    "Discard changes",
+    "Keep editing",
+)
+_add(
+    "settings-invalid-proxy",
+    "Downloads & network",
+    "Changes were not saved.",
+    "Proxy settings are invalid",
+)
 _add("settings-general", "General", "Appearance")
 _add("settings-game", "Game defaults", "Defaults apply to new Instances and Profiles.")
 _add("settings-profiles", "Profile mode", "Separated Profile")

@@ -105,6 +105,25 @@ class ScenarioContractsTest(unittest.TestCase):
                 self.assertEqual(contract(name)["title"], "Block · Settings")
                 self.assertEqual(contract(name)["viewport"], HOME_VIEWPORT)
 
+    def test_settings_index_exit_and_validation_have_distinct_contracts(self) -> None:
+        index = contract("settings-index")
+        self.assertIn("Choose what to adjust", index["required"])
+        self.assertIn("Downloads & network", index["required"])
+
+        exit_dialog = contract("settings-exit-dirty")
+        for phrase in (
+            "Return to Home?",
+            "Save and leave",
+            "Discard changes",
+            "Keep editing",
+        ):
+            self.assertIn(phrase, exit_dialog["required"])
+
+        invalid = contract("settings-invalid-proxy")
+        self.assertIn("Changes were not saved.", invalid["required"])
+        self.assertIn("Proxy settings are invalid", invalid["required"])
+        self.assertNotIn("Choose what to adjust", invalid["required"])
+
 
 if __name__ == "__main__":
     unittest.main()
