@@ -177,6 +177,7 @@ def contract(name: str) -> dict[str, object]:
         raise KeyError(f"native scenario has no visual contract: {name}")
     home = (
         name.startswith("home-")
+        or name.startswith("settings-")
         or name.startswith("toast-")
         or name == "download-files"
         or name in _WELCOME_FRAME_SCENARIOS

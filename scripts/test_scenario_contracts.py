@@ -97,6 +97,14 @@ class ScenarioContractsTest(unittest.TestCase):
                 self.assertEqual(contract(name)["title"], f"Block · {title}")
                 self.assertEqual(contract(name)["viewport"], MANAGEMENT_VIEWPORT)
 
+    def test_settings_scenarios_use_the_home_sized_frame(self) -> None:
+        settings = {name for name in scenario_names() if name.startswith("settings-")}
+        self.assertTrue(settings)
+        for name in settings:
+            with self.subTest(name=name):
+                self.assertEqual(contract(name)["title"], "Block · Settings")
+                self.assertEqual(contract(name)["viewport"], HOME_VIEWPORT)
+
 
 if __name__ == "__main__":
     unittest.main()
