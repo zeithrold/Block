@@ -11,8 +11,9 @@ accommodate that board.
 
 The goal is to find a setting, edit it and return without losing orientation
 or mistaking navigation for saving. Prefer a shallow, predictable hierarchy
-over exposing all destinations at once. This document proposes interaction
-and content organization; it does not change production behavior.
+over exposing all destinations at once. The design study below records the
+selected direction; [implementation and native evidence](#implementation-and-native-evidence)
+distinguishes the delivered behavior from the static storyboard.
 
 ## Official patterns inspected
 
@@ -90,7 +91,7 @@ focus follows the new context; returning restores the originating row.
 ## Make saving understandable without a sidebar
 
 Preserve the current shared draft and
-[save-all validation boundary](../crates/block-ui/src/settings/settings.rs#L856-L928).
+[save-all validation boundary](../crates/block-ui/src/settings/settings.rs#L1043-L1125).
 Narrow layout is not a reason to invent independent per-category persistence.
 
 - Keep a consistent bottom action area with **Save all changes** as the primary
@@ -153,8 +154,8 @@ This is a starting budget, not a rendered-fit claim.
   assume the old 72 px footer fits every state.
 
 Category return should preserve a useful reading position. The
-[current category switch resets scroll to the top](../crates/block-ui/src/settings/settings.rs#L823-L836);
-return restoration is therefore proposed work, not an existing guarantee.
+[implemented category switch](../crates/block-ui/src/settings/settings.rs#L956-L975)
+retains its scroll handle and focuses the visible viewport on return.
 Field-error navigation deliberately overrides a saved scroll position to
 reveal the field needing correction.
 
@@ -235,13 +236,78 @@ checked. The rendered Chinese and English samples fit their shown body and
 action regions; this does not establish automatic wrapping for different text.
 Captures are scratch evidence; the SVG is the maintained design artifact.
 
-The next step is an interactive prototype of the same sequence: category
-return, retained drafts, first-error routing, correction and Save-and-leave.
-Check actual focus restoration, keyboard/IME, title-bar Close, persistence
-failure, interrupted navigation and reduced motion. Add long translations and
-scaled text rather than treating manually placed labels as responsive evidence.
+The static study's validation scope is separate from the implementation evidence
+below. Manually placed labels are not responsive-layout evidence.
 
 No production code, build or behavioral test suite ran for this static study.
 It does not establish scrolling, accessibility, motion comfort, dark-theme
 appearance or unchanged runtime window bounds. Native Linux ARM64 interaction
 remains required for implementation acceptance.
+
+## Implementation and native evidence
+
+Candidate `cd7ff3125b4fcf35419dffed07e70a3104650cc4` implements the selected
+navigation without changing Home's composition:
+
+- [PageSpec](../crates/block-ui/src/navigation/navigation.rs#L245-L278) assigns
+  Settings the Home frame and single-pane host. The category heading changes
+  in the custom chrome; the [native title](../crates/block-ui/src/navigation/shell.rs#L326-L335)
+  remains localized `Block · Settings`.
+- [Category navigation](../crates/block-ui/src/settings/settings.rs#L956-L1023)
+  retains reading position, restores the originating index row, and reveals
+  controls reached through keyboard traversal. Category changes settle
+  immediately rather than retaining an inert outgoing form.
+- [Save all](../crates/block-ui/src/settings/settings.rs#L1043-L1125) validates
+  the shared draft and remains in Settings. Dirty exits distinguish Home,
+  native Close and Quit; failures keep the draft. One-way Profile conversion
+  remains separate from preference rollback.
+- Narrow confirmation actions stack. Alt+Left cancels an active Settings
+  dialog before navigating the underlying page.
+
+### Executed checks
+
+| Host | Evidence |
+| --- | --- |
+| macOS ARM64 | Full `just check` passed on the initial implementation. The focused repair passed workspace strict `just clippy`; the integrated candidate passed `just fmt-check`, `cargo test --locked --package block-ui` (582 unit + 3 framework tests), `cargo build --locked --package block-app --bin block`, seven scenario-contract Python tests and `git diff --check`. |
+| Windows ARM64 | The integrated candidate passed `cargo test --locked --package block-ui` (581 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. |
+| Linux ARM64 | Initial implementation passed 579 unit + 3 framework tests. Desktop build and final native verification are blocked by insufficient free disk space. |
+| Windows AMD64 | Initial full package run had one discard-navigation failure; the unchanged isolated rerun passed. The assertion remains intact with stronger diagnostics. Final full-suite rerun is pending disk space. |
+| Linux AMD64 | Integrated candidate passed `cargo build --locked --package block-app --bin block`; native light-theme index, General and dirty Close dialog were inspected on Debian/XFCE X11. |
+
+On macOS ARM64, all nine Settings scenarios passed strict title, logical
+dimensions, PNG scale and required-text validation in both light and dark
+themes: **18 captures at 360 × 720**. Representative Game, Profile mode,
+SOCKS5, Storage and dirty-exit images were visually inspected. Native
+interaction also verified the stacked conversion dialog, Alt+Left dismissal
+without leaving Profile mode, retained Game scrolling, and Tab revealing the
+Memory field and label after return.
+
+On Windows ARM64 at 200% display scaling, native dark-theme Profile mode and
+the stacked conversion confirmation were inspected. Alt+Left dismissed the
+confirmation without leaving the category. The 724 × 1442 outer window
+includes native borders; it is not a 724 px logical content requirement.
+
+On Linux AMD64, the 402 × 762 outer bounds include client-side frame insets.
+Native interaction verified index-to-General navigation, motion-preview edits,
+the native Close guard, Alt+Left dismissing that guard without leaving Settings,
+and Discard closing the window. The window-capture path produced horizontal
+black bands while a simultaneous desktop capture showed intact content;
+desktop captures, not the corrupted window images, supplied the visual evidence.
+AT-SPI reads exposed controls, but subsequent token actions reported expired
+objects; desktop pointer input supplied the tested actions.
+
+An earlier native macOS normal-engine run verified cross-category Save from
+Storage, saved memory/motion preferences after restart, Chinese live preview,
+and discard through the native Close prompt. Scenario fixtures have no engine:
+they establish validation and draft retention, not successful persistence.
+Local native artifacts are under `target/settings-single-pane/` and
+`target/parity-shots/native/`.
+
+### Acceptance limits
+
+Acceptance remains pending required Linux ARM64 native interaction and the
+remaining platform checks. Static captures and GPUI test windows do not establish
+native IME composition, completed application Quit, game survival after launcher
+closure, or subjective motion comfort. No macOS AMD64 host was exercised.
+Independent source reviews accepted the draft lifecycle and scoped layout
+repairs; they do not substitute for these native checks.

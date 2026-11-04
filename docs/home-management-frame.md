@@ -2,9 +2,9 @@
 
 Date: 2026-10-24. This is the user-authorized Milestone III geometry/navigation increment. Accepted remains Pending.
 
-Settings has a selected [single-pane design direction](settings-single-pane-navigation.md)
-with the same dimensions as Home. The expanded Settings layout described below
-records the current implementation, not the target for that redesign.
+Settings now uses the [single-pane layout](settings-single-pane-navigation.md#implementation-and-native-evidence)
+at Home's 360 × 720 dimensions. The expanded Settings examples and measurements
+below are historical evidence for the earlier management frame.
 
 ## Dimensions and rationale
 
@@ -20,7 +20,7 @@ All dimensions below are logical **visible content** pixels. Linux client-frame 
 
 The sidebar is 31.25% of the default management frame. The choice starts with Home's content budget: 24 px side padding leaves 312 px for the existing primary action and its profile selector. The management content budget accommodates the existing 608 px forms plus surrounding space. The 8 px grid and a common height/header keep both frames related without adding a Home dashboard or changing its composition. The preferred management ratio is a product choice, not a universal design rule. For comparison, Microsoft's [NavigationView default expanded pane](https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.controls.navigationview.openpanelength?view=winrt-28000) is 320 DIP; Block uses 360 to preserve its Home action budget and the requested width equality.
 
-Accounts/Games, Settings, providers, About, game setup, account setup and Welcome share the fixed desktop sidebar token. Management pages use the side-by-side sidebar and content layout, with a 72 px action footer.
+Accounts/Games, providers, About, game setup, account setup and Welcome share the fixed desktop sidebar token. Management pages use the side-by-side sidebar and content layout, with a 72 px action footer. Settings instead uses a category index and single-pane detail at Home's size, with its own shared save-all footer.
 
 Startup centers the fixed expanded frame before showing Home. Navigation changes width while retaining the current height and top-left position. Window sizes are independent of screen space. The launcher window is not manually resizable.
 
