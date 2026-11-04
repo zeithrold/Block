@@ -248,6 +248,21 @@ impl Block {
             if !page_changed && (detail_changed || wizard_changed) {
                 self.motion.page.settle();
             }
+            // Single-pane navigation is immediately interactive. Its body does
+            // not retain a second, overlapping focus tree during a drill-in.
+            if spec.layout == super::navigation::LayoutKind::SinglePane {
+                self.motion.detail.settle();
+            }
+            if page_changed
+                && !frame_changed
+                && (spec.layout == super::navigation::LayoutKind::SinglePane
+                    || self.motion.page.outgoing().is_some_and(|layer| {
+                        layer._snapshot.page_spec().layout
+                            == super::navigation::LayoutKind::SinglePane
+                    }))
+            {
+                self.motion.page.settle();
+            }
             self.motion_dirty = false;
         }
         if self.motion.frame.active() {
@@ -765,6 +780,7 @@ mod policy_tests {
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.handle(UiAction::Tab(Tab::Home), window, cx);
+                view.handle(UiAction::SettingsExitDiscard, window, cx);
             });
         });
         cx.run_until_parked();

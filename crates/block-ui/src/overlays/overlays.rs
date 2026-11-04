@@ -271,6 +271,7 @@ impl Overlays {
                     return dialog;
                 };
                 let section = matches!(kind, Surface::WizardSection(_));
+                let settings_exit = matches!(kind, Surface::SettingsExit(_));
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
                 let body = body.clone();
                 let gate = build_owner.clone();
@@ -317,10 +318,11 @@ impl Overlays {
                     .close_button(false)
                     .content(move |content, _window, _cx| content.child(body.clone()))
                     .on_cancel(move |_, _, cx| {
-                        gate.upgrade().is_none_or(|view| {
-                            let view = view.read(cx);
-                            !(view.busy && !view.can_stop())
-                        })
+                        settings_exit
+                            || gate.upgrade().is_none_or(|view| {
+                                let view = view.read(cx);
+                                !(view.busy && !view.can_stop())
+                            })
                     })
                     .on_ok(move |_, window, cx| {
                         let allowed = confirm.upgrade().is_none_or(|view| {
@@ -545,6 +547,7 @@ impl Surface {
             Self::SeparateProfiles => "separate_profiles",
             Self::StopPackImport { .. } => "stop_pack_import",
             Self::DiscardGameDraft { .. } => "discard_game_draft",
+            Self::SettingsExit(_) => "settings_exit",
             Self::GamesHelp => "games_help",
             Self::WizardSection(super::WizardPage::Version) => "wizard_version",
             Self::WizardSection(super::WizardPage::Loader) => "wizard_loader",
@@ -580,6 +583,7 @@ impl Surface {
             Self::SeparateProfiles => tr!(language, "action.enable_separated"),
             Self::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
             Self::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
+            Self::SettingsExit(_) => tr!(language, "settings.exit.home_title"),
             Self::GamesHelp => tr!(language, "surface.games_help"),
             Self::WizardSection(page) => match page {
                 super::WizardPage::Version => tr!(language, "surface.wizard_version"),
@@ -613,6 +617,7 @@ impl Surface {
             | Self::SeparateProfiles
             | Self::StopPackImport { .. }
             | Self::DiscardGameDraft { .. }
+            | Self::SettingsExit(_)
             | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
         }
     }

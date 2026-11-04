@@ -43,6 +43,10 @@ impl Block {
                 Page::FirstRun => self.first_run_page(window, cx),
                 _ => unreachable!("plain layout requires a plain page"),
             },
+            LayoutKind::SinglePane => match spec.page {
+                Page::Settings => self.render_settings(cx).into_any_element(),
+                _ => unreachable!("single-pane layout requires a single-pane page"),
+            },
             LayoutKind::Management => {
                 let (slots, palette, transition_detail, id) = match spec.page {
                     Page::Browser => (
@@ -59,15 +63,6 @@ impl Block {
                         },
                         true,
                         "providers-page",
-                    ),
-                    Page::Settings => (
-                        self.render_settings(cx),
-                        Palette {
-                            sidebar: self.palette.background,
-                            ..self.palette
-                        },
-                        true,
-                        "settings-page",
                     ),
                     Page::About => (self.render_about(cx), self.palette, false, "about-page"),
                     _ => unreachable!("management layout requires a management page"),

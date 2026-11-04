@@ -17,17 +17,18 @@ fn page_spec_shares_the_rendered_page_and_detail_transition_identity(cx: &mut Te
     view.update_in(cx, |view, window, cx| {
         view.handle(UiAction::Tab(Tab::Settings), window, cx);
     });
-    cx.run_until_parked();
-    let before = view.read_with(cx, |view, _| view.page_spec());
-    assert_eq!(before.page, Page::Settings);
-    assert!(crate::test_support::control_bounds(cx, "settings-appearance").is_some());
+    frame(cx, 400);
+    let index = view.read_with(cx, |view, _| view.page_spec());
+    assert_eq!(index.page, Page::Settings);
+    assert!(view.read_with(cx, |view, _| view.shell.settings_page.is_none()));
+    assert!(crate::test_support::control_bounds(cx, "settings-page-general").is_some());
     view.update_in(cx, |view, window, cx| {
         view.handle(UiAction::SettingsPage(1), window, cx);
     });
-    let after = view.read_with(cx, |view, _| view.page_spec());
-    assert_eq!(after.page, before.page);
-    assert_eq!(after.key, before.key);
-    assert_ne!(after.detail, before.detail);
+    let category = view.read_with(cx, |view, _| view.page_spec());
+    assert_eq!(category.page, index.page);
+    assert_eq!(category.key, index.key);
+    assert_ne!(category.detail, index.detail);
 }
 
 #[gpui::test]
@@ -75,7 +76,7 @@ fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &m
     cx.run_until_parked();
     let native = cx.update(|window, _| window.bounds());
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx)
+        view.handle(UiAction::Tab(Tab::About), window, cx)
     });
     cx.run_until_parked();
     frame(cx, 20);
@@ -124,15 +125,15 @@ fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppC
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
-        view.router.navigate(Tab::Settings);
-        view.open_settings(cx);
+        view.snapshot = crate::test_support::ready_snapshot();
+        view.router.navigate(Tab::Instances);
         view
     });
     cx.simulate_resize(size(px(1152.), px(720.)));
     cx.run_until_parked();
     let sidebar = cx.debug_bounds("management-sidebar");
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::SettingsPage(1), window, cx)
+        view.handle(UiAction::Inspect("instance-a".into()), window, cx)
     });
     frame(cx, 35);
     assert_eq!(cx.debug_bounds("management-sidebar"), sidebar);
@@ -177,7 +178,7 @@ fn rapid_navigation_retains_one_outgoing_page_and_reduced_motion_releases_it(
     cx.simulate_resize(size(px(1152.), px(720.)));
     cx.run_until_parked();
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx)
+        view.handle(UiAction::Tab(Tab::Accounts), window, cx)
     });
     frame(cx, 70);
     let before = view.read_with(cx, |view, _| view.motion.page_frames.get().sidebar.current);
@@ -196,7 +197,7 @@ fn rapid_navigation_retains_one_outgoing_page_and_reduced_motion_releases_it(
             before.map(|pose| (pose.x, pose.opacity))
         );
         let outgoing = view.motion.page.outgoing();
-        assert!(outgoing.is_some_and(|layer| layer._snapshot.router.tab() == Tab::Settings));
+        assert!(outgoing.is_some_and(|layer| layer._snapshot.router.tab() == Tab::Accounts));
         outgoing.map(|layer| Rc::downgrade(&layer._snapshot))
     });
     view.update(cx, |view, cx| {
@@ -222,18 +223,15 @@ fn outgoing_management_controls_cannot_activate_under_the_incoming_page(cx: &mut
     let old_add = cx.debug_bounds("sign-in");
     assert!(old_add.is_some());
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx)
+        view.handle(UiAction::Tab(Tab::About), window, cx)
     });
     cx.run_until_parked();
     if let Some(bounds) = old_add {
         cx.simulate_click(bounds.center(), gpui::Modifiers::none());
     }
     cx.run_until_parked();
-    assert!(
-        view.read_with(cx, |view, _| view.router.tab() == Tab::Settings
-            && view.shell.auth.is_none()
-            && view.shell.settings_page == 0)
-    );
+    assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::About
+        && view.shell.auth.is_none()));
 }
 
 #[gpui::test]
@@ -244,7 +242,7 @@ fn early_tab_events_settle_navigation_and_forward_once_after_the_clean_focus_tre
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     cx.run_until_parked();
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx)
+        view.handle(UiAction::Tab(Tab::Accounts), window, cx)
     });
     cx.run_until_parked();
     view.update_in(cx, |view, window, cx| {

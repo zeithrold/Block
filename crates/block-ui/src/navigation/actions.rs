@@ -43,6 +43,9 @@ pub(super) enum UiAction {
     SetLanguage(crate::Language),
     ReduceMotion,
     SavePreferences,
+    SettingsBack,
+    SettingsExitSave,
+    SettingsExitDiscard,
     ResetPreferences,
     ConfirmSeparate(bool),
     SeparateProfiles,
@@ -162,6 +165,7 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
     if matches!(
         action,
         UiAction::CancelForm
+            | UiAction::SettingsBack
             | UiAction::ProvidersBack
             | UiAction::WizardBack
             | UiAction::AuthCancel
@@ -193,6 +197,7 @@ impl Block {
             || !self.action_allowed(&action)
             || self.confirm_pack_leave_if_needed(&action, window, cx)
             || self.confirm_game_discard_if_needed(&action, window, cx)
+            || self.confirm_settings_exit_if_needed(&action, window, cx)
         {
             return;
         }
@@ -229,17 +234,16 @@ impl Block {
             }
             UiAction::ReduceMotion => self.preview_reduce_motion(),
             UiAction::ResetPreferences => self.reset_settings(window, cx),
-            UiAction::SavePreferences => self.save_settings(window, cx),
-            UiAction::SetFullscreen => self.edit_settings_draft(|form| {
-                form.fullscreen = !form.fullscreen;
-            }),
-            UiAction::ShowSnapshots => self.edit_settings_draft(|form| {
-                form.show_snapshots = !form.show_snapshots;
-            }),
+            UiAction::SavePreferences => {
+                self.save_settings(window, cx);
+            }
+            UiAction::SettingsBack => self.settings_back(window, cx),
+            UiAction::SettingsExitSave => self.confirm_settings_exit(true, window, cx),
+            UiAction::SettingsExitDiscard => self.confirm_settings_exit(false, window, cx),
+            UiAction::SetFullscreen => self.toggle_settings_fullscreen(),
+            UiAction::ShowSnapshots => self.toggle_settings_snapshots(),
             UiAction::SettingsPage(page) => self.select_settings_page(page, window, cx),
-            UiAction::ProxyMode(mode) => self.edit_settings_draft(|form| {
-                form.proxy_mode = mode;
-            }),
+            UiAction::ProxyMode(mode) => self.edit_settings_draft(|form| form.proxy_mode = mode),
             UiAction::ConfirmSeparate(confirm) => self.confirm_separate(confirm, window, cx),
             UiAction::SeparateProfiles => self.separate_profiles(window, cx),
             UiAction::Inspect(id) => self.inspect(id, None, cx),
@@ -293,9 +297,7 @@ impl Block {
                 self.set_instance_window(width, height, cx);
             }
             UiAction::CustomInstanceWindow => self.custom_instance_window(window, cx),
-            UiAction::ProfileConnect => self.edit_profile_draft(|form| {
-                form.original.server.connect_on_launch = !form.original.server.connect_on_launch;
-            }),
+            UiAction::ProfileConnect => self.toggle_profile_connect(),
             UiAction::WizardRuntime(value) => self.wizard_runtime(value),
             UiAction::WizardWindow { width, height } => self.wizard_window(width, height, cx),
             UiAction::WizardCustomWindow => self.wizard_custom_window(),
@@ -425,6 +427,7 @@ impl Block {
         if self.auth_save_pending()
             || self.confirm_pack_leave_if_needed(&UiAction::CloseWindow, window, cx)
             || self.confirm_game_discard_if_needed(&UiAction::CloseWindow, window, cx)
+            || self.confirm_settings_exit_if_needed(&UiAction::CloseWindow, window, cx)
         {
             return false;
         }
@@ -440,6 +443,7 @@ impl Block {
         !self.auth_save_pending()
             && !self.confirm_pack_leave_if_needed(&UiAction::QuitApplication, window, cx)
             && !self.confirm_game_discard_if_needed(&UiAction::QuitApplication, window, cx)
+            && !self.confirm_settings_exit_if_needed(&UiAction::QuitApplication, window, cx)
     }
 
     fn cancel_log_export(&self) {
@@ -503,8 +507,19 @@ impl Block {
 
     /// A commit or page change must not interrupt an IME composition: the draft
     /// still holds the text being assembled.
-    fn composition_in_progress(&self, action: &UiAction, cx: &Context<'_, Self>) -> bool {
-        if matches!(action, UiAction::SavePreferences) {
+    pub(super) fn composition_in_progress(
+        &self,
+        action: &UiAction,
+        cx: &Context<'_, Self>,
+    ) -> bool {
+        if matches!(
+            action,
+            UiAction::SavePreferences
+                | UiAction::SettingsExitSave
+                | UiAction::SettingsBack
+                | UiAction::SettingsPage(_)
+                | UiAction::Tab(_)
+        ) {
             return self.settings_form.as_ref().is_some_and(|draft| {
                 draft
                     .fields()
@@ -781,6 +796,9 @@ impl Block {
                 | UiAction::DefaultWindow { .. }
                 | UiAction::CustomDefaultWindow
                 | UiAction::SavePreferences
+                | UiAction::SettingsBack
+                | UiAction::SettingsExitSave
+                | UiAction::SettingsExitDiscard
                 | UiAction::ResetPreferences
                 | UiAction::SettingsPage(_)
                 | UiAction::SetFullscreen
@@ -830,8 +848,77 @@ impl Block {
         self.form = None;
         self.shell.instance_editor = None;
         self.shell.surfaces.clear(window, &self.focus, cx);
+        if tab == Tab::Settings {
+            self.focus_settings_heading(window, cx);
+        }
         self.request_frame_resize(window, cx);
         true
+    }
+
+    fn confirm_settings_exit_if_needed(
+        &mut self,
+        action: &UiAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let leaving = match action {
+            UiAction::Tab(tab) => {
+                *tab != Tab::Settings && self.router.allows(*tab, self.setup_incomplete())
+            }
+            UiAction::CloseWindow | UiAction::QuitApplication => true,
+            _ => false,
+        };
+        if !leaving
+            || self.router.tab() != Tab::Settings
+            || !self
+                .settings_form
+                .as_ref()
+                .is_some_and(|draft| self.settings_dirty(draft, cx))
+        {
+            return false;
+        }
+        if !self
+            .shell
+            .surfaces
+            .layers()
+            .any(|entry| matches!(entry.kind, Surface::SettingsExit(_)))
+        {
+            self.shell.surfaces.clear(window, &self.focus, cx);
+            self.shell
+                .surfaces
+                .open(Surface::SettingsExit(Box::new(action.clone())), window, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn confirm_settings_exit(
+        &mut self,
+        save: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(exit) = self
+            .shell
+            .surfaces
+            .top()
+            .and_then(|entry| match &entry.kind {
+                Surface::SettingsExit(exit) => Some(exit.clone()),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        self.shell.surfaces.close(window, &self.focus, cx);
+        if save && !self.save_settings(window, cx) {
+            return;
+        }
+        self.leave_settings(cx);
+        if matches!(*exit, UiAction::QuitApplication) {
+            Self::defer_application_quit(cx);
+        } else {
+            self.handle(*exit, window, cx);
+        }
     }
 
     /// Open, replace or dismiss a drawer. Returns whether the shared epilogue
@@ -1230,11 +1317,25 @@ impl Block {
         }
     }
 
+    fn toggle_profile_connect(&mut self) {
+        self.edit_profile_draft(|form| {
+            form.original.server.connect_on_launch = !form.original.server.connect_on_launch;
+        });
+    }
+
     /// Apply an edit to the open settings draft, if one is open.
     fn edit_settings_draft(&mut self, apply: impl FnOnce(&mut SettingsDraft)) {
         if let Some(form) = &mut self.settings_form {
             apply(form);
         }
+    }
+
+    fn toggle_settings_fullscreen(&mut self) {
+        self.edit_settings_draft(|form| form.fullscreen = !form.fullscreen);
+    }
+
+    fn toggle_settings_snapshots(&mut self) {
+        self.edit_settings_draft(|form| form.show_snapshots = !form.show_snapshots);
     }
 
     /// Drop the OptiFine jar recorded in the wizard draft and its import request.

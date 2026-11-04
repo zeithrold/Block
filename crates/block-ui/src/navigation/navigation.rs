@@ -125,6 +125,7 @@ pub(super) enum FrameClass {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LayoutKind {
     Plain,
+    SinglePane,
     Management,
     Wizard,
 }
@@ -139,7 +140,7 @@ pub(super) struct PageKey {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DetailKey {
-    Settings(u8),
+    Settings(Option<u8>),
     Provider(ProviderKey),
     Browser {
         tab: Tab,
@@ -260,6 +261,7 @@ impl Block {
             },
         };
         let frame = if page == Page::Home && self.form.is_none()
+            || page == Page::Settings
             || page == Page::FirstRun && self.shell.first_run.stage == Stage::Welcome
         {
             FrameClass::Home
@@ -267,9 +269,8 @@ impl Block {
             FrameClass::Management
         };
         let layout = match page {
-            Page::Browser | Page::Providers | Page::Settings | Page::About => {
-                LayoutKind::Management
-            }
+            Page::Browser | Page::Providers | Page::About => LayoutKind::Management,
+            Page::Settings => LayoutKind::SinglePane,
             Page::Authentication | Page::GameWizard => LayoutKind::Wizard,
             Page::Home | Page::FirstRun => LayoutKind::Plain,
         };

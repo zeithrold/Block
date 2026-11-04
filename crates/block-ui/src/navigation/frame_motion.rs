@@ -513,6 +513,51 @@ mod tests {
     }
 
     #[gpui::test]
+    fn settings_and_home_keep_the_same_native_frame_and_wide_pages_still_resize(
+        cx: &mut TestAppContext,
+    ) {
+        for reduced in [false, true] {
+            let _system_motion = crate::platform::test_system_motion(false);
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.router.navigate(Tab::Home);
+                view.preferences.reduce_motion = reduced;
+                view.saved_preferences.reduce_motion = reduced;
+                view
+            });
+            cx.simulate_resize(size(px(360.), px(720.)));
+            cx.run_until_parked();
+            let original = cx.update(|window, _| window.bounds());
+            view.update_in(cx, |view, window, cx| {
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            });
+            for elapsed in [20, 180, 400] {
+                frame(cx, elapsed);
+                assert_eq!(cx.update(|window, _| window.bounds()), original);
+                assert!(view.read_with(cx, |view, _| !view.motion.frame.active()));
+            }
+            view.update_in(cx, |view, window, cx| {
+                view.handle(UiAction::SettingsPage(1), window, cx);
+                view.handle(UiAction::SettingsBack, window, cx);
+                view.handle(UiAction::SettingsBack, window, cx);
+            });
+            frame(cx, 400);
+            assert_eq!(cx.update(|window, _| window.bounds()), original);
+            assert_eq!(view.read_with(cx, |view, _| view.router.tab()), Tab::Home);
+            view.update_in(cx, |view, window, cx| {
+                view.handle(UiAction::Tab(Tab::Accounts), window, cx);
+            });
+            frame(cx, 400);
+            assert_eq!(cx.update(|window, _| window.bounds().size.width), px(1152.));
+            view.update_in(cx, |view, window, cx| {
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            });
+            frame(cx, 400);
+            assert_eq!(cx.update(|window, _| window.bounds()), original);
+        }
+    }
+
+    #[gpui::test]
     fn native_width_and_real_sidebar_preserve_home_height_and_origin(cx: &mut TestAppContext) {
         let _system_motion = crate::platform::test_system_motion(false);
         let (view, cx) = crate::test_support::window(cx, |window, cx| {

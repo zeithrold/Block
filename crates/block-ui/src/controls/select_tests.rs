@@ -84,6 +84,7 @@ fn settings_select_anchors_to_trigger_and_keeps_inspection_separate_from_value(
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.handle(UiAction::SettingsPage(0), window, cx);
         });
     });
     settle(cx);
@@ -136,6 +137,7 @@ fn settings_select_tab_closes_and_traverses_once_in_both_directions(cx: &mut gpu
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.handle(UiAction::SettingsPage(0), window, cx);
         });
     });
     settle(cx);
@@ -231,6 +233,7 @@ fn tab_in_a_dialog_never_closes_the_select_beneath_it(cx: &mut gpui::TestAppCont
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.handle(UiAction::SettingsPage(0), window, cx);
         });
     });
     click(cx, "settings-appearance");
@@ -281,6 +284,11 @@ fn settings_language_select_previews_cancels_and_saves(cx: &mut gpui::TestAppCon
                 view.handle(UiAction::Tab(Tab::Settings), window, cx)
             });
         });
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.handle(UiAction::SettingsPage(0), window, cx)
+            });
+        });
         click(cx, "settings-language");
         assert!(view.read_with(cx, |view, _| {
             view.shell.surfaces.top().is_some_and(|layer| matches!(
@@ -310,6 +318,8 @@ fn settings_language_select_previews_cancels_and_saves(cx: &mut gpui::TestAppCon
                 view.handle(UiAction::Tab(Tab::Home), window, cx)
             });
         });
+        click(cx, "settings-exit-discard");
+        assert_eq!(view.read_with(cx, |view, _| view.router.tab()), Tab::Home);
         assert_eq!(
             view.read_with(cx, |view, _| view.preferences.language),
             None
@@ -317,7 +327,8 @@ fn settings_language_select_previews_cancels_and_saves(cx: &mut gpui::TestAppCon
 
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle(UiAction::Tab(Tab::Settings), window, cx)
+                view.handle(UiAction::Tab(Tab::Settings), window, cx);
+                view.handle(UiAction::SettingsPage(0), window, cx);
             });
         });
         click(cx, "settings-language");
@@ -431,7 +442,9 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
             view.handle(UiAction::Tab(Tab::Home), window, cx);
         });
     });
-    assert!(view.read_with(cx, |view, _| view.settings_form.is_none()
+    click(cx, "settings-exit-discard");
+    assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::Home
+        && view.settings_form.is_none()
         && view.preferences == view.saved_preferences));
 }
 
@@ -443,6 +456,7 @@ fn busy_settings_choice_commits_only_its_ui_draft_and_keeps_the_task_busy(
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.handle(UiAction::SettingsPage(0), window, cx);
             view.busy = true;
             cx.notify();
         });
@@ -563,6 +577,7 @@ fn selector_typeahead_moves_real_focus_without_committing_until_activation(
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
+            view.handle(UiAction::SettingsPage(0), window, cx);
         });
     });
     click(cx, "settings-appearance");
@@ -619,6 +634,8 @@ fn app_menu_shares_roving_typeahead_current_page_and_real_navigation(
             && view.settings_form.is_some()
             && !view.shell.surfaces.is_open())
     );
+    click(cx, "settings-back");
+    assert_eq!(view.read_with(cx, |view, _| view.router.tab()), Tab::Home);
     click(cx, "app-menu");
     click(cx, "menu-games");
     assert!(

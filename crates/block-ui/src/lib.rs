@@ -828,7 +828,7 @@ impl Block {
         }
     }
 
-    fn select_requested_profile(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+    fn select_requested_profile(&mut self, id: &str, _cx: &mut Context<'_, Self>) {
         if let Some(profile) = self
             .snapshot
             .profiles
@@ -849,10 +849,8 @@ impl Block {
                 && self.shell.auth.is_none()
                 && self.shell.instance_editor.is_none()
                 && !self.setup_incomplete()
+                && self.router.tab() != Tab::Settings
             {
-                if self.router.tab() == Tab::Settings {
-                    self.leave_settings(cx);
-                }
                 if self.router.tab() == Tab::Home {
                     self.pending_window_size = Some(preferred_management_size());
                 }
@@ -958,7 +956,11 @@ impl Block {
                         view.crash_help = None;
                         view.crash_guard = None;
                         view.select_requested_profile(&profile, cx);
-                        view.focus.focus(window, cx);
+                        if view.router.tab() == Tab::Settings {
+                            view.handle(UiAction::Tab(Tab::Instances), window, cx);
+                        } else {
+                            view.focus.focus(window, cx);
+                        }
                         cx.notify();
                     });
                 },
@@ -2761,7 +2763,8 @@ mod tests {
             view.read_with(cx, |view, _| view.router.tab()),
             super::Tab::Settings
         );
-        cx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(600.)));
+        cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
+        click_selector(cx, "settings-page-general");
         click_selector(cx, "settings-appearance");
         click_selector(cx, "select-choice-2");
         assert_eq!(
@@ -2770,8 +2773,9 @@ mod tests {
         );
         click_selector(cx, "reduce-motion");
         assert!(view.read_with(cx, |view, _| view.preferences.reduce_motion));
-        click_selector(cx, "app-menu");
-        click_selector(cx, "menu-home");
+        click_selector(cx, "settings-back");
+        click_selector(cx, "settings-back");
+        click_selector(cx, "settings-exit-discard");
         assert_eq!(
             view.read_with(cx, |view, _| view.preferences.clone()),
             super::Preferences::default()
@@ -3080,6 +3084,14 @@ mod tests {
                 assert!(view.read_with(cx, |view, _| view.crash_guard.is_none()));
                 assert!(!view.read_with(cx, |view, _| view.busy));
                 assert!(view.read_with(cx, |view, _| view.active_run.is_none()));
+                assert!(
+                    view.read_with(cx, |view, _| view.router.tab() == super::Tab::Settings
+                        && view.settings_form.is_some()
+                        && view.preferences.language == Some(preview))
+                );
+                view.update_in(cx, |view, window, cx| {
+                    view.handle(super::UiAction::SettingsExitDiscard, window, cx);
+                });
                 assert!(view.read_with(cx, |view, _| {
                     view.router.tab() == super::Tab::Instances
                         && view.preferences.language == Some(crate::Language::English)

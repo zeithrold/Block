@@ -142,24 +142,25 @@ fn game_wizard_subpages_keep_scrolling_content_above_the_action_rail(cx: &mut Te
 }
 
 #[gpui::test]
-fn settings_sections_keep_save_and_cancel_inside_the_default_window(cx: &mut TestAppContext) {
-    for page in [0, 1, 3] {
-        let (_view, cx) = crate::test_support::window(cx, |window, cx| {
-            let mut view = super::tests::test_view(window, cx);
-            view.router.navigate(Tab::Settings);
-            view.preferences.reduce_motion = true;
-            view.open_settings(cx);
-            if let Some(draft) = &mut view.settings_form {
-                draft.page = page;
-            }
-            view
-        });
+fn settings_views_keep_save_inside_the_default_window(cx: &mut TestAppContext) {
+    let mut saves = Vec::new();
+    for page in 0..=4u8 {
+        let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
         cx.simulate_resize(size(px(960.), px(600.)));
-        let cancel = inside_viewport(cx, "cancel-preferences");
-        let save = inside_viewport(cx, "save-preferences");
-        assert!(cancel.right() <= save.left());
-        assert_eq!(cancel.top(), save.top());
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.router.navigate(Tab::Settings);
+                view.preferences.reduce_motion = true;
+                view.open_settings(cx);
+                view.handle(UiAction::SettingsPage(page), window, cx);
+            });
+        });
+        saves.push(inside_viewport(cx, "save-preferences"));
     }
+    assert!(
+        saves.windows(2).all(|pair| pair[0] == pair[1]),
+        "the fixed save action must not move between views: {saves:?}"
+    );
 }
 
 #[gpui::test]

@@ -61,6 +61,9 @@ pub const SCENARIOS: &[&str] = &[
     "auth-complete",
     "auth-saving",
     "auth-error",
+    "settings-index",
+    "settings-exit-dirty",
+    "settings-invalid-proxy",
     "settings-general",
     "settings-game",
     "settings-profiles",
@@ -424,6 +427,28 @@ impl Block {
 
     /// Settings fixtures: one page per tab, plus the proxy and storage states.
     fn settings_scenario(&mut self, name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if matches!(
+            name,
+            "settings-index" | "settings-exit-dirty" | "settings-invalid-proxy"
+        ) {
+            self.router.navigate(Tab::Settings);
+            self.open_settings(cx);
+            if let Some(draft) = &mut self.settings_form {
+                if name == "settings-invalid-proxy" {
+                    draft.proxy_mode = 2;
+                    draft
+                        .proxy_url
+                        .update(cx, |input, cx| input.set_value("http://", cx));
+                } else if name == "settings-exit-dirty" {
+                    draft.fullscreen = !draft.fullscreen;
+                }
+            }
+            if name == "settings-invalid-proxy" {
+                self.handle(UiAction::SavePreferences, window, cx);
+            } else if name == "settings-exit-dirty" {
+                self.handle(UiAction::Tab(Tab::Home), window, cx);
+            }
+        }
         if let Some(section) = ["general", "game", "profiles", "downloads", "storage"]
             .iter()
             .position(|section| name == format!("settings-{section}"))
@@ -600,10 +625,10 @@ impl Block {
     }
 }
 
-/// Home-sized fixtures keep the window a Home visit uses; every other page opens
-/// at the management size.
+/// Single-pane fixtures use Home's frame; other pages use the management frame.
 fn resize_scenario_window(name: &str, toast_scenario: bool, window: &mut Window) {
     let home = name.starts_with("home-")
+        || name.starts_with("settings-")
         || name == "download-files"
         || toast_scenario
         || matches!(

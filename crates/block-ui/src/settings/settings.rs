@@ -17,7 +17,8 @@ use block_launcher::{
 };
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, ScrollHandle, SharedString, Styled as _, Window, div, point, px, rgb,
+    ParentElement as _, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Window, div, px, rgb,
 };
 use serde::{Deserialize, Serialize};
 
@@ -273,7 +274,9 @@ pub(super) struct SettingsDraft {
     pub notice: Option<SettingsNotice>,
     heading: FocusHandle,
     scroll: ScrollHandle,
+    category_scroll: [ScrollHandle; 5],
     navigation_scroll: ScrollHandle,
+    navigation_focus: [FocusHandle; 5],
     reveal: Rc<Cell<Option<SettingsField>>>,
 }
 
@@ -302,8 +305,12 @@ impl SettingsDraft {
     /// Independent display state for an inert outgoing transition. Inputs and
     /// scroll/focus handles are copied; live draft observers are not attached.
     pub(super) fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
-        let scroll = ScrollHandle::new();
-        scroll.set_offset(self.scroll.offset());
+        let category_scroll = std::array::from_fn(|index| {
+            let scroll = ScrollHandle::new();
+            scroll.set_offset(self.category_scroll[index].offset());
+            scroll
+        });
+        let scroll = category_scroll[usize::from(self.page)].clone();
         let navigation_scroll = ScrollHandle::new();
         navigation_scroll.set_offset(self.navigation_scroll.offset());
         Self {
@@ -328,7 +335,9 @@ impl SettingsDraft {
             notice: self.notice,
             heading: cx.focus_handle(),
             scroll,
+            category_scroll,
             navigation_scroll,
+            navigation_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
             reveal: Rc::new(Cell::new(self.reveal.get())),
         }
     }
@@ -342,7 +351,8 @@ impl SettingsDraft {
             ProxyMode::Direct => (1, ""),
             ProxyMode::Http { url } | ProxyMode::Socks5 { url } => (2, url.as_str()),
         };
-        let scroll = ScrollHandle::new();
+        let category_scroll: [ScrollHandle; 5] = std::array::from_fn(|_| ScrollHandle::new());
+        let scroll = category_scroll[0].clone();
         let draft = Self {
             memory: input(&components::memory_gb_text(game.memory_mib), "2", cx),
             java: input(&game.java, &tr!(language, "settings.placeholder.java"), cx),
@@ -374,7 +384,9 @@ impl SettingsDraft {
             heading: cx.focus_handle(),
             reveal: Rc::new(Cell::new(None)),
             scroll,
+            category_scroll,
             navigation_scroll: ScrollHandle::new(),
+            navigation_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
         };
         draft.observe_fields(cx);
         draft
@@ -799,9 +811,8 @@ impl Block {
                     .map_err(|error| StorageProblem::Unreadable(format!("{error:#}")))
             },
         );
-        let mut draft = SettingsDraft::new(&self.saved_preferences, cx);
-        draft.page = self.shell.settings_page.min(4);
-        self.settings_form = Some(draft);
+        self.shell.settings_page = None;
+        self.settings_form = Some(SettingsDraft::new(&self.saved_preferences, cx));
     }
 
     pub(super) fn preview_appearance(&mut self, appearance: Appearance) {
@@ -826,14 +837,32 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.shell.settings_page = page.min(4);
+        let page = page.min(4);
+        self.shell.settings_page = Some(page);
         if let Some(draft) = &mut self.settings_form {
-            draft.page = self.shell.settings_page;
+            draft.page = page;
+            draft.scroll = draft.category_scroll[usize::from(page)].clone();
             draft.error = None;
-            draft.scroll.set_offset(point(px(0.), px(0.)));
             draft.heading.focus(window, cx);
         }
         cx.notify();
+    }
+
+    pub(super) fn settings_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(page) = self.shell.settings_page.take() {
+            if let Some(draft) = &self.settings_form {
+                draft.navigation_focus[usize::from(page)].focus(window, cx);
+            }
+            cx.notify();
+        } else {
+            self.handle(UiAction::Tab(Tab::Home), window, cx);
+        }
+    }
+
+    pub(super) fn focus_settings_heading(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(draft) = &self.settings_form {
+            draft.heading.focus(window, cx);
+        }
     }
 
     pub(super) fn reset_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -853,7 +882,11 @@ impl Block {
         cx.notify();
     }
 
-    pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn save_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
         let parsed = self.settings_form.as_ref().map(|draft| {
             draft
                 .parse(&self.saved_preferences, cx)
@@ -865,7 +898,7 @@ impl Block {
                 })
         });
         let Some(parsed) = parsed else {
-            return;
+            return false;
         };
         match parsed {
             Ok(preferences) => {
@@ -886,6 +919,7 @@ impl Block {
                         if let Some(engine) = &self.engine {
                             engine.load_versions();
                         }
+                        return true;
                     }
                     Err(error) => {
                         self.settings_failure(SettingsError::save(format!("{error:#}")), window, cx)
@@ -894,6 +928,7 @@ impl Block {
             }
             Err(error) => self.settings_failure(error, window, cx),
         }
+        false
     }
 
     pub(super) fn settings_failure(
@@ -911,8 +946,12 @@ impl Block {
                 if field == SettingsField::Java {
                     draft.java_automatic = false;
                 }
+                if field == SettingsField::ProxyUrl {
+                    draft.proxy_mode = 2;
+                }
                 draft.page = field.page();
-                self.shell.settings_page = draft.page;
+                draft.scroll = draft.category_scroll[usize::from(draft.page)].clone();
+                self.shell.settings_page = Some(draft.page);
                 draft
                     .input(field)
                     .read(cx)
@@ -928,166 +967,198 @@ impl Block {
         cx.notify();
     }
 
-    pub(super) fn render_settings(
-        &self,
-        cx: &Context<'_, Self>,
-    ) -> super::page_host::ManagementSlots {
+    pub(super) fn render_settings(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let Some(draft) = &self.settings_form else {
-            return super::page_host::ManagementSlots {
-                sidebar: div().into_any_element(),
-                detail: div().into_any_element(),
-            };
+            return div().into_any_element();
         };
-        let navigation = self.settings_navigation(draft, cx);
-        super::page_host::ManagementSlots {
-            sidebar: navigation.into_any_element(),
-            detail: self.render_settings_detail(cx),
-        }
+        div()
+            .id("settings-page")
+            .size_full()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(self.render_settings_detail(cx))
+            .child(self.settings_footer(draft, cx))
+            .into_any_element()
     }
 
     pub(super) fn render_settings_detail(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         self.settings_form.as_ref().map_or_else(
             || div().into_any_element(),
-            |draft| self.settings_detail(draft, cx).into_any_element(),
+            |draft| {
+                if self.shell.settings_page.is_some() {
+                    self.settings_detail(draft, cx)
+                } else {
+                    self.settings_navigation(draft, cx)
+                }
+            },
         )
     }
 
-    fn settings_navigation(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let page = draft.page;
+    fn settings_navigation(
+        &self,
+        draft: &SettingsDraft,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         let language = self.language();
-        let dirty = self.settings_dirty(draft, cx);
         let categories = [
             (
                 0,
                 "general",
                 tr!(language, "settings.navigation.general"),
-                Icon::System,
+                tr!(language, "settings.index.general"),
             ),
             (
                 1,
                 "game",
                 tr!(language, "settings.navigation.game"),
-                Icon::Settings,
+                tr!(language, "settings.index.game"),
             ),
             (
                 2,
                 "profiles",
                 tr!(language, "settings.navigation.profiles"),
-                Icon::Games,
+                tr!(language, "settings.index.profiles"),
             ),
             (
                 3,
                 "downloads",
                 tr!(language, "settings.navigation.downloads"),
-                Icon::Download,
+                tr!(language, "settings.index.downloads"),
             ),
             (
                 4,
                 "storage",
                 tr!(language, "settings.navigation.storage"),
-                Icon::Folder,
+                tr!(language, "settings.index.storage"),
             ),
         ];
         div()
-            .size_full()
+            .id("settings-categories")
+            .debug_selector(|| "settings-categories".into())
+            .flex_1()
             .min_h_0()
+            .min_w_0()
+            .scroll_area(
+                &draft.navigation_scroll,
+                "settings.categories",
+                self.palette,
+                false,
+            )
+            .px_6()
+            .py_4()
             .flex()
             .flex_col()
             .child(
-                div()
-                    .id("settings-categories")
-                    .flex_1()
-                    .min_h_0()
-                    .scroll_area(
-                        &draft.navigation_scroll,
-                        "settings.categories",
-                        self.palette,
-                        false,
-                    )
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .children(categories.map(|(index, id, label, icon)| {
-                        let active = page == index;
-                        let mut button = components::button(
-                            format!("settings-page-{id}"),
-                            "",
-                            self.palette,
-                            components::ButtonVariant::Ghost,
-                            ControlState::default(),
-                            cx.listener(move |view, (): &(), window, cx| {
-                                view.handle(UiAction::SettingsPage(index), window, cx);
-                            }),
-                        )
-                        .w_full()
-                        .h(px(40.))
-                        .gap_3()
-                        .justify_start()
-                        .child(icon.render(
-                            16.,
-                            if active {
-                                self.palette.foreground
-                            } else {
-                                self.palette.muted
-                            },
-                        ))
-                        .child(label);
-                        if active {
-                            button = button
-                                .bg(rgb(self.palette.accent))
-                                .text_color(rgb(self.palette.foreground));
-                        }
-                        button
-                    })),
+                note(tr!(language, "settings.index.choose"))
+                    .track_focus(&draft.heading)
+                    .pb_2(),
             )
-            .child(
-                patterns::management_footer(self.palette)
-                    .justify_center()
-                    .child(note(if dirty {
-                        tr!(language, "settings.navigation.unsaved")
-                    } else {
-                        tr!(language, "settings.navigation.saved")
-                    })),
-            )
+            .children(draft.error.as_ref().map(|error| {
+                note(error.message(language))
+                    .id("settings-status")
+                    .debug_selector(|| "settings-status".into())
+                    .text_color(rgb(self.palette.destructive))
+            }))
+            .children(categories.map(|(index, id, label, description)| {
+                let modified = self.settings_category_dirty(draft, index, cx);
+                let modified_label = tr!(language, "settings.index.modified");
+                let accessible = if modified {
+                    format!("{label}, {description}, {modified_label}")
+                } else {
+                    format!("{label}, {description}")
+                };
+                components::button(
+                    format!("settings-page-{id}"),
+                    "",
+                    self.palette,
+                    components::ButtonVariant::Ghost,
+                    ControlState::default(),
+                    cx.listener(move |view, (): &(), window, cx| {
+                        view.handle(UiAction::SettingsPage(index), window, cx);
+                    }),
+                )
+                .aria_label(accessible)
+                .track_focus(&draft.navigation_focus[usize::from(index)])
+                .w_full()
+                .h_auto()
+                .min_h(px(72.))
+                .px_2()
+                .py_3()
+                .gap_2()
+                .justify_between()
+                .whitespace_normal()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_1()
+                        .child(div().child(label))
+                        .child(note(description).whitespace_normal())
+                        .children(modified.then(|| note(modified_label))),
+                )
+                .child(Icon::ChevronRight.render(16., self.palette.muted))
+            }))
+            .into_any_element()
     }
 
     /// The language preview lives in the view rather than a draft input, so a
     /// language-only change still enables Save and is reported as unsaved.
-    fn settings_dirty(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> bool {
+    pub(super) fn settings_dirty(&self, draft: &SettingsDraft, cx: &gpui::App) -> bool {
         self.preferences.language != self.saved_preferences.language
             || draft.is_dirty(&self.saved_preferences, cx)
     }
 
-    fn settings_detail(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
+    fn settings_category_dirty(
+        &self,
+        draft: &SettingsDraft,
+        page: u8,
+        cx: &Context<'_, Self>,
+    ) -> bool {
+        match page {
+            0 => {
+                self.preferences.language != self.saved_preferences.language
+                    || draft.appearance != self.saved_preferences.appearance
+                    || draft.reduce_motion != self.saved_preferences.reduce_motion
+            }
+            1 => !draft
+                .parse_game(cx)
+                .is_ok_and(|game| game == self.saved_preferences.game),
+            3 => !draft
+                .parse_downloads(cx)
+                .is_ok_and(|downloads| downloads == self.saved_preferences.downloads),
+            _ => false,
+        }
+    }
+
+    fn settings_detail(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let page = draft.page;
         let language = self.language();
-        let (title, description) = match page {
-            1 => (
-                tr!(language, "settings.page.game.title"),
-                tr!(language, "settings.page.game.description"),
-            ),
-            2 => (
-                tr!(language, "settings.page.profiles.title"),
-                tr!(language, "settings.page.profiles.description"),
-            ),
-            3 => (
-                tr!(language, "settings.page.downloads.title"),
-                tr!(language, "settings.page.downloads.description"),
-            ),
-            4 => (
-                tr!(language, "settings.page.storage.title"),
-                tr!(language, "settings.page.storage.description"),
-            ),
-            _ => (
-                tr!(language, "settings.page.general.title"),
-                tr!(language, "settings.page.general.description"),
-            ),
+        let description = match page {
+            1 => tr!(language, "settings.page.game.description"),
+            2 => tr!(language, "settings.page.profiles.description"),
+            3 => tr!(language, "settings.page.downloads.description"),
+            4 => tr!(language, "settings.page.storage.description"),
+            _ => tr!(language, "settings.page.general.description"),
         };
         let feedback = draft
             .error
             .as_ref()
-            .map(|error| (error.message(language), true))
+            .map(|error| {
+                let detail = error.message(language);
+                (
+                    if error.field.is_some() {
+                        tr!(language, "settings.error.not_saved", detail = detail)
+                    } else {
+                        detail
+                    },
+                    true,
+                )
+            })
             .or_else(|| {
                 draft
                     .notice
@@ -1095,45 +1166,38 @@ impl Block {
             });
         let body = self.settings_section_body(draft, cx);
         div()
-            .size_full()
+            .id("settings-content")
+            .debug_selector(|| "settings-content".into())
+            .flex_1()
             .min_h_0()
             .min_w_0()
+            .scroll_area(&draft.scroll, "settings.fields", self.palette, false)
+            .px_6()
+            .py_4()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .id("settings-content")
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .scroll_area(&draft.scroll, "settings.fields", self.palette, false)
-                    .child(
-                        div()
-                            .mx_auto()
-                            .w_full()
-                            .max_w(px(608.))
-                            .p_8()
-                            .flex()
-                            .flex_col()
-                            .gap_6()
-                            .child(
-                                patterns::page_heading(title, description)
-                                    .track_focus(&draft.heading),
-                            )
-                            .children(feedback.map(|(message, error)| {
-                                note(message)
-                                    .id("settings-status")
-                                    .debug_selector(|| "settings-status".into())
-                                    .text_color(rgb(if error {
-                                        self.palette.destructive
-                                    } else {
-                                        self.palette.success
-                                    }))
-                            }))
-                            .child(body),
-                    ),
-            )
-            .child(self.settings_footer(draft, cx))
+            .gap_6()
+            .child(note(description).track_focus(&draft.heading))
+            .children(feedback.map(|(message, error)| {
+                note(message)
+                    .id("settings-status")
+                    .debug_selector(|| "settings-status".into())
+                    .text_color(rgb(if error {
+                        self.palette.destructive
+                    } else {
+                        self.palette.success
+                    }))
+            }))
+            .child(body)
+            .children(matches!(page, 0 | 1 | 3).then(|| {
+                self.button(
+                    "reset-preferences",
+                    tr!(language, "settings.restore_defaults"),
+                    UiAction::ResetPreferences,
+                    cx,
+                )
+            }))
+            .into_any_element()
     }
 
     fn settings_section_body(
@@ -1151,43 +1215,30 @@ impl Block {
         .into_any_element()
     }
 
-    fn settings_footer(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let page = draft.page;
+    fn settings_footer(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let language = self.language();
         let dirty = self.settings_dirty(draft, cx);
-        let close = UiAction::Tab(Tab::Home);
-        let mut footer = patterns::management_footer(self.palette).justify_between();
-        if page == 4 {
-            return footer
-                .child(note(tr!(language, "settings.storage.footer")).flex_1())
-                .child(self.button(
-                    "cancel-preferences",
-                    tr!(language, "common.close"),
-                    close,
-                    cx,
-                ));
-        }
-        if page == 2 {
-            footer = footer.child(note(tr!(language, "settings.profile_mode.footer")).flex_1());
-        } else {
-            footer = footer.child(self.button(
-                "reset-preferences",
-                tr!(language, "settings.restore_defaults"),
-                UiAction::ResetPreferences,
-                cx,
-            ));
-        }
-        footer = footer.child(
-            div()
-                .flex()
-                .gap_2()
-                .child(self.button(
-                    "cancel-preferences",
-                    tr!(language, "common.cancel"),
-                    close,
-                    cx,
-                ))
-                .child(components::button(
+        div()
+            .id("settings-footer")
+            .debug_selector(|| "settings-footer".into())
+            .flex_shrink_0()
+            .w_full()
+            .px_6()
+            .py_3()
+            .border_t_1()
+            .border_color(rgb(self.palette.border))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(note(if dirty {
+                tr!(language, "settings.navigation.unsaved")
+            } else if draft.notice == Some(SettingsNotice::Saved) {
+                tr!(language, "settings.index.all_saved")
+            } else {
+                tr!(language, "settings.navigation.saved")
+            }))
+            .child(
+                components::button(
                     "save-preferences",
                     tr!(language, "settings.save_changes"),
                     self.palette,
@@ -1200,9 +1251,10 @@ impl Block {
                     cx.listener(|view, (): &(), window, cx| {
                         view.handle(UiAction::SavePreferences, window, cx);
                     }),
-                )),
-        );
-        footer
+                )
+                .w_full(),
+            )
+            .into_any_element()
     }
 
     fn settings_control(
@@ -1235,7 +1287,10 @@ impl Block {
             .error
             .as_ref()
             .filter(|error| error.field == Some(field))
-            .map(|error| error.message(language).into());
+            .map(|error| {
+                let detail = error.message(language);
+                tr!(language, "settings.error.not_saved", detail = detail).into()
+            });
         patterns::reveal_field(
             components::field_with(
                 label,
@@ -1449,6 +1504,7 @@ impl Block {
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .gap_4()
                     .child(self.settings_memory_field(draft, cx).flex_1())
                     .child(
@@ -1470,6 +1526,31 @@ impl Block {
                     Some(tr!(language, "settings.game.java.path.hint").into()),
                 )
             }))
+            .children(
+                (!draft.java_automatic && !draft.java.read(cx).value().is_empty()).then(|| {
+                    let path = draft.java.read(cx).value();
+                    let wrapped: String = path
+                        .chars()
+                        .flat_map(|character| [character, '\u{200b}'])
+                        .collect();
+                    div()
+                        .id("settings-java-full-path")
+                        .debug_selector(|| "settings-java-full-path".into())
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(note(tr!(language, "settings.game.java.path.full")))
+                        .child(
+                            div()
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(self.palette.secondary))
+                                .whitespace_normal()
+                                .child(wrapped),
+                        )
+                }),
+            )
             .child(self.product_select_field(
                 "settings-default-window",
                 tr!(language, "select.default_window"),
@@ -1480,6 +1561,7 @@ impl Block {
             .children(draft.window_custom.then(|| {
                 div()
                     .flex()
+                    .flex_col()
                     .gap_4()
                     .child(
                         self.settings_field(
@@ -1536,6 +1618,7 @@ impl Block {
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .gap_4()
                     .child(
                         self.settings_field(
@@ -1682,6 +1765,7 @@ impl Block {
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .gap_3()
                     .child(
                         card(

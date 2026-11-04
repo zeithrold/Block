@@ -1,5 +1,100 @@
 {
   "_version": 2,
+  "settings.index.choose": {
+    "en": "Choose what to adjust",
+    "zh-Hans": "选择要调整的内容",
+    "ja": "変更する項目を選択"
+  },
+  "settings.index.general": {
+    "en": "Language, appearance and motion",
+    "zh-Hans": "语言、外观与动画",
+    "ja": "言語、外観、アニメーション"
+  },
+  "settings.index.game": {
+    "en": "Memory, Java and game windows",
+    "zh-Hans": "内存、Java 与游戏窗口",
+    "ja": "メモリ、Java、ゲーム画面"
+  },
+  "settings.index.profiles": {
+    "en": "How instances and profiles work together",
+    "zh-Hans": "实例与配置如何配合",
+    "ja": "インスタンスとプロファイルの連携"
+  },
+  "settings.index.downloads": {
+    "en": "Download limits, retries and proxy",
+    "zh-Hans": "下载限制、重试与代理",
+    "ja": "ダウンロード制限、再試行、プロキシ"
+  },
+  "settings.index.storage": {
+    "en": "View data and game locations",
+    "zh-Hans": "查看数据与游戏位置",
+    "ja": "データとゲームの保存場所を確認"
+  },
+  "settings.index.modified": {
+    "en": "Modified",
+    "zh-Hans": "已修改",
+    "ja": "変更済み"
+  },
+  "settings.index.all_saved": {
+    "en": "All changes saved",
+    "zh-Hans": "所有更改已保存",
+    "ja": "すべての変更を保存しました"
+  },
+  "settings.back.home": {
+    "en": "Back to Home",
+    "zh-Hans": "返回主页",
+    "ja": "ホームに戻る"
+  },
+  "settings.back.settings": {
+    "en": "Back to settings",
+    "zh-Hans": "返回设置分类",
+    "ja": "設定カテゴリに戻る"
+  },
+  "settings.exit.home_title": {
+    "en": "Return to Home?",
+    "zh-Hans": "返回主页？",
+    "ja": "ホームに戻りますか？"
+  },
+  "settings.exit.close_title": {
+    "en": "Close Block?",
+    "zh-Hans": "关闭 Block？",
+    "ja": "Block を閉じますか？"
+  },
+  "settings.exit.quit_title": {
+    "en": "Quit Block?",
+    "zh-Hans": "退出 Block？",
+    "ja": "Block を終了しますか？"
+  },
+  "settings.exit.leave_title": {
+    "en": "Leave settings?",
+    "zh-Hans": "离开设置？",
+    "ja": "設定を終了しますか？"
+  },
+  "settings.exit.note": {
+    "en": "You have unsaved changes. Saving includes all categories.",
+    "zh-Hans": "你有未保存的更改。保存会包含所有分类。",
+    "ja": "未保存の変更があります。保存するとすべてのカテゴリに適用されます。"
+  },
+  "settings.exit.save": {
+    "en": "Save and leave",
+    "zh-Hans": "保存并离开",
+    "ja": "保存して終了"
+  },
+  "settings.exit.discard": {
+    "en": "Discard changes",
+    "zh-Hans": "放弃更改",
+    "ja": "変更を破棄"
+  },
+  "settings.exit.stay": {
+    "en": "Keep editing",
+    "zh-Hans": "继续编辑",
+    "ja": "編集を続ける"
+  },
+  "settings.error.not_saved": {
+    "en": "Changes were not saved. %{detail}",
+    "zh-Hans": "更改未保存。%{detail}",
+    "ja": "変更を保存できませんでした。%{detail}"
+  },
   "settings.navigation.general": {
     "en": "General",
     "zh-Hans": "常规",
@@ -101,9 +196,9 @@
     "ja": "言語"
   },
   "settings.language.hint": {
-    "en": "Applies immediately. Save changes keeps this language; Cancel restores your saved language.",
-    "zh-Hans": "立即生效。保存更改会保留此语言；取消会恢复已保存的语言。",
-    "ja": "すぐに反映されます。「変更を保存」でこの言語を保持し、キャンセルすると保存済みの言語に戻ります。"
+    "en": "Applies immediately. Save to keep this language, or discard changes to restore the saved language.",
+    "zh-Hans": "立即生效。保存以保留此语言，或放弃更改以恢复已保存的语言。",
+    "ja": "すぐに反映されます。保存するとこの言語を保持し、変更を破棄すると保存済みの言語に戻ります。"
   },
   "settings.appearance.system": {
     "en": "Follow system",
@@ -131,19 +226,19 @@
     "ja": "Block 全体でよりシンプルなトランジションを使用します。システムの「視差効果を減らす」設定は常に尊重されます。"
   },
   "settings.preview.hint": {
-    "en": "Appearance and language preview immediately. Save changes keeps these choices; Cancel restores your saved ones.",
-    "zh-Hans": "外观和语言会立即预览。保存更改会保留这些选择；取消会恢复已保存的选择。",
-    "ja": "外観と言語はすぐにプレビューされます。「変更を保存」で選択内容が保持され、キャンセルすると保存済みの内容に戻ります。"
+    "en": "Appearance, language and motion preview immediately. Discarding changes restores your saved choices.",
+    "zh-Hans": "外观、语言和动画会立即预览。放弃更改会恢复已保存的选择。",
+    "ja": "外観、言語、アニメーションはすぐにプレビューされます。変更を破棄すると保存済みの設定に戻ります。"
   },
   "settings.save_changes": {
-    "en": "Save changes",
-    "zh-Hans": "保存更改",
-    "ja": "変更を保存"
+    "en": "Save all changes",
+    "zh-Hans": "保存全部更改",
+    "ja": "すべての変更を保存"
   },
   "settings.restore_defaults": {
-    "en": "Restore defaults",
-    "zh-Hans": "恢复默认设置",
-    "ja": "既定値に戻す"
+    "en": "Reset this category",
+    "zh-Hans": "恢复本分类默认值",
+    "ja": "このカテゴリを既定値に戻す"
   },
   "settings.notice.saved": {
     "en": "Settings saved. New game defaults apply to new setups.",
@@ -214,6 +309,11 @@
     "en": "Absolute path to the Java executable used for new games.",
     "zh-Hans": "新游戏使用的 Java 可执行文件的绝对路径。",
     "ja": "新しいゲームで使用する Java 実行ファイルの絶対パス。"
+  },
+  "settings.game.java.path.full": {
+    "en": "Full path",
+    "zh-Hans": "完整路径",
+    "ja": "パス全体"
   },
   "settings.game.window.size": {
     "en": "%{width} × %{height}",

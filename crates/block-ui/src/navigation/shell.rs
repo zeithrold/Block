@@ -50,6 +50,7 @@ pub(super) enum Surface {
         draft: gpui::EntityId,
         exit: Box<UiAction>,
     },
+    SettingsExit(Box<UiAction>),
     GamesHelp,
     WizardSection(super::WizardPage),
     AuthProviderAdd,
@@ -90,7 +91,7 @@ pub(super) struct ShellState {
     pub selector: Option<super::search_selector::SearchSelectorState>,
     pub revision: usize,
     pub backwards: bool,
-    pub settings_page: u8,
+    pub settings_page: Option<u8>,
     pub wizard: super::game_wizard::WizardState,
     pub onboarding: super::onboarding::State,
     pub chrome_dragging: bool,
@@ -175,6 +176,7 @@ impl ShellState {
             | Surface::SeparateProfiles
             | Surface::StopPackImport { .. }
             | Surface::DiscardGameDraft { .. }
+            | Surface::SettingsExit(_)
             | Surface::GamesHelp
             | Surface::WizardSection(_)
             | Surface::AuthProviderAdd
@@ -209,7 +211,23 @@ impl Block {
                 cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
             )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
+                let modifiers = event.keystroke.modifiers;
+                if event.keystroke.key == "left"
+                    && modifiers.alt
+                    && !modifiers.control
+                    && !modifiers.platform
+                    && !modifiers.shift
+                    && !modifiers.function
+                    && view.router.tab() == Tab::Settings
+                    && !view.composition_in_progress(&UiAction::SettingsBack, cx)
+                {
+                    if view.shell.surfaces.is_open() {
+                        view.handle(UiAction::Drawer(None), window, cx);
+                    } else {
+                        view.handle(UiAction::SettingsBack, window, cx);
+                    }
+                    cx.stop_propagation();
+                } else if event.keystroke.key == "escape" {
                     // Base Dialog owns Escape while a surface is mounted.
                     if !view.shell.surfaces.is_open() {
                         if view.shell.auth.is_some() {
@@ -293,9 +311,21 @@ impl Block {
                 Tab::Onboarding => tr!(language, "nav.setup_block"),
                 Tab::Instances | Tab::Profiles => tr!(language, "nav.games"),
                 Tab::Accounts => tr!(language, "nav.accounts"),
-                Tab::Settings => tr!(language, "nav.settings"),
+                Tab::Settings => self.settings_title(),
                 Tab::About => tr!(language, "nav.about"),
             },
+        }
+    }
+
+    fn settings_title(&self) -> String {
+        let language = self.language();
+        match self.shell.settings_page {
+            Some(0) => tr!(language, "settings.navigation.general"),
+            Some(1) => tr!(language, "settings.navigation.game"),
+            Some(2) => tr!(language, "settings.navigation.profiles"),
+            Some(3) => tr!(language, "settings.navigation.downloads"),
+            Some(4) => tr!(language, "settings.navigation.storage"),
+            _ => tr!(language, "nav.settings"),
         }
     }
 
@@ -390,6 +420,27 @@ impl Block {
                 .into_any_element()
             } else if first_run {
                 div().w(px(32.)).into_any_element()
+            } else if self.router.tab() == Tab::Settings {
+                let text = tr!(
+                    language,
+                    if self.shell.settings_page.is_some() {
+                        "settings.back.settings"
+                    } else {
+                        "settings.back.home"
+                    }
+                );
+                super::tooltip::trigger(
+                    self.chrome_icon_button(
+                        "settings-back",
+                        UiAction::SettingsBack,
+                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                        text.clone(),
+                        cx,
+                    ),
+                    text,
+                    cx,
+                )
+                .into_any_element()
             } else {
                 self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
                     .child(super::design::Icon::Menu.render(18., self.palette.muted))
@@ -1185,6 +1236,15 @@ impl Block {
         if section {
             return content.into_any_element();
         }
+        let actions = div().px(px(24.)).w_full().flex().gap_2();
+        let (actions, buttons) = if matches!(kind, Surface::SettingsExit(_)) {
+            (actions.flex_col(), self.settings_exit_actions(cx))
+        } else {
+            (
+                actions.justify_end(),
+                self.surface_dialog_actions(&kind, cx),
+            )
+        };
         // The separator spans the dialog edge to edge, while the actions keep
         // the same inset as the body.
         content
@@ -1198,14 +1258,7 @@ impl Block {
                     .border_color(rgb(self.palette.border))
                     .flex()
                     .justify_end()
-                    .child(
-                        div()
-                            .px(px(24.))
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .children(self.surface_dialog_actions(&kind, cx)),
-                    ),
+                    .child(actions.children(buttons)),
             )
             .into_any_element()
     }
@@ -1323,6 +1376,12 @@ impl Block {
             Surface::SeparateProfiles => tr!(language, "dialog.separate_profiles.title"),
             Surface::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
             Surface::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
+            Surface::SettingsExit(exit) => match exit.as_ref() {
+                UiAction::CloseWindow => tr!(language, "settings.exit.close_title"),
+                UiAction::QuitApplication => tr!(language, "settings.exit.quit_title"),
+                UiAction::Tab(Tab::Home) => tr!(language, "settings.exit.home_title"),
+                _ => tr!(language, "settings.exit.leave_title"),
+            },
             _ => kind.title(language),
         }
     }
@@ -1346,8 +1405,39 @@ impl Block {
             Surface::SeparateProfiles => vec![tr!(language, "dialog.separate_profiles.note")],
             Surface::StopPackImport { .. } => vec![tr!(language, "modpack.leave.note")],
             Surface::DiscardGameDraft { .. } => vec![tr!(language, "wizard.discard.note")],
+            Surface::SettingsExit(_) => vec![tr!(language, "settings.exit.note")],
             _ => Vec::new(),
         }
+    }
+
+    fn settings_exit_actions(&self, cx: &Context<'_, Self>) -> Vec<super::components::Control> {
+        let language = self.language();
+        vec![
+            self.surface_dialog_button(
+                "settings-exit-save",
+                tr!(language, "settings.exit.save"),
+                Some(UiAction::SettingsExitSave),
+                SurfaceDialogTone::Primary,
+                cx,
+            )
+            .w_full(),
+            self.surface_dialog_button(
+                "settings-exit-discard",
+                tr!(language, "settings.exit.discard"),
+                Some(UiAction::SettingsExitDiscard),
+                SurfaceDialogTone::Destructive,
+                cx,
+            )
+            .w_full(),
+            self.surface_dialog_button(
+                "settings-exit-stay",
+                tr!(language, "settings.exit.stay"),
+                None,
+                SurfaceDialogTone::Outline,
+                cx,
+            )
+            .w_full(),
+        ]
     }
 
     fn surface_dialog_actions(
