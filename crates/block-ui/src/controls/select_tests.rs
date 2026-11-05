@@ -491,6 +491,7 @@ fn open_editor(
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
             view.snapshot = crate::test_support::ready_snapshot();
+            view.handle(UiAction::Inspect("profile-a".into()), window, cx);
             view.handle(action, window, cx);
         });
     });
@@ -573,6 +574,15 @@ fn instance_selects_preserve_custom_input_validate_real_values_and_discard_on_ca
     settle(cx);
 
     click(cx, "cancel-instance-settings");
+    assert!(view.read_with(cx, |view, _| {
+        view.shell.instance_editor.is_some()
+            && matches!(
+                view.shell.surfaces.top().map(|layer| &layer.kind),
+                Some(Surface::EditorExit(_))
+            )
+            && view.snapshot.instances[0].settings.is_none()
+    }));
+    click(cx, "editor-exit-discard");
     assert!(
         view.read_with(cx, |view, _| view.shell.instance_editor.is_none()
             && view.snapshot.instances[0].settings.is_none())

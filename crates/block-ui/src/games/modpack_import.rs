@@ -231,7 +231,6 @@ impl TargetDraft {
 /// The page and first-run draft to restore when leaving an import shortcut.
 #[derive(Debug)]
 struct ReturnContext {
-    tab: super::Tab,
     first_run: Option<super::first_run::Stage>,
     directory_import: bool,
     draft: Option<FirstRunDraft>,
@@ -665,6 +664,141 @@ impl State {
 }
 
 impl Block {
+    /// Synthetic native-capture states use the real archive parser and result
+    /// handlers. No picker, worker, download, or installation is started.
+    #[cfg(debug_assertions)]
+    pub(super) fn modpack_scenario(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> anyhow::Result<()> {
+        self.open_pack_import(window, cx);
+        if name == "modpack-choose" {
+            return Ok(());
+        }
+        let source = PathBuf::from("/scenario/Compact workshop.mrpack");
+        let request = uuid::Uuid::from_u128(0x360720);
+        {
+            let state = &mut self.shell.pack_import;
+            state.source = Some(source.clone());
+            state.begin_inspection();
+            state.request = Some(request);
+        }
+        if name == "modpack-inspecting" {
+            return Ok(());
+        }
+        // Reuse the synthetic archive used by this owner's native tests.
+        let directory = tempfile::tempdir()?;
+        let archive = directory.path().join("fixture.mrpack");
+        write_fabric_pack(&archive)?;
+        let mut inspection = block_launcher::modpack::inspect(&archive)?;
+        inspection.name = "Compact workshop".into();
+        inspection.version = Some("1.2.3".into());
+        inspection.files.extend(
+            [
+                ("mods/required-world-tools.jar", true),
+                ("mods/optional-map-overlay.jar", false),
+                ("resourcepacks/optional-landscape-textures.zip", false),
+            ]
+            .into_iter()
+            .map(|(path, required)| PackFile {
+                path: path.into(),
+                sha1: "0".repeat(40),
+                sha512: "0".repeat(128),
+                size: 0,
+                urls: Vec::new(),
+                required,
+            }),
+        );
+        self.receive_pack_inspected(
+            request,
+            source,
+            Ok((inspection, PackSelection::default())),
+            cx,
+        );
+        if name == "modpack-review" {
+            return Ok(());
+        }
+        self.shell.pack_import.phase = Phase::Installing;
+        self.shell.pack_import.request = Some(request);
+        if name == "modpack-blocked" {
+            self.finish_pack_import(
+                request,
+                Err(
+                    "Synthetic archive verification failed before any files were installed.".into(),
+                ),
+                cx,
+            );
+            return Ok(());
+        }
+        // The fixture library already owns these records. Simulate the engine's
+        // commit message against those exact IDs so completion has a real result
+        // to open and a stopped request keeps a pending catalog target.
+        let instance = self
+            .snapshot
+            .instances
+            .iter_mut()
+            .find(|instance| instance.id == "vanilla")
+            .ok_or_else(|| anyhow::anyhow!("modpack scenario needs its fixture Instance"))?;
+        instance.name = "Compact workshop".into();
+        instance.minecraft_version = self
+            .shell
+            .pack_import
+            .inspection
+            .as_ref()
+            .and_then(|inspection| inspection.minecraft_version.clone())
+            .ok_or_else(|| anyhow::anyhow!("synthetic pack must declare Minecraft"))?;
+        let target = instance
+            .targets
+            .first_mut()
+            .ok_or_else(|| anyhow::anyhow!("modpack scenario needs its fixture target"))?;
+        target.kind = LoaderKind::Fabric;
+        target.loader_version = self
+            .shell
+            .pack_import
+            .inspection
+            .as_ref()
+            .and_then(|inspection| inspection.loader.as_ref().map(|(_, build)| build.clone()));
+        target.status = if name == "modpack-complete" {
+            block_launcher::catalog::InstallStatus::Ready
+        } else {
+            block_launcher::catalog::InstallStatus::Pending
+        };
+        instance.pack = Some(block_launcher::catalog::PackAttachment {
+            target_id: target.id.clone(),
+            status: if name == "modpack-complete" {
+                block_launcher::catalog::PackStatus::Ready
+            } else {
+                block_launcher::catalog::PackStatus::Pending
+            },
+        });
+        let profile = self
+            .snapshot
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == "vanilla")
+            .ok_or_else(|| anyhow::anyhow!("modpack scenario needs its fixture Profile"))?;
+        profile.name = "Compact workshop".into();
+        self.receive_pack_created(
+            request,
+            "vanilla".into(),
+            "Compact workshop".into(),
+            "vanilla".into(),
+            cx,
+        );
+        match name {
+            "modpack-stopped" => {
+                self.stop_pack_import();
+                self.finish_pack_import(request, Err("Synthetic cancellation".into()), cx);
+            }
+            "modpack-complete" => self.finish_pack_import(request, Ok(()), cx),
+            "modpack-installing" => {}
+            _ => anyhow::bail!("unknown modpack scenario"),
+        }
+        Ok(())
+    }
+
     /// Open the same wizard branch from the existing directory-import shortcut.
     pub(super) fn open_pack_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.router.game_wizard() {
@@ -735,8 +869,6 @@ impl Block {
         let first_run = self.setup_incomplete() && self.shell.first_run.enabled;
         self.begin_game_wizard(cx);
         if first_run {
-            self.router.navigate(super::Tab::Onboarding);
-            self.router.enter_game_wizard();
             self.shell.first_run.stage = super::first_run::Stage::GameWizard;
         }
         self.shell.wizard.kind = CreationKind::ImportPack;
@@ -745,7 +877,6 @@ impl Block {
 
     fn pack_return_context(&self) -> ReturnContext {
         ReturnContext {
-            tab: self.router.tab(),
             first_run: (self.router.tab() == super::Tab::Onboarding
                 && self.shell.first_run.enabled)
                 .then_some(self.shell.first_run.stage),
@@ -838,12 +969,15 @@ impl Block {
         if let Some(draft) = return_to.draft.take() {
             self.restore_first_run_draft(draft);
         }
-        self.router.navigate(return_to.tab);
         if let Some(stage) = return_to.first_run {
             self.shell.first_run.stage = stage;
             if stage == super::first_run::Stage::GameChoice {
                 self.router.enter_game_choice();
+            } else {
+                self.router.leave_task();
             }
+        } else {
+            self.router.leave_task();
         }
         if return_to.directory_import {
             self.open_import_games(window, cx);
@@ -1084,8 +1218,19 @@ impl Block {
             self.first_run_overview(window, cx);
         } else {
             self.initialize_browsers(cx);
-            self.router.navigate(super::Tab::Instances);
+            self.router.leave_task();
             self.form = None;
+            if let Some(profile) = self.shell.pack_import.profile.clone() {
+                let tab = if self.snapshot.profile_mode
+                    == block_launcher::catalog::ProfileMode::Bundled
+                {
+                    super::Tab::Instances
+                } else {
+                    super::Tab::Profiles
+                };
+                self.router
+                    .open_record(tab, super::navigation::RecordRef::Profile(profile));
+            }
         }
         true
     }
@@ -1778,6 +1923,9 @@ impl Block {
                         div()
                             .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .min_w_0()
+                            .flex_1()
+                            .whitespace_normal()
                             .child(tr!(language, "modpack.blocked.heading")),
                     ),
             )
@@ -2318,7 +2466,14 @@ impl Block {
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().min_w_0().text_sm().child(file.path.clone()))
+            .child(
+                div()
+                    .min_w_0()
+                    .w_full()
+                    .text_sm()
+                    .whitespace_normal()
+                    .child(file.path.clone()),
+            )
             .child(note(tr!(language, "modpack.review.required_included")))
     }
 
@@ -2490,7 +2645,6 @@ impl Block {
     pub(super) fn modpack_wizard_footer(
         &self,
         language: Language,
-        compact: bool,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let state = &self.shell.pack_import;
@@ -2610,35 +2764,17 @@ impl Block {
         } else {
             primary
         };
-        if compact {
-            if state.phase == Phase::Complete {
-                return primary.w_full().into_any_element();
-            }
-            return div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .justify_between()
-                        .gap_2()
-                        .children(cancel)
-                        .children(back),
-                )
-                .child(primary.w_full())
-                .into_any_element();
+        if state.phase == Phase::Complete {
+            return primary.w_full().into_any_element();
         }
         div()
             .w_full()
             .flex()
-            .justify_between()
-            .items_center()
+            .flex_col()
             .gap_2()
-            .child(div().children(cancel))
-            .child(div().flex().gap_2().children(back).child(primary))
+            .children(cancel.map(|button| button.w_full()))
+            .children(back.map(|button| button.w_full()))
+            .child(primary.w_full())
             .into_any_element()
     }
 
@@ -2664,7 +2800,33 @@ impl Block {
                 view.handle(UiAction::PackImport(action.clone()), window, cx);
             }),
         )
+        .h_auto()
+        .min_h(gpui::px(36.))
+        .whitespace_normal()
     }
+}
+
+/// A synthetic manifest archive, shared by debug captures and native tests.
+#[cfg(any(test, debug_assertions))]
+fn write_fabric_pack(path: &std::path::Path) -> anyhow::Result<()> {
+    const ZIP_HEX: &str = concat!(
+        "504b03041400000008000dae615db11a6a457600000096000000130000006d6f6472696e74682e69",
+        "6e6465782e6a736f6e4d8c310e83300c45af527986a8a9c4920354e2022c550737712aabc44106b1",
+        "20ee5e53968effbdffff06b96ac165209db90a04dfc01b0b4180c24251312fd0809ce88e2fe57899",
+        "307e0caee7a64f66bce544134922894c3384edefc0bcbb5ddd51cabf8b76ac98484d18ed9cf7b09b",
+        "e2f1183e9efb17504b010214031400000008000dae615db11a6a4576000000960000001300000000",
+        "000000000000008001000000006d6f6472696e74682e696e6465782e6a736f6e504b050600000000",
+        "0100010041000000a70000000000",
+    );
+    let bytes = ZIP_HEX
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|digits| Ok(u8::from_str_radix(std::str::from_utf8(digits)?, 16)?))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    std::fs::write(path, bytes)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2723,27 +2885,6 @@ mod tests {
             "1bb5f1b00355d752caea0bff75fa20d0f0b081342883dd48732380d39560755eb2caf31b504b0102",
             "140314000000080058aa615d2076217a99000000e40000000d000000000000000000000080010000",
             "00006d616e69666573742e6a736f6e504b050600000000010001003b000000c40000000000",
-        );
-        let bytes = ZIP_HEX
-            .as_bytes()
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|digits| Ok(u8::from_str_radix(std::str::from_utf8(digits)?, 16)?))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        std::fs::write(path, bytes)?;
-        Ok(())
-    }
-
-    fn write_fabric_pack(path: &std::path::Path) -> anyhow::Result<()> {
-        const ZIP_HEX: &str = concat!(
-            "504b03041400000008000dae615db11a6a457600000096000000130000006d6f6472696e74682e69",
-            "6e6465782e6a736f6e4d8c310e83300c45af527986a8a9c4920354e2022c550737712aabc44106b1",
-            "20ee5e53968effbdffff06b96ac165209db90a04dfc01b0b4180c24251312fd0809ce88e2fe57899",
-            "307e0caee7a64f66bce544134922894c3384edefc0bcbb5ddd51cabf8b76ac98484d18ed9cf7b09b",
-            "e2f1183e9efb17504b010214031400000008000dae615db11a6a4576000000960000001300000000",
-            "000000000000008001000000006d6f6472696e74682e696e6465782e6a736f6e504b050600000000",
-            "0100010041000000a70000000000",
         );
         let bytes = ZIP_HEX
             .as_bytes()
@@ -3859,6 +4000,10 @@ mod tests {
                             } else {
                                 Tab::Instances
                             }
+                        && (exit == "settings"
+                            || matches!(view.router.screen(),
+                            crate::navigation::Screen::Record(
+                                crate::navigation::RecordRef::Profile(id)) if id == "profile-a"))
                 }));
                 Ok(())
             })();
@@ -4473,6 +4618,7 @@ mod tests {
                     view.open_import_games(window, cx);
                     view
                 });
+                let parent = view.read_with(cx, |view, _| view.router.entry_id());
                 cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(1000.)));
                 cx.run_until_parked();
                 view.update(cx, |view, cx| {
@@ -4488,7 +4634,7 @@ mod tests {
                     if origin.is_some() {
                         Tab::Onboarding
                     } else {
-                        Tab::Instances
+                        Tab::Home
                     }
                 );
                 click_pack(cx, "cancel-instance")?;
@@ -4504,6 +4650,7 @@ mod tests {
                         }
                         && origin.is_none_or(|stage| view.shell.first_run.stage == stage)
                         && (origin != Some(Stage::GameChoice) || view.wizard_task_active())
+                        && view.router.entry_id() == parent
                 }));
                 Ok(())
             })();
@@ -5071,8 +5218,8 @@ mod tests {
                     let bounds = reveal_pack_item(&view, cx, selector)?;
                     let body = view.read_with(cx, |view, _| view.shell.pack_import.scroll.bounds());
                     assert!(
-                        bounds.left() >= body.left() + gpui::px(32.)
-                            && bounds.right() <= body.right() - gpui::px(32.),
+                        bounds.left() >= body.left() + gpui::px(16.)
+                            && bounds.right() <= body.right() - gpui::px(16.),
                         "{language:?}/{selector}: {bounds:?} outside padded body {body:?}"
                     );
                 }

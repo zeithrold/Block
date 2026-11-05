@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "title": "Milestone II visual review semantic cases",
+  "title": "Historical comparisons and authored compact native review cases",
+  "compact_review_policy": "Historical and retired rows preserve the original comparison observations, never current acceptance. Current compact rows are native-only, unreviewed and not_assessed. Only hash-checked passed capture receipts with assertions.contract_revision = compact-ui-20261105 attach images to compact rows; old matching filenames remain historical. Historical viewport/source wording describes its earlier audit, not current geometry.",
   "description": "Historical Milestone II comparison, not the current Wizard acceptance contract. Scenario names, source locations and React/native correspondence below describe that review and may have been retired by the subsequent Wizard redesign. Use scripts/scenario_contracts.py for current capture expectations; new captures do not retroactively validate these archived comparisons. Exact filenames are candidate lookup only. Capture semantics and provenance are reviewed independently. Unknown archive fields are intentionally null/unknown.",
   "capture_receipt_schema": {
     "schema_version": 1,
@@ -42,6 +43,7 @@
   "cases": [
     {
       "case_id": "home-empty",
+      "lifecycle": "historical",
       "native_stems": [
         "home-empty"
       ],
@@ -88,6 +90,7 @@
     },
     {
       "case_id": "home-ready",
+      "lifecycle": "historical",
       "native_stems": [
         "home-ready"
       ],
@@ -134,6 +137,7 @@
     },
     {
       "case_id": "home-downloading",
+      "lifecycle": "historical",
       "native_stems": [
         "home-downloading"
       ],
@@ -180,6 +184,7 @@
     },
     {
       "case_id": "home-error",
+      "lifecycle": "historical",
       "native_stems": [
         "home-error"
       ],
@@ -226,6 +231,7 @@
     },
     {
       "case_id": "games-bundled",
+      "lifecycle": "historical",
       "native_stems": [
         "games-bundled"
       ],
@@ -272,6 +278,7 @@
     },
     {
       "case_id": "games-separated",
+      "lifecycle": "historical",
       "native_stems": [
         "games-separated"
       ],
@@ -318,6 +325,7 @@
     },
     {
       "case_id": "games-detail",
+      "lifecycle": "historical",
       "native_stems": [
         "games-detail"
       ],
@@ -364,6 +372,7 @@
     },
     {
       "case_id": "games-instance-settings",
+      "lifecycle": "historical",
       "native_stems": [
         "games-instance-settings"
       ],
@@ -410,6 +419,7 @@
     },
     {
       "case_id": "wizard-setup",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-setup"
       ],
@@ -456,6 +466,7 @@
     },
     {
       "case_id": "wizard-review",
+      "lifecycle": "retired",
       "native_stems": [
         "wizard-review"
       ],
@@ -488,7 +499,7 @@
         "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
       },
       "comparable_scope": "wizard_task_shell_and_review_step",
-      "rationale": "The setup/review task is shared, but direct fixture selection versus interactive step transition and location-page state are not equivalent. Location has no current screenshot recipe.",
+      "rationale": "Historical (retired scenario): The setup/review task is shared, but direct fixture selection versus interactive step transition and location-page state are not equivalent. Location has no current screenshot recipe. This native stem is no longer registered; retain this comparison only as archive history.",
       "reference_audit": {
         "current_snap_proto_status": "scripted_capture",
         "requested_by_current_script": true,
@@ -502,6 +513,7 @@
     },
     {
       "case_id": "wizard-optifine",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-optifine"
       ],
@@ -548,6 +560,7 @@
     },
     {
       "case_id": "wizard-optifine-selected",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-optifine-selected"
       ],
@@ -594,6 +607,7 @@
     },
     {
       "case_id": "accounts-list",
+      "lifecycle": "historical",
       "native_stems": [
         "accounts-list"
       ],
@@ -640,6 +654,7 @@
     },
     {
       "case_id": "accounts-detail",
+      "lifecycle": "historical",
       "native_stems": [
         "accounts-detail"
       ],
@@ -686,6 +701,7 @@
     },
     {
       "case_id": "accounts-offline-detail",
+      "lifecycle": "historical",
       "native_stems": [
         "accounts-offline-detail"
       ],
@@ -732,6 +748,7 @@
     },
     {
       "case_id": "accounts-providers",
+      "lifecycle": "historical",
       "native_stems": [
         "accounts-providers"
       ],
@@ -778,6 +795,7 @@
     },
     {
       "case_id": "provider-add",
+      "lifecycle": "historical",
       "native_stems": [
         "provider-add"
       ],
@@ -824,6 +842,7 @@
     },
     {
       "case_id": "provider-http-warning",
+      "lifecycle": "historical",
       "native_stems": [
         "provider-http-warning"
       ],
@@ -870,6 +889,7 @@
     },
     {
       "case_id": "remove-provider-confirmation",
+      "lifecycle": "historical",
       "native_stems": [
         "remove-provider-confirmation"
       ],
@@ -916,6 +936,7 @@
     },
     {
       "case_id": "auth-choose",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-choose"
       ],
@@ -962,6 +983,7 @@
     },
     {
       "case_id": "auth-information",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-information"
       ],
@@ -1008,6 +1030,7 @@
     },
     {
       "case_id": "auth-authlib-information",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-authlib-information"
       ],
@@ -1054,6 +1077,7 @@
     },
     {
       "case_id": "auth-authlib-http-warning",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-authlib-http-warning"
       ],
@@ -1100,6 +1124,7 @@
     },
     {
       "case_id": "auth-authlib-characters",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-authlib-characters"
       ],
@@ -1146,6 +1171,7 @@
     },
     {
       "case_id": "auth-authlib-complete",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-authlib-complete"
       ],
@@ -1192,6 +1218,7 @@
     },
     {
       "case_id": "auth-authlib-provider-add",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-authlib-provider-add"
       ],
@@ -1238,6 +1265,7 @@
     },
     {
       "case_id": "auth-offline-information",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-offline-information"
       ],
@@ -1284,6 +1312,7 @@
     },
     {
       "case_id": "auth-offline-error",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-offline-error"
       ],
@@ -1330,6 +1359,7 @@
     },
     {
       "case_id": "auth-offline-complete",
+      "lifecycle": "retired",
       "native_stems": [
         "auth-offline-complete"
       ],
@@ -1362,7 +1392,7 @@
         "react_image_commit": "unknown for archived images; populate from per-image capture receipt"
       },
       "comparable_scope": "offline_sign_in_step_layout_only",
-      "rationale": "Same workflow steps and username validation task, but exact user strings and resulting account identity differ.",
+      "rationale": "Historical (retired scenario): Same workflow steps and username validation task, but exact user strings and resulting account identity differ. This native stem is no longer registered; retain this comparison only as archive history.",
       "reference_audit": {
         "current_snap_proto_status": "scripted_capture",
         "requested_by_current_script": true,
@@ -1376,6 +1406,7 @@
     },
     {
       "case_id": "auth-device-preparing",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-device-preparing"
       ],
@@ -1422,6 +1453,7 @@
     },
     {
       "case_id": "auth-device-waiting",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-device-waiting"
       ],
@@ -1468,6 +1500,7 @@
     },
     {
       "case_id": "auth-waiting",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-waiting"
       ],
@@ -1514,6 +1547,7 @@
     },
     {
       "case_id": "auth-verifying",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-verifying"
       ],
@@ -1560,6 +1594,7 @@
     },
     {
       "case_id": "auth-complete",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-complete"
       ],
@@ -1606,6 +1641,7 @@
     },
     {
       "case_id": "auth-saving",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-saving"
       ],
@@ -1652,6 +1688,7 @@
     },
     {
       "case_id": "auth-error",
+      "lifecycle": "historical",
       "native_stems": [
         "auth-error"
       ],
@@ -1698,6 +1735,7 @@
     },
     {
       "case_id": "settings-general",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-general"
       ],
@@ -1744,6 +1782,7 @@
     },
     {
       "case_id": "settings-game",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-game"
       ],
@@ -1790,6 +1829,7 @@
     },
     {
       "case_id": "settings-profiles",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-profiles"
       ],
@@ -1836,6 +1876,7 @@
     },
     {
       "case_id": "settings-downloads",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-downloads"
       ],
@@ -1882,6 +1923,7 @@
     },
     {
       "case_id": "settings-socks5",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-socks5"
       ],
@@ -1928,6 +1970,7 @@
     },
     {
       "case_id": "settings-storage",
+      "lifecycle": "historical",
       "native_stems": [
         "settings-storage"
       ],
@@ -1974,6 +2017,7 @@
     },
     {
       "case_id": "about",
+      "lifecycle": "historical",
       "native_stems": [
         "about"
       ],
@@ -2020,6 +2064,7 @@
     },
     {
       "case_id": "setup-welcome",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-welcome"
       ],
@@ -2060,6 +2105,7 @@
     },
     {
       "case_id": "setup-overview",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-overview"
       ],
@@ -2100,6 +2146,7 @@
     },
     {
       "case_id": "setup-overview-ready",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-overview-ready"
       ],
@@ -2140,6 +2187,7 @@
     },
     {
       "case_id": "setup-game-choice",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-game-choice"
       ],
@@ -2180,6 +2228,7 @@
     },
     {
       "case_id": "setup-import-sources",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-import-sources"
       ],
@@ -2220,6 +2269,7 @@
     },
     {
       "case_id": "setup-import-list",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-import-list"
       ],
@@ -2260,6 +2310,7 @@
     },
     {
       "case_id": "setup-account",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-account"
       ],
@@ -2300,6 +2351,7 @@
     },
     {
       "case_id": "setup-game",
+      "lifecycle": "historical",
       "native_stems": [
         "setup-game"
       ],
@@ -2340,6 +2392,7 @@
     },
     {
       "case_id": "welcome-1",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-1"
       ],
@@ -2386,6 +2439,7 @@
     },
     {
       "case_id": "welcome-2",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-2"
       ],
@@ -2432,6 +2486,7 @@
     },
     {
       "case_id": "welcome-3",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-3"
       ],
@@ -2478,6 +2533,7 @@
     },
     {
       "case_id": "home-profile-drawer",
+      "lifecycle": "historical",
       "native_stems": [
         "home-profile-drawer"
       ],
@@ -2524,6 +2580,7 @@
     },
     {
       "case_id": "home-account-drawer",
+      "lifecycle": "historical",
       "native_stems": [
         "home-account-drawer"
       ],
@@ -2570,6 +2627,7 @@
     },
     {
       "case_id": "home-downloads-drawer",
+      "lifecycle": "historical",
       "native_stems": [
         "home-downloads-drawer"
       ],
@@ -2616,6 +2674,7 @@
     },
     {
       "case_id": "toast-motion",
+      "lifecycle": "historical",
       "native_stems": [
         "toast-motion"
       ],
@@ -2661,6 +2720,7 @@
     },
     {
       "case_id": "toast-motion-reduced",
+      "lifecycle": "historical",
       "native_stems": [
         "toast-motion-reduced"
       ],
@@ -2706,6 +2766,7 @@
     },
     {
       "case_id": "download-files",
+      "lifecycle": "historical",
       "native_stems": [
         "download-files"
       ],
@@ -2752,6 +2813,7 @@
     },
     {
       "case_id": "wizard-version-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-version-picker"
       ],
@@ -2798,6 +2860,7 @@
     },
     {
       "case_id": "wizard-loader-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-loader-picker"
       ],
@@ -2846,6 +2909,7 @@
     },
     {
       "case_id": "wizard-fabric-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-fabric-picker"
       ],
@@ -2894,6 +2958,7 @@
     },
     {
       "case_id": "wizard-quilt-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-quilt-picker"
       ],
@@ -2940,6 +3005,7 @@
     },
     {
       "case_id": "wizard-neoforge-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-neoforge-picker"
       ],
@@ -2986,6 +3052,7 @@
     },
     {
       "case_id": "wizard-forge-picker",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-forge-picker"
       ],
@@ -3032,6 +3099,7 @@
     },
     {
       "case_id": "wizard-loader-loading",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-loader-loading"
       ],
@@ -3078,6 +3146,7 @@
     },
     {
       "case_id": "wizard-loader-error",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-loader-error"
       ],
@@ -3124,6 +3193,7 @@
     },
     {
       "case_id": "wizard-loader-empty",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-loader-empty"
       ],
@@ -3172,6 +3242,7 @@
     },
     {
       "case_id": "wizard-loader-search-empty",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-loader-search-empty"
       ],
@@ -3220,6 +3291,7 @@
     },
     {
       "case_id": "wizard-configuration",
+      "lifecycle": "historical",
       "native_stems": [
         "wizard-configuration"
       ],
@@ -3266,6 +3338,7 @@
     },
     {
       "case_id": "welcome-version-picker",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-version-picker"
       ],
@@ -3312,6 +3385,7 @@
     },
     {
       "case_id": "remove-confirmation",
+      "lifecycle": "historical",
       "native_stems": [
         "remove-confirmation"
       ],
@@ -3359,6 +3433,7 @@
     },
     {
       "case_id": "remove-account-confirmation",
+      "lifecycle": "historical",
       "native_stems": [
         "remove-account-confirmation"
       ],
@@ -3405,6 +3480,7 @@
     },
     {
       "case_id": "separate-confirmation",
+      "lifecycle": "historical",
       "native_stems": [
         "separate-confirmation"
       ],
@@ -3451,6 +3527,7 @@
     },
     {
       "case_id": "games-help",
+      "lifecycle": "historical",
       "native_stems": [
         "games-help"
       ],
@@ -3497,6 +3574,7 @@
     },
     {
       "case_id": "welcome-settings",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-settings"
       ],
@@ -3543,6 +3621,7 @@
     },
     {
       "case_id": "welcome-about",
+      "lifecycle": "retired",
       "native_stems": [
         "welcome-about"
       ],
@@ -3586,6 +3665,4122 @@
       },
       "coverage_counts_as_independent": false,
       "semantic_group": "navigation-task"
+    },
+    {
+      "case_id": "compact-home-empty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-empty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-empty"
+      },
+      "trigger": {
+        "value": "--scenario home-empty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-ready",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-ready"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-ready"
+      },
+      "trigger": {
+        "value": "--scenario home-ready --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-downloading",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-downloading"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-downloading"
+      },
+      "trigger": {
+        "value": "--scenario home-downloading --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-error",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-error"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-error"
+      },
+      "trigger": {
+        "value": "--scenario home-error --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-bundled",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-bundled"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-bundled"
+      },
+      "trigger": {
+        "value": "--scenario games-bundled --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-separated",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-separated"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-separated"
+      },
+      "trigger": {
+        "value": "--scenario games-separated --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-detail",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-detail"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-detail"
+      },
+      "trigger": {
+        "value": "--scenario games-detail --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-instance-settings",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-instance-settings"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-instance-settings"
+      },
+      "trigger": {
+        "value": "--scenario games-instance-settings --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/instance_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/instance_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-setup",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-setup"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-setup"
+      },
+      "trigger": {
+        "value": "--scenario wizard-setup --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-optifine",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-optifine"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-optifine"
+      },
+      "trigger": {
+        "value": "--scenario wizard-optifine --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-optifine-selected",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-optifine-selected"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-optifine-selected"
+      },
+      "trigger": {
+        "value": "--scenario wizard-optifine-selected --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-accounts-list",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "accounts-list"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "accounts-list"
+      },
+      "trigger": {
+        "value": "--scenario accounts-list --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-accounts-detail",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "accounts-detail"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "accounts-detail"
+      },
+      "trigger": {
+        "value": "--scenario accounts-detail --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-accounts-offline-detail",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "accounts-offline-detail"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "accounts-offline-detail"
+      },
+      "trigger": {
+        "value": "--scenario accounts-offline-detail --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/browser_accounts.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-accounts-providers",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "accounts-providers"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "accounts-providers"
+      },
+      "trigger": {
+        "value": "--scenario accounts-providers --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-provider-add",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "provider-add"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "provider-add"
+      },
+      "trigger": {
+        "value": "--scenario provider-add --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-provider-http-warning",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "provider-http-warning"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "provider-http-warning"
+      },
+      "trigger": {
+        "value": "--scenario provider-http-warning --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-remove-provider-confirmation",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "remove-provider-confirmation"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "remove-provider-confirmation"
+      },
+      "trigger": {
+        "value": "--scenario remove-provider-confirmation --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-choose",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-choose"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-choose"
+      },
+      "trigger": {
+        "value": "--scenario auth-choose --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-information",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-information"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-information"
+      },
+      "trigger": {
+        "value": "--scenario auth-information --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-authlib-information",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-authlib-information"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-authlib-information"
+      },
+      "trigger": {
+        "value": "--scenario auth-authlib-information --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-authlib-http-warning",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-authlib-http-warning"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-authlib-http-warning"
+      },
+      "trigger": {
+        "value": "--scenario auth-authlib-http-warning --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-authlib-characters",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-authlib-characters"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-authlib-characters"
+      },
+      "trigger": {
+        "value": "--scenario auth-authlib-characters --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-authlib-complete",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-authlib-complete"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-authlib-complete"
+      },
+      "trigger": {
+        "value": "--scenario auth-authlib-complete --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-authlib-provider-add",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-authlib-provider-add"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-authlib-provider-add"
+      },
+      "trigger": {
+        "value": "--scenario auth-authlib-provider-add --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-offline-information",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-offline-information"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-offline-information"
+      },
+      "trigger": {
+        "value": "--scenario auth-offline-information --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-offline-error",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-offline-error"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-offline-error"
+      },
+      "trigger": {
+        "value": "--scenario auth-offline-error --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-offline-saving",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-offline-saving"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-offline-saving"
+      },
+      "trigger": {
+        "value": "--scenario auth-offline-saving --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-device-preparing",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-device-preparing"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-device-preparing"
+      },
+      "trigger": {
+        "value": "--scenario auth-device-preparing --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-device-waiting",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-device-waiting"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-device-waiting"
+      },
+      "trigger": {
+        "value": "--scenario auth-device-waiting --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-waiting",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-waiting"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-waiting"
+      },
+      "trigger": {
+        "value": "--scenario auth-waiting --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-verifying",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-verifying"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-verifying"
+      },
+      "trigger": {
+        "value": "--scenario auth-verifying --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-complete",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-complete"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-complete"
+      },
+      "trigger": {
+        "value": "--scenario auth-complete --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-saving",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-saving"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-saving"
+      },
+      "trigger": {
+        "value": "--scenario auth-saving --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-auth-error",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "auth-error"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "auth-error"
+      },
+      "trigger": {
+        "value": "--scenario auth-error --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-index",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-index"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-index"
+      },
+      "trigger": {
+        "value": "--scenario settings-index --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-exit-dirty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-exit-dirty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-exit-dirty"
+      },
+      "trigger": {
+        "value": "--scenario settings-exit-dirty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-invalid-proxy",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-invalid-proxy"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-invalid-proxy"
+      },
+      "trigger": {
+        "value": "--scenario settings-invalid-proxy --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-general",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-general"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-general"
+      },
+      "trigger": {
+        "value": "--scenario settings-general --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-game",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-game"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-game"
+      },
+      "trigger": {
+        "value": "--scenario settings-game --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-profiles",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-profiles"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-profiles"
+      },
+      "trigger": {
+        "value": "--scenario settings-profiles --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-downloads",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-downloads"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-downloads"
+      },
+      "trigger": {
+        "value": "--scenario settings-downloads --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-socks5",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-socks5"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-socks5"
+      },
+      "trigger": {
+        "value": "--scenario settings-socks5 --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-settings-storage",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "settings-storage"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "settings-storage"
+      },
+      "trigger": {
+        "value": "--scenario settings-storage --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/settings.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-about",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "about"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "about"
+      },
+      "trigger": {
+        "value": "--scenario about --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/about.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/settings/about.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-welcome",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-welcome"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-welcome"
+      },
+      "trigger": {
+        "value": "--scenario setup-welcome --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-overview",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-overview"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-overview"
+      },
+      "trigger": {
+        "value": "--scenario setup-overview --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-overview-ready",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-overview-ready"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-overview-ready"
+      },
+      "trigger": {
+        "value": "--scenario setup-overview-ready --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-game-choice",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-game-choice"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-game-choice"
+      },
+      "trigger": {
+        "value": "--scenario setup-game-choice --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-import-sources",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-import-sources"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-import-sources"
+      },
+      "trigger": {
+        "value": "--scenario setup-import-sources --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-import-list",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-import-list"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-import-list"
+      },
+      "trigger": {
+        "value": "--scenario setup-import-list --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-account",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-account"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-account"
+      },
+      "trigger": {
+        "value": "--scenario setup-account --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/authentication.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-game",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-game"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-game"
+      },
+      "trigger": {
+        "value": "--scenario setup-game --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-profile-drawer",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-profile-drawer"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-profile-drawer"
+      },
+      "trigger": {
+        "value": "--scenario home-profile-drawer --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-account-drawer",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-account-drawer"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-account-drawer"
+      },
+      "trigger": {
+        "value": "--scenario home-account-drawer --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-home-downloads-drawer",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "home-downloads-drawer"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "home-downloads-drawer"
+      },
+      "trigger": {
+        "value": "--scenario home-downloads-drawer --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-toast-motion",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "toast-motion"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "toast-motion"
+      },
+      "trigger": {
+        "value": "--scenario toast-motion --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-toast-motion-reduced",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "toast-motion-reduced"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "toast-motion-reduced"
+      },
+      "trigger": {
+        "value": "--scenario toast-motion-reduced --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-download-files",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "download-files"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "download-files"
+      },
+      "trigger": {
+        "value": "--scenario download-files --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-version-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-version-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-version-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-version-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-loader-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-loader-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-loader-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-loader-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-fabric-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-fabric-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-fabric-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-fabric-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-quilt-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-quilt-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-quilt-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-quilt-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-neoforge-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-neoforge-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-neoforge-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-neoforge-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-forge-picker",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-forge-picker"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-forge-picker"
+      },
+      "trigger": {
+        "value": "--scenario wizard-forge-picker --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-loader-loading",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-loader-loading"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-loader-loading"
+      },
+      "trigger": {
+        "value": "--scenario wizard-loader-loading --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-loader-error",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-loader-error"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-loader-error"
+      },
+      "trigger": {
+        "value": "--scenario wizard-loader-error --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-loader-empty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-loader-empty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-loader-empty"
+      },
+      "trigger": {
+        "value": "--scenario wizard-loader-empty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-loader-search-empty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-loader-search-empty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-loader-search-empty"
+      },
+      "trigger": {
+        "value": "--scenario wizard-loader-search-empty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-configuration",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-configuration"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-configuration"
+      },
+      "trigger": {
+        "value": "--scenario wizard-configuration --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-remove-confirmation",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "remove-confirmation"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "remove-confirmation"
+      },
+      "trigger": {
+        "value": "--scenario remove-confirmation --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-remove-account-confirmation",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "remove-account-confirmation"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "remove-account-confirmation"
+      },
+      "trigger": {
+        "value": "--scenario remove-account-confirmation --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-separate-confirmation",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "separate-confirmation"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "separate-confirmation"
+      },
+      "trigger": {
+        "value": "--scenario separate-confirmation --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/navigation/shell.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-help",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-help"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-help"
+      },
+      "trigger": {
+        "value": "--scenario games-help --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-provider-detail",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "provider-detail"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "provider-detail"
+      },
+      "trigger": {
+        "value": "--scenario provider-detail --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-provider-edit",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "provider-edit"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "provider-edit"
+      },
+      "trigger": {
+        "value": "--scenario provider-edit --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-profile-editor-root",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "profile-editor-root"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "profile-editor-root"
+      },
+      "trigger": {
+        "value": "--scenario profile-editor-root --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-profile-editor-data",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "profile-editor-data"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "profile-editor-data"
+      },
+      "trigger": {
+        "value": "--scenario profile-editor-data --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-profile-editor-launch",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "profile-editor-launch"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "profile-editor-launch"
+      },
+      "trigger": {
+        "value": "--scenario profile-editor-launch --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-profile-editor-appearance",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "profile-editor-appearance"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "profile-editor-appearance"
+      },
+      "trigger": {
+        "value": "--scenario profile-editor-appearance --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-instance-editor-exit-dirty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "instance-editor-exit-dirty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "instance-editor-exit-dirty"
+      },
+      "trigger": {
+        "value": "--scenario instance-editor-exit-dirty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/instance_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/instance_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-profile-editor-exit-dirty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "profile-editor-exit-dirty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "profile-editor-exit-dirty"
+      },
+      "trigger": {
+        "value": "--scenario profile-editor-exit-dirty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/profile_editor.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-provider-editor-exit-dirty",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "provider-editor-exit-dirty"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "provider-editor-exit-dirty"
+      },
+      "trigger": {
+        "value": "--scenario provider-editor-exit-dirty --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/accounts/providers.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-missing-record",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-missing-record"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-missing-record"
+      },
+      "trigger": {
+        "value": "--scenario games-missing-record --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-games-detail-long-path",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "games-detail-long-path"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "games-detail-long-path"
+      },
+      "trigger": {
+        "value": "--scenario games-detail-long-path --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/browser.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-overview-draft",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-overview-draft"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-overview-draft"
+      },
+      "trigger": {
+        "value": "--scenario setup-overview-draft --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-wizard-configuration-invalid",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "wizard-configuration-invalid"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "wizard-configuration-invalid"
+      },
+      "trigger": {
+        "value": "--scenario wizard-configuration-invalid --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/game_wizard.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-setup-import-long-destination",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "setup-import-long-destination"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "setup-import-long-destination"
+      },
+      "trigger": {
+        "value": "--scenario setup-import-long-destination --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/import_games.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-choose",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-choose"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-choose"
+      },
+      "trigger": {
+        "value": "--scenario modpack-choose --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-inspecting",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-inspecting"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-inspecting"
+      },
+      "trigger": {
+        "value": "--scenario modpack-inspecting --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-review",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-review"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-review"
+      },
+      "trigger": {
+        "value": "--scenario modpack-review --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-blocked",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-blocked"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-blocked"
+      },
+      "trigger": {
+        "value": "--scenario modpack-blocked --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-stopped",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-stopped"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-stopped"
+      },
+      "trigger": {
+        "value": "--scenario modpack-stopped --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-installing",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-installing"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-installing"
+      },
+      "trigger": {
+        "value": "--scenario modpack-installing --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-modpack-complete",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "modpack-complete"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native compact launcher",
+        "identity": "modpack-complete"
+      },
+      "trigger": {
+        "value": "--scenario modpack-complete --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/games/modpack_import.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-crash-overview",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "crash-overview"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native crash help",
+        "identity": "crash-overview"
+      },
+      "trigger": {
+        "value": "--scenario crash-overview --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-crash-logs",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "crash-logs"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native crash help",
+        "identity": "crash-logs"
+      },
+      "trigger": {
+        "value": "--scenario crash-logs --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
+    },
+    {
+      "case_id": "compact-crash-long-metadata",
+      "lifecycle": "current",
+      "capture_contract_revision": "compact-ui-20261105",
+      "native_stems": [
+        "crash-long-metadata"
+      ],
+      "reference_candidates": [],
+      "review_status": "unreviewed",
+      "object": {
+        "type": "native crash help",
+        "identity": "crash-long-metadata"
+      },
+      "trigger": {
+        "value": "--scenario crash-long-metadata --theme light|dark",
+        "source": "crates/block-ui/src/runtime/scenarios.rs"
+      },
+      "data": {
+        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
+        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs"
+      },
+      "viewport": {
+        "native": {
+          "width": 360,
+          "height": 720,
+          "unit": "logical content",
+          "observed": "unknown until a capture receipt records it"
+        },
+        "react": "not mapped"
+      },
+      "focus": "not assessed",
+      "scroll": "not assessed",
+      "source_provenance": {
+        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/feedback/crash_view.rs",
+        "native_image_commit": "unknown until supplied by a capture receipt",
+        "react_source": null,
+        "react_image_commit": null
+      },
+      "comparable_scope": "not_assessed",
+      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
+      "coverage_counts_as_independent": false
     }
   ]
 }

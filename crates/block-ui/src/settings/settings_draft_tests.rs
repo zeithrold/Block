@@ -1263,10 +1263,12 @@ fn completed_profile_conversion_survives_discarding_the_settings_draft(
 }
 
 #[gpui::test]
-fn settings_controls_fit_the_home_frame_in_both_languages_and_themes(
-    cx: &mut gpui::TestAppContext,
-) {
-    for language in [Language::English, Language::SimplifiedChinese] {
+fn settings_controls_and_long_storage_paths_fit_the_home_frame(cx: &mut gpui::TestAppContext) {
+    for language in [
+        Language::English,
+        Language::SimplifiedChinese,
+        Language::Japanese,
+    ] {
         for appearance in [Appearance::Light, Appearance::Dark] {
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
                 let mut view = crate::tests::test_view(window, cx);
@@ -1343,6 +1345,23 @@ fn settings_controls_fit_the_home_frame_in_both_languages_and_themes(
                     && save.top() >= footer.top()
                     && save.bottom() <= footer.bottom()
             }));
+            view.update_in(cx, |view, window, cx| {
+                view.shell.storage.paths = Ok(super::StoragePaths {
+                    library: format!("/library/{}", "long-directory-name".repeat(20)).into(),
+                    cache: format!("/cache/{}", "long-cache-name".repeat(20)).into(),
+                });
+                view.select_settings_page(4, window, cx);
+            });
+            settings_frame(cx);
+            for selector in ["settings-storage-library", "settings-storage-cache"] {
+                let bounds = cx.debug_bounds(selector);
+                assert!(
+                    bounds.is_some_and(|bounds| bounds.left() >= px(0.)
+                        && bounds.right() <= px(360.)
+                        && bounds.size.height > px(64.)),
+                    "{language:?} {appearance:?} {selector}: {bounds:?}"
+                );
+            }
             cx.update(|window, _| window.remove_window());
         }
     }
@@ -1473,8 +1492,7 @@ fn separated_profile_confirmation_actions_fit_the_home_frame(cx: &mut gpui::Test
         cancel.zip(confirm).is_some_and(|(cancel, confirm)| {
             cancel.left() >= px(0.)
                 && confirm.right() <= px(960.)
-                && cancel.right() <= confirm.left()
-                && cancel.top() == confirm.top()
+                && cancel.bottom() <= confirm.top()
         }),
         "cancel={cancel:?}, confirm={confirm:?}"
     );

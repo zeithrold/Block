@@ -14,8 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIO_SOURCE = ROOT / "crates/block-ui/src/runtime/scenarios.rs"
 HOME_VIEWPORT = (360, 720)
-MANAGEMENT_VIEWPORT = (1152, 720)
-_WELCOME_FRAME_SCENARIOS = {"setup-welcome", "setup-import-sources", "setup-import-list"}
+CAPTURE_CONTRACT_REVISION = "compact-ui-20261105"
 
 
 def scenario_names(source: Path = SCENARIO_SOURCE) -> set[str]:
@@ -37,6 +36,8 @@ _GAMES_SCENARIOS = {
     "remove-confirmation",
     "separate-confirmation",
     "games-help",
+    "games-missing-record",
+    "games-detail-long-path",
 }
 
 
@@ -61,8 +62,17 @@ _add("download-files", "Observed resources", "Resource IDs are SHA-1 hashes")
 
 _add("games-bundled", "Your games", "Vanilla")
 _add("games-separated", "Instances", "Profiles")
-_add("games-detail", "Vanilla", "Minecraft version")
+_add("games-detail games-detail-long-path", "Vanilla", "Minecraft", "Edit launch settings")
+_add("games-missing-record", "Item no longer available", "Go back to the list to choose another.")
 _add("games-instance-settings", "Instance configuration", "Instance name")
+_add("profile-editor-root", "Launch settings", "Server address (optional)", "Save changes")
+_add("profile-editor-data", "Data and account", "Default launch account", "Apply to draft")
+_add("profile-editor-launch", "Launch settings", "Maximum memory (GB)", "Apply to draft")
+_add("profile-editor-appearance", "Profile appearance", "Apply to draft")
+_add(
+    "instance-editor-exit-dirty profile-editor-exit-dirty provider-editor-exit-dirty",
+    "Save your changes?", "Save and leave", "Discard changes", "Keep editing",
+)
 _add("remove-confirmation", "Delete Vanilla?", "This game and its launch settings are removed from the library.")
 _add("remove-account-confirmation", "Remove Zeithrold?", "Your games and worlds stay on disk.")
 _add("separate-confirmation", "Enable separated profiles?", "Bundled mode cannot be restored.")
@@ -78,7 +88,7 @@ _add(
 _add("wizard-optifine", "Create a game", "OptiFine")
 _add("wizard-optifine-selected", "Create a game", "OptiFine")
 _add("wizard-version-picker", "Create a game", "Search versions")
-_add("wizard-loader-picker", "Create a game", "Search loader builds")
+_add("wizard-loader-picker", "Mod loader", "Vanilla", "No mod loader needed")
 _add("wizard-fabric-picker", "Create a game", "Fabric versions")
 _add("wizard-quilt-picker", "Create a game", "Quilt versions")
 _add("wizard-neoforge-picker", "Create a game", "NeoForge versions")
@@ -88,12 +98,15 @@ _add("wizard-loader-error", "Fabric versions", "The official catalog could not b
 _add("wizard-loader-empty", "Fabric versions", "No compatible builds")
 _add("wizard-loader-search-empty", "Fabric versions", "No matching builds")
 _add("wizard-configuration", "Configuration", "Installation folder (optional)", "Apply to draft")
+_add("wizard-configuration-invalid", "Configuration", "Choose an absolute installation folder or leave it empty.", "Apply to draft")
 
 _add("accounts-list", "Your accounts", "Add account")
-_add("accounts-detail", "Your accounts", "Zeithrold")
-_add("accounts-offline-detail", "Your accounts", "Pixel")
-_add("accounts-providers", "Authlib providers", "Add a provider")
-_add("provider-add", "Add a provider", "Drop an Authlib quick link here")
+_add("accounts-detail", "Account details", "Zeithrold", "Current account")
+_add("accounts-offline-detail", "Account details", "Pixel", "Use account")
+_add("accounts-providers", "Your providers", "Community server", "Local community", "Add a provider")
+_add("provider-add", "Add a provider", "Display name", "Server API address or quick link")
+_add("provider-detail", "Community server", "Edit provider", "Fixture Community")
+_add("provider-edit", "Edit provider", "Display name", "Community server", "Save changes")
 _add("provider-http-warning", "This provider uses HTTP.", "Use HTTPS whenever possible.")
 _add("remove-provider-confirmation", "Remove this provider?", "The saved provider and cached metadata are removed.")
 
@@ -113,7 +126,7 @@ _add("auth-waiting", "Continue in your browser", "Open browser again")
 _add("auth-verifying", "Verifying your account", "Block is checking Java Edition ownership")
 _add("auth-complete", "Your account is ready", "Zeithrold", "Save and use")
 _add("auth-saving", "Saving your account", "Block is saving the refresh credential")
-_add("auth-error", "Sign-in needs your attention", "The authorization request expired.")
+_add("auth-error", "Sign-in needs your attention", "Authorization expired. Start sign-in again to request a fresh session.")
 
 _add("settings-index", "Choose what to adjust", "Game defaults", "Downloads & network")
 _add(
@@ -135,25 +148,46 @@ _add("settings-profiles", "Profile mode", "Separated Profile")
 _add("settings-downloads", "Downloads & network", "Parallel downloads")
 _add("settings-socks5", "Downloads & network", "socks5h://127.0.0.1:1080")
 _add("settings-storage", "Storage", "Game storage", "Download cache")
-_add("about", "MINECRAFT: JAVA EDITION LAUNCHER", "Made for your next world.")
+_add("about", "One block at a time.", "Build information")
 _add("setup-welcome", "Welcome Back", "Add an account and set up a game.", "Skip setup")
 _add("setup-overview", "Set up Block", "Account", "Game", "Go to Home")
 _add("setup-overview-ready", "Set up Block", "Go to Home")
+_add("setup-overview-draft", "Set up Block", "A game draft is still open.", "Continue draft")
 _add("setup-game-choice", "Set up a game", "Recommended setup", "Custom setup")
 _add("setup-account", "Sign in with Microsoft", "Open browser")
 _add("setup-game", "Create your game", "Minecraft")
 _add("setup-import-sources", "Import games", "Choose a source.")
 _add("setup-import-list", "Minecraft Launcher", "Select games to copy.")
+_add("setup-import-long-destination", "Minecraft Launcher", "Select games to copy.", "a deliberately long destination folder")
+
+_add("modpack-choose", "Import a modpack", "Choose archive")
+_add("modpack-inspecting", "Import a modpack", "Reading the archive")
+_add("modpack-review", "Import a modpack", "Compact workshop", "Review what the pack installs before writing it into a new instance.")
+_add("modpack-blocked", "Import a modpack", "This modpack cannot be imported as inspected.")
+_add("modpack-stopped", "Import stopped", "The installation is not finished.")
+_add("modpack-installing", "Importing the modpack", "Installing the pack's files", "Stop")
+_add("modpack-complete", "Modpack imported", "Compact workshop", "Done")
+_add("crash-overview", "Minecraft closed unexpectedly", "Java heap memory may have been exhausted", "Return to instance")
+_add("crash-logs", "Minecraft closed unexpectedly", "Recent game output", "Find in current text", "Return to instance")
+_add("crash-long-metadata", "Minecraft closed unexpectedly", "Creative worlds and archived experiments with a deliberately long Profile name", "Return to instance")
 
 
 def _window_title(name: str) -> str:
-    if name.startswith("auth-"):
+    if name.startswith("crash-"):
+        page = "Crash help"
+    elif name.startswith("auth-"):
         page = "Accounts"
-    elif name in {"accounts-providers", "provider-add", "provider-http-warning", "remove-provider-confirmation"}:
+    elif name.startswith("provider-") or name in {"accounts-providers", "remove-provider-confirmation"}:
         page = "Authlib providers"
-    elif name == "games-instance-settings":
+    elif name in {"games-instance-settings", "instance-editor-exit-dirty"}:
         page = "Instance settings"
-    elif name.startswith("wizard-"):
+    elif name == "profile-editor-data":
+        page = "Data and account"
+    elif name == "profile-editor-appearance":
+        page = "Profile appearance"
+    elif name.startswith("profile-editor-"):
+        page = "Launch settings"
+    elif name.startswith("wizard-") or name.startswith("modpack-"):
         page = "Create a game"
     elif name.startswith("settings-"):
         page = "Settings"
@@ -189,15 +223,9 @@ def contract(name: str) -> dict[str, object]:
     required = _REQUIRED.get(name)
     if required is None:
         raise KeyError(f"native scenario has no visual contract: {name}")
-    home = (
-        name.startswith("home-")
-        or name.startswith("settings-")
-        or name.startswith("toast-")
-        or name == "download-files"
-        or name in _WELCOME_FRAME_SCENARIOS
-    )
     return {
         "title": _window_title(name),
-        "viewport": HOME_VIEWPORT if home else MANAGEMENT_VIEWPORT,
+        "viewport": HOME_VIEWPORT,
         "required": list(required),
+        "contract_revision": CAPTURE_CONTRACT_REVISION,
     }

@@ -3,7 +3,7 @@
 use super::scroll_area::ScrollAreaExt as _;
 use gpui::{
     ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    div, px, relative, rgb,
+    div, px, rgb,
 };
 
 use super::{
@@ -61,13 +61,18 @@ impl BuildInfo {
 }
 
 impl Block {
-    pub(super) fn render_about(&self, cx: &Context<'_, Self>) -> super::page_host::ManagementSlots {
+    pub(super) fn render_about(&self, cx: &Context<'_, Self>) -> super::page_host::ContentSlots {
         let language = self.language();
-        let brand = self.about_brand();
         let body = self.about_body(cx);
         let footer = patterns::management_footer(self.palette)
             .id("about-footer")
             .debug_selector(|| "about-footer".into())
+            .h_auto()
+            .min_h(px(super::design::MANAGEMENT_FOOTER))
+            .flex_wrap()
+            .gap_2()
+            .px_6()
+            .py_3()
             .justify_between()
             .child(self.about_link(
                 "product-website",
@@ -85,17 +90,9 @@ impl Block {
                 UiAction::ToggleOutput,
                 cx,
             ));
-        super::page_host::ManagementSlots {
-            sidebar: brand.into_any_element(),
-            detail: div()
-                .size_full()
-                .min_w_0()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .child(body)
-                .child(footer)
-                .into_any_element(),
+        super::page_host::ContentSlots {
+            body: body.into_any_element(),
+            footer: footer.into_any_element(),
         }
     }
 
@@ -106,26 +103,32 @@ impl Block {
             .debug_selector(|| "about-brand".into())
             .w_full()
             .min_w_0()
-            .h_full()
             .flex()
-            .flex_col()
             .items_center()
-            .justify_center()
-            .gap_5()
-            .px_5()
-            .child(super::shell::brand(144.))
+            .gap_3()
+            .child(div().flex_shrink_0().child(super::shell::brand(48.)))
             .child(
                 div()
-                    .text_size(px(30.))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("Block"),
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(patterns::page_title("Block"))
+                            .child(components::badge(
+                                format!("v{}", info.version),
+                                self.palette,
+                                BadgeVariant::Secondary,
+                            )),
+                    )
+                    .child(note(tr!(self.language(), "about.tagline"))),
             )
-            .child(components::badge(
-                format!("v{}", info.version),
-                self.palette,
-                BadgeVariant::Secondary,
-            ))
-            .child(note(tr!(self.language(), "about.tagline")))
     }
 
     fn about_body(&self, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
@@ -145,25 +148,13 @@ impl Block {
             .child(
                 div()
                     .debug_selector(|| "about-scroll-content".into())
-                    .min_h_full()
+                    .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap_7()
-                    .p_8()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(note(tr!(language, "about.eyebrow")))
-                            .child(
-                                div()
-                                    .text_size(px(24.))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(tr!(language, "about.headline")),
-                            )
-                            .child(note(tr!(language, "about.intro"))),
-                    )
+                    .gap_5()
+                    .p_6()
+                    .child(self.about_brand())
+                    .child(note(tr!(language, "about.intro")))
                     .child(self.about_build_information(cx))
                     .child(
                         div()
@@ -217,7 +208,8 @@ impl Block {
             body = body.child(
                 div()
                     .id("about-diagnostics")
-                    .p_8()
+                    .min_w_0()
+                    .p_6()
                     .pt_0()
                     .flex()
                     .flex_col()
@@ -271,10 +263,11 @@ impl Block {
         div()
             .border_t_1()
             .border_color(rgb(self.palette.border))
-            .pt_5()
+            .min_w_0()
+            .pt_4()
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_3()
             .child(
                 div()
                     .flex()
@@ -304,13 +297,12 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
-                    .gap_y_4()
+                    .flex_col()
+                    .gap_3()
                     .children(rows.into_iter().map(|(label, value)| {
                         div()
-                            .w(relative(0.5))
+                            .w_full()
                             .min_w_0()
-                            .pr_3()
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -466,7 +458,22 @@ mod tests {
 
     fn click(cx: &mut VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
-        let bounds = crate::test_support::control_bounds(cx, selector);
+        let mut bounds = crate::test_support::control_bounds(cx, selector);
+        if !matches!(selector, "product-website" | "show-output")
+            && let Some((control, body)) = bounds.zip(cx.debug_bounds("about-body"))
+            && (control.top() < body.top() || control.bottom() > body.bottom())
+        {
+            cx.simulate_event(gpui::ScrollWheelEvent {
+                position: body.center(),
+                delta: gpui::ScrollDelta::Pixels(point(
+                    px(0.),
+                    body.center().y - control.center().y,
+                )),
+                ..gpui::ScrollWheelEvent::default()
+            });
+            cx.run_until_parked();
+            bounds = crate::test_support::control_bounds(cx, selector);
+        }
         assert!(bounds.is_some(), "missing {selector}");
         if let Some(bounds) = bounds {
             let window_count = cx.windows().len();
@@ -630,14 +637,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn about_keeps_its_brand_and_footer_usable_while_diagnostics_scroll(cx: &mut TestAppContext) {
+    fn compact_about_scrolls_its_header_and_diagnostics_above_a_fixed_footer(
+        cx: &mut TestAppContext,
+    ) {
         let (_view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.router.navigate(Tab::About);
             view.preferences.reduce_motion = true;
             view
         });
-        for (width, height) in [(1152., 720.), (960., 600.)] {
+        for (width, height) in [(360., 720.), (360., 600.)] {
             cx.simulate_resize(size(px(width), px(height)));
             cx.run_until_parked();
             for expanded in [false, true] {
@@ -648,7 +657,8 @@ mod tests {
                 if let (Some(brand), Some(body), Some(footer)) = (brand, body, footer) {
                     assert!(body.size.height > px(0.) && body.bottom() <= footer.top());
                     assert!(footer.right() <= px(width) && footer.bottom() <= px(height));
-                    assert!(brand.right() <= body.left());
+                    assert!(brand.left() >= body.left() && brand.right() <= body.right());
+                    assert!(brand.top() >= body.top() && brand.bottom() <= body.bottom());
                     for selector in ["product-website", "show-output"] {
                         let bounds = crate::test_support::control_bounds(cx, selector);
                         assert!(bounds.is_some_and(|bounds| bounds.left() >= footer.left()

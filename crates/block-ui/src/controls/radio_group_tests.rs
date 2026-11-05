@@ -58,7 +58,7 @@ impl Render for Fixture {
             })))
             .child(super::checkbox(
                 "base-checkbox",
-                "Enable option",
+                "I understand and want to use this HTTP provider.",
                 self.checked,
                 crate::Palette::LIGHT,
                 ControlState {
@@ -181,6 +181,14 @@ fn base_checkbox_pointer_and_native_key_up_toggle_the_same_control_and_disabled_
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, |_, _| Fixture::default());
+    cx.simulate_resize(size(px(294.), px(720.)));
+    let bounds = crate::test_support::control_bounds(cx, "base-checkbox");
+    assert!(
+        bounds
+            .is_some_and(|bounds| bounds.size.height > px(super::CONTROL_HEIGHT)
+                && bounds.right() <= px(294.)),
+        "the complete consent must wrap inside the available row: {bounds:?}"
+    );
     click(cx, "base-checkbox");
     assert!(view.read_with(cx, |view, _| view.checked));
     for (key, expected) in [("space", false), ("enter", true)] {
@@ -274,6 +282,7 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
             }
             view.initialize_browsers(cx);
             view.handle(crate::UiAction::Tab(crate::Tab::Instances), window, cx);
+            view.handle(crate::UiAction::Inspect("profile-a".into()), window, cx);
             view.handle(crate::UiAction::EditProfile, window, cx);
             view.handle(
                 crate::UiAction::ProfilePage(crate::profile_editor::EditorPage::Data),
@@ -283,6 +292,14 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
         });
     });
     settle(cx);
+    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    assert!(
+        viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
+            cx,
+            viewport,
+            "default-account-none"
+        ))
+    );
     focus_radio(cx, "Use current account");
     cx.simulate_keystrokes("down");
     settle(cx);
@@ -295,19 +312,24 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
     );
     click(cx, "cancel-profile-page");
     assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::Profile(form)) if form.original.default_account.is_none())));
+    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    assert!(
+        viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
+            cx,
+            viewport,
+            "edit-profile-launch"
+        ))
+    );
     click(cx, "edit-profile-launch");
     settle(cx);
-    let body = cx.debug_bounds("profile-field-Memory");
-    assert!(body.is_some());
-    if let Some(body) = body {
-        cx.simulate_event(gpui::ScrollWheelEvent {
-            position: body.center(),
-            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-600.))),
-            modifiers: gpui::Modifiers::none(),
-            touch_phase: gpui::TouchPhase::Moved,
-        });
-        settle(cx);
-    }
+    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    assert!(
+        viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
+            cx,
+            viewport,
+            "target-vanilla"
+        ))
+    );
     focus_radio(cx, "vanilla");
     cx.simulate_keystrokes("end");
     settle(cx);

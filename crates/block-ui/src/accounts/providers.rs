@@ -6,15 +6,18 @@
 
 use block_auth::{AuthlibProvider, ProviderAddress};
 use gpui::{
-    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
-    Styled as _, Window, div, px, rgb,
+    Context, Entity, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
+    ScrollHandle, Styled as _, Window, div, px, rgb,
 };
+use std::{cell::RefCell, collections::HashMap};
 
 use super::{
     Block, Tab, TextInput, UiAction,
     authentication::AccountMessage,
     components::{self, ButtonVariant, ControlState, FieldOptions},
-    input, note, patterns,
+    input,
+    navigation::Screen,
+    note, patterns,
     scroll_area::ScrollAreaExt as _,
 };
 
@@ -28,12 +31,20 @@ pub(super) struct State {
     form: Option<ProviderForm>,
     list_scroll: ScrollHandle,
     body_scroll: ScrollHandle,
+    detail_scroll: ScrollHandle,
+    detail_entries: HashMap<u64, (uuid::Uuid, ScrollHandle)>,
+    detail_offsets: HashMap<uuid::Uuid, gpui::Point<gpui::Pixels>>,
+    active_detail: Option<(u64, uuid::Uuid)>,
+    heading_focus: RefCell<Option<gpui::FocusHandle>>,
+    control_focus: RefCell<HashMap<gpui::SharedString, gpui::FocusHandle>>,
     error: Option<AccountMessage>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
+    removing: Option<uuid::Uuid>,
 }
 
 #[derive(Debug)]
 struct ProviderForm {
+    id: uuid::Uuid,
     original: Option<AuthlibProvider>,
     name: Entity<TextInput>,
     address: Entity<TextInput>,
@@ -44,11 +55,26 @@ struct ProviderForm {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProviderKey {
     List,
+    Detail(uuid::Uuid),
     New,
     Existing(uuid::Uuid),
 }
 
 impl State {
+    /// Root-editor guard; raw input and address-bound consent are draft values.
+    pub(super) fn dirty(&self, cx: &gpui::App) -> bool {
+        self.form.as_ref().is_some_and(|form| {
+            let original = form.original.as_ref();
+            form.name.read(cx).value() != original.map_or("", |provider| provider.name.as_str())
+                || form.address.read(cx).value()
+                    != original.map_or("", |provider| provider.api_url.as_str())
+                || form.accepted_address.as_deref()
+                    != original
+                        .filter(|provider| provider.allow_http)
+                        .map(|provider| provider.api_url.as_str())
+        })
+    }
+
     pub(super) fn refresh_placeholders(
         &self,
         language: crate::Language,
@@ -65,21 +91,13 @@ impl State {
         }
     }
 
-    pub(super) fn motion_key(&self) -> ProviderKey {
-        self.form.as_ref().map_or_else(
-            || ProviderKey::List,
-            |form| {
-                form.original.as_ref().map_or(ProviderKey::New, |provider| {
-                    ProviderKey::Existing(provider.id)
-                })
-            },
-        )
-    }
     pub(super) fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
         let list_scroll = ScrollHandle::new();
         list_scroll.set_offset(self.list_scroll.offset());
         let body_scroll = ScrollHandle::new();
         body_scroll.set_offset(self.body_scroll.offset());
+        let detail_scroll = ScrollHandle::new();
+        detail_scroll.set_offset(self.detail_scroll.offset());
         Self {
             visible: self.visible,
             records: self.records.clone(),
@@ -90,6 +108,7 @@ impl State {
                 .as_ref()
                 .map(|field| super::frozen_input(field, cx)),
             form: self.form.as_ref().map(|form| ProviderForm {
+                id: form.id,
                 original: form.original.clone(),
                 name: super::frozen_input(&form.name, cx),
                 address: super::frozen_input(&form.address, cx),
@@ -98,8 +117,15 @@ impl State {
             }),
             list_scroll,
             body_scroll,
+            detail_scroll,
+            detail_entries: HashMap::new(),
+            detail_offsets: HashMap::new(),
+            active_detail: None,
+            heading_focus: RefCell::default(),
+            control_focus: RefCell::default(),
             error: self.error.clone(),
             attempt: None,
+            removing: None,
         }
     }
 }
@@ -125,10 +151,62 @@ pub(super) fn fixture_provider(insecure: bool) -> anyhow::Result<AuthlibProvider
 }
 
 impl Block {
+    pub(super) fn provider_detail_focus(&self, cx: &Context<'_, Self>) -> gpui::FocusHandle {
+        self.shell
+            .providers
+            .heading_focus
+            .borrow_mut()
+            .get_or_insert_with(|| cx.focus_handle())
+            .clone()
+            .tab_stop(false)
+    }
+
+    pub(super) fn reconcile_provider_scroll(&mut self) {
+        let state = &mut self.shell.providers;
+        if let Some((_, id)) = state.active_detail
+            && state.records.iter().any(|record| record.id == id)
+        {
+            state
+                .detail_offsets
+                .insert(id, state.detail_scroll.offset());
+        }
+        state
+            .detail_offsets
+            .retain(|id, _| state.records.iter().any(|record| record.id == *id));
+        state.detail_entries.retain(|entry, (id, _)| {
+            self.router.contains_entry(*entry)
+                && state.records.iter().any(|record| record.id == *id)
+        });
+        let active = match self.router.screen() {
+            Screen::Provider(id) if state.records.iter().any(|record| record.id == *id) => {
+                Some((self.router.entry_id(), *id))
+            }
+            _ => None,
+        };
+        if active != state.active_detail
+            && let Some((entry, id)) = active
+        {
+            state.detail_scroll = state
+                .detail_entries
+                .entry(entry)
+                .or_insert_with(|| {
+                    let scroll = ScrollHandle::new();
+                    if let Some(offset) = state.detail_offsets.get(&id) {
+                        scroll.set_offset(*offset);
+                    }
+                    (id, scroll)
+                })
+                .1
+                .clone();
+        }
+        state.active_detail = active;
+    }
+
     #[cfg(debug_assertions)]
     pub(super) fn provider_scenario(
         &mut self,
         name: &str,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> anyhow::Result<()> {
         self.router.navigate(Tab::Accounts);
@@ -136,7 +214,7 @@ impl Block {
         self.shell.providers.loaded = true;
         self.open_providers(cx);
         if name == "provider-add" || name == "provider-http-warning" {
-            self.edit_provider(None, cx);
+            self.edit_provider(None, window, cx);
             if name == "provider-http-warning"
                 && let Some(form) = &self.shell.providers.form
             {
@@ -147,7 +225,7 @@ impl Block {
                 });
             }
         } else {
-            self.edit_provider(Some(&uuid::Uuid::from_u128(1).to_string()), cx);
+            self.edit_provider(Some(&uuid::Uuid::from_u128(1).to_string()), window, cx);
         }
         Ok(())
     }
@@ -165,6 +243,12 @@ impl Block {
         if let Some(query) = &self.shell.providers.query {
             query.update(cx, |field, cx| field.set_placeholder(&placeholder, cx));
         }
+        if !matches!(
+            self.router.screen(),
+            Screen::Providers | Screen::Provider(_) | Screen::NewProvider | Screen::EditProvider(_)
+        ) {
+            self.router.open_screen(Tab::Accounts, Screen::Providers);
+        }
         self.shell.providers.visible = true;
         cx.notify();
     }
@@ -177,10 +261,75 @@ impl Block {
         self.shell.providers.visible = false;
         self.shell.providers.form = None;
         self.shell.providers.error = None;
+        self.shell.providers.removing = None;
+        while matches!(
+            self.router.screen(),
+            Screen::Providers | Screen::Provider(_) | Screen::NewProvider | Screen::EditProvider(_)
+        ) {
+            if !self.router.back() {
+                break;
+            }
+        }
+        self.sync_provider_visibility();
         cx.notify();
     }
 
-    pub(super) fn edit_provider(&mut self, id: Option<&str>, cx: &mut Context<'_, Self>) {
+    /// Called after shared navigation, including Back, while old consumers use visible.
+    pub(super) fn sync_provider_visibility(&mut self) {
+        self.shell.providers.visible = self.router.tab() == Tab::Accounts
+            && matches!(
+                self.router.screen(),
+                Screen::Providers
+                    | Screen::Provider(_)
+                    | Screen::NewProvider
+                    | Screen::EditProvider(_)
+            );
+    }
+
+    pub(super) fn inspect_provider(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        if self.busy {
+            return;
+        }
+        let Some(provider) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|provider| provider.id.to_string() == id)
+        else {
+            return;
+        };
+        let id = provider.id;
+        self.shell.providers.form = None;
+        self.shell.providers.error = None;
+        self.router.open_screen(Tab::Accounts, Screen::Provider(id));
+        self.sync_provider_visibility();
+        cx.notify();
+    }
+
+    /// Shared EditorExit calls this only after resolving the captured draft.
+    pub(super) fn cancel_provider_editor(&mut self, cx: &mut Context<'_, Self>) {
+        if self.shell.providers.attempt.is_some() && self.busy {
+            return;
+        }
+        self.shell.providers.form = None;
+        self.shell.providers.error = None;
+        if matches!(
+            self.router.screen(),
+            Screen::NewProvider | Screen::EditProvider(_)
+        ) {
+            self.router.back();
+        }
+        self.sync_provider_visibility();
+        cx.notify();
+    }
+
+    pub(super) fn edit_provider(
+        &mut self,
+        id: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if self.busy {
             return;
         }
@@ -194,6 +343,12 @@ impl Block {
             })
             .cloned();
         if id.is_some() && original.is_none() {
+            return;
+        }
+        let screen = original.as_ref().map_or(Screen::NewProvider, |provider| {
+            Screen::EditProvider(provider.id)
+        });
+        if self.router.screen() == &screen && self.shell.providers.form.is_some() {
             return;
         }
         let name = input(
@@ -228,7 +383,9 @@ impl Block {
             .as_ref()
             .filter(|p| p.allow_http)
             .map(|p| p.api_url.clone());
+        name.read(cx).focus_handle(cx).focus(window, cx);
         self.shell.providers.form = Some(ProviderForm {
+            id: uuid::Uuid::new_v4(),
             observed_address: address.read(cx).value(),
             original,
             name,
@@ -236,6 +393,8 @@ impl Block {
             accepted_address,
         });
         self.shell.providers.error = None;
+        self.router.open_screen(Tab::Accounts, screen);
+        self.sync_provider_visibility();
         self.shell
             .providers
             .body_scroll
@@ -247,15 +406,14 @@ impl Block {
         self.shell.providers.loaded = true;
         match result {
             Ok(records) => {
-                if self
-                    .shell
-                    .providers
-                    .form
-                    .as_ref()
-                    .and_then(|f| f.original.as_ref())
-                    .is_some_and(|old| !records.iter().any(|p| p.id == old.id))
+                // A refresh never owns the user's editor lifetime, even when
+                // its saved record disappeared. The routed page reports that.
+                if let Some(id) = self.shell.providers.removing
+                    && !records.iter().any(|provider| provider.id == id)
+                    && self.router.screen() == &Screen::Provider(id)
                 {
-                    self.shell.providers.form = None;
+                    self.router.back();
+                    self.sync_provider_visibility();
                 }
                 self.shell.providers.records = records;
                 self.shell.providers.load_error = None;
@@ -274,11 +432,20 @@ impl Block {
                 .as_ref()
                 .is_some_and(|(revision, _)| *revision == self.operation_revision)
         {
-            // Finish's status arrives next; it must not reopen a different draft.
-            let busy = self.busy;
-            self.busy = false;
-            self.edit_provider(Some(id), cx);
-            self.busy = busy;
+            let Ok(id) = uuid::Uuid::parse_str(id) else {
+                return;
+            };
+            self.shell.providers.form = None;
+            self.shell.providers.error = None;
+            if matches!(
+                self.router.screen(),
+                Screen::NewProvider | Screen::EditProvider(_)
+            ) {
+                self.router.back();
+            }
+            self.router.open_screen(Tab::Accounts, Screen::Provider(id));
+            self.sync_provider_visibility();
+            cx.notify();
         }
     }
 
@@ -291,6 +458,7 @@ impl Block {
             .is_some_and(|(revision, _)| *revision == self.operation_revision)
         {
             self.shell.providers.attempt = None;
+            self.shell.providers.removing = None;
             self.shell.providers.error = result
                 .as_ref()
                 .err()
@@ -298,7 +466,7 @@ impl Block {
         }
     }
 
-    pub(super) fn identify_provider(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn identify_provider(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;
         }
@@ -316,7 +484,9 @@ impl Block {
                     .find(|p| p.api_url == parsed.url)
                     .map(|p| p.id.to_string());
                 if let Some(existing) = existing {
-                    self.edit_provider(Some(&existing), cx);
+                    self.cancel_provider_editor(cx);
+                    self.inspect_provider(&existing, cx);
+                    self.edit_provider(Some(&existing), window, cx);
                     return;
                 }
                 if let Some(form) = &mut self.shell.providers.form {
@@ -359,7 +529,16 @@ impl Block {
         let name = form.name.read(cx).value().trim().to_owned();
         let address = form.address.read(cx).value().trim().to_owned();
         let parsed = ProviderAddress::parse(&address);
-        let error = if name.is_empty() {
+        let error = if form.original.as_ref().is_some_and(|original| {
+            !self
+                .shell
+                .providers
+                .records
+                .iter()
+                .any(|provider| provider.id == original.id)
+        }) {
+            Some(AccountMessage::product("accounts.providers.unavailable"))
+        } else if name.is_empty() {
             Some(AccountMessage::product("accounts.providers.error.name"))
         } else if let Err(error) = &parsed {
             Some(AccountMessage::diagnostic(error.to_string()))
@@ -444,6 +623,13 @@ impl Block {
         }
         self.shell.surfaces.close(window, &self.focus, cx);
         if self.engine.is_some() {
+            self.shell.providers.removing = self
+                .shell
+                .providers
+                .records
+                .iter()
+                .find(|provider| provider.id.to_string() == id)
+                .map(|provider| provider.id);
             self.begin(
                 msg!("accounts.providers.status.removing"),
                 super::ui_logging::Operation::RemoveProvider,
@@ -470,6 +656,15 @@ impl Block {
         variant: ButtonVariant,
         cx: &Context<'_, Self>,
     ) -> components::Control {
+        let id: gpui::SharedString = id.into();
+        let focus = self
+            .shell
+            .providers
+            .control_focus
+            .borrow_mut()
+            .entry(id.clone())
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
         components::button(
             id,
             title,
@@ -481,12 +676,33 @@ impl Block {
             },
             cx.listener(move |view, (), window, cx| view.handle(action.clone(), window, cx)),
         )
+        .track_focus(&focus)
+        .w_full()
+        .min_w_0()
+        .h_auto()
+        .min_h(px(super::design::CONTROL_HEIGHT))
+        .whitespace_normal()
     }
 
     pub(super) fn render_providers(
         &self,
         cx: &Context<'_, Self>,
-    ) -> super::page_host::ManagementSlots {
+    ) -> super::page_host::ContentSlots {
+        match self.router.screen() {
+            Screen::Providers => self.provider_list(cx),
+            Screen::Provider(id) => self.provider_detail(*id, cx),
+            Screen::NewProvider | Screen::EditProvider(_) => self.provider_editor_slots(cx),
+            Screen::List
+            | Screen::Record(_)
+            | Screen::InstanceEditor(_)
+            | Screen::ProfileEditor(_) => super::page_host::ContentSlots {
+                body: div().into_any_element(),
+                footer: div().into_any_element(),
+            },
+        }
+    }
+
+    fn provider_list(&self, cx: &Context<'_, Self>) -> super::page_host::ContentSlots {
         let language = self.language();
         let state = &self.shell.providers;
         let query = state.query.as_ref().map_or_else(String::new, |field| {
@@ -500,22 +716,13 @@ impl Block {
             {
                 continue;
             }
-            let selected = state
-                .form
-                .as_ref()
-                .and_then(|f| f.original.as_ref())
-                .is_some_and(|p| p.id == provider.id);
             rows = rows.child(
                 self.provider_button(
                     format!("provider-inspect-{}", provider.id),
                     "",
                     UiAction::ProviderInspect(provider.id.to_string()),
                     self.busy,
-                    if selected {
-                        ButtonVariant::Secondary
-                    } else {
-                        ButtonVariant::Ghost
-                    },
+                    ButtonVariant::Ghost,
                     cx,
                 )
                 .w_full()
@@ -540,7 +747,7 @@ impl Block {
                             div()
                                 .text_sm()
                                 .font_weight(gpui::FontWeight::NORMAL)
-                                .truncate()
+                                .w_full()
                                 .child(provider.name.clone()),
                         )
                         .child(components::badge(
@@ -578,15 +785,22 @@ impl Block {
                 cx,
             ));
         }
-        let rail = div()
+        let body = div()
+            .id("provider-list-scroll")
             .w_full()
             .h_full()
             .min_h_0()
-            .flex()
-            .flex_col()
+            .min_w_0()
+            .scroll_area(
+                &state.list_scroll,
+                "accounts.providers.list",
+                self.palette,
+                false,
+            )
             .child(
                 div()
                     .p_4()
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap_4()
@@ -601,109 +815,221 @@ impl Block {
                             count = state.records.len()
                         )
                     }))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .children(
-                                state
-                                    .query
-                                    .as_ref()
-                                    .map(|field| div().flex_1().min_w_0().child(field.clone())),
-                            )
-                            .child(self.provider_button(
-                                "provider-add",
-                                "+",
-                                UiAction::ProviderAdd,
-                                self.busy,
-                                ButtonVariant::Outline,
-                                cx,
-                            )),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .id("provider-list-scroll")
-                    .scroll_area(
-                        &state.list_scroll,
-                        "accounts.providers.list",
-                        self.palette,
-                        false,
+                    .child(self.provider_button(
+                        "provider-add",
+                        tr!(language, "accounts.providers.add"),
+                        UiAction::ProviderAdd,
+                        self.busy,
+                        ButtonVariant::Primary,
+                        cx,
+                    ))
+                    .children(
+                        state
+                            .query
+                            .as_ref()
+                            .map(|field| div().w_full().min_w_0().child(field.clone())),
                     )
-                    .p_3()
                     .child(rows),
             )
-            .child(
-                patterns::management_footer(self.palette).child(self.provider_button(
+            .into_any_element();
+        super::page_host::ContentSlots {
+            body,
+            footer: patterns::management_footer(self.palette)
+                .h_auto()
+                .min_h(px(super::design::MANAGEMENT_FOOTER))
+                .px_4()
+                .py_3()
+                .child(self.provider_button(
                     "providers-back",
                     tr!(language, "accounts.providers.back"),
-                    UiAction::ProvidersBack,
+                    UiAction::NavigationBack,
                     false,
                     ButtonVariant::Ghost,
                     cx,
-                )),
-            );
-        super::page_host::ManagementSlots {
-            sidebar: rail.into_any_element(),
-            detail: self.provider_editor(cx).into_any_element(),
+                ))
+                .into_any_element(),
         }
     }
 
-    pub(super) fn provider_editor(&self, cx: &Context<'_, Self>) -> gpui::Div {
+    fn provider_detail(
+        &self,
+        id: uuid::Uuid,
+        cx: &Context<'_, Self>,
+    ) -> super::page_host::ContentSlots {
         let language = self.language();
-        let mut content = div().p_8().flex().flex_col().gap_6();
-        let mut footer = patterns::management_footer(self.palette).justify_between();
-        if let Some(form) = &self.shell.providers.form {
-            let address = form.address.read(cx).value();
-            let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);
-            content = self.provider_form_fields(content, form, cx);
-            if insecure {
-                content = content.child(self.provider_http_consent(form, &address, cx));
+        let mut content = div().p_4().min_w_0().flex().flex_col().gap_4();
+        let mut footer = patterns::management_footer(self.palette)
+            .h_auto()
+            .min_h(px(super::design::MANAGEMENT_FOOTER))
+            .flex_col()
+            .gap_2()
+            .px_4()
+            .py_3();
+        if let Some(provider) = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|provider| provider.id == id)
+        {
+            let links = self.provider_links(&id.to_string());
+            content = content
+                .child(components::provider_icon(
+                    &provider.name,
+                    self.provider_icons.get(&id.to_string()),
+                    self.palette,
+                    36.,
+                ))
+                .child(patterns::page_title(provider.name.clone()))
+                .child(note(provider.api_url.clone()))
+                .child(components::badge(
+                    if provider.allow_http { "HTTP" } else { "HTTPS" },
+                    self.palette,
+                    components::BadgeVariant::Secondary,
+                ))
+                .children(provider_saved_notes(provider, links, language));
+            if links > 0 {
+                content = content.child(note(tr!(language, "accounts.providers.error.linked")));
             }
-            content = self.provider_identify_section(content, cx);
-            if let Some(original) = &form.original {
-                let links = self.provider_links(&original.id.to_string());
-                content = content.children(provider_saved_notes(original, links, language));
-                footer = footer.child(self.provider_button(
+            footer = footer
+                .child(self.provider_button(
                     "provider-remove",
                     tr!(language, "accounts.providers.remove"),
-                    UiAction::ProviderRemoveRequest(original.id.to_string()),
+                    UiAction::ProviderRemoveRequest(id.to_string()),
                     self.busy || links > 0,
                     ButtonVariant::Ghost,
                     cx,
-                ));
-            } else {
-                footer = footer.child(div());
-            }
-            footer = footer.child(self.provider_button(
-                "provider-save",
-                if form.original.is_some() {
-                    tr!(language, "accounts.providers.save_changes")
-                } else {
-                    tr!(language, "accounts.providers.add")
-                },
-                UiAction::ProviderSave,
-                self.busy || insecure && form.accepted_address.as_deref() != Some(address.trim()),
-                ButtonVariant::Primary,
-                cx,
-            ));
-        } else {
-            content = content
-                .child(patterns::page_heading(
-                    tr!(language, "accounts.providers.empty_title"),
-                    tr!(language, "accounts.providers.empty_description"),
                 ))
                 .child(self.provider_button(
-                    "provider-new",
-                    tr!(language, "accounts.providers.add"),
-                    UiAction::ProviderAdd,
+                    "provider-edit",
+                    tr!(language, "accounts.providers.edit"),
+                    UiAction::ProviderEdit(id.to_string()),
                     self.busy,
                     ButtonVariant::Primary,
                     cx,
                 ));
+        } else {
+            content = content.child(note(tr!(language, "accounts.providers.unavailable")));
+            footer = footer.child(self.provider_button(
+                "providers-back",
+                tr!(language, "common.back"),
+                UiAction::NavigationBack,
+                false,
+                ButtonVariant::Ghost,
+                cx,
+            ));
+        }
+        if let Some(error) = &self.shell.providers.error {
+            content = content
+                .child(note(error.render(language)).text_color(rgb(self.palette.destructive)));
+        }
+        if self.shell.providers.attempt.is_some() && self.busy {
+            content = content
+                .child(components::progress(
+                    components::ProgressState::Indeterminate,
+                    self.palette,
+                    tr!(language, "common.in_progress"),
+                ))
+                .child(note(self.status.text(language)));
+        }
+        super::page_host::ContentSlots {
+            body: div()
+                .id("provider-detail-scroll")
+                .track_focus(&self.provider_detail_focus(cx))
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .scroll_area(
+                    &self.shell.providers.detail_scroll,
+                    "accounts.providers.details",
+                    self.palette,
+                    false,
+                )
+                .child(content)
+                .into_any_element(),
+            footer: footer.into_any_element(),
+        }
+    }
+
+    fn provider_editor_slots(&self, cx: &Context<'_, Self>) -> super::page_host::ContentSlots {
+        let language = self.language();
+        let mut content = div().p_4().min_w_0().flex().flex_col().gap_4();
+        let mut footer = patterns::management_footer(self.palette)
+            .h_auto()
+            .min_h(px(super::design::MANAGEMENT_FOOTER))
+            .flex_col()
+            .gap_2()
+            .px_4()
+            .py_3();
+        let form = self.shell.providers.form.as_ref().filter(|form| {
+            match (self.router.screen(), form.original.as_ref()) {
+                (Screen::NewProvider, None) => true,
+                (Screen::EditProvider(id), Some(original)) => *id == original.id,
+                _ => false,
+            }
+        });
+        if let Some(form) = form {
+            let address = form.address.read(cx).value();
+            let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);
+            let missing = form.original.as_ref().is_some_and(|original| {
+                !self
+                    .shell
+                    .providers
+                    .records
+                    .iter()
+                    .any(|provider| provider.id == original.id)
+            });
+            content = self.provider_form_fields(content, form, cx);
+            if insecure {
+                content = content.child(self.provider_http_consent(form, &address, cx));
+            }
+            if form
+                .original
+                .as_ref()
+                .is_none_or(|provider| self.provider_links(&provider.id.to_string()) == 0)
+            {
+                content = self.provider_identify_section(content, cx);
+            }
+            if let Some(original) = &form.original {
+                let links = self.provider_links(&original.id.to_string());
+                content = content.children(provider_saved_notes(original, links, language));
+            }
+            if missing {
+                content = content.child(note(tr!(language, "accounts.providers.unavailable")));
+            }
+            footer = footer
+                .child(self.provider_button(
+                    "provider-cancel",
+                    tr!(language, "accounts.providers.cancel_changes"),
+                    UiAction::ProviderCancel,
+                    self.shell.providers.attempt.is_some() && self.busy,
+                    ButtonVariant::Ghost,
+                    cx,
+                ))
+                .child(self.provider_button(
+                    "provider-save",
+                    if form.original.is_some() {
+                        tr!(language, "accounts.providers.save_changes")
+                    } else {
+                        tr!(language, "accounts.providers.add")
+                    },
+                    UiAction::ProviderSave,
+                    self.busy
+                        || missing
+                        || insecure && form.accepted_address.as_deref() != Some(address.trim()),
+                    ButtonVariant::Primary,
+                    cx,
+                ));
+        } else {
+            content = content.child(note(tr!(language, "accounts.providers.unavailable")));
+            footer = footer.child(self.provider_button(
+                "providers-back",
+                tr!(language, "common.back"),
+                UiAction::NavigationBack,
+                false,
+                ButtonVariant::Ghost,
+                cx,
+            ));
         }
         if let Some(error) = &self.shell.providers.error {
             content = content
@@ -718,27 +1044,22 @@ impl Block {
                 ))
                 .child(note(self.status.text(self.language())));
         }
-        div()
-            .size_full()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .id("provider-editor-scroll")
-                    .scroll_area(
-                        &self.shell.providers.body_scroll,
-                        "accounts.providers.details",
-                        self.palette,
-                        false,
-                    )
-                    .child(content),
-            )
-            .child(footer)
+        super::page_host::ContentSlots {
+            body: div()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .id("provider-editor-scroll")
+                .scroll_area(
+                    &self.shell.providers.body_scroll,
+                    "accounts.providers.editor",
+                    self.palette,
+                    false,
+                )
+                .child(content)
+                .into_any_element(),
+            footer: footer.into_any_element(),
+        }
     }
 
     /// The provider's icon and heading above its editable name and address fields.
@@ -757,7 +1078,7 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .gap_4()
                     .child(components::provider_icon(
                         &form.name.read(cx).value(),
@@ -767,7 +1088,7 @@ impl Block {
                     ))
                     .child(patterns::page_heading(
                         if form.original.is_some() {
-                            tr!(language, "accounts.providers.details.title")
+                            tr!(language, "accounts.providers.edit")
                         } else {
                             tr!(language, "accounts.providers.add.title")
                         },
@@ -877,19 +1198,19 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let existing = fixture_provider(false)?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-            cx.update(|_,cx|view.update(cx,|view,cx| {
+            cx.update(|window,cx|view.update(cx,|view,cx| {
                 view.router.navigate(Tab::Accounts);
                 view.shell.providers.loaded = true;
                 view.shell.providers.records = vec![existing.clone()];
                 view.open_providers(cx);
-                view.edit_provider(None,cx);
+                view.edit_provider(None,window,cx);
                 if let Some(form) = &view.shell.providers.form {
                     form.address.update(cx,|field,cx|field.set_value("authlib-injector:yggdrasil-server:https%3A%2F%2Fcommunity.example.test%2Fapi%2F",cx));
                 }
-                view.identify_provider(cx);
+                view.identify_provider(window,cx);
                 assert!(view.shell.providers.form.as_ref().and_then(|f|f.original.as_ref()).is_some_and(|p|p.id==existing.id));
                 assert_eq!(view.shell.providers.records,vec![existing.clone()]);
-                view.edit_provider(None,cx);
+                view.edit_provider(None,window,cx);
                 if let Some(form) = &view.shell.providers.form {
                     form.name.update(cx,|field,cx|field.set_value("Draft community",cx));
                     form.address.update(cx,|field,cx|field.set_value("http://localhost:8080/api/",cx));
@@ -960,12 +1281,12 @@ mod tests {
             let old = fixture_provider(false)?;
             let other = fixture_provider(true)?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-            cx.update(|_, cx| {
+            cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
                     view.router.navigate(Tab::Accounts);
                     view.shell.providers.records = vec![old.clone(), other.clone()];
                     view.open_providers(cx);
-                    view.edit_provider(Some(&other.id.to_string()), cx);
+                    view.edit_provider(Some(&other.id.to_string()), window, cx);
                     if let Some(form) = &view.shell.providers.form {
                         form.name
                             .update(cx, |field, cx| field.set_value("Unsaved name", cx));
@@ -1016,13 +1337,13 @@ mod tests {
                 view.preferences.language = Some(crate::Language::Japanese);
                 view
             });
-            cx.update(|_, cx| {
+            cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
                     view.router.navigate(Tab::Accounts);
                     view.shell.providers.records = vec![provider.clone()];
                     view.shell.providers.loaded = true;
                     view.open_providers(cx);
-                    view.edit_provider(Some(&provider.id.to_string()), cx);
+                    view.edit_provider(Some(&provider.id.to_string()), window, cx);
                     if let Some(form) = &view.shell.providers.form {
                         form.name
                             .update(cx, |field, cx| field.set_value("Draft community", cx));
@@ -1030,8 +1351,8 @@ mod tests {
                 });
             });
             assert_eq!(
-                control_node(cx, "providers-back").label(),
-                Some("アカウントに戻る")
+                control_node(cx, "provider-cancel").label(),
+                Some("変更をキャンセル")
             );
             assert_eq!(
                 control_node(cx, "provider-save").label(),
@@ -1069,9 +1390,194 @@ mod tests {
                     .as_ref()
                     .is_some_and(|form| form.name.read(cx).value() == "Draft community")
             }));
-            assert_eq!(control_node(cx, "providers-back").label(), Some("返回账户"));
+            assert_eq!(
+                control_node(cx, "provider-cancel").label(),
+                Some("取消更改")
+            );
             Ok(())
         })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn provider_inspection_returns_to_list_without_creating_a_draft(cx: &mut gpui::TestAppContext) {
+        use gpui::Focusable as _;
+
+        let result = (|| -> anyhow::Result<()> {
+            let provider = fixture_provider(false)?;
+            let (view, cx) = crate::test_support::window(cx, |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.preferences.reduce_motion = true;
+                view
+            });
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.router.navigate(Tab::Accounts);
+                    view.shell.providers.records = vec![provider.clone()];
+                    view.open_providers(cx);
+                    let list = view.page_spec().detail;
+                    view.inspect_provider(&provider.id.to_string(), cx);
+                    view.prepare_motion(window, cx);
+                    let detail = view.page_spec().detail;
+                    assert_ne!(list, detail, "inspection has its own scene without a draft");
+                    assert_eq!(view.router.screen(), &Screen::Provider(provider.id));
+                    assert!(view.shell.providers.form.is_none());
+                    view.shell
+                        .providers
+                        .detail_scroll
+                        .set_offset(gpui::point(px(0.), px(-120.)));
+                    view.edit_provider(Some(&provider.id.to_string()), window, cx);
+                    view.prepare_motion(window, cx);
+                    assert_ne!(view.page_spec().detail, detail);
+                    view.shell
+                        .providers
+                        .body_scroll
+                        .set_offset(gpui::point(px(0.), px(-30.)));
+                    view.cancel_provider_editor(cx);
+                    view.prepare_motion(window, cx);
+                    assert_eq!(view.shell.providers.detail_scroll.offset().y, px(-120.));
+                    let frozen = view.visual_snapshot(cx);
+                    view.shell
+                        .providers
+                        .detail_scroll
+                        .set_offset(gpui::point(px(0.), px(-150.)));
+                    assert_eq!(frozen.shell.providers.detail_scroll.offset().y, px(-120.));
+                    assert!(frozen.shell.providers.detail_entries.is_empty());
+                    assert!(frozen.shell.return_focus.is_empty());
+                });
+            });
+            assert!(crate::test_support::control_bounds(cx, "provider-edit").is_some());
+            assert!(crate::test_support::control_bounds(cx, "provider-add").is_none());
+            assert!(crate::test_support::control_bounds(cx, "provider-save").is_none());
+            let edit = crate::test_support::control_bounds(cx, "provider-edit")
+                .ok_or_else(|| anyhow::anyhow!("provider edit action did not paint"))?;
+            cx.simulate_click(edit.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            for _ in 0..2 {
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                cx.run_until_parked();
+            }
+            cx.update(|window, cx| {
+                assert!(view.read_with(cx, |view, cx| {
+                    view.shell
+                        .providers
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.name.read(cx).focus_handle(cx).is_focused(window))
+                }));
+            });
+            crate::test_support::press(cx, "alt-left");
+            assert!(view.read_with(cx, |view, _| view.router.screen()
+                == &Screen::Provider(provider.id)
+                && view.shell.providers.form.is_none()));
+            for _ in 0..2 {
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                cx.run_until_parked();
+            }
+            crate::test_support::press(cx, "enter");
+            assert!(
+                view.read_with(cx, |view, _| view.shell.providers.form.is_some()),
+                "returning must focus the original Edit provider action"
+            );
+            crate::test_support::press(cx, "alt-left");
+            crate::test_support::press(cx, "alt-left");
+            for (selector, destination) in [
+                ("provider-add", Screen::NewProvider),
+                (
+                    "provider-inspect-00000000-0000-0000-0000-000000000001",
+                    Screen::Provider(provider.id),
+                ),
+            ] {
+                let origin = crate::test_support::control_bounds(cx, selector)
+                    .ok_or_else(|| anyhow::anyhow!("provider origin did not paint: {selector}"))?;
+                cx.simulate_click(origin.center(), gpui::Modifiers::none());
+                cx.run_until_parked();
+                crate::test_support::press(cx, "alt-left");
+                for _ in 0..2 {
+                    cx.update(|window, cx| window.simulate_next_frame(cx));
+                    cx.run_until_parked();
+                }
+                crate::test_support::press(cx, "enter");
+                assert_eq!(
+                    view.read_with(cx, |view, _| view.router.screen().clone()),
+                    destination,
+                    "returning must preserve the actual invoking provider control"
+                );
+                crate::test_support::press(cx, "alt-left");
+            }
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.inspect_provider(&provider.id.to_string(), cx);
+                    view.prepare_motion(window, cx);
+                    let offset = view.shell.providers.detail_scroll.offset();
+                    assert!(view.router.back());
+                    view.prepare_motion(window, cx);
+                    view.inspect_provider(&provider.id.to_string(), cx);
+                    view.prepare_motion(window, cx);
+                    assert_eq!(view.shell.providers.detail_scroll.offset(), offset);
+                    assert!(view.router.back());
+                    view.prepare_motion(window, cx);
+                    view.shell.providers.records.clear();
+                    view.prepare_motion(window, cx);
+                    assert!(view.shell.providers.detail_offsets.is_empty());
+                    view.sync_provider_visibility();
+                    assert_eq!(view.router.screen(), &Screen::Providers);
+                    assert!(view.shell.providers.visible);
+                    cx.notify();
+                });
+            });
+            assert!(crate::test_support::control_bounds(cx, "provider-add").is_some());
+            assert!(crate::test_support::control_bounds(cx, "provider-edit").is_none());
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn provider_root_dirty_tracks_consent_and_retains_missing_record_drafts(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result =
+            (|| -> anyhow::Result<()> {
+                let provider = fixture_provider(true)?;
+                let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+                cx.update(|window, cx| {
+                    view.update(cx, |view, cx| {
+                        view.router.navigate(Tab::Accounts);
+                        view.shell.providers.records = vec![provider.clone()];
+                        view.open_providers(cx);
+                        view.inspect_provider(&provider.id.to_string(), cx);
+                        view.edit_provider(Some(&provider.id.to_string()), window, cx);
+                        let draft = view.shell.providers.form.as_ref().map(|form| form.id);
+                        assert!(!view.shell.providers.dirty(cx));
+                        view.consent_provider(cx);
+                        assert!(view.shell.providers.dirty(cx));
+                        view.consent_provider(cx);
+                        assert!(!view.shell.providers.dirty(cx));
+                        if let Some(form) = &view.shell.providers.form {
+                            form.name
+                                .update(cx, |field, cx| field.set_value("Unsaved name", cx));
+                        }
+                        view.receive_providers(Ok(Vec::new()));
+                        assert_eq!(
+                            view.shell.providers.form.as_ref().map(|form| form.id),
+                            draft
+                        );
+                        assert!(view.shell.providers.dirty(cx));
+                        assert!(
+                            view.shell.providers.form.as_ref().is_some_and(|form| {
+                                form.name.read(cx).value() == "Unsaved name"
+                            })
+                        );
+                        view.save_provider(cx);
+                        assert_eq!(
+                            view.shell.providers.error,
+                            Some(AccountMessage::product("accounts.providers.unavailable"))
+                        );
+                    });
+                });
+                Ok(())
+            })();
         assert!(result.is_ok(), "{result:?}");
     }
 }

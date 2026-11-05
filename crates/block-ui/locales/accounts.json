@@ -916,9 +916,24 @@
     "ja": "変更を保存"
   },
   "accounts.providers.add": {
-    "en": "Add provider",
+    "en": "Add a provider",
     "zh-Hans": "添加验证服务器",
     "ja": "認証サーバーを追加"
+  },
+  "accounts.providers.edit": {
+    "en": "Edit provider",
+    "zh-Hans": "编辑验证服务器",
+    "ja": "認証サーバーを編集"
+  },
+  "accounts.providers.cancel_changes": {
+    "en": "Cancel changes",
+    "zh-Hans": "取消更改",
+    "ja": "変更をキャンセル"
+  },
+  "accounts.providers.unavailable": {
+    "en": "This provider is no longer available.",
+    "zh-Hans": "此验证服务器已不可用。",
+    "ja": "この認証サーバーは利用できなくなりました。"
   },
   "accounts.providers.empty_title": {
     "en": "Your authentication providers",

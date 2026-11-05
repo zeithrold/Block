@@ -1,6 +1,5 @@
 //! Debug-only paint measurements and replay against disposable scenario data.
-use super::Presentation;
-use crate::{Block, Tab, UiAction};
+use crate::{Block, Tab, UiAction, motion::Pose, window_geometry};
 use gpui::{Context, IntoElement, Styled as _, WeakEntity, Window};
 use serde_json::{Value, json};
 use std::{
@@ -41,18 +40,27 @@ fn record(mut value: Value) {
         }
     }
 }
-pub(super) fn probe(value: Presentation, home: bool, navigation: Value) -> impl IntoElement {
+pub(super) fn probe(
+    home: bool,
+    running: bool,
+    sidebar: Pose,
+    detail: Pose,
+    navigation: Value,
+) -> impl IntoElement {
     gpui::canvas(|_, _, _| {}, move |bounds, (), window, _| {
         let native = window.bounds();
-        record(json!({"type":"paint","home":home,"running":value.active,
+        let content = window_geometry::content_size(window);
+        let outer = window_geometry::home_size(window);
+        record(json!({"type":"paint","geometry":"fixed","home":home,"running":running,
             "native_x":f32::from(native.origin.x),"native_y":f32::from(native.origin.y),
             "native_width":f32::from(native.size.width),"native_height":f32::from(native.size.height),
             "viewport_width":f32::from(window.viewport_size().width),"viewport_height":f32::from(window.viewport_size().height),
             "body_x":f32::from(bounds.origin.x),"body_y":f32::from(bounds.origin.y),
-            "home_opacity":value.home.opacity,"home_y":value.home.y,
-            "sidebar_opacity":value.sidebar.opacity,"sidebar_y":value.sidebar.y,
-            "detail_opacity":value.detail.opacity,"detail_x":value.detail.x,
-            "requested_width":value.outer_width,"layout_width":value.manage_width,
+            "home_opacity":if home {sidebar.opacity} else {0.},"home_x":if home {sidebar.x} else {0.},"home_y":0.,
+            "sidebar_opacity":sidebar.opacity,"sidebar_x":sidebar.x,"sidebar_y":0.,
+            "detail_opacity":detail.opacity,"detail_x":detail.x,
+            "requested_width":f32::from(outer.width),"requested_height":f32::from(outer.height),
+            "layout_width":f32::from(content.width),"layout_height":f32::from(content.height),
             "navigation":navigation,"active":window.is_window_active(),"dpr":window.scale_factor()}));
     }).absolute().inset_0()
 }
@@ -71,7 +79,7 @@ pub(crate) fn start(owner: WeakEntity<Block>, window: &mut Window, cx: &mut Cont
         return;
     }
     record(
-        json!({"type":"meta","clock":"native paint submission, not display presentation","schema":1}),
+        json!({"type":"meta","clock":"native paint submission, not display presentation","schema":2,"geometry":"fixed","content_width":360,"content_height":720,"chrome_height":56}),
     );
     // Pointer-driven task checks must not also dispatch the old page replay.
     if std::env::var_os("BLOCK_FRAME_MOTION_MANUAL").is_some() {

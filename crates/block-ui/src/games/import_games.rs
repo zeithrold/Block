@@ -701,8 +701,11 @@ impl Block {
             if let Some(source_path) = source_path {
                 row = row.child(
                     div()
+                        .w_full()
+                        .min_w_0()
                         .text_xs()
                         .text_color(rgb(self.palette.muted))
+                        .whitespace_normal()
                         .child(source_path.root.display().to_string()),
                 );
                 if let Some(warning) = &source_path.warning {
@@ -964,6 +967,14 @@ impl Block {
     ) -> gpui::AnyElement {
         let state = &self.shell.import_games;
         let language = self.language();
+        let pending = state.pending();
+        let destination = (!pending.is_empty()).then(|| {
+            tr!(
+                language,
+                "import.footer.destination",
+                path = self.proposed_import_parent(&pending).display()
+            )
+        });
         let mut running_motion = false;
         let body = match state.page {
             Page::Sources | Page::List => {
@@ -976,12 +987,38 @@ impl Block {
                     .id("import-sources-content")
                     .size_full()
                     .scroll_area(&state.source_scroll, "import.sources", self.palette, false)
-                    .child(self.render_sources(state, state.page == Page::Sources, cx));
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(self.render_sources(state, state.page == Page::Sources, cx))
+                            .children(destination.as_ref().map(|destination| {
+                                note(destination.clone())
+                                    .id("import-destination")
+                                    .w_full()
+                                    .whitespace_normal()
+                            })),
+                    );
                 let list = div()
                     .id("import-list-content")
                     .size_full()
                     .scroll_area(&state.list_scroll, "import.list", self.palette, false)
-                    .child(self.render_list(state, state.page == Page::List, cx));
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(self.render_list(state, state.page == Page::List, cx))
+                            .children(destination.as_ref().map(|destination| {
+                                note(destination.clone())
+                                    .id("import-list-destination")
+                                    .w_full()
+                                    .whitespace_normal()
+                            })),
+                    );
                 div()
                     .id("import-games-body")
                     .relative()
@@ -1054,25 +1091,8 @@ impl Block {
                 cx,
             ));
         } else {
-            let pending = state.pending();
             let n = pending.len();
             if n > 0 {
-                let destination = tr!(
-                    language,
-                    "import.footer.destination",
-                    path = self.proposed_import_parent(&pending).display()
-                );
-                footer = footer.child(super::tooltip::trigger(
-                    div()
-                        .id("import-destination")
-                        .w_full()
-                        .text_xs()
-                        .text_color(rgb(self.palette.muted))
-                        .truncate()
-                        .child(destination.clone()),
-                    destination,
-                    cx,
-                ));
                 footer = footer.child(note(tr!(language, "import.footer.originalFiles")));
             }
             footer = footer.child(self.button_with_variant(

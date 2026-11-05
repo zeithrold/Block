@@ -2,7 +2,7 @@
 
 use gpui::{App, Bounds, Edges, Pixels, Size, Window, px, size};
 
-const MANAGEMENT_HEIGHT: Pixels = px(720.);
+const PRODUCT_HEIGHT: Pixels = px(720.);
 
 /// The same inner bounds used by the component library's window border. Tiled
 /// Linux edges have no shadow or border; overlays must not cover resize chrome.
@@ -38,30 +38,24 @@ pub(super) fn content_size(window: &Window) -> Size<Pixels> {
     subtract_insets(window.viewport_size(), content_insets(window))
 }
 
-/// Home starts at its final left-pane width while preserving the same content
-/// height used by Manage.
+/// Fixed outer size, including the actual native frame insets once.
 #[expect(
     clippy::redundant_pub_crate,
     reason = "Only the parent UI module uses this helper."
 )]
 pub(super) fn home_size(window: &Window) -> Size<Pixels> {
-    add_insets(preferred_home_content_size(), content_insets(window))
-}
-
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "Only the parent UI module uses this helper."
-)]
-pub(super) fn management_size(window: &Window) -> Size<Pixels> {
     add_insets(preferred_management_size(), content_insets(window))
 }
 
-/// Fixed Manage content dimensions used to center the application window.
-pub fn preferred_management_size() -> Size<Pixels> {
-    size(px(1152.), MANAGEMENT_HEIGHT)
+/// Fixed product content dimensions, including the shared 56 px title area.
+///
+/// The historical export name remains until callers adopt the product name.
+pub const fn preferred_management_size() -> Size<Pixels> {
+    size(px(360.), PRODUCT_HEIGHT)
 }
 
-/// Reserve the expanded frame's position before Home is shown.
+/// Center the compact content bounds for launcher and standalone crash windows.
+/// The live window's decoration insets are added when its outer size is set.
 pub fn initial_window_bounds(cx: &App) -> Bounds<Pixels> {
     let center = cx
         .primary_display()
@@ -69,30 +63,9 @@ pub fn initial_window_bounds(cx: &App) -> Bounds<Pixels> {
     Bounds::centered_at(center, preferred_management_size())
 }
 
-/// Width-only navigation targets. The current viewport height is retained so
-/// callers can morph Home into a sidebar at a fixed top-left corner.
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "Only the parent UI module uses this helper."
-)]
-pub(super) fn navigation_sizes(window: &Window) -> (Size<Pixels>, Size<Pixels>) {
-    navigation_sizes_for(window.viewport_size().height, content_insets(window))
-}
-
-const fn preferred_home_content_size() -> Size<Pixels> {
-    size(px(super::design::SIDEBAR_WIDTH), MANAGEMENT_HEIGHT)
-}
-
-fn navigation_sizes_for(
-    viewport_height: Pixels,
-    insets: Edges<Pixels>,
-) -> (Size<Pixels>, Size<Pixels>) {
-    let preferred_home = add_insets(preferred_home_content_size(), insets);
-    let preferred_management = add_insets(preferred_management_size(), insets);
-    (
-        size(preferred_home.width, viewport_height),
-        size(preferred_management.width, viewport_height),
-    )
+/// Apply live decoration insets once, after the root publishes its native frame.
+pub fn initialize_window_size(window: &mut Window) {
+    window.on_next_frame(|window, _| window.resize(home_size(window)));
 }
 
 fn add_insets(size: Size<Pixels>, insets: Edges<Pixels>) -> Size<Pixels> {
@@ -113,56 +86,22 @@ fn subtract_insets(size: Size<Pixels>, insets: Edges<Pixels>) -> Size<Pixels> {
 mod tests {
     use gpui::Edges;
 
-    use super::{
-        add_insets, navigation_sizes_for, preferred_home_content_size, preferred_management_size,
-    };
+    use super::{add_insets, preferred_management_size, subtract_insets};
 
     #[test]
-    fn home_and_management_share_fixed_content_height_and_sidebar_width() {
-        let insets = Edges {
-            top: gpui::px(2.),
-            right: gpui::px(3.),
-            bottom: gpui::px(4.),
-            left: gpui::px(5.),
-        };
-        let home = add_insets(preferred_home_content_size(), insets);
-        let management = add_insets(preferred_management_size(), insets);
-        assert_eq!(home.height, management.height);
+    fn product_content_budget_includes_the_shared_chrome() {
         assert_eq!(
-            home.width - insets.left - insets.right,
-            gpui::px(crate::design::SIDEBAR_WIDTH)
+            preferred_management_size(),
+            gpui::size(gpui::px(360.), gpui::px(720.))
         );
         assert_eq!(
-            management.width - insets.left - insets.right,
-            gpui::px(1152.)
-        );
-        assert_eq!(
-            preferred_home_content_size().height,
-            preferred_management_size().height
+            preferred_management_size().height - gpui::px(crate::design::CHROME_HEIGHT),
+            gpui::px(664.)
         );
     }
 
     #[test]
-    fn width_only_navigation_preserves_height_and_targets_content_widths() {
-        let insets = Edges {
-            top: gpui::px(1.),
-            right: gpui::px(2.),
-            bottom: gpui::px(3.),
-            left: gpui::px(4.),
-        };
-        let (home, management) = navigation_sizes_for(gpui::px(611.), insets);
-        assert_eq!(home.height, gpui::px(611.));
-        assert_eq!(management.height, gpui::px(611.));
-        assert_eq!(home.width - insets.left - insets.right, gpui::px(360.));
-        assert_eq!(
-            management.width - insets.left - insets.right,
-            gpui::px(1152.)
-        );
-        assert!(management.width >= home.width);
-    }
-
-    #[test]
-    fn geometry_constants_include_frame_insets_in_outer_size() {
+    fn outer_size_adds_actual_insets_once_and_recovers_the_content_budget() {
         let insets = Edges {
             top: gpui::px(1.),
             right: gpui::px(2.),
@@ -170,9 +109,54 @@ mod tests {
             left: gpui::px(4.),
         };
         assert_eq!(
-            add_insets(preferred_home_content_size(), insets),
+            add_insets(preferred_management_size(), insets),
             gpui::size(gpui::px(366.), gpui::px(724.))
         );
+        assert_eq!(
+            subtract_insets(gpui::size(gpui::px(366.), gpui::px(724.)), insets),
+            gpui::size(gpui::px(360.), gpui::px(720.))
+        );
+    }
+
+    #[gpui::test]
+    fn startup_bounds_center_the_compact_product(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let bounds = super::initial_window_bounds(cx);
+            let center = cx
+                .primary_display()
+                .map_or_else(Default::default, |display| display.bounds().center());
+            assert_eq!(bounds.size, gpui::size(gpui::px(360.), gpui::px(720.)));
+            assert_eq!(bounds.center(), center);
+        });
+    }
+
+    #[gpui::test]
+    fn startup_size_uses_actual_insets_once_after_root_setup(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        cx.update(|window, cx| {
+            let home = super::home_size(window);
+            assert_eq!(
+                subtract_insets(home, super::content_insets(window)),
+                gpui::size(gpui::px(360.), gpui::px(720.))
+            );
+            let initial = gpui::size(gpui::px(500.), gpui::px(800.));
+            window.resize(initial);
+            super::initialize_window_size(window);
+            assert_eq!(
+                window.window_bounds().get_bounds().size,
+                initial,
+                "startup sizing must wait for the root's decoration setup"
+            );
+            window.simulate_next_frame(cx);
+            assert_eq!(window.window_bounds().get_bounds().size, home);
+            window.resize(initial);
+            window.simulate_next_frame(cx);
+            assert_eq!(
+                window.window_bounds().get_bounds().size,
+                initial,
+                "startup sizing must not keep correcting later frames"
+            );
+        });
     }
 
     #[gpui::test]

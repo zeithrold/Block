@@ -251,6 +251,56 @@ impl Drop for CrashView {
 }
 
 impl CrashView {
+    /// Native captures exercise the real report reader and help actions without
+    /// starting a game or entering the persisted session-report queue.
+    #[cfg(debug_assertions)]
+    pub(super) fn scenario(
+        name: &str,
+        preferences: super::Preferences,
+        return_to_profile: impl FnMut(&mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
+        use block_launcher::crash::{AttachmentKind, DiagnosticAttachment};
+
+        let mut report = fixture_report();
+        report.context.profile_id = "vanilla".into();
+        report.context.run_id = "00000000-0000-4000-8000-000000360720".into();
+        report.context.minecraft_version = "1.20.1".into();
+        report.context.loader = None;
+        report.context.profile_name = if name == "crash-long-metadata" {
+            "Creative worlds and archived experiments with a deliberately long Profile name"
+        } else {
+            "Vanilla"
+        }
+        .into();
+        report.sanitized_tail = (0..120)
+            .map(|line| format!("[Client thread/INFO] Synthetic diagnostic line {line:03}\n"))
+            .collect::<String>()
+            + "java.lang.OutOfMemoryError: Java heap space\n";
+        report.attachments.push(DiagnosticAttachment {
+            name: "crash-synthetic-client.txt".into(),
+            kind: AttachmentKind::MinecraftCrashReport,
+            sanitized_text: "Synthetic local report\njava.lang.OutOfMemoryError: Java heap space\n"
+                .into(),
+            truncated: true,
+        });
+        let language = preferences.language.unwrap_or_default();
+        let mut view = Self::new(
+            report,
+            PathBuf::from("/scenario/Block/reports/synthetic-session"),
+            language,
+            return_to_profile,
+            window,
+            cx,
+        );
+        view.set_preferences(preferences, window, cx);
+        if name == "crash-logs" {
+            view.handle(HelpAction::Logs, window, cx);
+        }
+        view
+    }
+
     /// Display a startup language-preference failure without hiding the report.
     pub fn report_language_initialization_error(&mut self, error: String) {
         self.status = Some(Status::LanguageInitializationFailed(error));
@@ -1026,7 +1076,8 @@ impl CrashView {
             .flex()
             .flex_col()
             .gap_2()
-            .p_4()
+            .px_4()
+            .py_3()
             .border_t_1()
             .border_color(rgb(palette.border))
             .child(
@@ -1048,6 +1099,8 @@ impl CrashView {
                     .gap_2()
                     .child(
                         div()
+                            .min_w_0()
+                            .max_w_full()
                             .flex()
                             .flex_wrap()
                             .gap_1()
@@ -1080,6 +1133,8 @@ impl CrashView {
                     )
                     .child(
                         div()
+                            .min_w_0()
+                            .max_w_full()
                             .flex()
                             .flex_wrap()
                             .gap_1()
@@ -1107,7 +1162,7 @@ impl CrashView {
         div()
             .id("crash-window-chrome")
             .debug_selector(|| "crash-window-chrome".into())
-            .h(px(40.))
+            .h(px(super::design::CHROME_HEIGHT))
             .flex_shrink_0()
             .flex()
             .items_center()
@@ -1338,11 +1393,34 @@ fn diagnostic_summary(report: &CrashReport) -> String {
     text
 }
 
+#[cfg(any(test, debug_assertions))]
+fn fixture_report() -> CrashReport {
+    use block_launcher::crash::{CrashContext, ExitOutcome};
+
+    CrashReport::new(
+        CrashContext {
+            run_id: "test-session".into(),
+            profile_id: "profile".into(),
+            profile_name: "My world".into(),
+            minecraft_version: "1.20.6".into(),
+            loader: Some("NeoForge".into()),
+        },
+        ExitOutcome {
+            kind: ExitKind::Abnormal,
+            code: Some(1),
+            signal: None,
+            windows_status: None,
+        },
+        "java.lang.OutOfMemoryError: Java heap space\naccessToken=[redacted]",
+        Vec::new(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use block_launcher::crash::{AttachmentKind, CrashContext, DiagnosticAttachment, ExitOutcome};
+    use block_launcher::crash::{AttachmentKind, DiagnosticAttachment, ExitOutcome};
     #[cfg(debug_assertions)]
     use gpui::AppContext as _;
 
@@ -1402,23 +1480,7 @@ mod tests {
     }
 
     fn report() -> CrashReport {
-        CrashReport::new(
-            CrashContext {
-                run_id: "test-session".into(),
-                profile_id: "profile".into(),
-                profile_name: "My world".into(),
-                minecraft_version: "1.20.6".into(),
-                loader: Some("NeoForge".into()),
-            },
-            ExitOutcome {
-                kind: ExitKind::Abnormal,
-                code: Some(1),
-                signal: None,
-                windows_status: None,
-            },
-            "java.lang.OutOfMemoryError: Java heap space\naccessToken=[redacted]",
-            Vec::new(),
-        )
+        super::fixture_report()
     }
 
     fn report_with_attachment() -> CrashReport {
@@ -2229,7 +2291,7 @@ mod tests {
 
     #[gpui::test]
     fn footer_remains_in_bounds_at_compact_and_wide_sizes(cx: &mut gpui::TestAppContext) {
-        for (width, height) in [(360., 540.), (400., 540.), (1152., 720.)] {
+        for (width, height) in [(360., 540.), (360., 720.), (400., 540.), (1152., 720.)] {
             for (language, appearance) in [
                 (crate::Language::English, crate::Appearance::Light),
                 (crate::Language::SimplifiedChinese, crate::Appearance::Dark),
@@ -2263,6 +2325,9 @@ mod tests {
                 cx.run_until_parked();
                 let footer = cx.debug_bounds("crash-footer").unwrap_or_default();
                 let body = cx.debug_bounds("crash-help-content").unwrap_or_default();
+                let chrome = cx.debug_bounds("crash-window-chrome").unwrap_or_default();
+                assert_eq!(chrome.size.height, gpui::px(56.));
+                assert_eq!(body.top(), chrome.bottom());
                 assert!(
                     footer.top() >= body.bottom(),
                     "body {body:?} footer {footer:?}"
@@ -2302,6 +2367,11 @@ mod tests {
                 assert_eq!(actual, expected);
                 click(cx, "crash-export");
                 let footer = cx.debug_bounds("crash-footer").unwrap_or_default();
+                let body = cx.debug_bounds("crash-help-content").unwrap_or_default();
+                assert!(
+                    body.size.height > gpui::px(0.) && body.bottom() <= footer.top(),
+                    "pending export at {width}x{height} {language:?}: body {body:?}, {footer:?}"
+                );
                 for id in [
                     "crash-copy",
                     "crash-export",

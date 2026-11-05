@@ -4,7 +4,7 @@ import unittest
 
 from scenario_contracts import (
     HOME_VIEWPORT,
-    MANAGEMENT_VIEWPORT,
+    CAPTURE_CONTRACT_REVISION,
     _REQUIRED,
     contract,
     scenario_names,
@@ -19,7 +19,8 @@ class ScenarioContractsTest(unittest.TestCase):
             with self.subTest(name=name):
                 value = contract(name)
                 self.assertTrue(value["title"])
-                self.assertIn(value["viewport"], {HOME_VIEWPORT, MANAGEMENT_VIEWPORT})
+                self.assertEqual(value["viewport"], (360, 720))
+                self.assertEqual(value["contract_revision"], CAPTURE_CONTRACT_REVISION)
                 self.assertGreaterEqual(len(value["required"]), 2)
                 self.assertEqual(len(value["required"]), len(set(value["required"])))
 
@@ -39,7 +40,7 @@ class ScenarioContractsTest(unittest.TestCase):
         for name, phrase in expected.items():
             value = contract(name)
             self.assertEqual(value["title"], "Block · Create a game")
-            self.assertEqual(value["viewport"], MANAGEMENT_VIEWPORT)
+            self.assertEqual(value["viewport"], (360, 720))
             self.assertIn(phrase, value["required"])
             observed[name] = value["required"]
         self.assertEqual(len({tuple(value) for value in observed.values()}), 4)
@@ -95,7 +96,37 @@ class ScenarioContractsTest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(contract(name)["title"], f"Block · {title}")
-                self.assertEqual(contract(name)["viewport"], MANAGEMENT_VIEWPORT)
+                self.assertEqual(contract(name)["viewport"], (360, 720))
+
+    def test_compact_details_do_not_require_the_unmounted_list(self) -> None:
+        for name in ("accounts-detail", "accounts-offline-detail"):
+            with self.subTest(name=name):
+                self.assertIn("Account details", contract(name)["required"])
+                self.assertNotIn("Your accounts", contract(name)["required"])
+        vanilla = contract("wizard-loader-picker")["required"]
+        self.assertIn("No mod loader needed", vanilla)
+        self.assertNotIn("Search loader builds", vanilla)
+        self.assertIn("Your providers", contract("accounts-providers")["required"])
+        self.assertIn("Display name", contract("provider-add")["required"])
+
+    def test_editor_dialogs_and_crash_use_their_actual_native_titles(self) -> None:
+        for name, title in (
+            ("instance-editor-exit-dirty", "Instance settings"),
+            ("profile-editor-exit-dirty", "Launch settings"),
+            ("provider-editor-exit-dirty", "Authlib providers"),
+        ):
+            with self.subTest(name=name):
+                value = contract(name)
+                self.assertEqual(value["title"], f"Block · {title}")
+                self.assertEqual(value["required"], [
+                    "Save your changes?", "Save and leave", "Discard changes", "Keep editing",
+                ])
+        for name in ("crash-overview", "crash-logs", "crash-long-metadata"):
+            with self.subTest(name=name):
+                value = contract(name)
+                self.assertEqual(value["title"], "Block · Crash help")
+                self.assertIn("Return to instance", value["required"])
+        self.assertIn("Find in current text", contract("crash-logs")["required"])
 
     def test_settings_scenarios_use_the_home_sized_frame(self) -> None:
         settings = {name for name in scenario_names() if name.startswith("settings-")}

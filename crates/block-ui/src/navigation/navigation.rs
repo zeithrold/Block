@@ -2,7 +2,6 @@
 use super::{
     Block, Form,
     authentication::AuthStep,
-    first_run::Stage,
     game_wizard::{WizardPage, WizardStep},
     modpack_import::Phase as PackPhase,
     motion::MotionStyle,
@@ -29,24 +28,74 @@ enum Task {
     Authentication,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum RecordRef {
+    Instance(String),
+    Profile(String),
+    Account(String),
+}
+
+impl RecordRef {
+    pub(super) fn id(&self) -> &str {
+        match self {
+            Self::Instance(id) | Self::Profile(id) | Self::Account(id) => id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum Screen {
+    #[default]
+    List,
+    Record(RecordRef),
+    InstanceEditor(String),
+    ProfileEditor(String),
+    Providers,
+    Provider(uuid::Uuid),
+    NewProvider,
+    EditProvider(uuid::Uuid),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Destination {
+    entry: u64,
     tab: Tab,
     task: Option<Task>,
+    screen: Screen,
 }
 
 /// Navigation owns the destination and a task's return destination, not its draft.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(super) struct Router {
     current: Destination,
     auth_return: Option<Destination>,
+    parents: Vec<Destination>,
+    next_entry: u64,
+}
+
+impl Default for Router {
+    fn default() -> Self {
+        Self::new(Tab::Home)
+    }
 }
 
 impl Router {
-    pub(super) const fn new(tab: Tab) -> Self {
+    pub(super) fn new(tab: Tab) -> Self {
+        let nested = !matches!(tab, Tab::Home | Tab::Onboarding);
         Self {
-            current: Destination { tab, task: None },
+            current: Destination {
+                entry: u64::from(nested),
+                tab,
+                task: None,
+                screen: Screen::List,
+            },
             auth_return: None,
+            parents: if nested {
+                vec![Destination::default()]
+            } else {
+                Vec::new()
+            },
+            next_entry: if nested { 2 } else { 1 },
         }
     }
 
@@ -55,14 +104,86 @@ impl Router {
     }
 
     pub(super) fn navigate(&mut self, tab: Tab) {
-        self.current = Destination { tab, task: None };
+        if self.current.tab == tab
+            && self.current.task.is_none()
+            && self.current.screen == Screen::List
+        {
+            return;
+        }
+        self.parents.clear();
+        if !matches!(tab, Tab::Home | Tab::Onboarding) {
+            self.parents.push(Destination::default());
+        }
+        self.current = Destination {
+            entry: self.allocate_entry(),
+            tab,
+            ..Destination::default()
+        };
+    }
+
+    pub(super) fn screen(&self) -> &Screen {
+        &self.current.screen
+    }
+
+    pub(super) const fn entry_id(&self) -> u64 {
+        self.current.entry
+    }
+
+    pub(super) fn contains_entry(&self, entry: u64) -> bool {
+        self.current.entry == entry
+            || self.parents.iter().any(|parent| parent.entry == entry)
+            || self
+                .auth_return
+                .as_ref()
+                .is_some_and(|parent| parent.entry == entry)
+    }
+
+    fn allocate_entry(&mut self) -> u64 {
+        let entry = self.next_entry;
+        self.next_entry = self.next_entry.wrapping_add(1);
+        entry
+    }
+
+    pub(super) fn open_screen(&mut self, tab: Tab, screen: Screen) {
+        if self.current.tab == tab && self.current.task.is_none() && self.current.screen == screen {
+            return;
+        }
+        let destination = Destination {
+            entry: self.allocate_entry(),
+            tab,
+            task: None,
+            screen,
+        };
+        self.parents.push(self.current.clone());
+        self.current = destination;
+    }
+
+    pub(super) fn open_record(&mut self, tab: Tab, record: RecordRef) {
+        self.open_screen(tab, Screen::Record(record));
+    }
+
+    pub(super) fn back(&mut self) -> bool {
+        if let Some(parent) = self.parents.pop() {
+            self.current = parent;
+            true
+        } else {
+            false
+        }
     }
 
     pub(super) fn enter_game_choice(&mut self) {
+        if self.current.task.is_none() {
+            self.parents.push(self.current.clone());
+            self.current.entry = self.allocate_entry();
+        }
         self.current.task = Some(Task::GameChoice);
     }
 
     pub(super) fn enter_game_wizard(&mut self) {
+        if self.current.task.is_none() {
+            self.parents.push(self.current.clone());
+            self.current.entry = self.allocate_entry();
+        }
         self.current.task = Some(Task::GameWizard);
     }
 
@@ -71,7 +192,9 @@ impl Router {
     }
 
     pub(super) fn leave_task(&mut self) {
-        self.current.task = None;
+        if self.current.task.is_some() && !self.back() {
+            self.current.task = None;
+        }
     }
 
     pub(super) const fn allows(&self, tab: Tab, setup_incomplete: bool) -> bool {
@@ -80,15 +203,17 @@ impl Router {
     }
 
     pub(super) fn begin_auth(&mut self) {
-        self.auth_return = Some(self.current);
+        self.auth_return = Some(self.current.clone());
         self.current = Destination {
+            entry: self.allocate_entry(),
             tab: Tab::Accounts,
             task: Some(Task::Authentication),
+            screen: Screen::List,
         };
     }
 
     pub(super) const fn auth_return(&self) -> Option<Tab> {
-        match self.auth_return {
+        match &self.auth_return {
             Some(destination) => Some(destination.tab),
             None => None,
         }
@@ -117,12 +242,6 @@ pub(super) enum Page {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum FrameClass {
-    Home,
-    Management,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum LayoutKind {
     Plain,
     SinglePane,
@@ -136,6 +255,7 @@ pub(super) struct PageKey {
     auth: bool,
     task: bool,
     providers: bool,
+    first_run: Option<super::first_run::Stage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,6 +264,7 @@ pub(super) enum DetailKey {
     Provider(ProviderKey),
     Browser {
         tab: Tab,
+        screen: Screen,
         inspected: Option<String>,
         editor_page: Option<EditorPage>,
         profile_form: bool,
@@ -165,7 +286,6 @@ pub(super) struct PageSpec {
     pub key: PageKey,
     pub detail: DetailKey,
     pub wizard: Option<WizardKey>,
-    pub frame: FrameClass,
     pub layout: LayoutKind,
     pub preset: MotionStyle,
     pub task: bool,
@@ -198,16 +318,14 @@ impl PageSpec {
     }
 
     pub(super) const fn frame_label(&self) -> &'static str {
-        match self.frame {
-            FrameClass::Home => "home",
-            FrameClass::Management => "management",
-        }
+        "fixed"
     }
 
     pub(super) const fn detail_label(&self) -> &'static str {
         match &self.detail {
             DetailKey::Settings(_) => "settings",
             DetailKey::Provider(ProviderKey::List) => "provider_list",
+            DetailKey::Provider(ProviderKey::Detail(_)) => "provider_detail",
             DetailKey::Provider(ProviderKey::New) => "provider_new",
             DetailKey::Provider(ProviderKey::Existing(_)) => "provider_existing",
             DetailKey::Browser {
@@ -254,19 +372,21 @@ impl Block {
             None => match tab {
                 Tab::Home => Page::Home,
                 Tab::Onboarding => Page::FirstRun,
-                Tab::Accounts if self.shell.providers.visible => Page::Providers,
+                Tab::Accounts
+                    if matches!(
+                        self.router.screen(),
+                        Screen::Providers
+                            | Screen::Provider(_)
+                            | Screen::NewProvider
+                            | Screen::EditProvider(_)
+                    ) =>
+                {
+                    Page::Providers
+                }
                 Tab::Instances | Tab::Profiles | Tab::Accounts => Page::Browser,
                 Tab::Settings => Page::Settings,
                 Tab::About => Page::About,
             },
-        };
-        let frame = if page == Page::Home && self.form.is_none()
-            || page == Page::Settings
-            || page == Page::FirstRun && self.shell.first_run.stage == Stage::Welcome
-        {
-            FrameClass::Home
-        } else {
-            FrameClass::Management
         };
         let layout = match page {
             Page::Browser | Page::Providers | Page::About => LayoutKind::Management,
@@ -276,24 +396,39 @@ impl Block {
         };
         let detail = match page {
             Page::Settings => DetailKey::Settings(self.shell.settings_page),
-            Page::Providers => DetailKey::Provider(self.shell.providers.motion_key()),
+            Page::Providers => DetailKey::Provider(match self.router.screen() {
+                Screen::Provider(id) => ProviderKey::Detail(*id),
+                Screen::NewProvider => ProviderKey::New,
+                Screen::EditProvider(id) => ProviderKey::Existing(*id),
+                _ => ProviderKey::List,
+            }),
             _ => DetailKey::Browser {
                 tab,
-                inspected: self.collection().inspected.clone(),
-                editor_page: self.shell.editor.page,
-                profile_form: matches!(self.form, Some(Form::Profile(_))),
+                screen: self.router.screen().clone(),
+                inspected: match self.router.screen() {
+                    Screen::Record(record) => Some(record.id().to_owned()),
+                    _ => None,
+                },
+                editor_page: matches!(self.router.screen(), Screen::ProfileEditor(_))
+                    .then_some(self.shell.editor.page)
+                    .flatten(),
+                profile_form: matches!(self.router.screen(), Screen::ProfileEditor(_))
+                    && matches!(self.form, Some(Form::Profile(_))),
                 instance_editor: self
                     .shell
                     .instance_editor
                     .as_ref()
+                    .filter(|_| matches!(self.router.screen(), Screen::InstanceEditor(_)))
                     .map(|editor| editor.identity().to_owned()),
             },
         };
-        let wizard = if let Some(auth) = &self.shell.auth {
+        let wizard = if page == Page::Authentication
+            && let Some(auth) = &self.shell.auth
+        {
             Some(WizardKey::Authentication(auth.motion_key()))
-        } else if self.pack_wizard_active() {
+        } else if page == Page::GameWizard && self.pack_wizard_active() {
             Some(WizardKey::Pack(self.shell.pack_import.phase))
-        } else if matches!(self.form, Some(Form::Instance(_))) {
+        } else if page == Page::GameWizard && matches!(self.form, Some(Form::Instance(_))) {
             Some(WizardKey::Game(
                 self.shell.wizard.step,
                 self.wizard_outer_page(),
@@ -307,11 +442,11 @@ impl Block {
                 tab,
                 auth,
                 task,
-                providers: self.shell.providers.visible,
+                providers: page == Page::Providers,
+                first_run: (page == Page::FirstRun).then_some(self.shell.first_run.stage),
             },
             detail,
             wizard,
-            frame,
             layout,
             preset: if task {
                 MotionStyle::Wizard
@@ -325,7 +460,76 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
-    use super::{DetailKey, FrameClass, LayoutKind, Page, PageKey, PageSpec, Router, Tab, Task};
+    use super::{DetailKey, LayoutKind, Page, PageKey, PageSpec, Router, Tab, Task};
+
+    #[test]
+    fn linked_details_and_editors_return_to_the_exact_parent_entry() {
+        let mut router = Router::new(Tab::Instances);
+        let list = router.entry_id();
+        router.open_record(
+            Tab::Instances,
+            super::RecordRef::Instance("instance-a".into()),
+        );
+        let instance = router.entry_id();
+        router.open_record(Tab::Profiles, super::RecordRef::Profile("profile-b".into()));
+        let profile = router.entry_id();
+        router.open_screen(
+            Tab::Profiles,
+            super::Screen::ProfileEditor("profile-b".into()),
+        );
+        assert!(router.back());
+        assert_eq!(router.entry_id(), profile);
+        assert!(
+            matches!(router.screen(), super::Screen::Record(super::RecordRef::Profile(id)) if id == "profile-b")
+        );
+        assert!(router.back());
+        assert_eq!(router.entry_id(), instance);
+        assert!(
+            matches!(router.screen(), super::Screen::Record(super::RecordRef::Instance(id)) if id == "instance-a")
+        );
+        assert!(router.back());
+        assert_eq!(router.entry_id(), list);
+        assert_eq!(router.screen(), &super::Screen::List);
+        assert!(router.back());
+        assert_eq!(router.tab(), Tab::Home);
+        assert!(!router.back());
+    }
+
+    #[test]
+    fn root_navigation_is_idempotent_and_has_home_as_parent() {
+        let mut router = Router::new(Tab::Home);
+        router.navigate(Tab::Accounts);
+        let accounts = router.entry_id();
+        router.navigate(Tab::Accounts);
+        assert_eq!(router.entry_id(), accounts);
+        assert!(router.back());
+        assert_eq!(router.tab(), Tab::Home);
+        assert!(!router.contains_entry(accounts));
+    }
+
+    #[test]
+    fn authentication_restores_the_same_detail_and_its_parent_stack() {
+        let mut router = Router::new(Tab::Profiles);
+        router.open_record(Tab::Profiles, super::RecordRef::Profile("profile-a".into()));
+        let detail = router.entry_id();
+        router.begin_auth();
+        router.end_auth();
+        assert_eq!(router.entry_id(), detail);
+        assert!(router.back());
+        assert_eq!(router.screen(), &super::Screen::List);
+    }
+
+    #[test]
+    fn game_choice_replacement_keeps_the_invoking_destination() {
+        let mut router = Router::new(Tab::Onboarding);
+        let overview = router.entry_id();
+        router.enter_game_choice();
+        router.enter_game_wizard();
+        router.leave_task();
+        assert_eq!(router.entry_id(), overview);
+        assert_eq!(router.current.task, None);
+        assert!(!router.back());
+    }
 
     #[test]
     fn setup_guards_regular_destinations_and_cannot_be_replayed_after_completion() {
@@ -378,16 +582,17 @@ mod tests {
                 auth: false,
                 task: false,
                 providers: false,
+                first_run: None,
             },
             detail: DetailKey::Browser {
                 tab: Tab::Profiles,
+                screen: super::Screen::InstanceEditor("private-instance".into()),
                 inspected: Some("private-profile".into()),
                 editor_page: None,
                 profile_form: false,
                 instance_editor: Some("private-instance".into()),
             },
             wizard: None,
-            frame: FrameClass::Management,
             layout: LayoutKind::Management,
             preset: super::MotionStyle::Navigation,
             task: false,

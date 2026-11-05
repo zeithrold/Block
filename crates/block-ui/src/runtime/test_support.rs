@@ -61,6 +61,8 @@ pub(super) fn window<V: gpui::Render + 'static>(
     let view = root
         .read_with(cx, |root, _| root.view().clone().downcast::<V>())
         .expect("the Base Root retains the supplied product entity");
+    let dimensions = cx.update(|window, _| crate::window_geometry::home_size(window));
+    cx.simulate_resize(dimensions);
     (view, cx)
 }
 
@@ -71,9 +73,7 @@ pub(super) fn window<V: gpui::Render + 'static>(
     reason = "Test key sequences are static valid GPUI bindings."
 )]
 pub(super) fn press(cx: &mut gpui::VisualTestContext, keys: &str) {
-    if let Some(window) = cx.windows().last().copied() {
-        *cx = gpui::VisualTestContext::from_window(window, &cx.cx);
-    }
+    ensure_live_window(cx);
     for key in keys.split(' ') {
         let keystroke = gpui::Keystroke::parse(key).expect("valid test keystroke");
         let pressed_in = gpui::VisualContext::window_handle(cx);
@@ -141,34 +141,49 @@ pub(super) fn test_account() -> anyhow::Result<Account> {
     })
 }
 
-/// Locate the real product control in its owning window after dialog migration.
+/// Locate a control in the current live product window.
 pub(super) fn control_bounds(
     cx: &mut gpui::VisualTestContext,
     selector: &'static str,
 ) -> Option<gpui::Bounds<gpui::Pixels>> {
     cx.run_until_parked();
-    let alias = match selector {
-        "wizard-next" => Some("section-done"),
-        "wizard-back" => Some("section-cancel"),
-        _ => None,
-    };
-    if let Some(alias) = alias {
-        for window in cx.windows().into_iter().rev() {
-            let mut candidate = gpui::VisualTestContext::from_window(window, &cx.cx);
-            if let Some(bounds) = candidate.debug_bounds(alias) {
-                *cx = candidate;
-                return Some(bounds);
-            }
+    ensure_live_window(cx);
+    cx.debug_bounds(selector)
+}
+
+/// Reach a mounted page control using wheel input, retaining the current window.
+pub(super) fn scroll_into_view(
+    cx: &mut gpui::VisualTestContext,
+    viewport: gpui::Bounds<gpui::Pixels>,
+    selector: &'static str,
+) -> bool {
+    for _ in 0..12 {
+        let Some(bounds) = control_bounds(cx, selector) else {
+            return false;
+        };
+        if bounds.left() < viewport.left() || bounds.right() > viewport.right() {
+            return false;
         }
-    }
-    for window in cx.windows().into_iter().rev() {
-        let mut candidate = gpui::VisualTestContext::from_window(window, &cx.cx);
-        if let Some(bounds) = candidate.debug_bounds(selector) {
-            *cx = candidate;
-            return Some(bounds);
+        if bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom() {
+            return true;
         }
+        let position = viewport.center();
+        let delta = if bounds.top() < viewport.top() {
+            160.
+        } else {
+            -160.
+        };
+        cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position,
+            delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(delta))),
+            ..gpui::ScrollWheelEvent::default()
+        });
+        cx.run_until_parked();
     }
-    None
+    control_bounds(cx, selector).is_some_and(|bounds| {
+        bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
+    })
 }
 
 pub(super) fn ensure_live_window(cx: &mut gpui::VisualTestContext) {
@@ -181,4 +196,38 @@ pub(super) fn ensure_live_window(cx: &mut gpui::VisualTestContext) {
     {
         *cx = gpui::VisualTestContext::from_window(*window, &cx.cx);
     }
+}
+
+#[gpui::test]
+fn input_helpers_keep_the_current_window_without_searching_other_roots(
+    cx: &mut gpui::TestAppContext,
+) {
+    let first_window = {
+        let (_, cx) = window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.router.navigate(crate::Tab::Accounts);
+            view
+        });
+        cx.run_until_parked();
+        gpui::VisualContext::window_handle(cx)
+    };
+    let (_, cx) = window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.router.navigate(crate::Tab::About);
+        view
+    });
+    cx.run_until_parked();
+    let second_window = gpui::VisualContext::window_handle(cx);
+    assert!(control_bounds(cx, "sign-in").is_none());
+    assert_eq!(
+        gpui::VisualContext::window_handle(cx).window_id(),
+        second_window.window_id()
+    );
+    *cx = gpui::VisualTestContext::from_window(first_window, &cx.cx);
+    assert!(control_bounds(cx, "sign-in").is_some());
+    press(cx, "tab");
+    assert_eq!(
+        gpui::VisualContext::window_handle(cx).window_id(),
+        first_window.window_id()
+    );
 }

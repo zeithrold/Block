@@ -46,9 +46,9 @@ fn reducing_motion_during_welcome_swap_settles_and_releases_the_outgoing_page(
     frame(cx, 20);
     let outgoing = view.read_with(cx, |view, _| {
         view.motion
-            .first_run_switch
-            .as_ref()
-            .map(|switch| Rc::downgrade(&switch.outgoing))
+            .page
+            .outgoing()
+            .map(|layer| Rc::downgrade(&layer._snapshot))
     });
     assert!(outgoing.is_some());
     view.update(cx, |view, cx| {
@@ -57,22 +57,22 @@ fn reducing_motion_during_welcome_swap_settles_and_releases_the_outgoing_page(
     });
     frame(cx, 0);
     assert!(view.read_with(cx, |view, _| {
-        view.motion.first_run_switch.is_none()
-            && !view.motion.frame.active()
+        view.motion.page.outgoing().is_none()
+            && !view.motion.moving
             && view.shell.first_run.stage == crate::first_run::Stage::Overview
     }));
     assert!(outgoing.is_some_and(|outgoing| outgoing.upgrade().is_none()));
 }
 
 #[gpui::test]
-fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &mut TestAppContext) {
+fn page_navigation_moves_one_compact_surface_without_resizing(cx: &mut TestAppContext) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.router.navigate(Tab::Accounts);
         view
     });
-    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.simulate_resize(size(px(360.), px(720.)));
     cx.run_until_parked();
     let native = cx.update(|window, _| window.bounds());
     view.update_in(cx, |view, window, cx| {
@@ -88,21 +88,18 @@ fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &m
                 .current
                 .is_some_and(|pose| pose.opacity > 0. && pose.x > 0. && pose.x <= 12.)
         );
-        assert!(
-            panes
-                .detail
-                .current
-                .is_some_and(|pose| pose.opacity == 0. && pose.x == 20.)
+        assert_eq!(
+            panes.detail.current.map(|pose| (pose.x, pose.opacity)),
+            panes.sidebar.current.map(|pose| (pose.x, pose.opacity))
         );
         assert!(view.motion.page.outgoing().is_some());
     });
-    for selector in ["management-sidebar", "management-content"] {
-        let bounds = cx.debug_bounds(selector);
-        assert!(
-            bounds.is_some_and(|bounds| bounds.top() == px(crate::design::CHROME_HEIGHT)),
-            "only horizontal motion is allowed: {selector} {bounds:?}"
-        );
-    }
+    let selector = "navigation-current-0";
+    let bounds = cx.debug_bounds(selector);
+    assert!(
+        bounds.is_some_and(|bounds| bounds.top() == px(crate::design::CHROME_HEIGHT)),
+        "only horizontal motion is allowed: {selector} {bounds:?}"
+    );
     frame(cx, 60);
     view.read_with(cx, |view, _| {
         let panes = view.motion.page_frames.get();
@@ -121,7 +118,7 @@ fn management_navigation_staggers_small_horizontal_panes_without_resizing(cx: &m
 }
 
 #[gpui::test]
-fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppContext) {
+fn list_to_detail_moves_one_body_and_keeps_chrome_and_native_bounds(cx: &mut TestAppContext) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
@@ -129,20 +126,22 @@ fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppC
         view.router.navigate(Tab::Instances);
         view
     });
-    cx.simulate_resize(size(px(1152.), px(720.)));
+    cx.simulate_resize(size(px(360.), px(720.)));
     cx.run_until_parked();
-    let sidebar = cx.debug_bounds("management-sidebar");
+    let chrome = cx.debug_bounds("window-chrome");
+    assert!(chrome.is_some());
+    let native = cx.update(|window, _| window.bounds());
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Inspect("instance-a".into()), window, cx)
+        view.handle(UiAction::Inspect("profile-a".into()), window, cx)
     });
     frame(cx, 35);
-    assert_eq!(cx.debug_bounds("management-sidebar"), sidebar);
+    assert_eq!(cx.debug_bounds("window-chrome"), chrome);
     let content = cx.debug_bounds("navigation-current-1");
     assert!(
-        content.is_some_and(|bounds| bounds.left() > px(360.)
-            && bounds.left() <= px(380.)
+        content.is_some_and(|bounds| bounds.left() > px(0.)
+            && bounds.left() <= px(20.)
             && bounds.top() == px(crate::design::CHROME_HEIGHT)),
-        "only the right content moves horizontally: {content:?}"
+        "the compact detail body moves within the same frame: {content:?}"
     );
     view.read_with(cx, |view, cx| {
         let pane = view.page_pane_pose(true);
@@ -166,7 +165,69 @@ fn selecting_a_management_subpage_moves_only_its_right_content(cx: &mut TestAppC
     });
     frame(cx, 145);
     assert!(view.read_with(cx, |view, _| view.motion.detail.outgoing().is_none()));
-    assert_eq!(cx.debug_bounds("management-sidebar"), sidebar);
+    assert_eq!(cx.debug_bounds("window-chrome"), chrome);
+    assert_eq!(cx.update(|window, _| window.bounds()), native);
+}
+
+#[gpui::test]
+fn scrolling_before_navigation_freezes_the_last_visible_detail(cx: &mut TestAppContext) {
+    let _system = crate::platform::test_system_motion(false);
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.snapshot = crate::test_support::ready_snapshot();
+        view.router.open_record(
+            Tab::Instances,
+            crate::navigation::RecordRef::Profile("profile-a".into()),
+        );
+        view
+    });
+    cx.run_until_parked();
+    let body = view.read_with(cx, |view, _| view.shell.games.detail_scroll.bounds());
+    cx.simulate_mouse_move(body.center(), None, gpui::Modifiers::none());
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: body.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-120.))),
+        ..gpui::ScrollWheelEvent::default()
+    });
+    cx.run_until_parked();
+    frame(cx, 30);
+    let offset = view.read_with(cx, |view, _| view.shell.games.detail_scroll.offset());
+    assert!(
+        offset.y < px(0.),
+        "the real detail must have scrolled: {offset:?}"
+    );
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::EditInstance, window, cx);
+        assert_eq!(
+            view.motion.detail.current().map(|layer| layer
+                ._snapshot
+                .shell
+                .games
+                .detail_scroll
+                .offset()),
+            Some(offset),
+            "the dispatch boundary must capture the live scroll before any new layout"
+        );
+    });
+    cx.run_until_parked();
+    frame(cx, 20);
+    assert_eq!(
+        view.read_with(cx, |view, _| view
+            .motion
+            .detail
+            .outgoing()
+            .map(|layer| layer._snapshot.shell.games.detail_scroll.offset())),
+        Some(offset),
+        "the outgoing surface must preserve the last visible scroll, not its entry snapshot"
+    );
+    frame(cx, 240);
+    assert!(view.read_with(cx, |view, _| view.motion.detail.outgoing().is_none()));
+    crate::test_support::press(cx, "alt-left alt-left");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.router.screen().clone()),
+        crate::navigation::Screen::List,
+        "both Back keys must route while the returning detail is still mounting"
+    );
 }
 
 #[gpui::test]
@@ -266,7 +327,7 @@ fn early_tab_events_settle_navigation_and_forward_once_after_the_clean_focus_tre
 }
 
 #[gpui::test]
-fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppContext) {
+fn welcome_overview_uses_the_shared_reversible_transition_at_fixed_bounds(cx: &mut TestAppContext) {
     use crate::first_run::{Action as FirstRunAction, Stage};
 
     let _system = crate::platform::test_system_motion(false);
@@ -277,40 +338,30 @@ fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppCo
     });
     cx.run_until_parked();
     assert!(view.read_with(cx, |view, _| view.shell.first_run.stage == Stage::Welcome));
+    let native = cx.update(|window, _| window.bounds());
 
-    // Welcome slides left; no resize is requested yet.
     view.update_in(cx, |view, window, cx| view.first_run_overview(window, cx));
     cx.run_until_parked();
     frame(cx, 20);
     assert!(view.read_with(cx, |view, _| {
-        view.motion.first_run_switch.is_some() && !view.motion.frame.active()
+        view.motion.moving
+            && view
+                .motion
+                .page
+                .outgoing()
+                .is_some_and(|layer| layer._snapshot.shell.first_run.stage == Stage::Welcome)
     }));
-    let outgoing = cx.debug_bounds("first-run-switch-outgoing");
+    let incoming = cx.debug_bounds("navigation-current-0");
     assert!(
-        outgoing.is_some_and(|bounds| bounds.left() < px(0.)),
-        "Welcome must slide away before the frame resizes: {outgoing:?}"
+        incoming.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
+        "Overview enters from the right within the compact frame: {incoming:?}"
     );
+    assert_eq!(cx.update(|window, _| window.bounds()), native);
 
-    // The frame snaps to its new size in one step, then Overview slides in.
-    frame(cx, 200);
-    assert!(
-        !view.read_with(cx, |view, _| view.motion.frame.active()),
-        "the frame must resize in one step instead of animating"
-    );
-    assert!(
-        cx.debug_bounds("first-run-switch-outgoing").is_none(),
-        "the outgoing page must be gone before the reveal"
-    );
-    frame(cx, 30);
-    let incoming = cx.debug_bounds("first-run-switch-incoming");
-    assert!(
-        incoming.is_some_and(|bounds| bounds.left() > px(0.)),
-        "Overview must slide in after the instant resize: {incoming:?}"
-    );
     frame(cx, 260);
-    assert!(view.read_with(cx, |view, _| view.motion.first_run_switch.is_none()));
+    assert!(view.read_with(cx, |view, _| !view.motion.moving
+        && view.motion.page.outgoing().is_none()));
 
-    // The same sequence runs backwards when returning to Welcome.
     view.update_in(cx, |view, window, cx| {
         view.handle(
             UiAction::FirstRun(FirstRunAction::BackToWelcome),
@@ -320,25 +371,22 @@ fn welcome_overview_swap_slides_out_then_resizes_then_reveals(cx: &mut TestAppCo
     });
     cx.run_until_parked();
     frame(cx, 20);
-    let outgoing = cx.debug_bounds("first-run-switch-outgoing");
+    let incoming = cx.debug_bounds("navigation-current-0");
     assert!(
-        outgoing.is_some_and(|bounds| bounds.left() > px(0.)),
-        "Overview must slide away before the frame shrinks: {outgoing:?}"
-    );
-    frame(cx, 200);
-    assert!(
-        !view.read_with(cx, |view, _| view.motion.frame.active()),
-        "the frame must shrink in one step instead of animating"
-    );
-    assert!(cx.debug_bounds("first-run-switch-outgoing").is_none());
-    frame(cx, 30);
-    let incoming = cx.debug_bounds("first-run-switch-incoming");
-    assert!(
-        incoming.is_some_and(|bounds| bounds.left() < px(0.)),
+        incoming.is_some_and(|bounds| bounds.left() < px(0.) && bounds.left() >= px(-12.)),
         "Welcome must slide back in from the left: {incoming:?}"
     );
+    assert!(view.read_with(cx, |view, _| {
+        view.motion
+            .page
+            .outgoing()
+            .is_some_and(|layer| layer._snapshot.shell.first_run.stage == Stage::Overview)
+    }));
+    assert_eq!(cx.update(|window, _| window.bounds()), native);
     frame(cx, 260);
     assert!(view.read_with(cx, |view, _| {
-        view.shell.first_run.stage == Stage::Welcome && view.motion.first_run_switch.is_none()
+        view.shell.first_run.stage == Stage::Welcome
+            && !view.motion.moving
+            && view.motion.page.outgoing().is_none()
     }));
 }

@@ -9,7 +9,9 @@ use super::scroll_area::ScrollAreaExt as _;
 use super::{
     Block, Language, TextInput, UiAction,
     components::{self, ButtonVariant, ControlState, FieldOptions},
-    input, note, patterns,
+    input,
+    navigation::Screen,
+    note, patterns,
 };
 use block_launcher::{
     catalog::{Instance, InstanceConfiguration, InstanceSettings, LaunchTarget},
@@ -17,9 +19,8 @@ use block_launcher::{
     recipe::RuntimeSelection,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, Context, Entity, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, Styled as _, Window,
-    div,
+    Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, ScrollHandle, Styled as _, Window, div,
 };
 use std::{cell::Cell, fmt, path::PathBuf, rc::Rc};
 
@@ -156,7 +157,6 @@ pub(super) struct InstanceEditor {
     scroll: ScrollHandle,
     reveal: Rc<Cell<Option<Reveal>>>,
     return_focus: Option<FocusHandle>,
-    window: AnyWindowHandle,
 }
 
 impl fmt::Debug for InstanceEditor {
@@ -195,7 +195,6 @@ impl InstanceEditor {
             scroll,
             reveal: Rc::new(Cell::new(None)),
             return_focus: None,
-            window: self.window,
         }
     }
 
@@ -260,20 +259,18 @@ impl InstanceEditor {
         Ok(InstanceConfiguration { name, settings })
     }
 
-    fn dirty(&self, cx: &Context<'_, Block>) -> bool {
-        let Some(settings) = &self.original.settings else {
-            return true;
-        };
+    pub(super) fn dirty(&self, cx: &Context<'_, Block>) -> bool {
+        let settings = self.original.settings.clone().unwrap_or_default();
         let java = match &settings.runtime {
             RuntimeSelection::Managed => String::new(),
             RuntimeSelection::Local { java } => java.display().to_string(),
         };
-        self.name.read(cx).value().trim() != self.original.name
-            || self.width.read(cx).value().trim() != settings.width.to_string()
-            || self.height.read(cx).value().trim() != settings.height.to_string()
+        self.name.read(cx).value() != self.original.name
+            || self.width.read(cx).value() != settings.width.to_string()
+            || self.height.read(cx).value() != settings.height.to_string()
             || self.fullscreen != settings.fullscreen
             || self.managed != matches!(settings.runtime, RuntimeSelection::Managed)
-            || (!self.managed && self.java.read(cx).value().trim() != java)
+            || self.java.read(cx).value() != java
             || self.optifine_changed()
     }
 
@@ -327,7 +324,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.busy || self.form.is_some() {
+        if self.busy || self.form.is_some() || self.shell.instance_editor.is_some() {
             return;
         }
         let Some(original) = self.inspected_instance().cloned() else {
@@ -360,6 +357,11 @@ impl Block {
             cx,
         );
         let return_focus = window.focused(cx);
+        if let Some(focus) = &return_focus {
+            self.shell
+                .return_focus
+                .insert(self.router.entry_id(), focus.clone());
+        }
         let mut editor = InstanceEditor {
             original,
             target,
@@ -385,7 +387,6 @@ impl Block {
             scroll: ScrollHandle::new(),
             reveal: Rc::new(Cell::new(None)),
             return_focus,
-            window: window.window_handle(),
         };
         let focus = match entry {
             Entry::Name => editor.name.read(cx).focus_handle(cx),
@@ -396,6 +397,10 @@ impl Block {
                 focus
             }
         };
+        self.router.open_screen(
+            self.router.tab(),
+            Screen::InstanceEditor(editor.identity().to_owned()),
+        );
         self.shell.instance_editor = Some(editor);
         focus.focus(window, cx);
         cx.notify();
@@ -642,18 +647,22 @@ impl Block {
 
     pub(super) fn cancel_instance_editor(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         if self.busy {
             return;
         }
-        if let Some(editor) = self.shell.instance_editor.take() {
-            editor
-                .return_focus
-                .as_ref()
-                .unwrap_or(&self.focus)
-                .focus(window, cx);
+        if let Some(editor) = self.shell.instance_editor.take()
+            && matches!(self.router.screen(), Screen::InstanceEditor(id) if id == editor.identity())
+        {
+            self.router.back();
+            if let Some(focus) = editor.return_focus {
+                self.shell
+                    .return_focus
+                    .entry(self.router.entry_id())
+                    .or_insert(focus);
+            }
         }
         cx.notify();
     }
@@ -747,19 +756,28 @@ impl Block {
                 editor.save_error = Some(SaveFailure::Reported(error.clone()));
                 editor.read_only(false, cx);
             }
-        } else if let Some(editor) = self.shell.instance_editor.take() {
-            let focus = editor.return_focus.unwrap_or_else(|| self.focus.clone());
-            cx.defer(move |cx| {
-                let _ = editor
-                    .window
-                    .update(cx, |_, window, cx| focus.focus(window, cx));
-            });
+        } else if let Some(editor) = self.shell.instance_editor.take()
+            && matches!(self.router.screen(), Screen::InstanceEditor(id) if id == editor.identity())
+        {
+            self.router.back();
+            if let Some(focus) = editor.return_focus {
+                self.shell
+                    .return_focus
+                    .entry(self.router.entry_id())
+                    .or_insert(focus);
+            }
         }
     }
 
-    pub(super) fn render_instance_editor(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_instance_editor(
+        &self,
+        cx: &Context<'_, Self>,
+    ) -> super::page_host::ContentSlots {
         let Some(editor) = &self.shell.instance_editor else {
-            return div().into_any_element();
+            return super::page_host::ContentSlots {
+                body: div().into_any_element(),
+                footer: div().into_any_element(),
+            };
         };
         let language = self.language();
         let mut body = div()
@@ -771,7 +789,7 @@ impl Block {
             .flex_1()
             .min_h_0()
             .scroll_area(&editor.scroll, "games.instance_editor", self.palette, false)
-            .p_6()
+            .p_4()
             .flex()
             .flex_col()
             .gap_5()
@@ -829,6 +847,7 @@ impl Block {
             body = body.child(
                 div()
                     .flex()
+                    .flex_col()
                     .gap_4()
                     .child(
                         self.instance_field(
@@ -872,8 +891,7 @@ impl Block {
                     .child(
                         note(editor.original.directory.display().to_string())
                             .min_w_0()
-                            .w_full()
-                            .truncate(),
+                            .w_full(),
                     )
                     .child(note(tr!(language, "games.instance_editor.directory_note"))),
             )
@@ -882,21 +900,23 @@ impl Block {
                     language,
                     "games.instance_editor.existing_profiles_note"
                 ))
-            }))
+            }));
+        let footer = patterns::management_footer(self.palette)
+            .id("instance-editor-footer")
+            .debug_selector(|| "instance-editor-footer".into())
+            .flex_col()
+            .items_stretch()
+            .gap_2()
             .children(
                 editor
                     .save_error
                     .as_ref()
                     .map(|failure| note(failure.message(language))),
-            );
-        let footer = patterns::management_footer(self.palette)
-            .id("instance-editor-footer")
-            .debug_selector(|| "instance-editor-footer".into())
-            .justify_end()
+            )
             .child(self.button(
                 "cancel-instance-settings",
                 tr!(language, "common.cancel"),
-                UiAction::CancelInstanceSettings,
+                UiAction::NavigationBack,
                 cx,
             ))
             .child(components::button(
@@ -913,15 +933,10 @@ impl Block {
                     view.handle(UiAction::SaveInstanceSettings, window, cx);
                 }),
             ));
-        div()
-            .size_full()
-            .min_h_0()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .child(body)
-            .child(footer)
-            .into_any_element()
+        super::page_host::ContentSlots {
+            body: body.into_any_element(),
+            footer: footer.into_any_element(),
+        }
     }
 
     fn instance_optifine_section(
@@ -1018,8 +1033,8 @@ impl Block {
         }
         let mut actions = div()
             .flex()
-            .flex_wrap()
-            .items_center()
+            .flex_col()
+            .items_stretch()
             .gap_2()
             .child(select);
         if editor.optifine.is_some() {
@@ -1084,6 +1099,10 @@ impl Block {
 }
 
 #[cfg(test)]
+#[path = "instance_editor_tests.rs"]
+mod compact_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{Issue, SaveFailure};
     use crate::{Block, Language, Tab, UiAction, test_support::ready_snapshot};
@@ -1108,6 +1127,10 @@ mod tests {
                 *cx = VisualTestContext::from_window(*window, &cx.cx);
             }
             crate::test_support::ensure_live_window(cx);
+            for _ in 0..2 {
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                cx.run_until_parked();
+            }
             cx.run_until_parked();
             crate::test_support::ensure_live_window(cx);
         }
@@ -1120,6 +1143,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+        }
         assert!(!view.read_with(cx, |view, _| view.busy));
     }
 
@@ -1134,6 +1161,10 @@ mod tests {
                 let mut view = crate::tests::test_view(window, cx);
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.engine = Some(engine);
                 view.messages = Some(messages);
@@ -1199,6 +1230,8 @@ mod tests {
             });
             assert!(old.is_some());
             click(cx, "cancel-instance-settings");
+            assert!(view.read_with(cx, |view, _| view.shell.instance_editor.is_some()));
+            click(cx, "editor-exit-discard");
             click(cx, "component-optifine");
             click(cx, "instance-optifine-select");
             let current = view.read_with(cx, |view, _| {
@@ -1303,6 +1336,10 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.focus.focus(window, cx);
                 view.handle(UiAction::EditInstance, window, cx);
@@ -1315,6 +1352,8 @@ mod tests {
             });
         });
         click(cx, "cancel-instance-settings");
+        assert!(view.read_with(cx, |view, _| view.shell.instance_editor.is_some()));
+        click(cx, "editor-exit-discard");
         cx.update(|window, cx| {
             view.read_with(cx, |view, _| {
                 assert!(view.shell.instance_editor.is_none() && view.focus.is_focused(window));
@@ -1334,6 +1373,10 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.handle(UiAction::EditInstance, window, cx);
                 if let Some(editor) = &view.shell.instance_editor {
@@ -1365,7 +1408,7 @@ mod tests {
         ));
         assert!(
             footer
-                .is_some_and(|footer| footer.size.height == px(72.) && footer.bottom() <= px(540.))
+                .is_some_and(|footer| footer.size.height == px(97.) && footer.bottom() <= px(540.))
         );
     }
 
@@ -1387,11 +1430,19 @@ mod tests {
                 view.update(cx, |view, cx| {
                     view.preferences.reduce_motion = true;
                     view.router.navigate(Tab::Instances);
+                    view.router.open_record(
+                        Tab::Instances,
+                        crate::navigation::RecordRef::Profile("profile-a".into()),
+                    );
                     view.snapshot = state;
                     view.engine = Some(engine);
                     view.messages = Some(messages);
                     view.selected_instance = Some(instance.id.clone());
                     view.selected_profile = Some(profile.id.clone());
+                    view.router.open_record(
+                        Tab::Instances,
+                        crate::navigation::RecordRef::Profile(profile.id.clone()),
+                    );
                     view.handle(UiAction::EditInstance, window, cx);
                     if let Some(editor) = &mut view.shell.instance_editor {
                         editor
@@ -1464,6 +1515,10 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.handle(UiAction::EditInstance, window, cx);
             });
@@ -1554,6 +1609,8 @@ mod tests {
             });
         });
         click(cx, "cancel-instance-settings");
+        assert!(view.read_with(cx, |view, _| view.shell.instance_editor.is_some()));
+        click(cx, "editor-exit-discard");
         cx.update(|window, cx| {
             view.read_with(cx, |view, _| {
                 assert!(view.shell.instance_editor.is_none() && view.focus.is_focused(window));
@@ -1574,6 +1631,10 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.handle(UiAction::EditInstance, window, cx);
             });
@@ -1607,6 +1668,10 @@ mod tests {
                 view.update(cx, |view, cx| {
                     view.preferences.reduce_motion = true;
                     view.router.navigate(Tab::Instances);
+                    view.router.open_record(
+                        Tab::Instances,
+                        crate::navigation::RecordRef::Profile("profile-a".into()),
+                    );
                     let mut snapshot = ready_snapshot();
                     snapshot.instances[0].targets[0].optifine = Some(optifine_jar("1.20.6"));
                     view.snapshot = snapshot;
@@ -1692,6 +1757,8 @@ mod tests {
                 });
             });
             click(cx, "cancel-instance-settings");
+            assert!(view.read_with(cx, |view, _| view.shell.instance_editor.is_some()));
+            click(cx, "editor-exit-discard");
             cx.update(|window, cx| {
                 view.read_with(cx, |view, _| {
                     assert!(view.shell.instance_editor.is_none());
@@ -1725,6 +1792,10 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 let mut snapshot = ready_snapshot();
                 snapshot.instances[0].targets[0].kind = LoaderKind::NeoForge;
                 view.snapshot = snapshot;
@@ -1778,6 +1849,10 @@ mod tests {
                     view.preferences.reduce_motion = true;
                     view.preferences.language = Some(Language::Japanese);
                     view.router.navigate(Tab::Instances);
+                    view.router.open_record(
+                        Tab::Instances,
+                        crate::navigation::RecordRef::Profile("profile-a".into()),
+                    );
                     view.snapshot = ready_snapshot();
                     view.handle(UiAction::EditInstance, window, cx);
                     if let Some(editor) = &view.shell.instance_editor {
@@ -1857,6 +1932,10 @@ mod tests {
                 view.preferences.reduce_motion = true;
                 view.preferences.language = Some(Language::Japanese);
                 view.router.navigate(Tab::Instances);
+                view.router.open_record(
+                    Tab::Instances,
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.snapshot = ready_snapshot();
                 view.handle(UiAction::EditInstance, window, cx);
             });

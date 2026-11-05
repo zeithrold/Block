@@ -21,8 +21,8 @@ use block_launcher::{
 };
 use gpui::{
     AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement as _, ScrollHandle, Styled as _, Window, div, prelude::FluentBuilder as _, px,
-    rgb,
+    ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window, div,
+    px, rgb,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,11 +74,6 @@ pub(super) enum WizardPage {
     Loader,
     OptiFine,
     Location,
-}
-
-enum WizardBodyOwner {
-    Outer,
-    Section(WizardPage),
 }
 
 use crate::i18n::UiText as WizardText;
@@ -665,12 +660,6 @@ impl WizardState {
         }
     }
 
-    fn open_section_page(&mut self, page: Option<WizardPage>) {
-        if self.set_page(page) {
-            self.section_scroll.set_offset(gpui::point(px(0.), px(0.)));
-        }
-    }
-
     fn set_page(&mut self, page: Option<WizardPage>) -> bool {
         if self.page != page {
             self.page = page;
@@ -1003,7 +992,7 @@ impl Block {
     }
 
     pub(super) fn focus_wizard_error(&self, window: &mut Window, cx: &mut gpui::App) -> bool {
-        if !matches!(self.router.tab(), Tab::Instances | Tab::Onboarding)
+        if !self.router.game_wizard()
             || !matches!(self.form, Some(Form::Instance(_)))
             || !self.shell.wizard.has_error()
         {
@@ -1060,20 +1049,6 @@ impl Block {
         input: &Entity<TextInput>,
         hint: Option<&str>,
     ) -> gpui::Stateful<gpui::Div> {
-        let section_field = self.wizard_section_page() == Some(WizardPage::Location)
-            && (matches!(
-                field,
-                WizardField::Directory
-                    | WizardField::Java
-                    | WizardField::Width
-                    | WizardField::Height
-            ) || self.router.tab() == Tab::Onboarding
-                && matches!(field, WizardField::Memory | WizardField::Jvm));
-        let scroll = if section_field {
-            &self.shell.wizard.section_scroll
-        } else {
-            &self.shell.wizard.body_scroll
-        };
         patterns::reveal_field(
             components::field_with(
                 label,
@@ -1090,7 +1065,7 @@ impl Block {
                         .map(Into::into),
                 },
             ),
-            scroll.clone(),
+            self.shell.wizard.body_scroll.clone(),
             self.shell.wizard.reveal.clone(),
             field,
         )
@@ -1120,7 +1095,6 @@ impl Block {
             language,
             cx,
         ));
-        self.router.navigate(Tab::Instances);
         self.router.enter_game_wizard();
         let version = self
             .version_catalog
@@ -1314,11 +1288,7 @@ impl Block {
             self.shell.wizard.optifine_request = None;
         }
         self.shell.wizard.clear_error();
-        if page == Some(WizardPage::OptiFine) {
-            self.shell.wizard.open_section_page(page);
-        } else {
-            self.shell.wizard.open_page(page);
-        }
+        self.shell.wizard.open_page(page);
         if page == Some(WizardPage::Loader) {
             self.load_wizard_loader_versions(false, cx);
         } else if page.is_none() {
@@ -1901,7 +1871,7 @@ impl Block {
         }
     }
 
-    pub(super) fn back_game_wizard(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn back_game_wizard(&mut self, _cx: &mut Context<'_, Self>) {
         if self.shell.wizard.kind == CreationKind::ImportPack
             && self.shell.wizard.step == WizardStep::Setup
         {
@@ -1911,7 +1881,12 @@ impl Block {
             self.shell.pack_import.clear_source_drawer_return();
             self.shell.wizard.back();
         } else if self.shell.wizard.page.is_some() {
-            self.cancel_component_draft(cx);
+            // Back leaves the section's raw values in the parent draft. Only
+            // explicit Cancel restores the section-entry checkpoint.
+            self.shell.wizard.section_snapshot = None;
+            self.shell.wizard.cancel_loader_request();
+            self.shell.wizard.suspend_optifine_request();
+            self.shell.wizard.back();
         } else {
             self.shell.wizard.back();
         }
@@ -1919,7 +1894,6 @@ impl Block {
     }
 
     pub(super) fn cancel_component_draft(&mut self, cx: &mut Context<'_, Self>) {
-        let section = self.shell.wizard.section_snapshot.is_some();
         if let Some(snapshot) = self.shell.wizard.section_snapshot.take()
             && let Some(Form::Instance(form)) = &mut self.form
         {
@@ -1946,14 +1920,10 @@ impl Block {
         }
         // A rejected Done leaves its message, field and pending reveal on the
         // shared wizard error owner. Cancelling the draft discards that
-        // validation together with the edits it described: the restored
-        // checkpoint is valid and the outer page must not inherit the banner.
+        // validation together with the edits it described. The parent draft
+        // keeps its checkpoint, including any raw values retained by Back.
         self.shell.wizard.clear_error();
-        if section {
-            self.shell.wizard.open_section_page(None);
-        } else {
-            self.shell.wizard.open_page(None);
-        }
+        self.shell.wizard.open_page(None);
         self.shell.wizard.loader_request = None;
         self.shell.wizard.optifine_request = None;
     }
@@ -1965,9 +1935,8 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let language = self.language();
-        let body = self.game_wizard_transition_body(form, WizardBodyOwner::Outer, window, cx);
+        let body = self.game_wizard_transition_body(form, window, cx);
         let (steps, current) = self.wizard_rail_progress(language);
-        let compact = super::page_host::compact_game_wizard(window);
         div()
             .id("game-wizard")
             .debug_selector(|| "game-wizard".into())
@@ -1975,12 +1944,12 @@ impl Block {
             .min_h_0()
             .child(self.host_wizard(
                 super::page_host::WizardSlots {
-                    rail: self.wizard_step_rail(&steps, current, compact),
+                    rail: self.wizard_step_rail(&steps, current),
                     body,
                     footer: if self.pack_wizard_active() {
-                        self.modpack_wizard_footer(language, compact, cx)
+                        self.modpack_wizard_footer(language, cx)
                     } else {
-                        self.game_wizard_footer(language, compact, cx)
+                        self.game_wizard_footer(language, cx)
                     },
                 },
                 super::page_host::WizardLayout::Game,
@@ -1991,12 +1960,7 @@ impl Block {
 
     /// The source page offers direct actions; a section applies its local draft
     /// and the setup page creates the game or Profile.
-    fn game_wizard_footer(
-        &self,
-        language: Language,
-        compact: bool,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn game_wizard_footer(&self, language: Language, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let state = &self.shell.wizard;
         let page = self.wizard_outer_page();
         let source = state.step == WizardStep::GetStarted;
@@ -2049,25 +2013,6 @@ impl Block {
             ))
             .whitespace_normal()
         });
-        if compact {
-            return div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .children(consequence)
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .justify_between()
-                        .gap_2()
-                        .child(cancel)
-                        .children(back),
-                )
-                .child(primary.w_full())
-                .into_any_element();
-        }
         div()
             .w_full()
             .flex()
@@ -2078,11 +2023,11 @@ impl Block {
                 div()
                     .w_full()
                     .flex()
-                    .justify_between()
-                    .items_center()
-                    .gap_3()
-                    .child(cancel)
-                    .child(div().flex().gap_2().children(back).child(primary)),
+                    .flex_col()
+                    .gap_2()
+                    .child(cancel.w_full())
+                    .children(back.map(|button| button.w_full()))
+                    .child(primary.w_full()),
             )
             .into_any_element()
     }
@@ -2152,63 +2097,29 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         match &self.form {
-            Some(Form::Instance(form)) => {
-                self.game_wizard_transition_body(form, WizardBodyOwner::Outer, window, cx)
-            }
+            Some(Form::Instance(form)) => self.game_wizard_transition_body(form, window, cx),
             _ => div().into_any_element(),
         }
-    }
-
-    pub(super) fn render_game_wizard_section_body(
-        &self,
-        page: WizardPage,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
-        match &self.form {
-            Some(Form::Instance(form)) => {
-                self.game_wizard_transition_body(form, WizardBodyOwner::Section(page), window, cx)
-            }
-            _ => div().into_any_element(),
-        }
-    }
-
-    fn wizard_section_page(&self) -> Option<WizardPage> {
-        self.shell
-            .surfaces
-            .layers()
-            .find_map(|layer| match layer.kind {
-                super::shell::Surface::WizardSection(page) => Some(page),
-                _ => None,
-            })
     }
 
     pub(super) fn wizard_outer_page(&self) -> Option<WizardPage> {
-        if self.wizard_section_page().is_some() {
-            None
-        } else {
-            self.shell.wizard.page
-        }
+        self.shell.wizard.page
     }
 
     fn game_wizard_transition_body(
         &self,
         form: &InstanceForm,
-        owner: WizardBodyOwner,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let state = &self.shell.wizard;
         let language = self.language();
-        let (page, scroll, id) = match owner {
-            WizardBodyOwner::Outer if self.pack_wizard_active() => {
-                (None, &self.shell.pack_import.scroll, "wizard-body")
-            }
-            WizardBodyOwner::Outer => (self.wizard_outer_page(), &state.body_scroll, "wizard-body"),
-            WizardBodyOwner::Section(page) => {
-                (Some(page), &state.section_scroll, "wizard-section-body")
-            }
+        let (page, scroll) = if self.pack_wizard_active() {
+            (None, &self.shell.pack_import.scroll)
+        } else {
+            (self.wizard_outer_page(), &state.body_scroll)
         };
+        let id = "wizard-body";
         let body = self.game_wizard_body(form, page, window, cx);
         let body = div()
             .flex()
@@ -2235,7 +2146,7 @@ impl Block {
             .size_full()
             .min_h_0()
             .scroll_area(scroll, id, self.palette, false)
-            .child(div().w_full().max_w(px(608.)).mx_auto().p_8().child(body))
+            .child(div().w_full().min_w_0().p_4().child(body))
             .into_any_element()
     }
 
@@ -2267,96 +2178,31 @@ impl Block {
         }
     }
 
-    fn wizard_step_rail(
-        &self,
-        steps: &[(String, String)],
-        current: usize,
-        compact: bool,
-    ) -> gpui::AnyElement {
+    fn wizard_step_rail(&self, steps: &[(String, String)], current: usize) -> gpui::AnyElement {
         let language = self.language();
         let current_step = (current + 1).to_string();
         let total_steps = steps.len().to_string();
-        if compact {
-            return div()
-                .id("wizard-rail")
-                .debug_selector(|| "wizard-rail".into())
-                .w_full()
-                .px_4()
-                .py_2()
-                .border_b_1()
-                .border_color(rgb(self.palette.border))
-                .bg(rgb(self.palette.sidebar))
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(div().min_w_0().flex_1().child(steps[current].0.clone()))
-                .child(note(text(
-                    language,
-                    "wizard.rail.stepOf",
-                    &[("current", &current_step), ("total", &total_steps)],
-                )))
-                .into_any_element();
-        }
-        let rail = div()
+        div()
             .id("wizard-rail")
             .debug_selector(|| "wizard-rail".into())
-            .min_w_0()
-            .h_full()
-            .flex_shrink_0()
-            .flex()
-            .flex_col()
-            .w(px(super::design::SIDEBAR_WIDTH))
-            .border_r_1()
+            .w_full()
+            .px_4()
+            .py_2()
+            .border_b_1()
             .border_color(rgb(self.palette.border))
-            .bg(rgb(self.palette.sidebar));
-        rail.child(
-            div()
-                .id("wizard-steps")
-                .flex_1()
-                .min_h_0()
-                .scroll_area(
-                    &self.shell.wizard.rail_scroll,
-                    "wizard.rail.steps",
-                    self.palette,
-                    false,
-                )
-                .px_6()
-                .py_6()
-                .flex()
-                .flex_col()
-                .gap_6()
-                .child(note(tr!(language, "wizard.rail.section")))
-                .child(components::stepper(
-                    "game-wizard-steps",
-                    &tr!(language, "wizard.rail.stepperLabel"),
-                    &steps
-                        .iter()
-                        .enumerate()
-                        .map(|(index, (title, description))| components::StepperStep {
-                            title: title.as_str(),
-                            description: description.as_str(),
-                            complete: index < current,
-                        })
-                        .collect::<Vec<_>>(),
-                    current,
-                    self.palette,
-                )),
-        )
-        .child(
-            patterns::management_footer(self.palette)
-                .px_6()
-                .child(note(text(
-                    language,
-                    "wizard.rail.stepOf",
-                    &[
-                        ("current", current_step.as_str()),
-                        ("total", total_steps.as_str()),
-                    ],
-                ))),
-        )
-        .into_any_element()
+            .bg(rgb(self.palette.sidebar))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(div().min_w_0().flex_1().child(steps[current].0.clone()))
+            .child(note(text(
+                language,
+                "wizard.rail.stepOf",
+                &[("current", &current_step), ("total", &total_steps)],
+            )))
+            .into_any_element()
     }
 
     fn wizard_radio_group(
@@ -2539,12 +2385,6 @@ impl Block {
         let Some(profile) = &self.shell.wizard.profile else {
             return div();
         };
-        // First-run Configuration contains these same draft editors. While its
-        // section owns them, keep the disclosure and the rest of the profile
-        // mounted without mounting a second copy of the inputs.
-        let section_owns_advanced = self.router.tab() == Tab::Onboarding
-            && self.shell.wizard.kind == CreationKind::NewInstance
-            && self.wizard_section_page() == Some(WizardPage::Location);
         let language = self.language();
         div()
             .flex()
@@ -2564,7 +2404,8 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .flex_col()
+                    .items_stretch()
                     .gap_3()
                     .child(components::profile_avatar(
                         profile.appearance,
@@ -2609,11 +2450,7 @@ impl Block {
                             "wizard-advanced",
                             &self.shell.wizard.advanced.borrow(),
                             self.motion_preferences(),
-                            if section_owns_advanced {
-                                div().into_any_element()
-                            } else {
-                                self.wizard_profile_advanced(profile, cx).into_any_element()
-                            },
+                            self.wizard_profile_advanced(profile, cx).into_any_element(),
                             window,
                             cx,
                         )
@@ -2621,8 +2458,7 @@ impl Block {
                 ),
             )
             .children(
-                ((!show_name || self.shell.wizard.kind == CreationKind::NewInstance)
-                    && !section_owns_advanced)
+                (!show_name || self.shell.wizard.kind == CreationKind::NewInstance)
                     .then(|| self.wizard_profile_advanced(profile, cx)),
             )
     }
@@ -2935,6 +2771,7 @@ impl Block {
             .children(profile.window_custom.then(|| {
                 div()
                     .flex()
+                    .flex_col()
                     .gap_3()
                     .child(
                         self.wizard_field(
@@ -3035,10 +2872,7 @@ impl Block {
                     .id("wizard-components")
                     .debug_selector(|| "wizard-components".into())
                     .grid()
-                    .grid_cols(2)
-                    .when(super::page_host::compact_game_wizard(window), |grid| {
-                        grid.grid_cols(1)
-                    })
+                    .grid_cols(1)
                     .gap_3()
                     .child(self.wizard_card(
                         "version",
@@ -3164,30 +2998,25 @@ impl Block {
                 view.handle(UiAction::WizardPage(Some(page)), window, cx);
             }),
         )
-        .w_auto()
+        .aria_label(format!("{title}: {value}"))
+        .w_full()
         .h_auto()
         .min_w_0()
         .flex()
-        .flex_col()
-        .items_start()
-        .justify_between()
-        .min_h(px(96.))
+        .items_center()
+        .min_h(px(80.))
         .gap_3()
-        .p_4()
+        .p_3()
         .track_focus(&self.shell.wizard.creation_focus(id, cx));
         let card = card
             .child(
                 div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(icon.render(20., self.palette.muted))
-                    .child(Icon::ChevronRight.render(14., self.palette.muted)),
+                    .flex_shrink_0()
+                    .child(icon.render(20., self.palette.muted)),
             )
             .child(
                 div()
-                    .w_full()
+                    .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
@@ -3216,6 +3045,11 @@ impl Block {
                             .whitespace_normal()
                             .child(detail.to_owned())
                     }),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .child(Icon::ChevronRight.render(14., self.palette.muted)),
             );
         super::tooltip::trigger(
             card,
@@ -3241,7 +3075,7 @@ impl Block {
             },
             |&(), _, _| {},
         )
-        .w_auto()
+        .w_full()
         .h_auto()
         .min_w_0()
         .min_h(px(96.))
@@ -3406,6 +3240,7 @@ impl Block {
 
         div()
             .id("wizard-version-picker")
+            .debug_selector(|| "wizard-version-picker".into())
             .flex()
             .flex_col()
             .gap_4()
@@ -3516,8 +3351,8 @@ impl Block {
             return div()
                 .id("wizard-version-catalog-status")
                 .flex()
-                .items_center()
-                .justify_between()
+                .flex_col()
+                .items_start()
                 .gap_2()
                 .child(note(text(
                     language,
@@ -3832,9 +3667,9 @@ impl Block {
                 div()
                     .id("wizard-loader-picker")
                     .debug_selector(|| "wizard-loader-picker".into())
-                    .h(px(336.))
                     .min_w_0()
                     .flex()
+                    .flex_col()
                     .overflow_hidden()
                     .rounded_xl()
                     .border_1()
@@ -3842,15 +3677,14 @@ impl Block {
                     .child(
                         group
                             .container()
-                            .w(gpui::relative(0.32))
-                            .min_w(px(76.))
-                            .max_w(px(144.))
+                            .w_full()
+                            .min_w_0()
                             .flex_none()
                             .flex()
                             .flex_col()
                             .gap_2()
                             .p_2()
-                            .border_r_1()
+                            .border_b_1()
                             .border_color(rgb(self.palette.border))
                             .bg(rgb(self.palette.secondary))
                             .child(note(tr!(language, "wizard.loader.column")).px_1())
@@ -3867,7 +3701,7 @@ impl Block {
         let language = self.language();
         let minecraft = form.version.read(cx).value();
         let mut pane = div()
-            .flex_1()
+            .w_full()
             .min_w_0()
             .min_h_0()
             .flex()
@@ -3970,8 +3804,8 @@ impl Block {
         let count = count.to_string();
         div()
             .flex()
-            .items_center()
-            .justify_between()
+            .flex_col()
+            .items_start()
             .gap_2()
             .child(div().text_sm().child(text(
                 language,
@@ -4104,8 +3938,8 @@ impl Block {
             .child(
                 group
                     .container()
-                    .flex_1()
-                    .min_h_0()
+                    .min_h(px(160.))
+                    .max_h(px(240.))
                     .flex()
                     .flex_col()
                     .gap_2()

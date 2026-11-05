@@ -270,6 +270,8 @@ fn a_saved_identity_returns_from_first_run_to_its_center(cx: &mut TestAppContext
         std::fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, mut receiver) = first_run_engine(root.path())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        let dimensions = cx.update(|window, _| crate::window_geometry::home_size(window));
+        cx.simulate_resize(dimensions);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
@@ -300,7 +302,6 @@ fn a_saved_identity_returns_from_first_run_to_its_center(cx: &mut TestAppContext
         assert!(view.read_with(cx, |view, _| {
             view.router.tab() == Tab::Onboarding
                 && view.page_spec().page == crate::navigation::Page::FirstRun
-                && view.page_spec().frame == crate::navigation::FrameClass::Management
                 && !view.page_spec().task
                 && view.shell.first_run.stage == FirstRunStage::Overview
                 && view.shell.onboarding.account.as_deref() == Some(id.as_str())
@@ -312,6 +313,10 @@ fn a_saved_identity_returns_from_first_run_to_its_center(cx: &mut TestAppContext
         }));
         cx.update(|window, cx| {
             view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
+            assert_eq!(
+                crate::window_geometry::content_size(window),
+                gpui::size(gpui::px(360.), gpui::px(720.))
+            );
         });
         assert_eq!(saved_accounts(root.path())?.len(), 1);
         Ok(())

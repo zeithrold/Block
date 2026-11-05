@@ -15,6 +15,8 @@ import review_cases
 # crates/block-ui/src/runtime/scenarios.rs. Their registry rows remain historical
 # reference observations; they must not satisfy current-scenario coverage.
 RETIRED_NATIVE_STEMS = {
+    "auth-offline-complete",
+    "wizard-review",
     "welcome-1",
     "welcome-2",
     "welcome-3",
@@ -68,7 +70,9 @@ class ReviewCaseTests(unittest.TestCase):
     def test_source_audit_records_actual_loader_and_provider_states(self):
         registry = review_cases.load_registry()
         cases = {case["case_id"]: case for case in registry["cases"]}
-        self.assertFalse(any(case["review_status"] == "unreviewed" for case in cases.values()))
+        historical = [case for case in cases.values() if case["lifecycle"] != "current"]
+        self.assertTrue(historical)
+        self.assertFalse(any(case["review_status"] == "unreviewed" for case in historical))
 
         vanilla = cases["wizard-loader-picker"]
         self.assertIn("Vanilla", vanilla["data"]["value"])
@@ -86,12 +90,12 @@ class ReviewCaseTests(unittest.TestCase):
         self.assertEqual(provider["current_snap_proto_status"], "scripted_capture_but-existing-provider-edit")
         self.assertIn("initialProviders[0]", provider["trigger"])
 
-    def test_active_reviewed_native_stems_cover_current_scenarios_without_retired_states(self):
+    def test_current_native_stems_cover_scenarios_without_reusing_historical_reviews(self):
         cases = review_cases.load_registry()["cases"]
         retired_case_ids = {
             case["case_id"]
             for case in cases
-            if case["source_provenance"]["native_source"].startswith("retired:")
+            if case["lifecycle"] == "retired"
         }
         retired_stems = {
             stem for case in cases if case["case_id"] in retired_case_ids for stem in case["native_stems"]
@@ -102,8 +106,15 @@ class ReviewCaseTests(unittest.TestCase):
             if case["case_id"] in retired_case_ids:
                 self.assertTrue(case["rationale"].startswith("Historical (retired scenario):"), case["case_id"])
 
-        active = [case for case in cases if case["case_id"] not in retired_case_ids]
-        self.assertFalse(any(case["review_status"] == "unreviewed" for case in active))
+        historical = [case for case in cases if case["lifecycle"] == "historical"]
+        self.assertTrue(historical)
+        self.assertTrue(all(case["review_status"] != "unreviewed" for case in historical))
+        active = [case for case in cases if case["lifecycle"] == "current"]
+        for case in active:
+            self.assertEqual(case["review_status"], "unreviewed", case["case_id"])
+            self.assertEqual(case["comparable_scope"], "not_assessed", case["case_id"])
+            self.assertFalse(case["coverage_counts_as_independent"], case["case_id"])
+            self.assertEqual(case["reference_candidates"], [], case["case_id"])
         active_stems = {stem for case in active for stem in case["native_stems"]}
         self.assertEqual(len(active_stems), sum(len(case["native_stems"]) for case in active))
         self.assertEqual(active_stems, review_cases.scenario_names())
@@ -161,6 +172,55 @@ class ReviewCaseTests(unittest.TestCase):
             self.assertFalse(result["coverage_counts_as_independent"])
             self.assertEqual(len(manifest["reuse_groups"]), 1)
             self.assertEqual(manifest["summary"]["reviewed_semantic_equivalences"], 0)
+
+    def test_compact_receipt_routes_same_named_image_without_inheriting_archive_review(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            native = root / "linux-arm64/scenarios"
+            native.mkdir(parents=True)
+            image = native / "same-light.png"
+            image.write_bytes(bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000b49444154789c636000020000050001a5f645400000000049454e44ae426082"
+            ))
+            common = {
+                "native_stems": ["same"], "reference_candidates": [],
+                "object": {"type": "page", "identity": "same"},
+                "trigger": {"value": "open"}, "data": {"value": "seed"},
+                "viewport": {"native": "unknown"}, "focus": "unknown",
+                "scroll": "unknown", "source_provenance": {}, "rationale": "fixture",
+            }
+            registry_path = root / "registry.json"
+            registry_path.write_text(json.dumps({"schema_version": 1, "cases": [
+                {**common, "case_id": "archive", "lifecycle": "historical",
+                 "review_status": "semantic_equivalent", "comparable_scope": "full_state"},
+                {**common, "case_id": "compact", "lifecycle": "current",
+                 "capture_contract_revision": "compact-test",
+                 "review_status": "unreviewed", "comparable_scope": "not_assessed"},
+            ]}))
+            for revision, passed, expected in (
+                (None, True, (1, 0)),
+                ("older-contract", True, (0, 0)),
+                ("compact-test", False, (0, 0)),
+                ("compact-test", True, (0, 1)),
+            ):
+                with self.subTest(revision=revision, passed=passed):
+                    image.with_suffix(".capture.json").write_text(json.dumps({
+                        "schema_version": 1,
+                        "sha256": review_cases.sha256(image),
+                        "assertions": {"contract_revision": revision, "passed": passed},
+                    }))
+                    with (
+                        patch.object(review_cases, "OUTPUT", root),
+                        patch.object(review_cases, "ROOT", root),
+                        patch.object(review_cases, "scenario_names", return_value={"same"}),
+                    ):
+                        manifest = review_cases.build_semantic_manifest("linux-arm64", registry_path)
+                    self.assertEqual(
+                        tuple(len(case["artifacts"]["native"]) for case in manifest["cases"]),
+                        expected,
+                    )
+                    self.assertEqual(manifest["summary"]["reviewed_semantic_equivalences"], 0)
 
     def test_combined_reuse_finds_cross_platform_duplicates_and_dedupes_shared_reference_path(self):
         digest = "a" * 64

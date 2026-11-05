@@ -872,7 +872,8 @@ mod tests {
                     && !view.shell.surfaces.is_open()
             }));
             // Account management, not the temporary selector, owns removal.
-            cx.simulate_resize(size(px(1152.), px(720.)));
+            cx.simulate_resize(size(px(360.), px(720.)));
+            click(cx, "account-inspect-00000000-0000-4000-8000-000000000001");
             click(cx, "account-logout-00000000-0000-4000-8000-000000000001");
             assert!(view.read_with(cx, |view, _| matches!(
                 view.shell.surfaces.top().map(|layer| &layer.kind),

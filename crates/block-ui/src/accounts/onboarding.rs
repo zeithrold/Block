@@ -42,7 +42,6 @@ impl Block {
         if self.shell.first_run.enabled {
             self.normalize_selection();
         }
-        self.pending_window_size = None;
         self.shell.revision = self.shell.revision.wrapping_add(1);
         self.push_toast(
             msg!("accounts.onboarding.saved_toast"),

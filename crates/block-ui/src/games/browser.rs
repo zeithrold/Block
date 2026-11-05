@@ -20,15 +20,17 @@ use block_launcher::{
 };
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, FontWeight, InteractiveElement as _, IntoElement,
-    KeyDownEvent, ParentElement as _, ScrollHandle, Styled as _, Window, accesskit::Role, div, px,
-    relative, rgb,
+    KeyDownEvent, ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
+    Window, accesskit::Role, div, px, rgb,
 };
 
 use super::{
-    Block, Form, Language, Tab, TextInput, UiAction, account_id,
+    Block, Language, Tab, TextInput, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
     design::Icon,
-    input, note, patterns,
+    input,
+    navigation::{RecordRef, Screen},
+    note, patterns,
 };
 
 type DetailBody = super::scroll_area::ScrollArea<gpui::Stateful<gpui::Div>>;
@@ -44,9 +46,13 @@ pub(super) enum CollectionLoad {
 #[derive(Debug, Default)]
 pub(super) struct CollectionState {
     pub query: Option<Entity<TextInput>>,
+    /// List highlight only. The Router owns the record shown on a detail page.
     pub inspected: Option<String>,
     pub scroll: ScrollHandle,
     pub detail_scroll: ScrollHandle,
+    detail_entries: HashMap<u64, (RecordRef, ScrollHandle)>,
+    detail_offsets: HashMap<RecordRef, gpui::Point<gpui::Pixels>>,
+    active_detail: Option<(u64, RecordRef)>,
     pub load: CollectionLoad,
     row_focus: Rc<RefCell<HashMap<String, FocusHandle>>>,
 }
@@ -65,6 +71,9 @@ impl CollectionState {
             inspected: self.inspected.clone(),
             scroll,
             detail_scroll,
+            detail_entries: HashMap::new(),
+            detail_offsets: HashMap::new(),
+            active_detail: None,
             load: self.load.clone(),
             row_focus: Rc::default(),
         }
@@ -175,6 +184,58 @@ struct ComponentCard {
 }
 
 impl Block {
+    pub(super) fn reconcile_browser_scroll(&mut self) {
+        let exists = |record: &RecordRef| match record {
+            RecordRef::Instance(id) => self
+                .snapshot
+                .instances
+                .iter()
+                .any(|record| record.id == *id),
+            RecordRef::Profile(id) => self.snapshot.profiles.iter().any(|record| record.id == *id),
+            RecordRef::Account(id) => self.accounts.iter().any(|record| account_id(record) == *id),
+        };
+        for (tab, state) in [
+            (Tab::Instances, &mut self.shell.games),
+            (Tab::Profiles, &mut self.shell.profiles),
+            (Tab::Accounts, &mut self.shell.accounts),
+        ] {
+            if let Some((_, record)) = &state.active_detail
+                && exists(record)
+            {
+                state
+                    .detail_offsets
+                    .insert(record.clone(), state.detail_scroll.offset());
+            }
+            state.detail_offsets.retain(|record, _| exists(record));
+            state
+                .detail_entries
+                .retain(|entry, (record, _)| self.router.contains_entry(*entry) && exists(record));
+            let active = match self.router.screen() {
+                Screen::Record(record) if self.router.tab() == tab && exists(record) => {
+                    Some((self.router.entry_id(), record.clone()))
+                }
+                _ => None,
+            };
+            if active != state.active_detail
+                && let Some((entry, record)) = &active
+            {
+                state.detail_scroll = state
+                    .detail_entries
+                    .entry(*entry)
+                    .or_insert_with(|| {
+                        let scroll = ScrollHandle::new();
+                        if let Some(offset) = state.detail_offsets.get(record) {
+                            scroll.set_offset(*offset);
+                        }
+                        (record.clone(), scroll)
+                    })
+                    .1
+                    .clone();
+            }
+            state.active_detail = active;
+        }
+    }
+
     pub(super) fn initialize_browsers(&mut self, cx: &mut Context<'_, Self>) {
         let language = self.language();
         let games = if self.snapshot.profile_mode == ProfileMode::Bundled {
@@ -203,56 +264,39 @@ impl Block {
     }
 
     pub(super) fn inspected_instance(&self) -> Option<&Instance> {
-        if (self.router.tab() == Tab::Profiles
-            || self.snapshot.profile_mode == ProfileMode::Bundled)
-            && let Some(profile) = self.inspected_profile()
-        {
-            return self
-                .snapshot
-                .instances
-                .iter()
-                .find(|instance| instance.id == profile.instance_id);
-        }
+        let id = match self.router.screen() {
+            Screen::Record(RecordRef::Instance(id)) | Screen::InstanceEditor(id) => id.as_str(),
+            Screen::Record(RecordRef::Profile(_)) | Screen::ProfileEditor(_) => {
+                &self.inspected_profile()?.instance_id
+            }
+            Screen::List
+            | Screen::Record(RecordRef::Account(_))
+            | Screen::Providers
+            | Screen::Provider(_)
+            | Screen::NewProvider
+            | Screen::EditProvider(_) => return None,
+        };
         self.snapshot
             .instances
             .iter()
-            .find(|instance| Some(&instance.id) == self.shell.games.inspected.as_ref())
-            .or_else(|| self.instance())
-            .or_else(|| self.snapshot.instances.first())
+            .find(|instance| instance.id == id)
     }
 
     pub(super) fn inspected_profile(&self) -> Option<&Profile> {
-        let inspected = if self.router.tab() == Tab::Profiles {
-            self.shell.profiles.inspected.as_ref()
-        } else {
-            self.shell.games.inspected.as_ref()
+        let id = match self.router.screen() {
+            Screen::Record(RecordRef::Profile(id)) | Screen::ProfileEditor(id) => id,
+            Screen::List
+            | Screen::Record(RecordRef::Instance(_) | RecordRef::Account(_))
+            | Screen::InstanceEditor(_)
+            | Screen::Providers
+            | Screen::Provider(_)
+            | Screen::NewProvider
+            | Screen::EditProvider(_) => return None,
         };
-        let direct = self
-            .snapshot
+        self.snapshot
             .profiles
             .iter()
-            .find(|profile| Some(&profile.id) == inspected);
-        if direct.is_some() {
-            return direct;
-        }
-        if self.router.tab() == Tab::Profiles {
-            return self.profile().or_else(|| self.snapshot.profiles.first());
-        }
-        let instance = self
-            .snapshot
-            .instances
-            .iter()
-            .find(|instance| Some(&instance.id) == inspected)
-            .or_else(|| self.instance())
-            .or_else(|| self.snapshot.instances.first())?;
-        self.profile()
-            .filter(|profile| profile.instance_id == instance.id)
-            .or_else(|| {
-                self.snapshot
-                    .profiles
-                    .iter()
-                    .find(|profile| profile.instance_id == instance.id)
-            })
+            .find(|profile| &profile.id == id)
     }
 
     pub(super) const fn collection(&self) -> &CollectionState {
@@ -279,28 +323,6 @@ impl Block {
             BrowserKind::Profiles
         } else {
             BrowserKind::Instances
-        }
-    }
-
-    fn inspected_record(&self) -> Option<String> {
-        match self.browser_kind() {
-            BrowserKind::Accounts => self
-                .accounts
-                .iter()
-                .find(|account| Some(account_id(account)) == self.shell.accounts.inspected)
-                .or_else(|| {
-                    self.accounts
-                        .iter()
-                        .find(|account| Some(account_id(account)) == self.selected_account)
-                })
-                .or_else(|| self.accounts.first())
-                .map(account_id),
-            BrowserKind::Instances => self
-                .inspected_instance()
-                .map(|instance| instance.id.clone()),
-            BrowserKind::Bundled | BrowserKind::Profiles => {
-                self.inspected_profile().map(|profile| profile.id.clone())
-            }
         }
     }
 
@@ -456,7 +478,7 @@ impl Block {
         if records.is_empty() {
             return;
         }
-        let current = self.inspected_record();
+        let current = self.collection().inspected.clone();
         let index = records
             .iter()
             .position(|record| Some(&record.id) == current.as_ref());
@@ -499,7 +521,6 @@ impl Block {
             .focus(&records[index].id, cx)
             .focus(window, cx);
         self.collection().scroll.scroll_to_item(index);
-        self.motion_dirty = true;
         cx.stop_propagation();
         cx.notify();
     }
@@ -507,10 +528,44 @@ impl Block {
     pub(super) fn render_browser_detail(
         &self,
         cx: &Context<'_, Self>,
-    ) -> super::page_host::ManagementSlots {
+    ) -> super::page_host::ContentSlots {
+        match self.router.screen() {
+            Screen::List => {}
+            Screen::InstanceEditor(id)
+                if self
+                    .shell
+                    .instance_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.identity() == id) =>
+            {
+                return self.render_instance_editor(cx);
+            }
+            Screen::ProfileEditor(id) if matches!(&self.form, Some(super::Form::Profile(form)) if &form.original.id == id) =>
+            {
+                return self.render_profile_editor(cx);
+            }
+            Screen::Record(_) => {
+                return match self.detail_sections(cx) {
+                    Some((body, footer)) => super::page_host::ContentSlots {
+                        body: body.into_any_element(),
+                        footer: footer
+                            .id("detail-footer")
+                            .debug_selector(|| "detail-footer".into())
+                            .into_any_element(),
+                    },
+                    None => self.unavailable_browser_detail(cx),
+                };
+            }
+            Screen::InstanceEditor(_)
+            | Screen::ProfileEditor(_)
+            | Screen::Providers
+            | Screen::Provider(_)
+            | Screen::NewProvider
+            | Screen::EditProvider(_) => return self.unavailable_browser_detail(cx),
+        }
         let kind = self.browser_kind();
         let records = self.browser_records(cx);
-        let inspected = self.inspected_record();
+        let inspected = &self.collection().inspected;
         let roving = records
             .iter()
             .find(|record| Some(&record.id) == inspected.as_ref())
@@ -534,15 +589,13 @@ impl Block {
             .flex_col()
             .on_key_down(cx.listener(Self::browser_key))
             .child(heading)
-            .child(rows)
-            .child(
-                footer
-                    .id("browser-footer")
-                    .debug_selector(|| "browser-footer".into()),
-            );
-        super::page_host::ManagementSlots {
-            sidebar: browser.into_any_element(),
-            detail: self.browser_detail_content(cx),
+            .child(rows);
+        super::page_host::ContentSlots {
+            body: browser.into_any_element(),
+            footer: footer
+                .id("browser-footer")
+                .debug_selector(|| "browser-footer".into())
+                .into_any_element(),
         }
     }
 
@@ -587,13 +640,13 @@ impl Block {
                             .child(self.browser_tab(
                                 Tab::Instances,
                                 "games-tab-instances",
-                                tr!(language, "games.browser.instance"),
+                                tr!(language, "games.browser.title.instances"),
                                 cx,
                             ))
                             .child(self.browser_tab(
                                 Tab::Profiles,
                                 "games-tab-profiles",
-                                tr!(language, "games.browser.profile"),
+                                tr!(language, "games.browser.title.profiles"),
                                 cx,
                             )),
                     )
@@ -617,14 +670,8 @@ impl Block {
         heading = heading.child(
             div()
                 .flex()
-                .items_center()
+                .flex_col()
                 .gap_2()
-                .children(
-                    state
-                        .query
-                        .as_ref()
-                        .map(|field| div().flex_1().min_w_0().child(field.clone())),
-                )
                 .child(
                     self.browser_control(
                         if kind == BrowserKind::Accounts {
@@ -638,9 +685,14 @@ impl Block {
                         self.busy,
                         cx,
                     )
-                    .w(px(32.))
-                    .p_0()
+                    .w_full()
                     .child(Icon::Plus.render(16., self.palette.foreground)),
+                )
+                .children(
+                    state
+                        .query
+                        .as_ref()
+                        .map(|field| div().w_full().min_w_0().child(field.clone())),
                 ),
         );
         heading
@@ -712,7 +764,7 @@ impl Block {
 
     fn browser_footer(&self, kind: BrowserKind, count: usize, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let mut footer = patterns::management_footer(self.palette).px_5();
+        let mut footer = patterns::management_footer(self.palette).px_4();
         if kind == BrowserKind::Accounts {
             footer = footer.child(
                 self.browser_control(
@@ -723,6 +775,7 @@ impl Block {
                     false,
                     cx,
                 )
+                .w_full()
                 .child(Icon::Server.render(14., self.palette.muted)),
             );
         } else {
@@ -754,14 +807,9 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> components::Control {
         let id = id.into();
-        let text = if matches!(id.as_ref(), "sign-in" | "create-instance") {
-            gpui::SharedString::from("")
-        } else {
-            label.into()
-        };
         components::button(
             id,
-            text,
+            label,
             self.palette,
             variant,
             ControlState {
@@ -789,6 +837,7 @@ impl Block {
             cx.listener(move |view, (): &(), window, cx| {
                 view.handle(UiAction::Tab(tab), window, cx);
                 view.browser_tab_focus(tab, cx).focus(window, cx);
+                view.shell.focus_entry = Some(view.router.entry_id());
             }),
         )
         .track_focus(
@@ -819,6 +868,7 @@ impl Block {
                 };
                 view.handle(UiAction::Tab(next), window, cx);
                 view.browser_tab_focus(next, cx).focus(window, cx);
+                view.shell.focus_entry = Some(view.router.entry_id());
                 cx.stop_propagation();
             }
         }))
@@ -856,7 +906,7 @@ impl Block {
         roving: bool,
         cx: &Context<'_, Self>,
     ) -> components::Control {
-        let inspected = self.inspected_record().as_deref() == Some(record.id.as_str());
+        let inspected = self.collection().inspected.as_deref() == Some(record.id.as_str());
         let id = record.id.clone();
         let focus = self.collection().focus(&record.id, cx).tab_stop(roving);
         let mut row = components::button_role(
@@ -870,19 +920,26 @@ impl Block {
                 view.handle(UiAction::Inspect(id.clone()), window, cx);
             }),
         )
+        .aria_label(record.title.clone())
         .track_focus(&focus)
         .w_full()
         .h_auto()
-        .min_h(px(80.))
+        .min_h(px(72.))
         .rounded_none()
         .border_0()
-        .px_5()
-        .py_4()
+        .border_l_2()
+        .border_color(rgb(if inspected {
+            self.palette.foreground
+        } else {
+            self.palette.sidebar
+        }))
+        .px_4()
+        .py_3()
         .flex()
         .items_center()
         .gap_3()
         .bg(rgb(if inspected {
-            self.palette.secondary
+            self.palette.inspected
         } else {
             self.palette.sidebar
         }))
@@ -927,7 +984,7 @@ impl Block {
                     .then(|| Icon::Check.render(16., self.palette.foreground)),
             ),
         );
-        row
+        row.child(Icon::ChevronRight.render(16., self.palette.muted))
     }
 
     fn record_avatar(
@@ -978,30 +1035,6 @@ impl Block {
             .child(label)
     }
 
-    pub(super) fn browser_detail_content(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        if self.shell.instance_editor.is_some() {
-            return self.render_instance_editor(cx);
-        }
-        if matches!(self.form, Some(Form::Profile(_))) {
-            return self.render_profile_editor(cx);
-        }
-        let Some((body, footer)) = self.detail_sections(cx) else {
-            return self.empty_browser_detail(self.router.tab() == Tab::Accounts, cx);
-        };
-        div()
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(body)
-            .child(
-                footer
-                    .id("detail-footer")
-                    .debug_selector(|| "detail-footer".into()),
-            )
-            .into_any_element()
-    }
-
     /// Body and footer for the inspected record, or `None` when the collection
     /// holds no record to inspect.
     fn detail_sections(&self, cx: &Context<'_, Self>) -> Option<(DetailBody, gpui::Div)> {
@@ -1029,12 +1062,15 @@ impl Block {
             .track_focus(&self.browser_detail_focus(cx))
             .flex()
             .flex_col()
-            .gap_6()
-            .p_8()
+            .gap_5()
+            .p_4()
     }
 
     fn detail_footer(&self) -> gpui::Div {
-        patterns::management_footer(self.palette).justify_between()
+        patterns::management_footer(self.palette)
+            .flex_col()
+            .items_stretch()
+            .gap_2()
     }
 
     fn account_sections(
@@ -1043,10 +1079,13 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> Option<(DetailBody, gpui::Div)> {
         let language = self.language();
+        let Screen::Record(RecordRef::Account(record)) = self.router.screen() else {
+            return None;
+        };
         let account = self
             .accounts
             .iter()
-            .find(|account| Some(account_id(account)) == self.inspected_record())?;
+            .find(|account| account_id(account) == *record)?;
         let id = account_id(account);
         let current = self.selected_account.as_ref() == Some(&id);
         let body = body.child(self.account_details(account, current));
@@ -1081,7 +1120,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> Option<(DetailBody, gpui::Div)> {
         let instance = self.inspected_instance()?;
-        if self.browser_kind() == BrowserKind::Instances {
+        if matches!(self.router.screen(), Screen::Record(RecordRef::Instance(_))) {
             return Some(self.separated_instance_sections(body, instance, cx));
         }
         let profile = self.inspected_profile()?;
@@ -1109,20 +1148,17 @@ impl Block {
         if let Some(notice) = self.installation_notice(instance, None) {
             body = body.child(notice);
         }
-        let footer = self
-            .detail_footer()
-            .child(note(tr!(language, "games.mode.separated_profile")))
-            .child(
-                self.browser_control(
-                    "new-profile",
-                    tr!(language, "games.action.new_profile"),
-                    UiAction::NewProfile,
-                    ButtonVariant::Primary,
-                    self.busy,
-                    cx,
-                )
-                .child(Icon::Plus.render(16., self.palette.on_primary)),
-            );
+        let footer = self.detail_footer().child(
+            self.browser_control(
+                "new-profile",
+                tr!(language, "games.action.new_profile"),
+                UiAction::NewProfile,
+                ButtonVariant::Primary,
+                self.busy,
+                cx,
+            )
+            .child(Icon::Plus.render(16., self.palette.on_primary)),
+        );
         (body, footer)
     }
 
@@ -1161,6 +1197,44 @@ impl Block {
                         .child(Icon::More.render(16., self.palette.foreground)),
                 ),
         );
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    self.browser_control(
+                        "edit-profile",
+                        if kind == BrowserKind::Bundled {
+                            tr!(language, "games.action.edit_launch_settings")
+                        } else {
+                            tr!(language, "games.action.edit_profile")
+                        },
+                        UiAction::EditProfile,
+                        ButtonVariant::Outline,
+                        self.busy,
+                        cx,
+                    )
+                    .track_focus(&self.profile_editor_trigger_focus(cx)),
+                )
+                .child(self.browser_control(
+                    "repair-profile",
+                    tr!(
+                        language,
+                        if instance.pack.as_ref().is_some_and(|pack| {
+                            pack.status == block_launcher::catalog::PackStatus::Pending
+                        }) {
+                            "home.continue_pack"
+                        } else {
+                            "games.action.repair"
+                        }
+                    ),
+                    UiAction::RepairProfile(profile.id.clone()),
+                    ButtonVariant::Outline,
+                    self.busy,
+                    cx,
+                )),
+        );
         body = if kind == BrowserKind::Bundled {
             body.child(self.instance_components(instance, Some(profile), cx))
         } else {
@@ -1170,64 +1244,24 @@ impl Block {
         if let Some(notice) = self.installation_notice(instance, Some(profile)) {
             body = body.child(notice);
         }
-        let footer = self
-            .detail_footer()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        self.browser_control(
-                            "edit-profile",
-                            if kind == BrowserKind::Bundled {
-                                tr!(language, "games.action.edit_launch_settings")
-                            } else {
-                                tr!(language, "games.action.edit_profile")
-                            },
-                            UiAction::EditProfile,
-                            ButtonVariant::Outline,
-                            self.busy,
-                            cx,
-                        )
-                        .track_focus(&self.profile_editor_trigger_focus(cx)),
-                    )
-                    .child(self.browser_control(
-                        "repair-profile",
-                        tr!(
-                            language,
-                            if instance.pack.as_ref().is_some_and(|pack| {
-                                pack.status == block_launcher::catalog::PackStatus::Pending
-                            }) {
-                                "home.continue_pack"
-                            } else {
-                                "games.action.repair"
-                            }
-                        ),
-                        UiAction::RepairProfile(profile.id.clone()),
-                        ButtonVariant::Outline,
-                        self.busy,
-                        cx,
-                    )),
-            )
-            .child(self.browser_control(
-                "use-profile",
-                if current {
-                    if kind == BrowserKind::Bundled {
-                        tr!(language, "games.action.current_game")
-                    } else {
-                        tr!(language, "games.action.current_profile")
-                    }
-                } else if kind == BrowserKind::Bundled {
-                    tr!(language, "games.action.use_game")
+        let footer = self.detail_footer().child(self.browser_control(
+            "use-profile",
+            if current {
+                if kind == BrowserKind::Bundled {
+                    tr!(language, "games.action.current_game")
                 } else {
-                    tr!(language, "games.action.use_profile")
-                },
-                UiAction::SelectProfile(profile.id.clone()),
-                ButtonVariant::Primary,
-                current || self.busy,
-                cx,
-            ));
+                    tr!(language, "games.action.current_profile")
+                }
+            } else if kind == BrowserKind::Bundled {
+                tr!(language, "games.action.use_game")
+            } else {
+                tr!(language, "games.action.use_profile")
+            },
+            UiAction::SelectProfile(profile.id.clone()),
+            ButtonVariant::Primary,
+            current || self.busy,
+            cx,
+        ));
         (body, footer)
     }
 
@@ -1344,9 +1378,9 @@ impl Block {
                 name,
                 avatar,
                 if matches!(icon, RowIcon::Account) {
-                    80.
-                } else {
                     56.
+                } else {
+                    40.
                 },
             ))
             .child(
@@ -1358,7 +1392,7 @@ impl Block {
                     .gap(px(10.))
                     .child(
                         div()
-                            .text_2xl()
+                            .text_xl()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(name.to_owned()),
                     )
@@ -1397,11 +1431,11 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
+                    .flex_col()
                     .gap_y_6()
                     .children(values.iter().map(|(label, value)| {
                         div()
-                            .w(relative(0.5))
+                            .w_full()
                             .min_w_0()
                             .pr_4()
                             .flex()
@@ -1420,8 +1454,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let language = self.language();
-        let mut grid = div().flex().flex_wrap().gap_3();
-        let width = 0.48;
+        let mut grid = div().flex().flex_col().gap_3();
         let components = [
             ComponentCard {
                 id: "component-minecraft",
@@ -1476,7 +1509,13 @@ impl Block {
                         tr!(language, "games.java.custom")
                     }
                 },
-                description: instance.directory.display().to_string(),
+                description: instance
+                    .directory
+                    .display()
+                    .to_string()
+                    .chars()
+                    .flat_map(|character| [character, '\u{200b}'])
+                    .collect(),
                 fixed: false,
                 action: Some(UiAction::EditInstance),
             },
@@ -1493,36 +1532,45 @@ impl Block {
         {
             let contents = div()
                 .flex()
-                .flex_col()
-                .items_start()
+                .items_center()
                 .gap_3()
                 .w_full()
                 .min_w_0()
                 .child(
                     div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(icon.render(16., self.palette.muted))
-                        .child(note(label))
-                        .children(fixed.then(|| {
-                            div()
-                                .flex_shrink_0()
-                                .debug_selector(move || format!("component-lock-{id}"))
-                                .child(Icon::Lock.render(14., self.palette.muted))
-                        })),
+                        .flex_shrink_0()
+                        .child(icon.render(18., self.palette.muted)),
                 )
                 .child(
                     div()
-                        .text_sm()
-                        .font_weight(FontWeight::MEDIUM)
+                        .flex_1()
                         .min_w_0()
-                        .max_w_full()
-                        .truncate()
-                        .child(value),
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(note(label.clone()))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .min_w_0()
+                                .max_w_full()
+                                .whitespace_normal()
+                                .child(value),
+                        )
+                        .child(note(description).min_w_0().w_full().whitespace_normal()),
                 )
-                .child(note(description).min_w_0());
+                .children(action.as_ref().map(|_| {
+                    div()
+                        .flex_shrink_0()
+                        .child(Icon::ChevronRight.render(16., self.palette.muted))
+                }))
+                .children(fixed.then(|| {
+                    div()
+                        .flex_shrink_0()
+                        .debug_selector(move || format!("component-lock-{id}"))
+                        .child(Icon::Lock.render(14., self.palette.muted))
+                }));
             if let Some(action) = action {
                 let trigger = self.shell.surfaces.trigger_focus(id, cx);
                 let restore_focus = trigger.clone();
@@ -1541,11 +1589,12 @@ impl Block {
                             view.handle(action.clone(), window, cx);
                         }),
                     )
+                    .aria_label(label)
                     .track_focus(&trigger)
-                    .w(relative(width))
+                    .w_full()
                     .h_auto()
-                    .min_h(px(112.))
-                    .p_4()
+                    .min_h(px(80.))
+                    .p_3()
                     .border_1()
                     .border_color(rgb(self.palette.border))
                     .rounded_xl()
@@ -1555,9 +1604,9 @@ impl Block {
                 grid = grid.child(
                     components::card(self.palette)
                         .id(id)
-                        .w(relative(width))
-                        .min_h(px(112.))
-                        .p_4()
+                        .w_full()
+                        .min_h(px(80.))
+                        .p_3()
                         .bg(rgb(self.palette.background))
                         .child(contents),
                 );
@@ -1586,7 +1635,7 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .justify_between()
                     .child(note(if profiles.len() == 1 {
                         tr!(language, "games.instance.used_by_one")
@@ -1681,10 +1730,9 @@ impl Block {
     fn launch_details(&self, profile: &Profile) -> gpui::Div {
         let language = self.language();
         let server = (!profile.server.address.is_empty()).then(|| profile.server.address.clone());
-        let width = 0.48;
         let card = |icon: Icon, label: String, value: String, description: String| {
             div()
-                .w(relative(width))
+                .w_full()
                 .min_w_0()
                 .rounded_xl()
                 .p_4()
@@ -1716,7 +1764,7 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
+                    .flex_col()
                     .gap_3()
                     .child(card(
                         Icon::Server,
@@ -1757,59 +1805,29 @@ impl Block {
             )
     }
 
-    fn empty_browser_detail(&self, accounts: bool, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    fn unavailable_browser_detail(&self, cx: &Context<'_, Self>) -> super::page_host::ContentSlots {
         let language = self.language();
-        let loading = matches!(self.collection().load, CollectionLoad::Loading);
-        let failed = matches!(self.collection().load, CollectionLoad::Failed(_));
-        let title = if loading {
-            tr!(language, "games.empty_state.loading_title")
-        } else if failed {
-            tr!(language, "games.empty_state.failed_title")
-        } else {
-            tr!(language, "games.empty_state.title")
-        };
-        let description = if loading {
-            tr!(language, "games.empty_state.loading_body")
-        } else if failed {
-            tr!(language, "games.empty_state.failed_body")
-        } else if accounts {
-            tr!(language, "games.empty_state.accounts_body")
-        } else {
-            tr!(language, "games.empty_state.games_body")
-        };
-        let mut content = patterns::empty_state(title, description, self.palette).child(
-            if accounts { Icon::Account } else { Icon::Games }.render(32., self.palette.muted),
-        );
-        if !loading {
-            content = content.child(self.browser_control(
-                "welcome-create",
-                if failed {
-                    tr!(language, "games.action.try_again")
-                } else if accounts {
-                    tr!(language, "games.action.add_account")
-                } else {
-                    tr!(language, "games.action.create_game")
-                },
-                if failed {
-                    UiAction::ReloadLibrary
-                } else if accounts {
-                    UiAction::SignIn
-                } else {
-                    UiAction::CreateInstance
-                },
-                ButtonVariant::Primary,
-                self.busy,
-                cx,
-            ));
+        super::page_host::ContentSlots {
+            body: self
+                .detail_body(cx)
+                .child(patterns::empty_state(
+                    tr!(language, "games.browser.unavailable_title"),
+                    tr!(language, "games.browser.unavailable_body"),
+                    self.palette,
+                ))
+                .into_any_element(),
+            footer: self
+                .detail_footer()
+                .child(self.browser_control(
+                    "record-back",
+                    tr!(language, "common.back"),
+                    UiAction::NavigationBack,
+                    ButtonVariant::Outline,
+                    false,
+                    cx,
+                ))
+                .into_any_element(),
         }
-        div()
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(content)
-            .child(patterns::management_footer(self.palette))
-            .into_any_element()
     }
 
     pub(super) fn render_games_help(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {

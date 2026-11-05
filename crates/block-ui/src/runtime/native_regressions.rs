@@ -35,17 +35,30 @@ fn inside_viewport(cx: &mut VisualTestContext, selector: &'static str) -> Bounds
 
 #[gpui::test]
 fn custom_window_chrome_keeps_drag_space_and_controls_inside_the_window(cx: &mut TestAppContext) {
-    let (_view, cx) = crate::test_support::window(cx, super::tests::test_view);
-    for dimensions in [(960., 600.), (360., 540.)] {
-        cx.simulate_resize(size(px(dimensions.0), px(dimensions.1)));
-        let menu = inside_viewport(cx, "app-menu");
-        let title = inside_viewport(cx, "window-title");
-        let minimize = inside_viewport(cx, "window-minimize");
-        let close = inside_viewport(cx, "window-close");
-        assert!(menu.right() <= title.left());
-        assert!(title.right() <= minimize.left());
-        assert!(minimize.right() <= close.left());
-        assert!(title.size.width > px(0.));
+    let (view, cx) = crate::test_support::window(cx, super::tests::test_view);
+    for tab in [Tab::Home, Tab::Accounts] {
+        view.update(cx, |view, cx| {
+            view.router.navigate(tab);
+            cx.notify();
+        });
+        for dimensions in [(960., 600.), (360., 720.), (360., 540.)] {
+            cx.simulate_resize(size(px(dimensions.0), px(dimensions.1)));
+            let menu = inside_viewport(
+                cx,
+                if tab == Tab::Home {
+                    "app-menu"
+                } else {
+                    "navigation-back"
+                },
+            );
+            let title = inside_viewport(cx, "window-title");
+            let minimize = inside_viewport(cx, "window-minimize");
+            let close = inside_viewport(cx, "window-close");
+            assert!(menu.right() <= title.left());
+            assert!(title.right() <= minimize.left());
+            assert!(minimize.right() <= close.left());
+            assert!(title.size.width > px(0.));
+        }
     }
 }
 

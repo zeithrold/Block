@@ -612,6 +612,7 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.begin_first_run(cx);
+            let parent = view.router.entry_id();
             view.handle_first_run(FirstRunAction::Game, window, cx);
             view.handle_first_run(FirstRunAction::Custom, window, cx);
             if let Some(super::Form::Instance(form)) = &mut view.form {
@@ -623,6 +624,7 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
                 form.loader_version = Some("0.15.11".into());
             }
             view.handle_first_run(FirstRunAction::Back, window, cx);
+            assert_eq!(view.router.entry_id(), parent);
         });
     });
     assert!(view.read_with(cx, |view, cx| {
@@ -668,7 +670,7 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
 }
 
 #[gpui::test]
-fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
+fn overview_back_to_welcome_keeps_compact_geometry_and_saved_progress(
     cx: &mut gpui::TestAppContext,
 ) {
     let result = (|| -> anyhow::Result<()> {
@@ -682,8 +684,8 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
             view
         });
         fs::write(root.path().join("setup-started"), b"1")?;
-        let management = cx.update(|window, _| crate::window_geometry::management_size(window));
-        cx.simulate_resize(management);
+        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
+        cx.simulate_resize(home);
         cx.run_until_parked();
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
@@ -708,17 +710,13 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
                 && view.shell.first_run.enabled
                 && view.shell.first_run.stage == Stage::Welcome
                 && view.shell.first_run.entered.is_none()
-                && view.is_home_frame()
+                && view.page_spec().page == crate::navigation::Page::FirstRun
+                && !view.page_spec().task
         }));
-        // `request_frame_resize` asks the platform for the Home-sized outer
-        // width; deliver that resize like the real platform callback would.
-        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
-        cx.update(|window, cx| window.bounds_changed(cx));
-        cx.run_until_parked();
         assert_eq!(
-            cx.update(|window, _| window.viewport_size().width),
-            home.width,
-            "Back to welcome must restore the Home-sized frame"
+            cx.update(|window, _| window.viewport_size()),
+            home,
+            "Back to welcome must keep the same compact frame"
         );
         assert!(
             root.path().join("setup-started").is_file(),
@@ -730,10 +728,12 @@ fn overview_back_to_welcome_restores_the_home_frame_and_keeps_saved_progress(
 }
 
 #[gpui::test]
-fn returning_to_welcome_keeps_the_hidden_game_draft_and_restores_the_home_frame(
+fn returning_to_welcome_keeps_the_hidden_game_draft_and_compact_bounds(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let dimensions = cx.update(|window, _| crate::window_geometry::home_size(window));
+    cx.simulate_resize(dimensions);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
@@ -746,7 +746,8 @@ fn returning_to_welcome_keeps_the_hidden_game_draft_and_restores_the_home_frame(
             view.handle_first_run(FirstRunAction::Back, window, cx);
             view.handle_first_run(FirstRunAction::BackToWelcome, window, cx);
             assert_eq!(view.shell.first_run.stage, Stage::Welcome);
-            assert!(view.is_home_frame());
+            assert_eq!(view.page_spec().page, crate::navigation::Page::FirstRun);
+            assert!(!view.page_spec().task);
             assert_eq!(
                 window.bounds().size.width,
                 crate::window_geometry::home_size(window).width
@@ -771,7 +772,6 @@ fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAp
             view
         });
         let home = cx.update(|window, _| crate::window_geometry::home_size(window));
-        let management = cx.update(|window, _| crate::window_geometry::management_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
 
@@ -795,8 +795,7 @@ fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAp
                     "Play must not open the import drawer"
                 );
             });
-            cx.simulate_resize(management);
-            cx.run_until_parked();
+            assert_eq!(cx.update(|window, _| window.viewport_size()), home);
             assert!(view.read_with(cx, |view, _| {
                 view.shell.first_run.stage == Stage::Overview
             }));
@@ -805,8 +804,7 @@ fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAp
             cx.simulate_mouse_move(back.center(), None, gpui::Modifiers::none());
             cx.simulate_click(back.center(), gpui::Modifiers::none());
             cx.run_until_parked();
-            cx.simulate_resize(home);
-            cx.run_until_parked();
+            assert_eq!(cx.update(|window, _| window.viewport_size()), home);
             assert!(view.read_with(cx, |view, _| {
                 view.shell.first_run.stage == Stage::Welcome
             }));

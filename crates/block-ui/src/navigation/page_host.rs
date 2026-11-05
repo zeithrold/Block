@@ -3,19 +3,19 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, Div, InteractiveElement as _, IntoElement as _, ParentElement as _,
-    Styled as _, Window, div, prelude::FluentBuilder as _, px, rgb,
+    Styled as _, Window, div, px, rgb,
 };
+use gpui_base::ElementExt as _;
 
 use super::{
-    Block, Form, Palette,
+    Block, Form,
     motion::Scope,
     navigation::{LayoutKind, Page},
 };
 
-pub(super) struct ManagementSlots {
-    pub sidebar: AnyElement,
-    /// The detail's scrolling body and fixed footer remain together.
-    pub detail: AnyElement,
+pub(super) struct ContentSlots {
+    pub body: AnyElement,
+    pub footer: AnyElement,
 }
 
 pub(super) struct WizardSlots {
@@ -29,12 +29,21 @@ pub(super) enum WizardLayout {
     Authentication,
 }
 
-/// Keep at least 400 px for the wizard detail beside its 360 px rail.
-pub(super) fn compact_game_wizard(window: &Window) -> bool {
-    super::window_geometry::content_size(window).width < px(super::design::SIDEBAR_WIDTH + 400.)
-}
-
 impl Block {
+    pub(super) fn action_footer<E: gpui::ParentElement>(&self, footer: E) -> E {
+        if self.visual_only {
+            footer
+        } else {
+            footer.on_prepaint(|bounds, window, cx| {
+                super::feedback::ToastLayer::reserve_actions(
+                    bounds.size.height + px(12.),
+                    window,
+                    cx,
+                );
+            })
+        }
+    }
+
     pub(super) fn render_page_body(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let spec = self.page_spec();
         let content = match spec.layout {
@@ -48,26 +57,13 @@ impl Block {
                 _ => unreachable!("single-pane layout requires a single-pane page"),
             },
             LayoutKind::Management => {
-                let (slots, palette, transition_detail, id) = match spec.page {
-                    Page::Browser => (
-                        self.render_browser_detail(cx),
-                        self.palette,
-                        true,
-                        "browser-page",
-                    ),
-                    Page::Providers => (
-                        self.render_providers(cx),
-                        Palette {
-                            sidebar: self.palette.background,
-                            ..self.palette
-                        },
-                        true,
-                        "providers-page",
-                    ),
-                    Page::About => (self.render_about(cx), self.palette, false, "about-page"),
+                let (slots, transition_detail, id) = match spec.page {
+                    Page::Browser => (self.render_browser_detail(cx), true, "browser-page"),
+                    Page::Providers => (self.render_providers(cx), true, "providers-page"),
+                    Page::About => (self.render_about(cx), false, "about-page"),
                     _ => unreachable!("management layout requires a management page"),
                 };
-                self.host_management(slots, palette, transition_detail, window, cx)
+                self.host_content(slots, transition_detail, window, cx)
                     .id(id)
                     .into_any_element()
             }
@@ -99,53 +95,41 @@ impl Block {
         }
     }
 
-    pub(super) fn host_management(
+    pub(super) fn host_content(
         &self,
-        slots: ManagementSlots,
-        palette: Palette,
+        slots: ContentSlots,
         transition_detail: bool,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> Div {
-        let detail = if transition_detail {
-            self.transition_content(Scope::Detail, slots.detail, window, cx)
+        let body = if transition_detail {
+            self.transition_content(Scope::Detail, slots.body, window, cx)
         } else {
-            slots.detail
+            slots.body
         };
         div()
             .size_full()
             .min_h_0()
             .min_w_0()
             .flex()
+            .flex_col()
             .overflow_hidden()
-            .child(
-                self.frame_sidebar(
-                    div()
-                        .id("management-sidebar")
-                        .debug_selector(|| "management-sidebar".into())
-                        .h_full()
-                        .min_h_0()
-                        .min_w_0()
-                        .w(px(super::design::SIDEBAR_WIDTH))
-                        .flex_shrink_0()
-                        .bg(rgb(palette.sidebar))
-                        .border_r_1()
-                        .border_color(rgb(palette.border))
-                        .child(slots.sidebar),
-                ),
-            )
             .child(
                 self.frame_detail(
                     div()
-                        .id("management-content")
-                        .debug_selector(|| "management-content".into())
-                        .h_full()
+                        .id("page-content")
+                        .debug_selector(|| "page-content".into())
+                        .flex_1()
                         .min_h_0()
                         .min_w_0()
-                        .flex_1()
-                        .child(detail),
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .child(body),
                 ),
             )
+            .child(self.action_footer(div().w_full().flex_shrink_0().child(slots.footer)))
     }
 
     pub(super) fn host_wizard(
@@ -155,42 +139,21 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let compact_game = matches!(layout, WizardLayout::Game) && compact_game_wizard(window);
-        let rail = self.shell.wizard_entrance.stagger(
-            self.frame_sidebar(
-                div()
-                    .when(!compact_game, |rail| rail.h_full())
-                    .when(compact_game, |rail| rail.w_full())
-                    .min_h_0()
-                    .flex_shrink_0()
-                    .child(slots.rail),
-            )
-            .into_any_element(),
-            Duration::ZERO,
-            window,
-            cx,
-        );
+        let rail = self
+            .frame_sidebar(div().w_full().min_h_0().flex_shrink_0().child(slots.rail))
+            .into_any_element();
         let body = self.transition_content(Scope::Wizard, slots.body, window, cx);
         let body = self
             .shell
             .wizard_entrance
             .stagger(body, Duration::from_millis(40), window, cx);
-        let rail = if compact_game {
-            div()
-                .w_full()
-                .flex_shrink_0()
-                .child(rail)
-                .into_any_element()
-        } else {
-            rail
-        };
         match layout {
             WizardLayout::Game => div()
                 .id("wizard-frame")
                 .size_full()
                 .min_h_0()
                 .flex()
-                .when(compact_game, |frame| frame.flex_col())
+                .flex_col()
                 .child(rail)
                 .child(
                     self.frame_detail(
@@ -198,26 +161,27 @@ impl Block {
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
-                            .when(!compact_game, |detail| detail.h_full())
                             .flex()
                             .flex_col()
-                            .child(div().flex_1().min_h_0().child(body))
+                            .child(div().flex_1().min_h_0().flex().flex_col().child(body))
                             .child(
-                                super::patterns::management_footer(self.palette)
-                                    .id("wizard-footer")
-                                    .debug_selector(|| "wizard-footer".into())
-                                    .h_auto()
-                                    .min_h(px(super::design::MANAGEMENT_FOOTER))
-                                    .py_3()
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .max_w(px(544.))
-                                            .mx_auto()
-                                            .flex()
-                                            .flex_col()
-                                            .child(slots.footer),
-                                    ),
+                                self.action_footer(
+                                    super::patterns::management_footer(self.palette)
+                                        .id("wizard-footer")
+                                        .debug_selector(|| "wizard-footer".into())
+                                        .h_auto()
+                                        .min_h(px(super::design::MANAGEMENT_FOOTER))
+                                        .py_3()
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .max_w(px(544.))
+                                                .mx_auto()
+                                                .flex()
+                                                .flex_col()
+                                                .child(slots.footer),
+                                        ),
+                                ),
                             ),
                     ),
                 )
@@ -228,8 +192,18 @@ impl Block {
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .child(self.frame_detail(div().flex_1().min_h_0().min_w_0().child(body)))
-                .child(self.frame_detail(div().w_full().child(slots.footer)))
+                .child(
+                    self.frame_detail(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(body),
+                    ),
+                )
+                .child(self.action_footer(div().w_full().flex_shrink_0().child(slots.footer)))
                 .into_any_element(),
         }
     }

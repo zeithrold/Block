@@ -27,7 +27,7 @@ use super::{
 
 /// The account page's single reading column. Its footer aligns to the same width
 /// and horizontal padding, so the page reads as one column at any window size.
-const AUTH_CONTENT_WIDTH: f32 = 608.;
+const AUTH_CONTENT_WIDTH: f32 = 328.;
 
 /// Microsoft owns most Java Edition accounts and is therefore the page's
 /// default; the other types follow it in the alternatives list.
@@ -926,7 +926,7 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .justify_end()
+                    .flex_col()
                     .gap_2()
                     .child(self.auth_button(
                         "auth-provider-cancel",
@@ -1552,9 +1552,7 @@ impl Block {
         self.shell.auth = Some(wizard);
         // The Add account wizard is the Accounts page's own page, as in the
         // prototype's /accounts/new; never a separate window or overlay.
-        self.shell.instance_editor = None;
         self.shell.providers.visible = false;
-        self.request_frame_resize(window, cx);
         self.shell.surfaces.clear(window, &focus, cx);
         focus.focus(window, cx);
         cx.notify();
@@ -1921,7 +1919,7 @@ impl Block {
             return;
         }
         self.router.end_auth();
-        self.request_frame_resize(window, cx);
+        self.sync_provider_visibility();
         self.focus.focus(window, cx);
         cx.notify();
     }
@@ -1985,7 +1983,7 @@ impl Block {
                 self.palette,
                 false,
             )
-            .p_8()
+            .p_4()
             .child(
                 div()
                     .w_full()
@@ -2006,7 +2004,7 @@ impl Block {
     fn auth_body(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         let (title, description) = self.auth_heading(state);
-        let mut body = div().min_w_0().flex().flex_col().gap_6().child(
+        let mut body = div().min_w_0().flex().flex_col().gap_4().child(
             div()
                 .flex()
                 .flex_col()
@@ -2151,9 +2149,9 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .flex_col()
                     .gap_2()
-                    .child(div().flex_1().min_w_0().child(self.product_select_field(
+                    .child(div().w_full().min_w_0().child(self.product_select_field(
                         "auth-provider-picker",
                         tr!(language, "select.auth_provider"),
                         &picker_value,
@@ -2162,7 +2160,7 @@ impl Block {
                     )))
                     .child(self.auth_button(
                         "auth-provider-add",
-                        "+",
+                        tr!(language, "accounts.providers.add"),
                         UiAction::AuthProviderAdd,
                         ButtonVariant::Outline,
                         ControlState {
@@ -2312,7 +2310,7 @@ impl Block {
                         .text_sm()
                         .text_color(rgb(self.palette.destructive))
                         .child(Icon::Error.render(14., self.palette.destructive))
-                        .child(message),
+                        .child(div().min_w_0().flex_1().whitespace_normal().child(message)),
                 );
         }
         div()
@@ -2437,8 +2435,7 @@ impl Block {
     ) -> gpui::Div {
         div()
             .flex()
-            .items_center()
-            .justify_between()
+            .flex_col()
             .gap_3()
             .child(
                 div()
@@ -2468,15 +2465,13 @@ impl Block {
     ) -> gpui::Div {
         div()
             .flex()
-            .items_center()
-            .justify_between()
+            .flex_col()
             .gap_3()
             .child(
                 div()
-                    .flex_1()
+                    .w_full()
                     .min_w_0()
-                    .text_xs()
-                    .truncate()
+                    .text_sm()
                     .child(code.verification_uri.clone()),
             )
             .child(self.auth_button(
@@ -2519,7 +2514,7 @@ impl Block {
                 .child(
                     div()
                         .flex()
-                        .flex_wrap()
+                        .flex_col()
                         .gap_2()
                         .child(self.auth_button(
                             "auth-reopen",
@@ -2623,11 +2618,10 @@ impl Block {
                 self.palette,
                 BadgeVariant::Success,
             ))
-            .child(note(if state.phase == Phase::Saved {
-                tr!(language, "accounts.auth.complete.note.saved")
-            } else {
-                tr!(language, "accounts.auth.complete.note.ready")
-            }))
+            .children(
+                (state.phase == Phase::Saved)
+                    .then(|| note(tr!(language, "accounts.auth.complete.note.saved"))),
+            )
     }
 
     /// Whether the page has an earlier state to return to.
@@ -2653,7 +2647,7 @@ impl Block {
 
     fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
         let language = self.language();
-        let mut exits = div().flex().flex_wrap().items_center().gap_2();
+        let mut exits = div().w_full().flex().flex_col().gap_2();
         // A save in flight already authorizes the write, so no exit presents
         // itself as revoking it.
         if !state.phase.committed() {
@@ -2747,16 +2741,16 @@ impl Block {
             .debug_selector(|| "auth-footer".into())
             .h_auto()
             .min_h(px(super::design::MANAGEMENT_FOOTER))
+            .px_4()
+            .py_3()
             .child(
                 div()
                     .w_full()
                     .max_w(px(AUTH_CONTENT_WIDTH))
                     .mx_auto()
                     .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
+                    .flex_col()
+                    .gap_2()
                     .child(exits)
                     .child(self.auth_button(
                         "auth-primary",
@@ -2802,6 +2796,11 @@ impl Block {
                 view.handle(action.clone(), window, cx);
             }),
         )
+        .w_full()
+        .min_w_0()
+        .h_auto()
+        .min_h(px(super::design::CONTROL_HEIGHT))
+        .whitespace_normal()
     }
 }
 
@@ -2988,7 +2987,10 @@ mod tests {
     use gpui::{Focusable as _, TestAppContext, px, size};
 
     use super::{AuthWizard, Phase};
-    use crate::{Form, Tab, test_support::test_account};
+    use crate::{
+        Form, Tab,
+        test_support::{scroll_into_view, test_account},
+    };
 
     fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
         cx.run_until_parked();
@@ -3611,10 +3613,9 @@ mod tests {
                 view.open_auth_wizard(window, cx);
             });
         });
-        // The managed window must fit the form and its alternatives so the
-        // pointer reaches them.
-        cx.simulate_resize(size(px(1152.), px(720.)));
+        cx.simulate_resize(size(px(360.), px(720.)));
         cx.run_until_parked();
+        let body = crate::test_support::control_bounds(cx, "auth-body");
         // The Accounts entry is the Microsoft form itself, with the device code
         // as an action on it and the other account types collapsed.
         assert!(
@@ -3635,6 +3636,7 @@ mod tests {
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
 
         // One expansion reveals both alternatives without changing the form.
+        assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-other-options")));
         click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
@@ -3646,6 +3648,7 @@ mod tests {
         }));
 
         // Choosing one swaps the form on this page instead of opening a step.
+        assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-offline")));
         click(cx, "auth-offline");
         assert!(view.read_with(cx, |view, _| {
             view.shell.auth.as_ref().is_some_and(|state| {
@@ -3671,6 +3674,7 @@ mod tests {
 
         // Collapsing hides the alternatives and keeps the form in use with its
         // typed draft intact.
+        assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-other-options")));
         click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_none());
@@ -4002,14 +4006,25 @@ mod tests {
     fn account_setup_keeps_actions_reachable_at_supported_window_sizes(cx: &mut TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let account = test_account()?;
-            for (width, height) in [(1152., 720.), (960., 600.)] {
-                for phase in [Phase::Connect, Phase::Waiting, Phase::Complete] {
+            for (width, height) in [(360., 720.), (1152., 720.), (960., 600.)] {
+                for phase in [
+                    Phase::Connect,
+                    Phase::Preparing,
+                    Phase::Waiting,
+                    Phase::Verifying,
+                    Phase::Characters,
+                    Phase::Failed,
+                    Phase::Complete,
+                    Phase::Saving,
+                    Phase::Saved,
+                ] {
                     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
                         let mut view = crate::tests::test_view(window, cx);
                         view.preferences.reduce_motion = true;
                         view.shell.auth = Some(AuthWizard {
                             phase,
-                            prepared_account: (phase == Phase::Complete).then(|| account.clone()),
+                            prepared_account: matches!(phase, Phase::Complete | Phase::Saved)
+                                .then(|| account.clone()),
                             ..AuthWizard::default()
                         });
                         view.router.navigate(Tab::Accounts);
@@ -4029,6 +4044,10 @@ mod tests {
                     assert!(footer.bottom() <= px(height));
                     for selector in ["auth-cancel", "auth-primary"] {
                         let action = cx.debug_bounds(selector);
+                        if selector == "auth-cancel" && phase.committed() {
+                            assert!(action.is_none(), "committed save must not offer cancel");
+                            continue;
+                        }
                         assert!(
                             action.is_some_and(|action| {
                                 action.left() >= px(0.)
@@ -4429,7 +4448,6 @@ mod tests {
                 view.shell.auth.is_none()
                     && view.router.tab() == Tab::Home
                     && view.page_spec().page == crate::navigation::Page::Home
-                    && view.page_spec().frame == crate::navigation::FrameClass::Home
                     && !view.page_spec().task
                     && view.selected_account.as_deref() == Some(id.as_str())
                     && view
@@ -4481,7 +4499,7 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 view.shell.auth.is_none()
                     && view.router.tab() == Tab::Home
-                    && view.page_spec().frame == crate::navigation::FrameClass::Home
+                    && view.page_spec().page == crate::navigation::Page::Home
                     && view.selected_account.as_deref() == Some(id.as_str())
                     && view
                         .accounts
@@ -4511,7 +4529,6 @@ mod tests {
                 view.router.navigate(Tab::Accounts);
                 view
             });
-            cx.simulate_resize(size(px(1152.), px(720.)));
             cx.run_until_parked();
             // The Accounts page's own Add account action is the entry.
             click(cx, "sign-in");
@@ -4529,7 +4546,7 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 view.shell.auth.is_none()
                     && view.router.tab() == Tab::Accounts
-                    && view.page_spec().frame == crate::navigation::FrameClass::Management
+                    && view.page_spec().page == crate::navigation::Page::Browser
                     && view.selected_account.as_deref() == Some(id.as_str())
                     && view.shell.accounts.inspected.as_deref() == Some(id.as_str())
             }));
@@ -4537,7 +4554,8 @@ mod tests {
                 view.read_with(cx, |view, _| view.page_spec().detail),
                 crate::navigation::DetailKey::Browser {
                     tab: Tab::Accounts,
-                    inspected: Some(id.clone()),
+                    screen: crate::navigation::Screen::List,
+                    inspected: None,
                     editor_page: None,
                     profile_form: false,
                     instance_editor: None,
@@ -4550,38 +4568,6 @@ mod tests {
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
-    }
-
-    /// Wheel the account page until `selector` is inside its scrolling viewport,
-    /// as the pointer reaches it on a page taller than the window.
-    fn scroll_into_view(
-        cx: &mut gpui::VisualTestContext,
-        viewport: gpui::Bounds<gpui::Pixels>,
-        selector: &'static str,
-    ) -> bool {
-        fn visible(
-            cx: &mut gpui::VisualTestContext,
-            viewport: gpui::Bounds<gpui::Pixels>,
-            selector: &'static str,
-        ) -> bool {
-            crate::test_support::control_bounds(cx, selector).is_some_and(|bounds| {
-                bounds.top() >= viewport.top() && bounds.bottom() <= viewport.bottom()
-            })
-        }
-        for _ in 0..12 {
-            if visible(cx, viewport, selector) {
-                return true;
-            }
-            let position = viewport.center();
-            cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
-            cx.simulate_event(gpui::ScrollWheelEvent {
-                position,
-                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-160.))),
-                ..gpui::ScrollWheelEvent::default()
-            });
-            cx.run_until_parked();
-        }
-        visible(cx, viewport, selector)
     }
 
     /// Choosing an account type at a compact size starts its form at the top of

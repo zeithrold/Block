@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ def main():
     parser.add_argument('--theme', choices=['light', 'dark'], action='append')
     parser.add_argument('--no-build', action='store_true')
     parser.add_argument('--no-board', action='store_true')
+    parser.add_argument('--keep-going', action='store_true', help='Capture all requested states, preserving failures and exiting nonzero if any fail')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('Native CGWindowID capture requires macOS')
@@ -31,6 +33,7 @@ def main():
         parser.error('Unknown scenario; use target/debug/block --list-scenarios')
     # Validate the contract before starting a GUI process.
     contracts = {name: contract(name) for name in scenarios}
+    failures = []
     helper = mac_helper()
     provenance = source_state()
     binary_hash = sha256(binary)
@@ -61,7 +64,15 @@ def main():
                             raise RuntimeError(f'{name}: expected page never settled: {last}')
                         candidate = temporary / 'candidate.png'
                         subprocess.run(['screencapture', '-x', '-o', '-l', str(window['id']), str(candidate)], check=True)
-                        assertions = validate(candidate, window, **expected, observations=ocr(candidate))
+                        try:
+                            assertions = validate(candidate, window, **expected, observations=ocr(candidate))
+                        except ValueError as error:
+                            shutil.copyfile(candidate, output / f'{name}-{theme}.failed.png')
+                            if not args.keep_going:
+                                raise
+                            failures.append(f'{name}-{theme}: {error}')
+                            print(f'FAILED {failures[-1]}', flush=True)
+                            continue
                         destination = output / f'{name}-{theme}.png'
                         receipt = {
                             'kind': 'scenario', 'scenario': name, 'platform': 'macos-arm64', 'theme': theme,
@@ -82,6 +93,8 @@ def main():
                         except subprocess.TimeoutExpired:
                             app.terminate()
                             app.wait(timeout=5)
+    if failures:
+        raise ValueError("Native captures failed:\n" + "\n".join(failures))
     if not args.no_board:
         subprocess.run([sys.executable, ROOT / 'scripts/parity-board', '--platform', 'macos-arm64'], check=True)
 

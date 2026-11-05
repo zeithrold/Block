@@ -139,7 +139,9 @@ pub use gpui_base::Root as ProductRoot;
 pub use i18n::{Language, initialize_desktop_locale};
 #[cfg(debug_assertions)]
 pub use scenarios::{SCENARIOS, ScenarioOptions};
-pub use window_geometry::{initial_window_bounds, preferred_management_size};
+pub use window_geometry::{
+    initial_window_bounds, initialize_window_size, preferred_management_size,
+};
 
 /// The preferences loaded for a standalone desktop window.
 pub struct SavedDesktopPreferences(Preferences);
@@ -267,7 +269,7 @@ use std::{
 use block_auth::Account;
 use block_launcher::{
     CancellationToken,
-    catalog::{Instance, Profile, Snapshot},
+    catalog::{Profile, Snapshot},
     crash::CrashReport,
     platform::Architecture,
     recipe::{LaunchRecipe, RuntimeSelection},
@@ -388,7 +390,6 @@ pub struct Block {
     motion: transitions::MotionState,
     motion_dirty: bool,
     visual_only: bool,
-    pending_window_size: Option<gpui::Size<Pixels>>,
     settings_form: Option<settings::SettingsDraft>,
     preferences: Preferences,
     saved_preferences: Preferences,
@@ -497,6 +498,7 @@ enum OperationKind {
 #[derive(Clone, Copy, Debug)]
 struct PendingCreation {
     operation: u64,
+    entry: u64,
     tab: Tab,
     draft: u64,
 }
@@ -701,7 +703,6 @@ impl Block {
         } else {
             Tab::Onboarding
         };
-        window.resize(window_geometry::home_size(window));
         let mut view = Self {
             build_info: options.build_info,
             view_id: cx.entity_id().as_u64(),
@@ -712,7 +713,6 @@ impl Block {
             shell: ShellState {
                 ..ShellState::default()
             },
-            pending_window_size: None,
             settings_form: None,
             saved_preferences: preferences.clone(),
             palette: preferences.palette(window.appearance()),
@@ -783,9 +783,6 @@ impl Block {
                 view.shell.first_run.notice =
                     Some(first_run::Notice::LanguageInitialization(error));
             }
-            if view.shell.first_run.stage != first_run::Stage::Welcome {
-                window.resize(window_geometry::management_size(window));
-            }
         }
         if let Some(path) = options.recipe {
             view.load_recipe(path, options.launch, cx);
@@ -851,10 +848,16 @@ impl Block {
                 && !self.setup_incomplete()
                 && self.router.tab() != Tab::Settings
             {
-                if self.router.tab() == Tab::Home {
-                    self.pending_window_size = Some(preferred_management_size());
-                }
-                self.router.navigate(Tab::Instances);
+                let tab = if self.snapshot.profile_mode
+                    == block_launcher::catalog::ProfileMode::Bundled
+                {
+                    Tab::Instances
+                } else {
+                    Tab::Profiles
+                };
+                let record = navigation::RecordRef::Profile(profile.id.clone());
+                self.router.navigate(tab);
+                self.router.open_record(tab, record);
             }
             self.apply_profile_account();
         } else {
@@ -988,18 +991,19 @@ impl Block {
         if let Some(Form::Instance(form)) = &self.form {
             self.pending_creation = Some(PendingCreation {
                 operation: self.operation_revision,
+                entry: self.router.entry_id(),
                 tab: self.router.tab(),
                 draft: form.name.entity_id().as_u64(),
             });
         }
     }
 
-    fn creation_saved(&mut self, instance: String, profile: String, cx: &mut Context<'_, Self>) {
+    fn creation_saved(&mut self, instance: String, profile: String) {
         let context = self
             .pending_creation
             .take()
             .filter(|context| context.operation == self.operation_revision);
-        let owns_draft = context.is_some_and(|context| context.tab == self.router.tab() && matches!(&self.form, Some(Form::Instance(form)) if form.name.entity_id().as_u64() == context.draft));
+        let owns_draft = context.is_some_and(|context| context.entry == self.router.entry_id() && context.tab == self.router.tab() && matches!(&self.form, Some(Form::Instance(form)) if form.name.entity_id().as_u64() == context.draft));
         self.selected_instance = Some(instance.clone());
         self.selected_profile = Some(profile.clone());
         self.shell.games.inspected = Some(
@@ -1009,7 +1013,7 @@ impl Block {
                 instance
             },
         );
-        self.shell.profiles.inspected = Some(profile);
+        self.shell.profiles.inspected = Some(profile.clone());
         if owns_draft {
             if self.router.tab() == Tab::Onboarding {
                 self.form = None;
@@ -1018,9 +1022,15 @@ impl Block {
             } else {
                 self.form = None;
                 self.router.leave_task();
-                if let Some(query) = &self.collection().query {
-                    query.update(cx, |field, cx| field.set_value("", cx));
-                }
+                let tab = if self.snapshot.profile_mode
+                    == block_launcher::catalog::ProfileMode::Bundled
+                {
+                    Tab::Instances
+                } else {
+                    Tab::Profiles
+                };
+                self.router
+                    .open_record(tab, navigation::RecordRef::Profile(profile));
             }
         }
     }
@@ -1175,13 +1185,6 @@ impl Block {
         self.busy = self.active_run.is_some();
         self.operation_cancellable = false;
         true
-    }
-
-    fn instance(&self) -> Option<&Instance> {
-        self.snapshot
-            .instances
-            .iter()
-            .find(|i| Some(&i.id) == self.selected_instance.as_ref())
     }
 
     fn profile(&self) -> Option<&Profile> {
@@ -1809,19 +1812,12 @@ impl Render for Block {
             });
             return div().size_full().child(help.clone()).into_any_element();
         }
-        if self.pending_window_size.take().is_some() {
-            self.request_frame_resize(window, cx);
-        }
-        self.prepare_window_frame(window, cx);
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);
-        let action_rail = if self.router.tab() == Tab::Home && self.form.is_none() {
-            104.
-        } else {
-            design::MANAGEMENT_FOOTER
-        };
-        feedback::ToastLayer::reserve_actions(px(action_rail + 12.), window, cx);
+        if self.router.tab() == Tab::Home && self.form.is_none() {
+            feedback::ToastLayer::reserve_actions(px(116.), window, cx);
+        }
         self.prepare_motion(window, cx);
         window.set_window_title(&self.native_window_title());
         self.render_shell(window, cx).into_any_element()
@@ -2293,7 +2289,6 @@ mod tests {
             motion_dirty: true,
             visual_only: false,
             shell: super::ShellState::default(),
-            pending_window_size: None,
             settings_form: None,
             preferences: super::Preferences::default(),
             saved_preferences: super::Preferences::default(),
@@ -2787,7 +2782,11 @@ mod tests {
     fn native_menu_is_keyboard_operable_without_replaying_page_animation(
         cx: &mut gpui::TestAppContext,
     ) {
-        let (view, cx) = crate::test_support::window(cx, test_view);
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = test_view(window, cx);
+            view.router.navigate(super::Tab::Home);
+            view
+        });
         let revision = view.read_with(cx, |view, _| view.shell.revision);
         crate::test_support::press(cx, "tab enter");
         assert_eq!(
@@ -3452,6 +3451,10 @@ mod tests {
                 compatibility: Compatibility::Official,
             });
             view.normalize_selection();
+            view.router.open_record(
+                super::Tab::Instances,
+                super::navigation::RecordRef::Profile("profile".into()),
+            );
             cx.notify();
         });
         cx.run_until_parked();

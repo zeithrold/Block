@@ -17,7 +17,7 @@ use crate::{
     game_wizard::{CreationKind, WizardPage, WizardStep},
     import_games, modpack_import, motion, profile_editor, select,
     settings::SettingsDraft,
-    shell::{Drawer, Surface},
+    shell::{Drawer, EditorExit, EditorKind, PendingEditorExit, Surface},
 };
 
 /// One concrete launcher interaction.
@@ -28,15 +28,19 @@ pub(super) enum UiAction {
     PackImport(modpack_import::Action),
     AuthOtherOptions,
     Providers,
-    ProvidersBack,
     ProviderAdd,
     ProviderInspect(String),
+    ProviderEdit(String),
+    ProviderCancel,
     ProviderIdentify,
     ProviderConsent,
     ProviderSave,
     ProviderRemoveRequest(String),
     ProviderRemove(String),
     Tab(Tab),
+    NavigationBack,
+    EditorExitSave,
+    EditorExitDiscard,
     Drawer(Option<Drawer>),
     DownloadFiles(downloads::DownloadGroup),
     SetAppearance(Appearance),
@@ -98,7 +102,6 @@ pub(super) enum UiAction {
     EditInstance,
     EditInstanceOptiFine,
     SaveInstanceSettings,
-    CancelInstanceSettings,
     InstanceFullscreen,
     InstanceOptiFineFile,
     InstanceOptiFineRemove,
@@ -165,8 +168,8 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
     if matches!(
         action,
         UiAction::CancelForm
+            | UiAction::NavigationBack
             | UiAction::SettingsBack
-            | UiAction::ProvidersBack
             | UiAction::WizardBack
             | UiAction::AuthCancel
             | UiAction::AuthBack
@@ -174,6 +177,7 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
             | UiAction::ProfilePageCancel
             | UiAction::ProfilePageDone
             | UiAction::Tab(Tab::Home)
+            | UiAction::FirstRun(first_run::Action::Back | first_run::Action::BackToWelcome)
     ) {
         motion::Direction::Back
     } else {
@@ -191,19 +195,20 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) {
         self.motion_dirty = true;
+        self.shell.focus_generation = self.shell.focus_generation.wrapping_add(1);
         self.motion.direction = motion_direction(&action);
-        if self.exit_blocked_by_auth_save(&action)
-            || self.composition_in_progress(&action, cx)
-            || !self.action_allowed(&action)
-            || self.confirm_pack_leave_if_needed(&action, window, cx)
-            || self.confirm_game_discard_if_needed(&action, window, cx)
-            || self.confirm_settings_exit_if_needed(&action, window, cx)
-        {
+        if self.intercept_action(&action, window, cx) {
             return;
         }
+        self.capture_motion_origin(cx);
         let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
         let previous_page = (self.router.tab(), self.form.is_some());
+        let previous_entry = self.router.entry_id();
+        let previous_focus = window.focused(cx);
         match action {
+            UiAction::NavigationBack => self.navigation_back(window, cx),
+            UiAction::EditorExitSave => self.confirm_editor_exit(true, window, cx),
+            UiAction::EditorExitDiscard => self.confirm_editor_exit(false, window, cx),
             UiAction::FirstRun(action) => self.route_first_run(action, window, cx),
             UiAction::ImportGames(action) => self.handle_import_games(action, window, cx),
             UiAction::PackImport(action) => self.handle_pack_import(action, window, cx),
@@ -257,7 +262,6 @@ impl Block {
             UiAction::EditInstance => self.open_instance_editor(window, cx),
             UiAction::EditInstanceOptiFine => self.open_instance_optifine_editor(window, cx),
             UiAction::SaveInstanceSettings => self.save_instance_draft(window, cx),
-            UiAction::CancelInstanceSettings => self.cancel_instance_editor(window, cx),
             UiAction::InstanceFullscreen => self.toggle_instance_fullscreen(),
             UiAction::InstanceOptiFineFile => self.browse_instance_optifine(cx),
             UiAction::InstanceOptiFineRemove => self.remove_instance_optifine(cx),
@@ -348,10 +352,11 @@ impl Block {
             UiAction::AuthCancel => self.cancel_auth(window, cx),
             UiAction::AuthFinish => self.finish_auth(window, cx),
             UiAction::Providers => self.open_providers(cx),
-            UiAction::ProvidersBack => self.close_providers(cx),
-            UiAction::ProviderAdd => self.edit_provider(None, cx),
-            UiAction::ProviderInspect(id) => self.edit_provider(Some(&id), cx),
-            UiAction::ProviderIdentify => self.identify_provider(cx),
+            UiAction::ProviderAdd => self.edit_provider(None, window, cx),
+            UiAction::ProviderInspect(id) => self.inspect_provider(&id, cx),
+            UiAction::ProviderEdit(id) => self.edit_provider(Some(&id), window, cx),
+            UiAction::ProviderCancel => self.cancel_provider_editor(cx),
+            UiAction::ProviderIdentify => self.identify_provider(window, cx),
             UiAction::ProviderConsent => self.consent_provider(cx),
             UiAction::ProviderSave => self.save_provider(cx),
             UiAction::ProviderRemoveRequest(id) => self.request_remove_provider(id, window, cx),
@@ -387,7 +392,99 @@ impl Block {
             UiAction::OpenRecipe => self.open_recipe(cx),
             UiAction::LaunchRecipe => self.launch_recipe(cx),
         }
+        self.restore_navigation_focus(previous_entry, previous_focus);
         self.finish_action(previous_page, focus_first, window, cx);
+    }
+
+    fn restore_navigation_focus(
+        &mut self,
+        previous_entry: u64,
+        previous_focus: Option<gpui::FocusHandle>,
+    ) {
+        let entry = self.router.entry_id();
+        if previous_entry != entry {
+            if self.shell.focus_entry != Some(entry) {
+                self.shell.focus_entry = None;
+            }
+            if let Some(focus) = previous_focus {
+                self.shell.return_focus.insert(previous_entry, focus);
+            }
+            self.shell
+                .return_focus
+                .retain(|entry, _| self.router.contains_entry(*entry));
+        }
+    }
+
+    pub(super) fn schedule_navigation_focus(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let entry = self.router.entry_id();
+        if self.shell.focus_entry == Some(entry) {
+            return;
+        }
+        self.shell.focus_entry = Some(entry);
+        self.shell
+            .return_focus
+            .retain(|entry, _| self.router.contains_entry(*entry));
+        let fallback = match self.router.screen() {
+            super::navigation::Screen::Record(_) => self.browser_detail_focus(cx),
+            super::navigation::Screen::Provider(_) => self.provider_detail_focus(cx),
+            _ => self.focus.clone(),
+        };
+        let focus = self.shell.return_focus.get(&entry).cloned();
+        // Fresh editors already focus their initial field through their owner.
+        if focus.is_none()
+            && (matches!(
+                self.router.screen(),
+                super::navigation::Screen::InstanceEditor(_)
+                    | super::navigation::Screen::ProfileEditor(_)
+                    | super::navigation::Screen::NewProvider
+                    | super::navigation::Screen::EditProvider(_)
+            ) || self.page_spec().task)
+        {
+            return;
+        }
+        // Keep Back in the live shell until destination controls are mounted.
+        // Explicit component owners mark focus_entry before this scheduler.
+        if !self.shell.surfaces.is_open() {
+            self.focus.focus(window, cx);
+        }
+        let scene = self.page_spec().detail;
+        let generation = self.shell.focus_generation;
+        let overlays: Vec<_> = self
+            .shell
+            .surfaces
+            .layers()
+            .map(|layer| layer.revision)
+            .collect();
+        let owner = cx.weak_entity();
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| {
+                let _ = owner.update(cx, |view, cx| {
+                    if view.router.entry_id() != entry
+                        || view.page_spec().detail != scene
+                        || view.shell.focus_generation != generation
+                        || view.shell.surfaces.is_open()
+                        || !view
+                            .shell
+                            .surfaces
+                            .layers()
+                            .map(|layer| layer.revision)
+                            .eq(overlays)
+                    {
+                        return;
+                    }
+                    focus
+                        .filter(|focus| view.focus.contains(focus, window))
+                        .or(Some(fallback))
+                        .filter(|focus| view.focus.contains(focus, window))
+                        .unwrap_or_else(|| view.focus.clone())
+                        .focus(window, cx);
+                });
+            });
+        });
     }
 
     fn route_first_run(
@@ -419,16 +516,29 @@ impl Block {
         });
     }
 
+    /// Native close and application quit must use the same save and draft
+    /// barriers as actions dispatched by the page.
+    fn intercept_action(
+        &mut self,
+        action: &UiAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        self.exit_blocked_by_auth_save(action)
+            || self.composition_in_progress(action, cx)
+            || !self.action_allowed(action)
+            || self.confirm_pack_leave_if_needed(action, window, cx)
+            || self.confirm_game_discard_if_needed(action, window, cx)
+            || self.confirm_settings_exit_if_needed(action, window, cx)
+            || self.confirm_editor_exit_if_needed(action, window, cx)
+    }
+
     pub(super) fn allow_native_window_close(
         &mut self,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> bool {
-        if self.auth_save_pending()
-            || self.confirm_pack_leave_if_needed(&UiAction::CloseWindow, window, cx)
-            || self.confirm_game_discard_if_needed(&UiAction::CloseWindow, window, cx)
-            || self.confirm_settings_exit_if_needed(&UiAction::CloseWindow, window, cx)
-        {
+        if self.intercept_action(&UiAction::CloseWindow, window, cx) {
             return false;
         }
         self.select_completed_pack();
@@ -440,10 +550,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> bool {
-        !self.auth_save_pending()
-            && !self.confirm_pack_leave_if_needed(&UiAction::QuitApplication, window, cx)
-            && !self.confirm_game_discard_if_needed(&UiAction::QuitApplication, window, cx)
-            && !self.confirm_settings_exit_if_needed(&UiAction::QuitApplication, window, cx)
+        !self.intercept_action(&UiAction::QuitApplication, window, cx)
     }
 
     fn cancel_log_export(&self) {
@@ -453,6 +560,13 @@ impl Block {
     }
 
     fn cancel_or_finish_form(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.router.game_wizard()
+            && let Some(page) = self.shell.wizard.page
+        {
+            self.cancel_component_draft(cx);
+            self.focus_wizard_card(page, window, cx);
+            return;
+        }
         if !self.finish_completed_pack(window, cx) {
             self.cancel_form(window, cx);
         }
@@ -481,7 +595,6 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) {
         if previous_page != (self.router.tab(), self.form.is_some()) {
-            self.request_frame_resize(window, cx);
             self.shell.backwards =
                 self.router.tab() == Tab::Home || self.form.is_none() && previous_page.1;
             self.shell.revision = self.shell.revision.wrapping_add(1);
@@ -500,6 +613,7 @@ impl Block {
                 action,
                 UiAction::CloseWindow
                     | UiAction::QuitApplication
+                    | UiAction::NavigationBack
                     | UiAction::Tab(_)
                     | UiAction::FirstRun(_)
             )
@@ -517,19 +631,25 @@ impl Block {
             UiAction::SavePreferences
                 | UiAction::SettingsExitSave
                 | UiAction::SettingsBack
+                | UiAction::NavigationBack
                 | UiAction::SettingsPage(_)
                 | UiAction::Tab(_)
-        ) {
-            return self.settings_form.as_ref().is_some_and(|draft| {
-                draft
-                    .fields()
-                    .iter()
-                    .any(|field| field.read(cx).is_composing())
-            });
+        ) && self.settings_form.as_ref().is_some_and(|draft| {
+            draft
+                .fields()
+                .iter()
+                .any(|field| field.read(cx).is_composing())
+        }) {
+            return true;
         }
         (matches!(
             action,
-            UiAction::SaveInstance | UiAction::SaveProfile | UiAction::WizardNext
+            UiAction::SaveInstance
+                | UiAction::SaveProfile
+                | UiAction::WizardNext
+                | UiAction::NavigationBack
+                | UiAction::CancelForm
+                | UiAction::Tab(_)
         ) && self
             .form_inputs()
             .iter()
@@ -567,6 +687,7 @@ impl Block {
         let leaving = matches!(
             action,
             UiAction::CancelForm
+                | UiAction::NavigationBack
                 | UiAction::Tab(_)
                 | UiAction::CloseWindow
                 | UiAction::QuitApplication
@@ -650,7 +771,7 @@ impl Block {
             return false;
         }
         let leaving = match action {
-            UiAction::CancelForm => {
+            UiAction::CancelForm | UiAction::NavigationBack => {
                 self.pack_wizard_active()
                     || self.router.game_wizard()
                         && self.shell.wizard.page.is_none()
@@ -776,8 +897,8 @@ impl Block {
                 | UiAction::PackImport(modpack_import::Action::Stop)
                 | UiAction::QuitApplication
                 | UiAction::Tab(_)
+                | UiAction::NavigationBack
                 | UiAction::Providers
-                | UiAction::ProvidersBack
                 | UiAction::DownloadFiles(_)
                 | UiAction::Drawer(_)
                 | UiAction::AuthCancel
@@ -851,8 +972,152 @@ impl Block {
         if tab == Tab::Settings {
             self.focus_settings_heading(window, cx);
         }
-        self.request_frame_resize(window, cx);
         true
+    }
+
+    fn navigation_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.shell.auth.is_some() {
+            self.auth_back(window, cx);
+        } else if self.router.tab() == Tab::Settings {
+            self.settings_back(window, cx);
+        } else if self.shell.instance_editor.is_some() {
+            self.cancel_instance_editor(window, cx);
+        } else if matches!(self.form, Some(Form::Profile(_))) {
+            if self.shell.editor.page.is_some() {
+                self.finish_profile_page(false, window, cx);
+            } else {
+                self.cancel_or_finish_form(window, cx);
+            }
+        } else if self.router.game_wizard() {
+            if self.shell.wizard.page.is_some() {
+                self.back_wizard_focus(window, cx);
+            } else if self.router.tab() == Tab::Onboarding {
+                self.route_first_run(first_run::Action::Back, window, cx);
+            } else {
+                self.cancel_or_finish_form(window, cx);
+            }
+        } else if matches!(
+            self.router.screen(),
+            super::navigation::Screen::NewProvider | super::navigation::Screen::EditProvider(_)
+        ) {
+            self.cancel_provider_editor(cx);
+        } else {
+            self.router.back();
+            self.shell.providers.visible = matches!(
+                self.router.screen(),
+                super::navigation::Screen::Providers
+                    | super::navigation::Screen::Provider(_)
+                    | super::navigation::Screen::NewProvider
+                    | super::navigation::Screen::EditProvider(_)
+            );
+        }
+    }
+
+    fn confirm_editor_exit_if_needed(
+        &mut self,
+        action: &UiAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let leaving = matches!(
+            action,
+            UiAction::NavigationBack
+                | UiAction::Tab(_)
+                | UiAction::CloseWindow
+                | UiAction::QuitApplication
+        );
+        if !leaving {
+            return false;
+        }
+        if self.shell.pending_editor_exit.is_some() {
+            return true;
+        }
+        let kind = match self.router.screen() {
+            super::navigation::Screen::InstanceEditor(_) => self
+                .shell
+                .instance_editor
+                .as_ref()
+                .is_some_and(|editor| editor.dirty(cx))
+                .then_some(EditorKind::Instance),
+            super::navigation::Screen::ProfileEditor(_)
+                if !matches!(action, UiAction::NavigationBack)
+                    || self.shell.editor.page.is_none() =>
+            {
+                self.profile_editor_dirty(cx).then_some(EditorKind::Profile)
+            }
+            super::navigation::Screen::NewProvider | super::navigation::Screen::EditProvider(_) => {
+                self.shell
+                    .providers
+                    .dirty(cx)
+                    .then_some(EditorKind::Provider)
+            }
+            _ => None,
+        };
+        let Some(kind) = kind else {
+            return false;
+        };
+        if !self
+            .shell
+            .surfaces
+            .layers()
+            .any(|layer| matches!(layer.kind, Surface::EditorExit(_)))
+        {
+            if self.shell.surfaces.is_open() {
+                self.shell.surfaces.clear(window, &self.focus, cx);
+            }
+            self.shell.surfaces.open(
+                Surface::EditorExit(EditorExit {
+                    entry: self.router.entry_id(),
+                    kind,
+                    exit: Box::new(action.clone()),
+                }),
+                window,
+                cx,
+            );
+        }
+        cx.notify();
+        true
+    }
+
+    fn confirm_editor_exit(&mut self, save: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(exit) = self.shell.surfaces.top().and_then(|layer| {
+            if let Surface::EditorExit(exit) = &layer.kind {
+                Some(exit.clone())
+            } else {
+                None
+            }
+        }) else {
+            return;
+        };
+        if exit.entry != self.router.entry_id() {
+            self.shell.surfaces.close(window, &self.focus, cx);
+            return;
+        }
+        self.shell.surfaces.close(window, &self.focus, cx);
+        if save {
+            let operation = self.operation_revision;
+            match exit.kind {
+                EditorKind::Instance => self.save_instance_draft(window, cx),
+                EditorKind::Profile => self.save_profile_draft(window, cx),
+                EditorKind::Provider => self.save_provider(cx),
+            }
+            if self.busy && self.operation_revision != operation {
+                self.shell.pending_editor_exit = Some(PendingEditorExit {
+                    operation: self.operation_revision,
+                    exit: exit.exit,
+                    window: window.window_handle(),
+                });
+            }
+        } else {
+            match exit.kind {
+                EditorKind::Instance => self.cancel_instance_editor(window, cx),
+                EditorKind::Profile => self.cancel_profile_editor(window, cx),
+                EditorKind::Provider => self.cancel_provider_editor(cx),
+            }
+            if !matches!(exit.exit.as_ref(), UiAction::NavigationBack) {
+                self.handle(*exit.exit, window, cx);
+            }
+        }
     }
 
     fn confirm_settings_exit_if_needed(
@@ -954,14 +1219,6 @@ impl Block {
         {
             self.cancel_auth_provider(cx);
             self.shell.surfaces.close(window, &self.focus, cx);
-        } else if self
-            .shell
-            .surfaces
-            .top()
-            .is_some_and(|entry| matches!(entry.kind, Surface::WizardSection(_)))
-        {
-            self.cancel_component_draft(cx);
-            self.shell.surfaces.close(window, &self.focus, cx);
         } else {
             self.shell.surfaces.close(window, &self.focus, cx);
         }
@@ -987,29 +1244,8 @@ impl Block {
             self.focus_wizard_error(window, cx);
             return false;
         }
-        if let Some(page) = page
-            && self
-                .shell
-                .surfaces
-                .layers()
-                .any(|entry| matches!(entry.kind, Surface::WizardSection(_)))
-        {
-            self.shell
-                .surfaces
-                .open(Surface::WizardSection(page), window, cx);
-            return false;
-        }
         self.open_game_wizard_page(page, cx);
-        if page == Some(WizardPage::OptiFine) {
-            self.shell
-                .surfaces
-                .open(Surface::WizardSection(WizardPage::OptiFine), window, cx);
-        } else if page.is_none()
-            && self.shell.wizard.page.is_none()
-            && self.shell.surfaces.is_open()
-        {
-            self.shell.surfaces.close(window, &self.focus, cx);
-        } else if page.is_some() {
+        if page.is_some() {
             self.focus_field(false, window, cx);
         }
         true
@@ -1047,17 +1283,28 @@ impl Block {
     /// moves the page to the other collection first.
     fn inspect(&mut self, id: String, linked_tab: Option<bool>, cx: &mut Context<'_, Self>) {
         self.shell.instance_editor = None;
-        if let Some(profiles) = linked_tab {
-            self.router.navigate(if profiles {
+        let tab = if let Some(profiles) = linked_tab {
+            if profiles {
                 Tab::Profiles
             } else {
                 Tab::Instances
-            });
-            self.initialize_browsers(cx);
-        }
+            }
+        } else {
+            self.router.tab()
+        };
+        let record = if tab == Tab::Accounts {
+            super::navigation::RecordRef::Account(id.clone())
+        } else if tab == Tab::Profiles
+            || self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled
+        {
+            super::navigation::RecordRef::Profile(id.clone())
+        } else {
+            super::navigation::RecordRef::Instance(id.clone())
+        };
+        self.router.open_record(tab, record);
+        self.initialize_browsers(cx);
         self.collection_mut().inspected = Some(id);
         self.form = None;
-        self.router.leave_task();
     }
 
     fn open_profile_mode_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {

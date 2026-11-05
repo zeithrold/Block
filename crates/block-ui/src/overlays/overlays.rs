@@ -10,8 +10,9 @@ use super::{
     shell::{Drawer, OverlayPresentation, Surface},
 };
 use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Styled as _, WeakEntity, Window, div, px,
+    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
+    div, px,
 };
 use gpui_component::WindowExt as _;
 use std::{cell::RefCell, collections::HashMap};
@@ -240,8 +241,7 @@ impl Overlays {
             }
             SurfaceDialogClose { owner: close_owner }
         });
-        let body_close = matches!(kind, Surface::WizardSection(_) | Surface::AuthProviderAdd)
-            .then(|| close.clone());
+        let body_close = matches!(kind, Surface::AuthProviderAdd).then(|| close.clone());
         let body = cx.new(|cx| {
             if let Some(owner) = observer.upgrade() {
                 cx.observe(&owner, |_, _, cx| cx.notify()).detach();
@@ -250,6 +250,19 @@ impl Overlays {
                 owner: observer,
                 revision,
                 close: body_close,
+                footer: false,
+            }
+        });
+        let footer_owner = owner.clone();
+        let footer = cx.new(|cx| {
+            if let Some(owner) = footer_owner.upgrade() {
+                cx.observe(&owner, |_, _, cx| cx.notify()).detach();
+            }
+            SurfaceOverlayBody {
+                owner: footer_owner,
+                revision,
+                close: None,
+                footer: true,
             }
         });
         // The window root and neighbouring surface state are still settling
@@ -264,74 +277,97 @@ impl Overlays {
             let build_owner = owner.clone();
             let body = body.clone();
             let close = close.clone();
-            let available_width = (window.viewport_size().width - px(32.)).max(px(0.));
-            let dialog_width = available_width.min(px(520.));
-            window.open_dialog(cx, move |dialog, _dialog_window, dialog_cx| {
+            window.open_dialog(cx, move |dialog, dialog_window, dialog_cx| {
                 let Some(view) = build_owner.upgrade() else {
                     return dialog;
                 };
-                let section = matches!(kind, Surface::WizardSection(_));
-                let settings_exit = matches!(kind, Surface::SettingsExit(_));
+                let content_size = super::window_geometry::content_size(dialog_window);
+                let dialog_width = (content_size.width - px(32.)).max(px(0.)).min(px(520.));
+                let dialog_height =
+                    (content_size.height - px(super::design::CHROME_HEIGHT + 24.)).max(px(0.));
+                let body_chrome = matches!(kind, Surface::AuthProviderAdd);
+                let draft_exit = matches!(kind, Surface::SettingsExit(_) | Surface::EditorExit(_));
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
                 let body = body.clone();
+                let footer = footer.clone();
+                let close = close.clone();
                 let gate = build_owner.clone();
                 let confirm = build_owner.clone();
                 let dismiss = build_owner.clone();
                 let title_owner = build_owner.clone();
-                let dialog = if section {
-                    dialog
-                        .font_family(super::design::FONT_FAMILY)
-                        .w(available_width.min(px(760.)))
-                        .px(px(0.))
-                        .pt(px(0.))
-                        .pb(px(0.))
-                } else if matches!(kind, Surface::AuthProviderAdd) {
-                    dialog
-                        .font_family(super::design::FONT_FAMILY)
-                        .w(dialog_width.min(px(460.)))
-                        .px(px(0.))
-                        .pt(px(24.))
-                        .pb(px(0.))
-                } else {
-                    dialog
-                        .font_family(super::design::FONT_FAMILY)
-                        .w(dialog_width)
-                        .px(px(0.))
-                        .pt(px(24.))
-                        .pb(px(0.))
-                        .title(
+                dialog
+                    .font_family(super::design::FONT_FAMILY)
+                    .w(dialog_width)
+                    .px(px(0.))
+                    .pt(px(0.))
+                    .pb(px(0.))
+                    .close_button(false)
+                    .content(move |content, _window, _cx| {
+                        let title_owner = title_owner.clone();
+                        let header = (!body_chrome).then(|| {
                             div()
+                                .debug_selector(|| "surface-dialog-title".into())
                                 .px(px(24.))
+                                .pt(px(24.))
+                                .pb(px(16.))
                                 .flex()
+                                .flex_shrink_0()
                                 .items_center()
                                 .on_key_down(move |event, window, cx| {
                                     settings_dialog_back(&title_owner, revision, event, window, cx);
                                 })
                                 .child(
-                                    div()
+                                    gpui_component::dialog::DialogTitle::new()
                                         .flex_1()
                                         .min_w_0()
                                         .text_xl()
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .child(title),
+                                        .child(title.clone()),
                                 )
-                                .child(close.clone()),
-                        )
-                };
-                dialog
-                    .close_button(false)
-                    .content(move |content, _window, _cx| content.child(body.clone()))
+                                .child(close.clone())
+                        });
+                        // Keep the whole product surface within its content budget.
+                        // Only the middle region scrolls; title and actions cannot
+                        // be pushed beyond the compact window by a long note.
+                        content
+                            .min_h_0()
+                            .max_h((dialog_height - px(2.)).max(px(0.)))
+                            .overflow_hidden()
+                            .children(header)
+                            .child(
+                                div()
+                                    .id("surface-dialog-scroll")
+                                    .debug_selector(|| "surface-dialog-scroll".into())
+                                    .min_h_0()
+                                    .w_full()
+                                    .overflow_y_scroll()
+                                    .child(body.clone()),
+                            )
+                            .children((!body_chrome).then(|| {
+                                div()
+                                    .debug_selector(|| "surface-dialog-footer".into())
+                                    .flex_shrink_0()
+                                    .child(footer.clone())
+                            }))
+                    })
                     .on_cancel(move |_, _, cx| {
-                        settings_exit
-                            || gate.upgrade().is_none_or(|view| {
-                                let view = view.read(cx);
-                                !(view.busy && !view.can_stop())
-                            })
+                        gate.upgrade().is_some_and(|view| {
+                            let view = view.read(cx);
+                            view.shell
+                                .surfaces
+                                .top()
+                                .is_some_and(|entry| entry.revision == revision)
+                                && (draft_exit || !(view.busy && !view.can_stop()))
+                        })
                     })
                     .on_ok(move |_, window, cx| {
-                        let allowed = confirm.upgrade().is_none_or(|view| {
+                        let allowed = confirm.upgrade().is_some_and(|view| {
                             let view = view.read(cx);
-                            !(view.busy && !view.can_stop())
+                            view.shell
+                                .surfaces
+                                .top()
+                                .is_some_and(|entry| entry.revision == revision)
+                                && !(view.busy && !view.can_stop())
                         });
                         if allowed {
                             window.close_dialog(cx);
@@ -349,7 +385,14 @@ impl Overlays {
                         });
                     })
             });
-            if let Some(focus) = view.read(cx).surface_input_focus(revision, cx) {
+            if let Some(focus) = view
+                .read(cx)
+                .shell
+                .surfaces
+                .top()
+                .filter(|entry| entry.revision == revision)
+                .and_then(|_| view.read(cx).surface_input_focus(revision, cx))
+            {
                 focus.focus(window, cx);
             }
         });
@@ -398,18 +441,31 @@ struct SurfaceOverlayBody {
     owner: WeakEntity<Block>,
     revision: usize,
     close: Option<Entity<SurfaceDialogClose>>,
+    footer: bool,
 }
 
 impl Render for SurfaceOverlayBody {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let revision = self.revision;
+        let footer = self.footer;
         let body = self
             .owner
             .update(cx, |view, cx| {
-                view.render_surface_dialog_body(revision, window, cx)
+                if self.footer {
+                    view.render_surface_dialog_footer(revision, window, cx)
+                } else {
+                    view.render_surface_dialog_body(revision, window, cx)
+                }
             })
             .unwrap_or_else(|_| div().into_any_element());
         div()
+            .debug_selector(move || {
+                if footer {
+                    "surface-dialog-actions".into()
+                } else {
+                    "surface-dialog-body".into()
+                }
+            })
             .relative()
             .w_full()
             .on_key_down(cx.listener(move |body, event, window, cx| {
@@ -511,27 +567,17 @@ impl Block {
                     .trigger_focus("settings-exit-stay", cx)
                     .tab_stop(true),
             ),
+            Surface::EditorExit(_) => Some(
+                self.shell
+                    .surfaces
+                    .trigger_focus("editor-exit-stay", cx)
+                    .tab_stop(true),
+            ),
             Surface::Drawer(Drawer::Accounts | Drawer::Profiles) => self
                 .shell
                 .selector
                 .as_ref()
                 .map(|state| state.query_focus(cx)),
-            Surface::WizardSection(super::WizardPage::Version) => self
-                .shell
-                .wizard
-                .version_search
-                .as_ref()
-                .map(|input| input.read(cx).focus_handle(cx)),
-            Surface::WizardSection(super::WizardPage::Loader) => self
-                .shell
-                .wizard
-                .loader_search
-                .as_ref()
-                .map(|input| input.read(cx).focus_handle(cx)),
-            Surface::WizardSection(super::WizardPage::Location) => match &self.form {
-                Some(super::Form::Instance(form)) => Some(form.directory.read(cx).focus_handle(cx)),
-                _ => None,
-            },
             _ => None,
         }
     }
@@ -554,6 +600,11 @@ impl Block {
         else {
             return;
         };
+        if index + 1 != self.shell.surfaces.entries.len()
+            && !self.shell.surfaces.select_above(revision)
+        {
+            return;
+        }
         if self.shell.surfaces.select_above(revision) {
             self.shell.surfaces.close(window, &self.focus, cx);
         }
@@ -561,9 +612,6 @@ impl Block {
         self.shell.surfaces.trace_change(&entry, "closed");
         match entry.kind {
             Surface::Drawer(Drawer::ImportGames) => self.import_games_closed(window, cx),
-            Surface::WizardSection(_) => {
-                self.cancel_component_draft(cx);
-            }
             Surface::AuthProviderAdd => self.cancel_auth_provider(cx),
             _ => {}
         }
@@ -600,11 +648,8 @@ impl Surface {
             Self::StopPackImport { .. } => "stop_pack_import",
             Self::DiscardGameDraft { .. } => "discard_game_draft",
             Self::SettingsExit(_) => "settings_exit",
+            Self::EditorExit(_) => "editor_exit",
             Self::GamesHelp => "games_help",
-            Self::WizardSection(super::WizardPage::Version) => "wizard_version",
-            Self::WizardSection(super::WizardPage::Loader) => "wizard_loader",
-            Self::WizardSection(super::WizardPage::OptiFine) => "wizard_optifine",
-            Self::WizardSection(super::WizardPage::Location) => "wizard_location",
             Self::AuthProviderAdd => "auth_provider_add",
             Self::Select(_) => "select",
         }
@@ -636,13 +681,8 @@ impl Surface {
             Self::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
             Self::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
             Self::SettingsExit(_) => tr!(language, "settings.exit.home_title"),
+            Self::EditorExit(_) => tr!(language, "common.editor_exit.title"),
             Self::GamesHelp => tr!(language, "surface.games_help"),
-            Self::WizardSection(page) => match page {
-                super::WizardPage::Version => tr!(language, "surface.wizard_version"),
-                super::WizardPage::Loader => tr!(language, "surface.wizard_loader"),
-                super::WizardPage::OptiFine => "OptiFine".to_owned(),
-                super::WizardPage::Location => tr!(language, "surface.wizard_location"),
-            },
             Self::AuthProviderAdd => tr!(language, "surface.auth_provider_add"),
             Self::Select(state) => state.title(language),
         }
@@ -670,7 +710,7 @@ impl Surface {
             | Self::StopPackImport { .. }
             | Self::DiscardGameDraft { .. }
             | Self::SettingsExit(_)
-            | Self::WizardSection(_) => Some(OverlayPresentation::Dialog),
+            | Self::EditorExit(_) => Some(OverlayPresentation::Dialog),
         }
     }
 }

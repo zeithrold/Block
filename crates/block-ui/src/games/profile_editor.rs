@@ -8,6 +8,8 @@ use super::scroll_area::ScrollAreaExt as _;
 use super::{
     Block, Form, Language, ProfileForm, TextInput, UiAction, account_id,
     components::{self, ControlState, FieldOptions},
+    design::Icon,
+    navigation::Screen,
     note, patterns,
 };
 use block_launcher::{
@@ -15,8 +17,8 @@ use block_launcher::{
     recipe::RuntimeSelection,
 };
 use gpui::{
-    AnyWindowHandle, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement as _, ScrollHandle, Styled as _, Window, div,
+    Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, ScrollHandle, Styled as _, Window, div,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -26,7 +28,7 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum EditorPage {
     Appearance,
     Launch,
@@ -97,7 +99,7 @@ impl SaveFailure {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Checkpoint {
     original: Profile,
     values: [String; 6],
@@ -108,13 +110,14 @@ pub(super) struct EditorState {
     pub page: Option<EditorPage>,
     radio_focus: RefCell<HashMap<String, FocusHandle>>,
     checkpoint: Option<Checkpoint>,
+    baseline: Option<Checkpoint>,
     error: Option<EditorIssue>,
     scroll: ScrollHandle,
+    page_scroll: HashMap<Option<EditorPage>, gpui::Point<gpui::Pixels>>,
     reveal: Rc<Cell<Option<EditorField>>>,
     return_focus: Option<FocusHandle>,
     page_focus: Option<FocusHandle>,
     outer_focus: Option<FocusHandle>,
-    outer_window: Option<AnyWindowHandle>,
     outer_tab: Option<super::Tab>,
     outer_profile: Option<String>,
     saving: bool,
@@ -139,8 +142,14 @@ impl EditorState {
         scroll.set_offset(self.scroll.offset());
         Self {
             page: self.page,
+            checkpoint: self.checkpoint.clone(),
+            baseline: self.baseline.clone(),
             error: self.error.clone(),
             save_error: self.save_error.clone(),
+            saving: self.saving,
+            page_scroll: self.page_scroll.clone(),
+            outer_tab: self.outer_tab,
+            outer_profile: self.outer_profile.clone(),
             scroll,
             reveal: Rc::new(Cell::new(self.reveal.get())),
             ..Default::default()
@@ -150,17 +159,73 @@ impl EditorState {
 
 impl Block {
     pub(super) fn begin_profile_editor(
-        &self,
+        &mut self,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> EditorState {
-        EditorState {
-            outer_focus: Some(self.profile_editor_trigger_focus(cx)),
-            outer_window: Some(window.window_handle()),
+        let original = self.inspected_profile().cloned();
+        let baseline = original.as_ref().map(|profile| Checkpoint {
+            values: [
+                profile.name.clone(),
+                components::memory_gb_text(profile.memory_mib),
+                match &profile.runtime {
+                    RuntimeSelection::Managed => String::new(),
+                    RuntimeSelection::Local { java } => java.display().to_string(),
+                },
+                super::format_arguments(&profile.jvm_args),
+                super::format_arguments(&profile.game_args),
+                profile.server.address.clone(),
+            ],
+            managed: matches!(profile.runtime, RuntimeSelection::Managed),
+            original: profile.clone(),
+        });
+        let state = EditorState {
+            outer_focus: window
+                .focused(cx)
+                .or_else(|| Some(self.profile_editor_trigger_focus(cx))),
             outer_tab: Some(self.router.tab()),
-            outer_profile: self.inspected_profile().map(|profile| profile.id.clone()),
+            outer_profile: original.as_ref().map(|profile| profile.id.clone()),
+            baseline,
             ..EditorState::default()
+        };
+        if let Some(profile) = original {
+            if let Some(focus) = &state.outer_focus {
+                self.shell
+                    .return_focus
+                    .insert(self.router.entry_id(), focus.clone());
+            }
+            self.router
+                .open_screen(self.router.tab(), Screen::ProfileEditor(profile.id));
         }
+        state
+    }
+
+    /// Compare the complete root draft, including invalid raw text and changes
+    /// applied by a subsection, without validating or mutating that draft.
+    pub(super) fn profile_editor_dirty(&self, cx: &gpui::App) -> bool {
+        let (Some(Form::Profile(form)), Some(baseline)) = (&self.form, &self.shell.editor.baseline)
+        else {
+            return false;
+        };
+        let original = &baseline.original;
+        form.managed != baseline.managed
+            || [
+                &form.name,
+                &form.memory,
+                &form.java,
+                &form.jvm,
+                &form.game,
+                &form.server,
+            ]
+            .into_iter()
+            .zip(&baseline.values)
+            .any(|(field, value)| field.read(cx).value() != *value)
+            || form.original.target_id != original.target_id
+            || form.original.appearance != original.appearance
+            || form.original.inheritance != original.inheritance
+            || form.original.server != original.server
+            || form.original.data_policy != original.data_policy
+            || form.original.default_account != original.default_account
     }
 
     fn profile_editor_return_focus(
@@ -193,7 +258,7 @@ impl Block {
 
     pub(super) fn cancel_profile_editor(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         if self.busy || !matches!(self.form, Some(Form::Profile(_))) {
@@ -201,8 +266,15 @@ impl Block {
         }
         let editor = std::mem::take(&mut self.shell.editor);
         self.form = None;
-        if let Some(focus) = self.profile_editor_return_focus(&editor, cx) {
-            focus.focus(window, cx);
+        if matches!(self.router.screen(), Screen::ProfileEditor(id) if Some(id) == editor.outer_profile.as_ref())
+        {
+            self.router.back();
+            if let Some(focus) = self.profile_editor_return_focus(&editor, cx) {
+                self.shell
+                    .return_focus
+                    .entry(self.router.entry_id())
+                    .or_insert(focus);
+            }
         }
         cx.notify();
     }
@@ -224,11 +296,15 @@ impl Block {
             {
                 self.form = None;
             }
-            let focus = self.profile_editor_return_focus(&editor, cx);
-            if let (Some(window), Some(focus)) = (editor.outer_window, focus) {
-                cx.defer(move |cx| {
-                    let _ = window.update(cx, |_, window, cx| focus.focus(window, cx));
-                });
+            if matches!(self.router.screen(), Screen::ProfileEditor(id) if Some(id) == editor.outer_profile.as_ref())
+            {
+                self.router.back();
+                if let Some(focus) = self.profile_editor_return_focus(&editor, cx) {
+                    self.shell
+                        .return_focus
+                        .entry(self.router.entry_id())
+                        .or_insert(focus);
+                }
             }
         }
     }
@@ -254,12 +330,20 @@ impl Block {
                 form.server.read(cx).value(),
             ],
         });
-        self.shell.editor.page = Some(page);
-        self.shell.editor.error = None;
         self.shell
             .editor
-            .scroll
-            .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+            .page_scroll
+            .insert(self.shell.editor.page, self.shell.editor.scroll.offset());
+        self.shell.editor.page = Some(page);
+        self.shell.editor.error = None;
+        self.shell.editor.scroll.set_offset(
+            self.shell
+                .editor
+                .page_scroll
+                .get(&Some(page))
+                .copied()
+                .unwrap_or_default(),
+        );
         self.shell.editor.return_focus = window.focused(cx);
         let focus = cx.focus_handle().tab_stop(true);
         if page == EditorPage::Launch {
@@ -296,7 +380,19 @@ impl Block {
                 field.update(cx, |field, cx| field.set_value(&value, cx));
             }
         }
+        self.shell
+            .editor
+            .page_scroll
+            .insert(self.shell.editor.page, self.shell.editor.scroll.offset());
         self.shell.editor.page = None;
+        self.shell.editor.scroll.set_offset(
+            self.shell
+                .editor
+                .page_scroll
+                .get(&None)
+                .copied()
+                .unwrap_or_default(),
+        );
         self.shell.editor.error = None;
         if let Some(focus) = self.shell.editor.return_focus.take() {
             focus.focus(window, cx);
@@ -340,14 +436,21 @@ impl Block {
         }
     }
 
-    pub(super) fn render_profile_editor(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    pub(super) fn render_profile_editor(
+        &self,
+        cx: &Context<'_, Self>,
+    ) -> super::page_host::ContentSlots {
         let Some(Form::Profile(form)) = &self.form else {
-            return div().into_any_element();
+            return super::page_host::ContentSlots {
+                body: div().into_any_element(),
+                footer: div().into_any_element(),
+            };
         };
         let language = self.language();
         let page = self.shell.editor.page;
         let body = div()
             .id("profile-editor-body")
+            .debug_selector(|| "profile-editor-body".into())
             .flex_1()
             .min_h_0()
             .scroll_area(
@@ -356,7 +459,7 @@ impl Block {
                 self.palette,
                 false,
             )
-            .p_6()
+            .p_4()
             .flex()
             .flex_col()
             .gap_5();
@@ -370,7 +473,12 @@ impl Block {
             body = body.child(note(issue.message(language)));
         }
         let footer = patterns::management_footer(self.palette)
-            .justify_end()
+            .id("profile-editor-footer")
+            .debug_selector(|| "profile-editor-footer".into())
+            .flex_col()
+            .items_stretch()
+            .gap_2()
+            .children(self.profile_save_error())
             .child(self.button(
                 if page.is_some() {
                     "cancel-profile-page"
@@ -381,7 +489,7 @@ impl Block {
                 if page.is_some() {
                     UiAction::ProfilePageCancel
                 } else {
-                    UiAction::CancelForm
+                    UiAction::NavigationBack
                 },
                 cx,
             ))
@@ -403,15 +511,10 @@ impl Block {
                 },
                 cx,
             ));
-        div()
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(body)
-            .children(self.profile_save_error())
-            .child(footer)
-            .into_any_element()
+        super::page_host::ContentSlots {
+            body: body.into_any_element(),
+            footer: footer.into_any_element(),
+        }
     }
 
     fn profile_save_error(&self) -> Option<gpui::Stateful<gpui::Div>> {
@@ -633,24 +736,37 @@ impl Block {
                     UiAction::ProfilePage(EditorPage::Appearance),
                     cx,
                 )
+                .w_full()
+                .justify_between()
+                .child(Icon::ChevronRight.render(16., self.palette.muted))
                 .child(components::profile_avatar(
                     form.original.appearance,
                     self.palette,
                     32.,
                 )),
             )
-            .child(self.button(
-                "edit-profile-launch",
-                tr!(language, "games.launch.settings"),
-                UiAction::ProfilePage(EditorPage::Launch),
-                cx,
-            ))
-            .child(self.button(
-                "edit-profile-data",
-                tr!(language, "games.profile_editor.data_and_account"),
-                UiAction::ProfilePage(EditorPage::Data),
-                cx,
-            ))
+            .child(
+                self.button(
+                    "edit-profile-launch",
+                    tr!(language, "games.launch.settings"),
+                    UiAction::ProfilePage(EditorPage::Launch),
+                    cx,
+                )
+                .w_full()
+                .justify_between()
+                .child(Icon::ChevronRight.render(16., self.palette.muted)),
+            )
+            .child(
+                self.button(
+                    "edit-profile-data",
+                    tr!(language, "games.profile_editor.data_and_account"),
+                    UiAction::ProfilePage(EditorPage::Data),
+                    cx,
+                )
+                .w_full()
+                .justify_between()
+                .child(Icon::ChevronRight.render(16., self.palette.muted)),
+            )
             .child(note(tr!(language, "games.profile_editor.draft_note")))
     }
 
@@ -717,7 +833,14 @@ impl Block {
             )
         })
         .child(note(tr!(language, "games.profile_editor.data_note")))
-        .child(self.profile_account_group(form, cx))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(tr!(language, "games.profile_editor.default_account_group"))
+                .child(self.profile_account_group(form, cx)),
+        )
     }
 
     fn profile_inheritance_fields(&self, form: &ProfileForm, cx: &Context<'_, Self>) -> gpui::Div {

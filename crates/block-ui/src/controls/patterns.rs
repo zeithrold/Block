@@ -63,12 +63,14 @@ pub(super) fn reveal_field<T: Copy + Eq + 'static>(
 
 pub(super) fn management_footer(palette: Palette) -> Div {
     div()
-        .h(px(super::design::MANAGEMENT_FOOTER))
+        .min_h(px(super::design::MANAGEMENT_FOOTER))
         .flex_shrink_0()
         .flex()
-        .items_center()
-        .gap_3()
-        .px(px(32.))
+        .flex_col()
+        .items_stretch()
+        .gap_2()
+        .px_4()
+        .py_3()
         .border_t_1()
         .border_color(rgb(palette.border))
 }
@@ -101,27 +103,38 @@ pub(super) fn empty_state(
 mod tests {
     use super::management_footer;
     use gpui::{
-        Context, InteractiveElement as _, IntoElement, Render, Styled as _, Window, px, size,
+        Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
+        Window, div, px, size,
     };
 
     struct Footer;
     impl Render for Footer {
         fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
-            management_footer(crate::Palette::LIGHT)
-                .id("footer")
-                .debug_selector(|| "footer".into())
-                .w_full()
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1())
+                .child(
+                    management_footer(crate::Palette::LIGHT)
+                        .id("footer")
+                        .debug_selector(|| "footer".into())
+                        .w_full()
+                        .child(div().h(px(32.)).flex_shrink_0())
+                        .child(div().h(px(32.)).flex_shrink_0()),
+                )
         }
     }
     #[gpui::test]
-    fn management_footer_has_fixed_height(cx: &mut gpui::TestAppContext) {
+    fn compact_footer_grows_to_keep_both_actions_reachable(cx: &mut gpui::TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| Footer);
-        cx.simulate_resize(size(px(1152.), px(720.)));
+        cx.simulate_resize(size(px(360.), px(720.)));
         cx.run_until_parked();
         let bounds = cx.debug_bounds("footer");
         assert!(
             bounds
-                .is_some_and(|bounds| bounds.size.height == px(72.) && bounds.right() <= px(1152.))
+                .is_some_and(|bounds| bounds.size.height == px(97.) && bounds.right() <= px(360.)),
+            "two 32px actions, 8px gap, 24px padding and 1px border: {bounds:?}"
         );
     }
 }

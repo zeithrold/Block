@@ -13,10 +13,7 @@ use block_launcher::{
 use gpui::{Context, Image, ImageFormat};
 use uuid::Uuid;
 
-use crate::{
-    Block, OperationKind, PendingCrash, Tab, account_id, browser, components, engine::Message,
-    feedback,
-};
+use crate::{Block, PendingCrash, Tab, account_id, browser, components, engine::Message, feedback};
 
 impl Block {
     /// Drain the engine channel and apply every message that still belongs to the
@@ -30,6 +27,9 @@ impl Block {
             while let Ok(message) = receiver.try_recv() {
                 messages.push(message);
             }
+        }
+        if !messages.is_empty() {
+            self.capture_motion_origin(cx);
         }
         let toast_expired = self
             .shell
@@ -138,7 +138,7 @@ impl Block {
                     self.connection_finished(request, result, cx);
                 }
                 Message::Created { instance, profile } => {
-                    self.creation_saved(instance, profile, cx);
+                    self.creation_saved(instance, profile);
                 }
                 Message::Status(status) => self.status = status,
                 Message::Downloads(tracker) => {
@@ -309,6 +309,7 @@ impl Block {
         scoped: bool,
         cx: &mut Context<'_, Self>,
     ) {
+        let operation = self.logged_operation;
         if scoped {
             let outcome = if result.is_ok() {
                 crate::ui_logging::Outcome::Succeeded
@@ -321,28 +322,51 @@ impl Block {
         }
         self.auth_provider_finished(&result, cx);
         self.providers_finished(&result);
-        self.instance_edit_finished(&result, cx);
-        self.profile_edit_finished(&result, cx);
+        if scoped && operation == Some(crate::ui_logging::Operation::SaveInstance) {
+            self.instance_edit_finished(&result, cx);
+        }
+        if scoped && operation == Some(crate::ui_logging::Operation::SaveProfile) {
+            self.profile_edit_finished(&result, cx);
+        }
         self.auth_finished(&result);
         self.busy = self.active_run.is_some();
         self.operation_cancellable = false;
+        let succeeded = result.is_ok();
         match result {
             Ok(status) => {
                 self.push_toast(status.clone(), feedback::ToastKind::Success);
                 self.status = status;
-                if self.router.tab() != Tab::Onboarding
-                    && self.shell.auth.is_none()
-                    && self.operation_kind != OperationKind::Account
-                {
-                    self.form = None;
-                    self.router.leave_task();
-                }
             }
             Err(_) if self.cancel.is_cancelled() => {
                 self.status = msg!("runtime.cancelled");
             }
             Err(error) => {
                 self.report(msg!("runtime.failed", error = error));
+            }
+        }
+        if scoped
+            && self
+                .shell
+                .pending_editor_exit
+                .as_ref()
+                .is_some_and(|pending| pending.operation == self.operation_revision)
+        {
+            let pending = self.shell.pending_editor_exit.take();
+            if succeeded
+                && let Some(pending) = pending
+                && !matches!(pending.exit.as_ref(), crate::UiAction::NavigationBack)
+            {
+                let owner = cx.weak_entity();
+                let entry = self.router.entry_id();
+                cx.defer(move |cx| {
+                    let _ = pending.window.update(cx, |_, window, cx| {
+                        let _ = owner.update(cx, |view, cx| {
+                            if view.router.entry_id() == entry {
+                                view.handle(*pending.exit, window, cx);
+                            }
+                        });
+                    });
+                });
             }
         }
         self.start_pending_play(cx);

@@ -12,7 +12,7 @@ use block_launcher::{
     game_import::{DetectedLoader, DiscoveryReport, GameCandidate, ImportSourceReport, SourceKind},
     recipe::{Compatibility, RuntimeSelection},
 };
-use gpui::{Context, Window};
+use gpui::{AppContext as _, Context, Window};
 
 use crate::{
     Block, Tab, UiAction, account_id,
@@ -100,6 +100,30 @@ pub const SCENARIOS: &[&str] = &[
     "remove-account-confirmation",
     "separate-confirmation",
     "games-help",
+    "provider-detail",
+    "provider-edit",
+    "profile-editor-root",
+    "profile-editor-data",
+    "profile-editor-launch",
+    "profile-editor-appearance",
+    "instance-editor-exit-dirty",
+    "profile-editor-exit-dirty",
+    "provider-editor-exit-dirty",
+    "games-missing-record",
+    "games-detail-long-path",
+    "setup-overview-draft",
+    "wizard-configuration-invalid",
+    "setup-import-long-destination",
+    "modpack-choose",
+    "modpack-inspecting",
+    "modpack-review",
+    "modpack-blocked",
+    "modpack-stopped",
+    "modpack-installing",
+    "modpack-complete",
+    "crash-overview",
+    "crash-logs",
+    "crash-long-metadata",
 ];
 
 /// Wizard pages whose loader catalog is synthetic, so no fetch runs.
@@ -136,19 +160,24 @@ impl Block {
         let toast_scenario = matches!(name, "toast-motion" | "toast-motion-reduced");
         let toast_trace = toast_scenario && crate::feedback::toast_trace::enabled();
         self.prepare_scenario(options, toast_trace, window, cx)?;
-        resize_scenario_window(name, toast_scenario, window);
         self.home_scenario(name)?;
         self.games_scenario(name, window, cx);
         self.wizard_scenario(name, window, cx);
         self.accounts_scenario(name, window, cx)?;
         self.providers_scenario(name, window, cx)?;
         self.settings_scenario(name, window, cx);
+        if name.starts_with("modpack-") {
+            self.modpack_scenario(name, window, cx)?;
+        }
         if name == "about" {
             self.router.navigate(Tab::About);
         }
         self.setup_scenario(name, window, cx)?;
         self.initialize_browsers(cx);
         self.open_scenario_surface(name, window, cx);
+        if name.starts_with("crash-") {
+            self.crash_scenario(name, window, cx);
+        }
         self.start_scenario_traces(toast_trace, window, cx);
         cx.notify();
         Ok(())
@@ -274,6 +303,8 @@ impl Block {
     /// that open over them.
     fn games_scenario(&mut self, name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if name.starts_with("games-")
+            || name.starts_with("profile-editor-")
+            || name == "instance-editor-exit-dirty"
             || matches!(
                 name,
                 "remove-confirmation" | "separate-confirmation" | "games-help"
@@ -283,10 +314,67 @@ impl Block {
             if name == "games-separated" {
                 self.snapshot.profile_mode = ProfileMode::Separated;
             }
-            if matches!(name, "games-detail" | "games-instance-settings") {
+            if name == "games-detail-long-path" {
+                let directory = std::path::PathBuf::from(
+                    "/scenario/Application Support/Block/shared installations/creative worlds and archived experiments/very long installation directory/Vanilla",
+                );
+                self.snapshot.instances[0].directory = directory.clone();
+                self.snapshot.profiles[0].runtime = RuntimeSelection::Local {
+                    java: directory.join("custom Java runtime/bin/java"),
+                };
+            }
+            if matches!(
+                name,
+                "games-detail"
+                    | "games-instance-settings"
+                    | "games-missing-record"
+                    | "games-detail-long-path"
+                    | "instance-editor-exit-dirty"
+            ) || name.starts_with("profile-editor-")
+            {
                 self.handle(UiAction::Inspect("vanilla".into()), window, cx);
-                if name == "games-instance-settings" {
+                if matches!(
+                    name,
+                    "games-instance-settings" | "instance-editor-exit-dirty"
+                ) {
                     self.handle(UiAction::EditInstance, window, cx);
+                }
+                if name == "instance-editor-exit-dirty" {
+                    self.handle(
+                        UiAction::InstanceWindow {
+                            width: 1536,
+                            height: 864,
+                        },
+                        window,
+                        cx,
+                    );
+                    self.handle(UiAction::NavigationBack, window, cx);
+                }
+                if name == "games-missing-record" {
+                    self.snapshot
+                        .profiles
+                        .retain(|profile| profile.id != "vanilla");
+                }
+                if name.starts_with("profile-editor-") {
+                    self.handle(UiAction::EditProfile, window, cx);
+                    let page = match name {
+                        "profile-editor-data" => Some(crate::profile_editor::EditorPage::Data),
+                        "profile-editor-launch" => Some(crate::profile_editor::EditorPage::Launch),
+                        "profile-editor-appearance" => {
+                            Some(crate::profile_editor::EditorPage::Appearance)
+                        }
+                        _ => None,
+                    };
+                    if let Some(page) = page {
+                        self.handle(UiAction::ProfilePage(page), window, cx);
+                    }
+                    if name == "profile-editor-exit-dirty" {
+                        if let Some(super::Form::Profile(form)) = &self.form {
+                            form.name
+                                .update(cx, |field, cx| field.set_value("Vanilla draft", cx));
+                        }
+                        self.handle(UiAction::NavigationBack, window, cx);
+                    }
                 }
             }
         }
@@ -324,6 +412,14 @@ impl Block {
         }
         if LOADER_FIXTURES.contains(&name) {
             self.loader_scenario(name, cx);
+        }
+        if name == "wizard-configuration-invalid" {
+            if let Some(super::Form::Instance(form)) = &self.form {
+                form.directory.update(cx, |field, cx| {
+                    field.set_value("relative-scenario-folder", cx)
+                });
+            }
+            self.handle(UiAction::WizardNext, window, cx);
         }
     }
 
@@ -418,7 +514,39 @@ impl Block {
         {
             return Ok(());
         }
-        self.provider_scenario(name, cx)?;
+        if matches!(
+            name,
+            "accounts-providers"
+                | "provider-detail"
+                | "provider-edit"
+                | "provider-editor-exit-dirty"
+        ) {
+            self.router.navigate(Tab::Accounts);
+            self.shell.providers.records = vec![
+                super::providers::fixture_provider(false)?,
+                super::providers::fixture_provider(true)?,
+            ];
+            self.shell.providers.loaded = true;
+            self.open_providers(cx);
+            if name != "accounts-providers" {
+                let id = uuid::Uuid::from_u128(if name == "provider-editor-exit-dirty" {
+                    2
+                } else {
+                    1
+                })
+                .to_string();
+                self.inspect_provider(&id, cx);
+                if name != "provider-detail" {
+                    self.edit_provider(Some(&id), window, cx);
+                }
+                if name == "provider-editor-exit-dirty" {
+                    self.handle(UiAction::ProviderConsent, window, cx);
+                    self.handle(UiAction::NavigationBack, window, cx);
+                }
+            }
+        } else {
+            self.provider_scenario(name, window, cx)?;
+        }
         if name == "remove-provider-confirmation" {
             self.request_remove_provider(uuid::Uuid::from_u128(1).to_string(), window, cx);
         }
@@ -495,9 +623,10 @@ impl Block {
         self.shell.first_run = first_run::State::default();
         self.shell.first_run.enabled = true;
         self.shell.first_run.stage = match name {
-            "setup-welcome" | "setup-import-sources" | "setup-import-list" => {
-                FirstRunStage::Welcome
-            }
+            "setup-welcome"
+            | "setup-import-sources"
+            | "setup-import-list"
+            | "setup-import-long-destination" => FirstRunStage::Welcome,
             "setup-game-choice" => FirstRunStage::GameChoice,
             "setup-game" => FirstRunStage::GameWizard,
             _ => FirstRunStage::Overview,
@@ -525,7 +654,7 @@ impl Block {
                 self.selected_profile = Some("vanilla".into());
                 self.selected_instance = Some("vanilla".into());
             }
-            "setup-import-sources" | "setup-import-list" => {
+            "setup-import-sources" | "setup-import-list" | "setup-import-long-destination" => {
                 let report = setup_import_report();
                 let state = &mut self.shell.import_games;
                 state.report = Some(report);
@@ -537,7 +666,7 @@ impl Block {
                     .filter(|candidate| candidate.importable)
                     .map(|candidate| candidate.id.clone())
                     .collect();
-                if name == "setup-import-list" {
+                if matches!(name, "setup-import-list" | "setup-import-long-destination") {
                     self.handle(
                         UiAction::ImportGames(import_games::Action::View(
                             SourceKind::OfficialLauncher,
@@ -545,6 +674,11 @@ impl Block {
                         window,
                         cx,
                     );
+                }
+                if name == "setup-import-long-destination" {
+                    self.shell.first_run.game_parent = Some(std::path::PathBuf::from(
+                        "/scenario/Application Support/Block/imported games/creative worlds and archived experiments/a deliberately long destination folder/instances",
+                    ));
                 }
             }
             "setup-account" => {
@@ -555,6 +689,16 @@ impl Block {
             }
             "setup-game" => {
                 self.handle(UiAction::FirstRun(first_run::Action::Custom), window, cx);
+            }
+            "setup-overview-draft" => {
+                self.shell.import_games.report = Some(setup_import_report());
+                self.handle(UiAction::FirstRun(first_run::Action::Custom), window, cx);
+                if let Some(super::Form::Instance(form)) = &self.form {
+                    form.name.update(cx, |field, cx| {
+                        field.set_value("Unfinished creative world", cx)
+                    });
+                }
+                self.handle(UiAction::FirstRun(first_run::Action::Back), window, cx);
             }
             _ => {}
         }
@@ -581,7 +725,7 @@ impl Block {
             }
             "separate-confirmation" => Some(Surface::SeparateProfiles),
             "games-help" => Some(Surface::GamesHelp),
-            "setup-import-sources" | "setup-import-list" => {
+            "setup-import-sources" | "setup-import-list" | "setup-import-long-destination" => {
                 Some(Surface::Drawer(Drawer::ImportGames))
             }
             _ => None,
@@ -623,23 +767,31 @@ impl Block {
             );
         }
     }
-}
 
-/// Single-pane fixtures use Home's frame; other pages use the management frame.
-fn resize_scenario_window(name: &str, toast_scenario: bool, window: &mut Window) {
-    let home = name.starts_with("home-")
-        || name.starts_with("settings-")
-        || name == "download-files"
-        || toast_scenario
-        || matches!(
-            name,
-            "setup-welcome" | "setup-import-sources" | "setup-import-list"
-        );
-    window.resize(if home {
-        crate::window_geometry::home_size(window)
-    } else {
-        crate::window_geometry::management_size(window)
-    });
+    fn crash_scenario(&mut self, name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let preferences = self.preferences.clone();
+        let launcher = cx.weak_entity();
+        window.set_window_title(&crate::crash_window_title(self.language()));
+        self.crash_help = Some(cx.new(|cx| {
+            crate::CrashView::scenario(
+                name,
+                preferences,
+                move |window, cx| {
+                    if let Err(error) = launcher.update(cx, |view, cx| {
+                        view.crash_help = None;
+                        window.set_window_title("Block");
+                        view.handle(UiAction::Tab(Tab::Instances), window, cx);
+                        view.handle(UiAction::Inspect("vanilla".into()), window, cx);
+                        cx.notify();
+                    }) {
+                        tracing::debug!(%error, "scenario launcher was released");
+                    }
+                },
+                window,
+                cx,
+            )
+        }));
+    }
 }
 
 fn fail_selected_target(
@@ -737,7 +889,7 @@ fn wizard_page(name: &str) -> Option<WizardPage> {
         | "wizard-loader-error"
         | "wizard-loader-empty"
         | "wizard-loader-search-empty" => Some(WizardPage::Loader),
-        "wizard-configuration" => Some(WizardPage::Location),
+        "wizard-configuration" | "wizard-configuration-invalid" => Some(WizardPage::Location),
         _ => None,
     }
 }

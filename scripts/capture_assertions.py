@@ -43,7 +43,7 @@ def normalized(text):
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text)).strip()
 
 
-def validate(candidate, window, *, title, viewport, required, observations):
+def validate(candidate, window, *, title, viewport, required, observations, contract_revision=None):
     """Require all independent assertions; a filename or image hash proves no page."""
     header = Path(candidate).read_bytes()[:24]
     if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
@@ -60,9 +60,12 @@ def validate(candidate, window, *, title, viewport, required, observations):
     missing = [phrase for phrase in required if normalized(phrase) not in text]
     if missing:
         raise ValueError("Page content assertions failed: " + ", ".join(missing))
-    return {"title": title, "logical_viewport": list(viewport), "pixel_size": [width, height],
+    result = {"title": title, "logical_viewport": list(viewport), "pixel_size": [width, height],
             "dpr": width / viewport[0], "required_text": required,
             "observations": observations, "passed": True}
+    if contract_revision is not None:
+        result["contract_revision"] = contract_revision
+    return result
 
 
 def publish(candidate, destination, receipt, assertions):

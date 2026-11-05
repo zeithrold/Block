@@ -27,91 +27,6 @@ use super::{
     text_input::{FieldSemantics, TextInput},
 };
 
-/// Informational wizard progress. Completion comes from the caller's real state;
-/// the rail itself never navigates or adds keyboard tab stops.
-#[derive(Clone, Copy)]
-pub(super) struct StepperStep<'a> {
-    pub title: &'a str,
-    pub description: &'a str,
-    pub complete: bool,
-}
-
-pub(super) fn stepper(
-    id: impl Into<SharedString>,
-    _label: &str,
-    steps: &[StepperStep<'_>],
-    current: usize,
-    palette: Palette,
-) -> Stateful<Div> {
-    div()
-        .id(id.into())
-        .role(gpui::Role::List)
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .gap_5()
-        .children(steps.iter().enumerate().map(|(index, step)| {
-            let active = index == current;
-            let foreground = if active {
-                palette.on_primary
-            } else {
-                palette.muted
-            };
-            div()
-                .id(("step", index))
-                .role(gpui::Role::ListItem)
-                .min_w_0()
-                .flex()
-                .items_start()
-                .gap_3()
-                .child(
-                    div()
-                        .size(px(28.))
-                        .flex_shrink_0()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(rgb(if active {
-                            palette.primary
-                        } else {
-                            palette.border
-                        }))
-                        .bg(rgb(if active {
-                            palette.primary
-                        } else {
-                            palette.background
-                        }))
-                        .text_color(rgb(foreground))
-                        .text_sm()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .children(step.complete.then(|| Icon::Check.render(14., foreground)))
-                        .children((!step.complete).then(|| (index + 1).to_string())),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .text_sm()
-                        .text_color(rgb(if active {
-                            palette.foreground
-                        } else {
-                            palette.muted
-                        }))
-                        .child(step.title.to_owned())
-                        .children((!step.description.is_empty()).then(|| {
-                            div()
-                                .text_xs()
-                                .text_color(rgb(palette.muted))
-                                .child(step.description.to_owned())
-                        })),
-                )
-        }))
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct ControlState {
     pub disabled: bool,
@@ -882,7 +797,7 @@ fn choice(
         .text_color(rgb(palette.foreground))
         .focus_visible(move |style| style.border_color(rgb(color)).shadow(focus_ring(color)))
         .child(indicator)
-        .child(label)
+        .child(div().min_w_0().flex_1().whitespace_normal().child(label))
 }
 
 /// Initials use complete graphemes, including non-Latin names and emoji.

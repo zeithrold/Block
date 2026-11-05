@@ -229,7 +229,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
         click(cx, "optifine-select-jar");
         let old = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
         assert!(old.is_some());
-        click(cx, "section-cancel");
+        click(cx, "cancel-instance");
         click(cx, "wizard-component-optifine");
         click(cx, "optifine-select-jar");
         let current = view.read_with(cx, |view, _| view.shell.wizard.optifine_request);
@@ -391,9 +391,15 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
+            view.snapshot = ready_snapshot();
+            view.router.open_record(
+                crate::Tab::Profiles,
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view
         });
-        cx.simulate_resize(size(px(960.), px(900.)));
+        let parent = view.read_with(cx, |view, _| view.router.entry_id());
+        cx.simulate_resize(size(px(360.), px(720.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.handle(crate::UiAction::CreateInstance, window, cx);
@@ -422,7 +428,11 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
             click(cx, "cancel-instance");
             click(cx, "discard-game-confirm");
         }
-        assert!(view.read_with(cx, |view, _| view.form.is_none()));
+        assert!(view.read_with(cx, |view, _| view.form.is_none()
+            && view.router.entry_id() == parent
+            && matches!(view.router.screen(),
+                crate::navigation::Screen::Record(crate::navigation::RecordRef::Profile(id))
+                    if id == "profile-a")));
     }
 }
 
@@ -508,7 +518,7 @@ fn pack_rail_groups_inspection_review_and_install_results_into_three_steps(
 }
 
 #[gpui::test]
-fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut TestAppContext) {
+fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -519,9 +529,8 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
     // One value with no ASCII space and full-width glyphs: the longest real
     // value still has to wrap instead of collapsing into one clipped line.
     let long = "1.21.1-neoforge-21.1.172-构建设置与超长版本标识符用于校验换行".to_owned();
-    // Two columns are the layout at every window the product opens, so the
-    // cards have to stay content-sized at the standard and fitted widths.
-    for width in [960., 1152.] {
+    // The product always uses one column, including a larger test host.
+    for width in [360., 400.] {
         view.update(cx, |view, cx| {
             if let Some(Form::Instance(form)) = &mut view.form {
                 form.version
@@ -551,36 +560,37 @@ fn wizard_component_cards_keep_two_columns_and_grow_with_their_content(cx: &mut 
         else {
             return;
         };
-        // Version and Loader share the first row; Configuration follows.
+        // Every component occupies its own content-sized row.
         assert!(
             (version.left() - location.left()).abs() <= px(1.),
-            "Configuration starts in the first column at {width}"
+            "Configuration aligns with Version at {width}"
         );
         assert!(
             (version.size.width - loader.size.width).abs() <= px(1.)
                 && (loader.size.width - location.size.width).abs() <= px(1.),
-            "cards must split the grid width equally at {width}"
+            "cards must fill the same column width at {width}"
         );
-        let first_row = version.size.height.max(loader.size.height);
+        let first_row = version.size.height;
+        let loader_row = loader.size.height;
         let second_row = location.size.height;
         assert!(
-            (loader.left() - version.right()).abs() <= px(13.)
-                && (location.top() - (version.top() + first_row)).abs() <= px(13.),
+            (loader.top() - version.bottom() - px(12.)).abs() <= px(1.)
+                && (location.top() - loader.bottom() - px(12.)).abs() <= px(1.),
             "cards must keep the 12 px grid gap at {width}"
         );
         assert!(
-            version.top() < location.top() && loader.top() < location.top(),
-            "Version and Loader must lead the first row at {width}"
+            version.top() < loader.top() && loader.top() < location.top(),
+            "Version, Loader and Configuration must keep their reading order at {width}"
         );
         for card in [version, loader, location] {
             assert!(
-                card.size.height >= px(96.),
-                "cards must keep their 96 px minimum height at {width}: {card:?}"
+                card.size.height >= px(80.),
+                "summary rows must keep their 80 px minimum height at {width}: {card:?}"
             );
         }
         assert!(
-            (grid.size.height - (first_row + second_row + px(12.))).abs() <= px(1.),
-            "the grid must reserve only its two content rows at {width}: grid={grid:?}, version={version:?}, location={location:?}"
+            (grid.size.height - (first_row + loader_row + second_row + px(24.))).abs() <= px(1.),
+            "the grid must reserve only its three content rows at {width}: grid={grid:?}, version={version:?}, location={location:?}"
         );
         // The value and its detail sit inside the card instead of being clipped.
         assert!(
@@ -1372,6 +1382,102 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
 }
 
 #[gpui::test]
+fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.begin_game_wizard(cx);
+        view
+    });
+    for page in [
+        WizardPage::Version,
+        WizardPage::Loader,
+        WizardPage::OptiFine,
+        WizardPage::Location,
+    ] {
+        let result = view.update(cx, |view, cx| -> anyhow::Result<()> {
+            view.open_game_wizard_page(Some(page), cx);
+            let Some(Form::Instance(form)) = &view.form else {
+                anyhow::bail!("the wizard must retain its instance draft");
+            };
+            form.version
+                .update(cx, |field, cx| field.set_value(" invalid version ", cx));
+            form.directory
+                .update(cx, |field, cx| field.set_value("relative folder", cx));
+            let profile = view
+                .shell
+                .wizard
+                .profile
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("profile draft"))?;
+            profile
+                .width
+                .update(cx, |field, cx| field.set_value("invalid width", cx));
+            let token = block_launcher::CancellationToken::new();
+            view.shell.wizard.loader_request = Some(super::LoaderRequest(token.clone()));
+            view.shell.wizard.optifine_request = Some(uuid::Uuid::new_v4());
+
+            view.back_game_wizard(cx);
+
+            assert_eq!(view.shell.wizard.page, None);
+            assert!(view.shell.wizard.section_snapshot.is_none());
+            assert!(token.is_cancelled(), "Back releases the section request");
+            assert!(view.shell.wizard.optifine_request.is_none());
+            assert!(matches!(&view.form, Some(Form::Instance(form))
+                if form.version.read(cx).value() == " invalid version "
+                    && form.directory.read(cx).value() == "relative folder"));
+            assert_eq!(
+                view.shell
+                    .wizard
+                    .profile
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("profile draft"))?
+                    .width
+                    .read(cx)
+                    .value(),
+                "invalid width"
+            );
+
+            // A second entry checkpoints the retained raw values. Explicit
+            // Cancel restores that checkpoint without parsing or normalizing it.
+            view.open_game_wizard_page(Some(page), cx);
+            if let Some(Form::Instance(form)) = &view.form {
+                form.version
+                    .update(cx, |field, cx| field.set_value("other", cx));
+                form.directory
+                    .update(cx, |field, cx| field.set_value("/other", cx));
+            }
+            view.shell
+                .wizard
+                .profile
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("profile draft"))?
+                .width
+                .update(cx, |field, cx| field.set_value("1920", cx));
+            view.cancel_component_draft(cx);
+            assert!(matches!(&view.form, Some(Form::Instance(form))
+                if form.version.read(cx).value() == " invalid version "
+                    && form.directory.read(cx).value() == "relative folder"));
+            assert_eq!(
+                view.shell
+                    .wizard
+                    .profile
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("profile draft"))?
+                    .width
+                    .read(cx)
+                    .value(),
+                "invalid width"
+            );
+            Ok(())
+        });
+        assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+#[gpui::test]
 fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &mut TestAppContext) {
     let directory = std::env::temp_dir().join("block-new-game");
     let directory = directory.to_string_lossy().into_owned();
@@ -1397,7 +1503,7 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
             form.loader = block_launcher::catalog::LoaderKind::NeoForge;
             form.loader_version = Some("20.6.144".into());
         }
-        view.back_game_wizard(cx);
+        view.cancel_component_draft(cx);
         if let Some(Form::Instance(form)) = &view.form {
             assert_eq!(form.version.read(cx).value(), "1.21.1");
             assert_eq!(form.directory.read(cx).value(), "");
@@ -1793,7 +1899,7 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
     cx.run_until_parked();
 
     view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.loader_version.is_none() && form.version.read(cx).value() == "1.21.1")); });
-    click(cx, "wizard-back");
+    click(cx, "cancel-instance");
     view.update(cx, |view, cx| {
         assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
         assert!(view.shell.wizard.version_notice.is_none());
@@ -1813,8 +1919,8 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
 
 #[gpui::test]
 fn wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext) {
-    for (width, height) in [(1152., 720.), (960., 540.)] {
-        let (_view, cx) = crate::test_support::window(cx, |window, cx| {
+    for (width, height) in [(360., 720.), (360., 540.)] {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
             view.begin_game_wizard(cx);
@@ -1835,6 +1941,45 @@ fn wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext)
         assert!(footer.is_some_and(|bounds| bounds.size.height >= px(72.)));
         let rail = crate::test_support::control_bounds(cx, "wizard-rail");
         assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(360.)));
+        assert!(rail.is_some_and(|bounds| bounds.size.height < px(80.)));
+        for (page, selector) in [
+            (WizardPage::Version, "wizard-version-picker"),
+            (WizardPage::Loader, "wizard-loader-picker"),
+            (WizardPage::OptiFine, "optifine-select-jar"),
+            (WizardPage::Location, "wizard-field-Directory"),
+        ] {
+            view.update(cx, |view, cx| {
+                view.open_game_wizard_page(Some(page), cx);
+                cx.notify();
+            });
+            cx.run_until_parked();
+            view.read_with(cx, |view, _| {
+                assert_eq!(view.wizard_outer_page(), Some(page));
+                assert!(!view.shell.surfaces.is_open());
+            });
+            let content = crate::test_support::control_bounds(cx, selector);
+            assert!(
+                content
+                    .is_some_and(|bounds| bounds.left() >= px(0.) && bounds.right() <= px(width)),
+                "{page:?}: {content:?}"
+            );
+            let body = crate::test_support::control_bounds(cx, "wizard-body");
+            let footer = crate::test_support::control_bounds(cx, "wizard-footer");
+            assert!(
+                matches!((body, footer), (Some(body), Some(footer))
+                if body.bottom() <= footer.top() && footer.bottom() <= px(height)),
+                "{page:?}: body={body:?}, footer={footer:?}"
+            );
+            for action in ["cancel-instance", "wizard-back", "wizard-next"] {
+                let bounds = crate::test_support::control_bounds(cx, action);
+                assert!(
+                    bounds.is_some_and(|bounds| bounds.left() >= px(0.)
+                        && bounds.right() <= px(width)
+                        && bounds.bottom() <= px(height)),
+                    "{page:?}/{action}: {bounds:?}"
+                );
+            }
+        }
     }
 }
 

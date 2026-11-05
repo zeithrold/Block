@@ -1,5 +1,15 @@
 {
   "_version": 2,
+  "games.browser.unavailable_title": {
+    "en": "Item no longer available",
+    "zh-Hans": "项目已不可用",
+    "ja": "項目を利用できません"
+  },
+  "games.browser.unavailable_body": {
+    "en": "This item was removed or is no longer available. Go back to the list to choose another.",
+    "zh-Hans": "此项目已移除或不可用。请返回列表选择其他项目。",
+    "ja": "この項目は削除されたか利用できなくなりました。一覧に戻って別の項目を選択してください。"
+  },
   "games.browser.title.accounts": {
     "en": "Your accounts",
     "zh-Hans": "你的账户",

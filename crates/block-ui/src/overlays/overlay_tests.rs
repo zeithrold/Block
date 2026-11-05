@@ -2,7 +2,7 @@
 //! logical stack stays the single source of truth for open, close and order.
 use crate::{
     Block, UiAction,
-    shell::{Drawer, Surface},
+    shell::{Drawer, EditorExit, EditorKind, Surface},
 };
 use gpui::{
     Entity, Focusable as _, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px,
@@ -20,7 +20,6 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Block>, &mut VisualTestContext) {
         view.selected_profile = Some("profile-a".into());
         view
     });
-    cx.simulate_resize(size(px(960.), px(600.)));
     (view, cx)
 }
 
@@ -88,6 +87,189 @@ fn open_delete_profile(view: &Entity<Block>, cx: &mut VisualTestContext) {
         });
     });
     cx.run_until_parked();
+}
+
+#[gpui::test]
+#[expect(
+    clippy::expect_used,
+    reason = "Missing dialog geometry or a safe action is a test failure."
+)]
+fn compact_long_dialog_keeps_title_and_close_fixed_while_body_scrolls(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(360.), px(540.)));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| view.handle(UiAction::GamesHelp, window, cx));
+    });
+    cx.run_until_parked();
+    let (content, insets) = cx.update(|window, _| {
+        (
+            crate::window_geometry::content_size(window),
+            crate::window_geometry::content_insets(window),
+        )
+    });
+    let dialog = crate::test_support::control_bounds(cx, "dialog-0").expect("dialog painted");
+    let title =
+        crate::test_support::control_bounds(cx, "surface-dialog-title").expect("title painted");
+    let footer =
+        crate::test_support::control_bounds(cx, "surface-dialog-footer").expect("footer painted");
+    let scroll =
+        crate::test_support::control_bounds(cx, "surface-dialog-scroll").expect("body painted");
+    let body =
+        crate::test_support::control_bounds(cx, "surface-dialog-body").expect("content painted");
+    assert!(dialog.size.width <= content.width - px(32.));
+    assert!(dialog.left() >= insets.left + px(16.));
+    assert!(dialog.right() <= insets.left + content.width - px(16.));
+    assert!(dialog.size.height <= content.height - px(80.));
+    assert!(title.top() >= dialog.top() && title.bottom() <= scroll.top());
+    assert!(scroll.bottom() <= footer.top() && footer.bottom() <= dialog.bottom());
+    assert!(scroll.size.height < px(360.), "the long body must overflow");
+
+    let position = scroll.origin + point(px(8.), px(8.));
+    cx.simulate_mouse_move(position, None, Modifiers::none());
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position,
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+        ..gpui::ScrollWheelEvent::default()
+    });
+    cx.run_until_parked();
+    let scrolled =
+        crate::test_support::control_bounds(cx, "surface-dialog-body").expect("content retained");
+    assert!(scrolled.top() < body.top(), "the body must actually scroll");
+    assert_eq!(
+        crate::test_support::control_bounds(cx, "surface-dialog-title"),
+        Some(title)
+    );
+    assert_eq!(
+        crate::test_support::control_bounds(cx, "surface-dialog-footer"),
+        Some(footer)
+    );
+    let close = crate::test_support::control_bounds(cx, "close-drawer").expect("Close painted");
+    assert!(close.top() >= footer.top() && close.bottom() <= footer.bottom());
+    click(cx, "close-drawer");
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+}
+
+#[gpui::test]
+#[expect(
+    clippy::expect_used,
+    reason = "Each editor exit must paint its actions and focus the safe one."
+)]
+fn editor_exit_actions_fit_compact_content_and_stay_restores_focus(cx: &mut TestAppContext) {
+    for kind in [
+        EditorKind::Instance,
+        EditorKind::Profile,
+        EditorKind::Provider,
+    ] {
+        let (view, cx) = fixture(cx);
+        cx.simulate_resize(size(px(360.), px(720.)));
+        cx.run_until_parked();
+        let trigger = cx
+            .update(|window, cx| window.focused(cx))
+            .expect("trigger focused");
+        let (entry, operation) = cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let entry = view.router.entry_id();
+                view.shell.surfaces.open(
+                    Surface::EditorExit(EditorExit {
+                        entry,
+                        kind,
+                        exit: Box::new(UiAction::NavigationBack),
+                    }),
+                    window,
+                    cx,
+                );
+                (entry, view.operation_revision)
+            })
+        });
+        cx.run_until_parked();
+        let content = cx.update(|window, _| crate::window_geometry::content_size(window));
+        let dialog = crate::test_support::control_bounds(cx, "dialog-0").expect("dialog painted");
+        assert!(dialog.size.width <= content.width - px(32.));
+        assert!(dialog.size.height <= content.height - px(80.));
+        let mut previous_bottom = dialog.top();
+        for selector in [
+            "editor-exit-save",
+            "editor-exit-discard",
+            "editor-exit-stay",
+        ] {
+            let action = crate::test_support::control_bounds(cx, selector).expect("action painted");
+            assert!(action.left() >= dialog.left() && action.right() <= dialog.right());
+            assert!(action.top() >= previous_bottom && action.bottom() <= dialog.bottom());
+            previous_bottom = action.bottom();
+        }
+        cx.update(|window, _| {
+            let stay = gpui_base::test_support::find(window, &[], &"editor-exit-stay".into())
+                .expect("safe action has a native node");
+            assert_eq!(stay.focused(), Some(true));
+        });
+
+        click(cx, "editor-exit-stay");
+        view.read_with(cx, |view, _| {
+            assert!(!view.shell.surfaces.is_open());
+            assert_eq!(view.router.entry_id(), entry);
+            assert_eq!(view.operation_revision, operation);
+        });
+        cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+        assert_eq!(cx.update(|window, cx| window.focused(cx)), Some(trigger));
+    }
+}
+
+#[gpui::test]
+fn late_editor_exit_dismissal_cannot_close_a_covering_dialog(cx: &mut TestAppContext) {
+    let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(360.), px(720.)));
+    cx.run_until_parked();
+    let trigger = cx.update(|window, cx| window.focused(cx));
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.shell.surfaces.open(
+                Surface::EditorExit(EditorExit {
+                    entry: view.router.entry_id(),
+                    kind: EditorKind::Instance,
+                    exit: Box::new(UiAction::NavigationBack),
+                }),
+                window,
+                cx,
+            );
+        });
+    });
+    cx.run_until_parked();
+    let safe_focus = cx.update(|window, cx| window.focused(cx));
+    let revision = view.read_with(cx, |view, _| {
+        view.shell.surfaces.top().map(|layer| layer.revision)
+    });
+    open_delete_profile(&view, cx);
+
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            if let Some(revision) = revision {
+                view.dismiss_surface_overlay(revision, window, cx);
+            }
+        });
+    });
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.surfaces.layers().count(), 2);
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::DeleteProfile(_))
+        ));
+    });
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.surfaces.layers().count(), 1);
+        assert!(matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::EditorExit(_))
+        ));
+    });
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), safe_focus);
+    crate::test_support::press(cx, "escape");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
+    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+    assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger);
 }
 
 #[gpui::test]
@@ -299,10 +481,10 @@ fn a_late_dismissal_never_closes_a_newer_overlay(cx: &mut TestAppContext) {
 fn the_scrim_blocks_pointer_input_to_the_background(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
     cx.run_until_parked();
-    let menu = crate::test_support::control_bounds(cx, "app-menu");
+    let menu = crate::test_support::control_bounds(cx, "navigation-back");
     assert!(
         menu.is_some(),
-        "the shell menu must paint behind the overlay"
+        "the page Back control must paint behind the overlay"
     );
     let Some(menu) = menu else {
         return;
@@ -312,6 +494,7 @@ fn the_scrim_blocks_pointer_input_to_the_background(cx: &mut TestAppContext) {
     crate::test_support::ensure_live_window(cx);
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
+        assert_eq!(view.router.tab(), crate::Tab::Instances);
         assert_eq!(
             view.shell.surfaces.layers().count(),
             1,
@@ -547,7 +730,12 @@ fn crash_follows_pointer_dismissal(cx: &mut TestAppContext, backdrop: bool) -> a
     let window_id = gpui::VisualContext::window_handle(cx).window_id();
     deliver_crash(&view, cx, root.path())?;
     if backdrop {
-        cx.simulate_click(point(px(20.), px(250.)), Modifiers::none());
+        let dialog = crate::test_support::control_bounds(cx, "dialog-0")
+            .ok_or_else(|| anyhow::anyhow!("missing help dialog"))?;
+        cx.simulate_click(
+            point(dialog.left() - px(4.), dialog.center().y),
+            Modifiers::none(),
+        );
         cx.run_until_parked();
     } else {
         click(cx, "close-drawer");
@@ -1298,7 +1486,7 @@ fn auth_provider_add_opens_as_dialog_and_escape_dismisses_it(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn compact_wizard_dialogs_fit_the_window_and_provider_actions_scroll(cx: &mut TestAppContext) {
+fn compact_wizard_sections_and_provider_dialog_actions_stay_reachable(cx: &mut TestAppContext) {
     for language in crate::Language::ALL {
         let (view, cx) = fixture(cx);
         cx.simulate_resize(size(px(360.), px(540.)));
@@ -1315,7 +1503,8 @@ fn compact_wizard_dialogs_fit_the_window_and_provider_actions_scroll(cx: &mut Te
             });
         });
         cx.run_until_parked();
-        for selector in ["section-cancel", "section-done"] {
+        cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
+        for selector in ["cancel-instance", "wizard-back", "wizard-next"] {
             let action = crate::test_support::control_bounds(cx, selector);
             assert!(
                 action.is_some_and(|action| action.left() >= px(0.)

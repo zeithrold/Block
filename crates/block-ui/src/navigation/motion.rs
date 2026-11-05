@@ -256,9 +256,6 @@ impl Default for Pose {
     }
 }
 impl Pose {
-    pub(super) fn apply<E: gpui::Styled>(self, element: E) -> E {
-        element.relative().left(px(self.x)).opacity(self.opacity)
-    }
     fn mix(self, target: Self, progress: f32) -> Self {
         Self {
             x: self.x.interpolate(&target.x, progress),
@@ -276,6 +273,8 @@ pub(super) fn layer(id: impl Into<ElementId>, pose: Pose, content: AnyElement) -
         .size_full()
         .min_w_0()
         .min_h_0()
+        .flex()
+        .flex_col()
         .opacity(pose.opacity)
         .child(content)
 }
@@ -457,6 +456,11 @@ impl<K: PartialEq, T> Transition<K, T> {
     }
     pub(super) const fn current(&self) -> Option<&Layer<K, T>> {
         self.current.as_ref()
+    }
+    pub(super) fn refresh_snapshot(&mut self, key: &K, snapshot: T) {
+        if let Some(current) = self.current.as_mut().filter(|current| &current.key == key) {
+            current._snapshot = snapshot;
+        }
     }
     pub(super) const fn outgoing(&self) -> Option<&Layer<K, T>> {
         self.outgoing.as_ref()

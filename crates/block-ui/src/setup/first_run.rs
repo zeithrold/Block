@@ -359,33 +359,20 @@ impl Block {
             })
     }
 
-    pub(super) fn first_run_overview(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn first_run_overview(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
         // The center exists only while setup is incomplete; a late action from
         // inside the flow cannot revive it after Finish.
         if !self.shell.first_run.enabled || self.preferences.onboarding_complete {
             return;
         }
         self.shell.wizard.cancel_loader_request();
-        let leaving_welcome = self.shell.first_run.stage == Stage::Welcome;
-        // Freeze the leaving Welcome page before the stage changes.
-        let outgoing = leaving_welcome.then(|| std::rc::Rc::new(self.visual_snapshot(cx)));
         self.shell.first_run.stage = Stage::Overview;
         self.router.leave_task();
         self.shell.first_run.entered = None;
         // Entering the center is what asks the automatic sources for a count.
         self.ensure_setup_scan();
         self.motion_dirty = true;
-        if let Some(outgoing) = outgoing.filter(|_| !self.motion_preferences().reduced()) {
-            // Sequence: slide Welcome away, resize the frame, slide Overview in.
-            self.start_first_run_switch(
-                super::motion::Direction::Forward,
-                outgoing,
-                cx.background_executor().now(),
-            );
-            cx.notify();
-        } else {
-            self.request_frame_resize(window, cx);
-        }
+        cx.notify();
     }
 
     pub(super) fn handle_first_run(
@@ -414,11 +401,8 @@ impl Block {
                 let state = self.first_run_game_state();
                 if state == GameState::PendingPack {
                     self.handle_first_run(Action::Prepare, window, cx);
-                } else if self.complete_onboarding() {
-                    self.request_frame_resize(window, cx);
-                    if state == GameState::Unprepared {
-                        self.handle(UiAction::Repair, window, cx);
-                    }
+                } else if self.complete_onboarding() && state == GameState::Unprepared {
+                    self.handle(UiAction::Repair, window, cx);
                 }
             }
             Action::Account => {
@@ -431,7 +415,6 @@ impl Block {
                 self.shell.first_run.stage = Stage::GameChoice;
                 self.router.enter_game_choice();
                 self.shell.first_run.entered = Some(cx.background_executor().now());
-                self.request_frame_resize(window, cx);
             }
             Action::Recommended | Action::Custom => {
                 // Any game entry resumes the draft the user already has instead
@@ -450,8 +433,6 @@ impl Block {
                     return;
                 }
                 self.begin_game_wizard(cx);
-                self.router.navigate(Tab::Onboarding);
-                self.router.enter_game_wizard();
                 self.shell.wizard.step = WizardStep::Setup;
                 self.shell.first_run.stage = Stage::GameWizard;
                 self.shell.first_run.entered = Some(cx.background_executor().now());
@@ -478,27 +459,14 @@ impl Block {
             Action::BackToWelcome => {
                 // Returning to Welcome is navigation, not a reset: `setup-started`
                 // and the saved game parent keep the draft resumable.
-                let outgoing = std::rc::Rc::new(self.visual_snapshot(cx));
                 // The previous control was unmounted while hovered and may
                 // never receive mouse-leave. Give the returning control fresh
-                // hover/pointer state without changing the frozen snapshot.
+                // hover/pointer state when the page returns.
                 self.shell.first_run.welcome_button = Default::default();
                 self.shell.first_run.stage = Stage::Welcome;
                 self.router.leave_task();
                 self.shell.first_run.entered = None;
                 self.motion_dirty = true;
-                if self.motion_preferences().reduced() {
-                    self.request_frame_resize(window, cx);
-                } else {
-                    // Sequence: slide Overview away, shrink the frame, slide
-                    // Welcome back in from the left.
-                    self.start_first_run_switch(
-                        super::motion::Direction::Back,
-                        outgoing,
-                        cx.background_executor().now(),
-                    );
-                    cx.notify();
-                }
             }
             Action::Import => self.open_import_games(window, cx),
             Action::Prepare => match self.first_run_game_state() {
@@ -514,9 +482,7 @@ impl Block {
             },
             Action::Rescan => self.scan_games_for_setup(),
             Action::Skip => {
-                if self.complete_onboarding() {
-                    self.request_frame_resize(window, cx);
-                }
+                self.complete_onboarding();
             }
         }
         cx.notify();
@@ -656,7 +622,11 @@ impl Block {
 
     /// Overview and Game choice share one scrollable body; only Overview owns a
     /// footer, because those are the two steps it tracks.
-    fn first_run_progress_page(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    fn first_run_progress_page(
+        &self,
+        _window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
         let error = self.first_run_feedback(self.language()).map(|message| {
             div()
                 .id("setup-notice")
@@ -670,7 +640,7 @@ impl Block {
         } else {
             self.first_run_tasks(cx)
         };
-        let footer = self.first_run_footer(super::page_host::compact_game_wizard(window), cx);
+        let footer = self.first_run_footer(cx);
         div()
             .id("setup-overview")
             .debug_selector(|| "setup-overview".into())
@@ -696,11 +666,10 @@ impl Block {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .p_8()
+                            .p_4()
                             .child(
                                 div()
                                     .w_full()
-                                    .max_w(px(620.))
                                     .flex()
                                     .flex_col()
                                     .gap_4()
@@ -715,11 +684,7 @@ impl Block {
 
     /// The primary action names what happens to the selected game and where
     /// setup goes next. Leaving without preparing remains an explicit choice.
-    fn first_run_footer(
-        &self,
-        compact: bool,
-        cx: &Context<'_, Self>,
-    ) -> Option<gpui::Stateful<gpui::Div>> {
+    fn first_run_footer(&self, cx: &Context<'_, Self>) -> Option<gpui::Stateful<gpui::Div>> {
         if self.shell.first_run.stage != Stage::Overview {
             return None;
         }
@@ -733,9 +698,10 @@ impl Block {
                 ButtonVariant::Ghost,
                 cx,
             )
-            .when(compact, |button| {
-                button.w_full().h_auto().min_h(px(36.)).whitespace_normal()
-            })
+            .w_full()
+            .h_auto()
+            .min_h(px(36.))
+            .whitespace_normal()
         });
         Some(
             super::patterns::management_footer(self.palette)
@@ -747,12 +713,10 @@ impl Block {
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(620.))
                         .mx_auto()
                         .flex()
-                        .flex_wrap()
-                        .when(compact, |footer| footer.flex_col().items_stretch())
-                        .items_center()
+                        .flex_col()
+                        .items_stretch()
                         .justify_end()
                         .gap_3()
                         .children(later)
@@ -771,9 +735,10 @@ impl Block {
                                 ButtonVariant::Primary,
                                 cx,
                             )
-                            .when(compact, |button| {
-                                button.w_full().h_auto().min_h(px(36.)).whitespace_normal()
-                            }),
+                            .w_full()
+                            .h_auto()
+                            .min_h(px(36.))
+                            .whitespace_normal(),
                         ),
                 ),
         )
@@ -932,8 +897,8 @@ impl Block {
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .justify_between()
+                    .flex_col()
+                    .items_start()
                     .gap_3()
                     .child(note(tr!(language, "setup.language.description")))
                     .child(self.button_with_variant(
@@ -988,8 +953,8 @@ impl Block {
             Scan::Found(count) => Some(
                 div()
                     .flex()
-                    .items_center()
-                    .justify_between()
+                    .flex_col()
+                    .items_start()
                     .gap_3()
                     .child(note(tr!(language, "setup.import.found", count = count)))
                     .child(self.button_with_variant(
@@ -1011,8 +976,8 @@ impl Block {
             let language = self.language();
             div()
                 .flex()
-                .items_center()
-                .justify_between()
+                .flex_col()
+                .items_start()
                 .gap_3()
                 .child(note(tr!(language, "setup.draft.found")))
                 .child(self.button_with_variant(
@@ -1112,17 +1077,20 @@ impl Block {
             cx,
         )
         .w_full()
+        .h_auto()
         .min_h(px(90.))
         .p_4()
         .justify_start()
         .child(
             div()
+                .min_w_0()
+                .w_full()
                 .flex()
                 .flex_col()
                 .items_start()
                 .gap_2()
-                .child(title.to_owned())
-                .child(note(description.to_owned())),
+                .child(div().w_full().whitespace_normal().child(title.to_owned()))
+                .child(note(description.to_owned()).w_full().whitespace_normal()),
         )
     }
 
@@ -1148,7 +1116,8 @@ impl Block {
             ButtonVariant::Outline,
             cx,
         )
-        .flex_1()
+        .w_full()
+        .flex_shrink_0()
         .min_w_0()
         .h_auto()
         .p_4()

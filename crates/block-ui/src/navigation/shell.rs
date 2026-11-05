@@ -5,6 +5,7 @@
 //! Native product shell, keeping page, detail and drawer animation lifetimes independent.
 use std::{
     cell::RefCell,
+    collections::HashMap,
     sync::{Arc, LazyLock},
 };
 
@@ -33,6 +34,27 @@ pub(super) enum Drawer {
     Downloads,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EditorKind {
+    Instance,
+    Profile,
+    Provider,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct EditorExit {
+    pub entry: u64,
+    pub kind: EditorKind,
+    pub exit: Box<UiAction>,
+}
+
+#[derive(Debug)]
+pub(super) struct PendingEditorExit {
+    pub operation: u64,
+    pub exit: Box<UiAction>,
+    pub window: gpui::AnyWindowHandle,
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum Surface {
     Drawer(Drawer),
@@ -51,8 +73,8 @@ pub(super) enum Surface {
         exit: Box<UiAction>,
     },
     SettingsExit(Box<UiAction>),
+    EditorExit(EditorExit),
     GamesHelp,
-    WizardSection(super::WizardPage),
     AuthProviderAdd,
     Select(super::select::SelectState<UiAction>),
 }
@@ -90,6 +112,11 @@ pub(super) struct ShellState {
     pub providers: super::providers::State,
     pub selector: Option<super::search_selector::SearchSelectorState>,
     pub revision: usize,
+    pub return_focus: HashMap<u64, gpui::FocusHandle>,
+    /// The entry whose owner assigned focus or scheduled its restoration.
+    pub focus_entry: Option<u64>,
+    pub focus_generation: u64,
+    pub pending_editor_exit: Option<PendingEditorExit>,
     pub backwards: bool,
     pub settings_page: Option<u8>,
     pub wizard: super::game_wizard::WizardState,
@@ -177,8 +204,8 @@ impl ShellState {
             | Surface::StopPackImport { .. }
             | Surface::DiscardGameDraft { .. }
             | Surface::SettingsExit(_)
+            | Surface::EditorExit(_)
             | Surface::GamesHelp
-            | Surface::WizardSection(_)
             | Surface::AuthProviderAdd
             | Surface::Select(_) => None,
         })
@@ -212,13 +239,12 @@ impl Block {
             )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if super::settings::is_back_key(event)
-                    && view.router.tab() == Tab::Settings
-                    && !view.composition_in_progress(&UiAction::SettingsBack, cx)
+                    && !view.composition_in_progress(&UiAction::NavigationBack, cx)
                 {
                     if view.shell.surfaces.is_open() {
                         view.handle(UiAction::Drawer(None), window, cx);
                     } else {
-                        view.handle(UiAction::SettingsBack, window, cx);
+                        view.handle(UiAction::NavigationBack, window, cx);
                     }
                     cx.stop_propagation();
                 } else if event.keystroke.key == "escape" {
@@ -227,25 +253,26 @@ impl Block {
                         if view.shell.auth.is_some() {
                             view.handle(UiAction::AuthCancel, window, cx);
                             cx.stop_propagation();
-                        } else if view.shell.instance_editor.is_some() {
-                            view.handle(UiAction::CancelInstanceSettings, window, cx);
+                        } else if view.shell.instance_editor.is_some()
+                            || matches!(view.form, Some(Form::Profile(_)))
+                        {
+                            view.handle(UiAction::NavigationBack, window, cx);
                             cx.stop_propagation();
                         } else if view.form.is_some() {
                             view.handle(UiAction::CancelForm, window, cx);
+                            cx.stop_propagation();
+                        } else if view.router.tab() != Tab::Home {
+                            view.handle(UiAction::NavigationBack, window, cx);
                             cx.stop_propagation();
                         }
                     }
                 }
             }))
             .on_action(cx.listener(|view, _: &super::NextField, window, cx| {
-                if !view.motion.frame.active() {
-                    view.move_focus(false, window, cx);
-                }
+                view.move_focus(false, window, cx);
             }))
             .on_action(cx.listener(|view, _: &super::PreviousField, window, cx| {
-                if !view.motion.frame.active() {
-                    view.move_focus(true, window, cx);
-                }
+                view.move_focus(true, window, cx);
             }))
             .size_full()
             .relative()
@@ -324,7 +351,7 @@ impl Block {
     }
 
     pub(super) fn native_window_title(&self) -> String {
-        if self.router.tab() == Tab::Home && self.shell.auth.is_none() {
+        if self.page_spec().page == super::navigation::Page::Home {
             return "Block".to_owned();
         }
         let title = if self.page_spec().page == super::navigation::Page::Settings {
@@ -372,6 +399,7 @@ impl Block {
         };
         div()
             .id("window-chrome")
+            .debug_selector(|| "window-chrome".into())
             .h(px(super::design::CHROME_HEIGHT))
             .relative()
             .flex_shrink_0()
@@ -439,6 +467,20 @@ impl Block {
                     self.chrome_icon_button(
                         "settings-back",
                         UiAction::SettingsBack,
+                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                        text.clone(),
+                        cx,
+                    ),
+                    text,
+                    cx,
+                )
+                .into_any_element()
+            } else if !home {
+                let text = tr!(language, "common.back");
+                super::tooltip::trigger(
+                    self.chrome_icon_button(
+                        "navigation-back",
+                        UiAction::NavigationBack,
                         super::design::Icon::ChevronLeft.render(16., self.palette.muted),
                         text.clone(),
                         cx,
@@ -1152,7 +1194,7 @@ impl Block {
             })
     }
 
-    /// One overlay surface's body: notes and its action row. The dialog host
+    /// One overlay surface's scrolling body. The dialog host
     /// owns the title and chrome; every value comes from current state so a
     /// confirmation that started an operation cannot keep stale buttons.
     pub(super) fn render_surface_dialog_body(
@@ -1170,50 +1212,7 @@ impl Block {
         let Some(kind) = kind else {
             return div().into_any_element();
         };
-        // A section keeps its footer visible within the current window.
-        let language = self.language();
-        let section_height = (window.viewport_size().height
-            - px(super::design::MANAGEMENT_FOOTER + 32.))
-        .max(px(0.))
-        .min(px(520.));
-        let (content, section) = match &kind {
-            Surface::WizardSection(page) => (
-                div()
-                    .min_h_0()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .h(section_height)
-                            .min_h_0()
-                            .w_full()
-                            .child(self.render_game_wizard_section_body(*page, window, cx)),
-                    )
-                    .child(
-                        super::patterns::management_footer(self.palette)
-                            .justify_end()
-                            .child(
-                                self.button(
-                                    "section-cancel",
-                                    tr!(language, "common.cancel"),
-                                    UiAction::Drawer(None),
-                                    cx,
-                                )
-                                .w_auto(),
-                            )
-                            .child(
-                                self.button(
-                                    "section-done",
-                                    tr!(language, "common.apply_draft"),
-                                    UiAction::WizardPage(None),
-                                    cx,
-                                )
-                                .w_auto(),
-                            ),
-                    ),
-                true,
-            ),
+        let (content, _section) = match &kind {
             Surface::DownloadFiles(group) => (
                 div()
                     .px(px(24.))
@@ -1238,41 +1237,43 @@ impl Block {
                 false,
             ),
         };
-        let content = content.w_full().flex().flex_col();
-        if section {
-            return content.into_any_element();
+        content.w_full().flex().flex_col().into_any_element()
+    }
+
+    pub(super) fn render_surface_dialog_footer(
+        &self,
+        revision: usize,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        let Some(kind) = self
+            .shell
+            .surfaces
+            .layers()
+            .find(|layer| layer.revision == revision)
+            .map(|layer| layer.kind.clone())
+        else {
+            return div().into_any_element();
+        };
+        if matches!(kind, Surface::AuthProviderAdd) {
+            return div().into_any_element();
         }
-        let actions = div().px(px(24.)).w_full().flex().gap_2();
-        let compact = matches!(kind, Surface::SettingsExit(_))
-            || matches!(kind, Surface::SeparateProfiles)
-                && super::window_geometry::content_size(window).width < px(520.);
         let buttons = if matches!(kind, Surface::SettingsExit(_)) {
             self.settings_exit_actions(cx)
+        } else if matches!(kind, Surface::EditorExit(_)) {
+            self.editor_exit_actions(cx)
         } else {
             self.surface_dialog_actions(&kind, cx)
         };
-        let actions = if compact {
-            actions
-                .flex_col()
-                .children(buttons.into_iter().map(|button| button.w_full()))
-        } else {
-            actions.justify_end().children(buttons)
-        };
-        // The separator spans the dialog edge to edge, while the actions keep
-        // the same inset as the body.
-        content
-            .child(
-                div()
-                    .w_full()
-                    .mt_4()
-                    .pt_4()
-                    .pb_4()
-                    .border_t_1()
-                    .border_color(rgb(self.palette.border))
-                    .flex()
-                    .justify_end()
-                    .child(actions),
-            )
+        div()
+            .w_full()
+            .p_4()
+            .border_t_1()
+            .border_color(rgb(self.palette.border))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(buttons.into_iter().map(|button| button.w_full()))
             .into_any_element()
     }
 
@@ -1419,8 +1420,39 @@ impl Block {
             Surface::StopPackImport { .. } => vec![tr!(language, "modpack.leave.note")],
             Surface::DiscardGameDraft { .. } => vec![tr!(language, "wizard.discard.note")],
             Surface::SettingsExit(_) => vec![tr!(language, "settings.exit.note")],
+            Surface::EditorExit(_) => vec![tr!(language, "common.editor_exit.description")],
             _ => Vec::new(),
         }
+    }
+
+    fn editor_exit_actions(&self, cx: &Context<'_, Self>) -> Vec<super::components::Control> {
+        let language = self.language();
+        [
+            (
+                "editor-exit-save",
+                "common.editor_exit.save",
+                Some(UiAction::EditorExitSave),
+                SurfaceDialogTone::Primary,
+            ),
+            (
+                "editor-exit-discard",
+                "common.editor_exit.discard",
+                Some(UiAction::EditorExitDiscard),
+                SurfaceDialogTone::Destructive,
+            ),
+            (
+                "editor-exit-stay",
+                "common.editor_exit.stay",
+                None,
+                SurfaceDialogTone::Outline,
+            ),
+        ]
+        .into_iter()
+        .map(|(id, key, action, tone)| {
+            self.surface_dialog_button(id, tr!(language, key), action, tone, cx)
+                .w_full()
+        })
+        .collect()
     }
 
     fn settings_exit_actions(&self, cx: &Context<'_, Self>) -> Vec<super::components::Control> {
@@ -1611,7 +1643,10 @@ impl Block {
             },
             on_activate,
         );
-        if matches!(id, "cancel-separate" | "settings-exit-stay") {
+        if matches!(
+            id,
+            "cancel-separate" | "settings-exit-stay" | "editor-exit-stay"
+        ) {
             control.track_focus(&self.shell.surfaces.trigger_focus(id, cx).tab_stop(true))
         } else {
             control

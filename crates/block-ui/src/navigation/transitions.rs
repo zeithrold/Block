@@ -14,13 +14,7 @@ use gpui::{
     AnyElement, Context, EntityId, Global, InteractiveElement as _, IntoElement as _,
     ParentElement as _, Styled as _, WeakEntity, Window, div,
 };
-use gpui_base::motion::Timing;
-use std::{
-    cell::Cell,
-    collections::HashMap,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SceneKey {
@@ -30,39 +24,6 @@ pub(super) enum SceneKey {
 }
 
 type Scene = Transition<SceneKey, Rc<Block>>;
-
-/// The outgoing page slides away before the window frame snaps to its size.
-const FIRST_RUN_OUT: Duration = Duration::from_millis(170);
-/// The incoming page slides in once the window frame has settled.
-const FIRST_RUN_IN: Duration = Duration::from_millis(190);
-/// Horizontal travel of the sequential first-run page swap.
-const FIRST_RUN_TRAVEL: f32 = 24.;
-
-/// A sequenced Welcome ↔ Overview swap: the leaving page slides away, the
-/// window frame snaps to its new size in one step, then the arriving page
-/// slides in. The generic page scene cannot express this order, and the frame
-/// morph suppresses page motion, so this short sequence owns its own clock.
-#[derive(Debug)]
-pub(super) struct FirstRunSwitch {
-    direction: Direction,
-    started: Instant,
-    outgoing: Rc<Block>,
-    resize_requested: bool,
-    reveal_started: Option<Instant>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum FirstRunPhase {
-    Out(f32),
-    In(f32),
-}
-
-fn switch_progress(now: Instant, started: Instant, total: Duration) -> f32 {
-    Timing::new(total)
-        .ease(motion::navigation_easing())
-        .sample(now.saturating_duration_since(started))
-        .directed_progress
-}
 
 #[cfg(test)]
 #[path = "navigation_tests.rs"]
@@ -92,8 +53,6 @@ pub(super) struct MotionState {
     pub outgoing_page: Cell<bool>,
     pub moving: bool,
     pub pending_focus: Vec<bool>,
-    /// Sequential Welcome ↔ Overview swap, when one is running.
-    pub first_run_switch: Option<FirstRunSwitch>,
 }
 impl Default for MotionState {
     fn default() -> Self {
@@ -107,7 +66,6 @@ impl Default for MotionState {
             outgoing_page: Cell::new(false),
             moving: false,
             pending_focus: Vec::new(),
-            first_run_switch: None,
         }
     }
 }
@@ -146,11 +104,49 @@ impl Block {
         let preferences = self.motion_preferences();
         serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving,"welcome":self.shell.first_run.welcome_button.trace_sample(now)})
     }
+    /// Freeze what is visible before an input or engine batch changes its model.
+    /// Wheel offsets and text edits can change without changing a scene key.
+    pub(super) fn capture_motion_origin(&mut self, cx: &mut Context<'_, Self>) {
+        if self.visual_only {
+            return;
+        }
+        let spec = self.page_spec();
+        let page = SceneKey::Page(spec.key);
+        let detail = SceneKey::Detail(spec.detail);
+        let wizard = spec.wizard.map(SceneKey::Wizard);
+        if self
+            .motion
+            .page
+            .current()
+            .is_none_or(|layer| layer.key != page)
+            || self
+                .motion
+                .detail
+                .current()
+                .is_none_or(|layer| layer.key != detail)
+            || self.motion.wizard.current().map(|layer| &layer.key) != wizard.as_ref()
+        {
+            // Another event changed identity before it painted. Keep the
+            // previous rendered model rather than freezing that unseen state.
+            return;
+        }
+        let snapshot = Rc::new(self.visual_snapshot(cx));
+        self.motion.page.refresh_snapshot(&page, snapshot.clone());
+        self.motion
+            .detail
+            .refresh_snapshot(&detail, snapshot.clone());
+        if let Some(wizard) = wizard {
+            self.motion.wizard.refresh_snapshot(&wizard, snapshot);
+        }
+    }
+
     pub(super) fn prepare_motion(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.visual_only {
             return;
         }
-        self.advance_first_run_switch(window, cx);
+        self.reconcile_browser_scroll();
+        self.reconcile_provider_scroll();
+        self.schedule_navigation_focus(window, cx);
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
         let spec = self.page_spec();
@@ -177,12 +173,7 @@ impl Block {
                 .detail
                 .current()
                 .is_some_and(|current| current.key != detail);
-            let frame_changed = self
-                .motion
-                .page
-                .current()
-                .is_some_and(|current| current._snapshot.page_spec().frame != spec.frame);
-            if page_changed || detail_changed || wizard_changed || frame_changed {
+            if page_changed || detail_changed || wizard_changed {
                 tracing::debug!(
                     event = "ui.navigation.changed",
                     view_id = self.view_id,
@@ -195,7 +186,6 @@ impl Block {
                     page_changed,
                     detail_changed,
                     wizard_changed,
-                    frame_changed,
                 );
             }
             self.motion.page.reconcile(
@@ -248,27 +238,7 @@ impl Block {
             if !page_changed && (detail_changed || wizard_changed) {
                 self.motion.page.settle();
             }
-            // Single-pane navigation is immediately interactive. Its body does
-            // not retain a second, overlapping focus tree during a drill-in.
-            if spec.layout == super::navigation::LayoutKind::SinglePane {
-                self.motion.detail.settle();
-            }
-            if page_changed
-                && !frame_changed
-                && (spec.layout == super::navigation::LayoutKind::SinglePane
-                    || self.motion.page.outgoing().is_some_and(|layer| {
-                        layer._snapshot.page_spec().layout
-                            == super::navigation::LayoutKind::SinglePane
-                    }))
-            {
-                self.motion.page.settle();
-            }
             self.motion_dirty = false;
-        }
-        if self.motion.frame.active() {
-            self.motion.page.settle();
-            self.motion.detail.settle();
-            self.motion.wizard.settle();
         }
         let mut running = false;
         for (index, scene) in [
@@ -286,127 +256,11 @@ impl Block {
         if running {
             window.request_animation_frame();
         }
-        self.motion.moving = running || self.motion.frame.active();
+        self.motion.moving = running;
         self.motion.page_frames.set(PageFrames {
             sidebar: self.motion.page.sample(now, preferences),
-            detail: self.motion.page.sample_delayed(now, preferences, 40),
+            detail: self.motion.page.sample(now, preferences),
         });
-    }
-
-    /// Begin the sequenced Welcome ↔ Overview swap. The caller freezes the
-    /// outgoing page before changing the first-run stage.
-    pub(super) fn start_first_run_switch(
-        &mut self,
-        direction: Direction,
-        outgoing: Rc<Block>,
-        now: Instant,
-    ) {
-        self.motion.first_run_switch = Some(FirstRunSwitch {
-            direction,
-            started: now,
-            outgoing,
-            resize_requested: false,
-            reveal_started: None,
-        });
-    }
-
-    fn first_run_phase(&self, now: Instant) -> Option<FirstRunPhase> {
-        let switch = self.motion.first_run_switch.as_ref()?;
-        if !switch.resize_requested {
-            return Some(FirstRunPhase::Out(switch_progress(
-                now,
-                switch.started,
-                FIRST_RUN_OUT,
-            )));
-        }
-        switch
-            .reveal_started
-            .map(|started| FirstRunPhase::In(switch_progress(now, started, FIRST_RUN_IN)))
-    }
-
-    fn advance_first_run_switch(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.motion.first_run_switch.is_some() && self.motion_preferences().reduced() {
-            self.motion.first_run_switch = None;
-            self.resize_frame_now(window, cx);
-            self.motion_dirty = true;
-            return;
-        }
-        let now = cx.background_executor().now();
-        let Some(switch) = self.motion.first_run_switch.as_ref() else {
-            return;
-        };
-        if !switch.resize_requested
-            && now.saturating_duration_since(switch.started) >= FIRST_RUN_OUT
-        {
-            // The frame changes size in one step; only the content slides.
-            if let Some(switch) = self.motion.first_run_switch.as_mut() {
-                switch.resize_requested = true;
-                switch.reveal_started = Some(now);
-            }
-            self.resize_frame_now(window, cx);
-        }
-        let finished = self.motion.first_run_switch.as_ref().is_some_and(|switch| {
-            switch
-                .reveal_started
-                .is_some_and(|started| now.saturating_duration_since(started) >= FIRST_RUN_IN)
-        });
-        if finished {
-            self.motion.first_run_switch = None;
-            self.motion_dirty = true;
-            cx.notify();
-        } else {
-            window.request_animation_frame();
-        }
-    }
-
-    /// Render the current phase of the sequential first-run swap, if one is
-    /// running. The frame-morph body is skipped while this returns.
-    pub(super) fn first_run_switch_body(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> Option<AnyElement> {
-        let switch = self.motion.first_run_switch.as_ref()?;
-        let now = cx.background_executor().now();
-        let sign = match switch.direction {
-            Direction::Forward => 1.,
-            Direction::Back => -1.,
-        };
-        Some(match self.first_run_phase(now)? {
-            FirstRunPhase::Out(progress) => self.first_run_layer(
-                "first-run-switch-outgoing",
-                motion::Pose {
-                    x: -sign * FIRST_RUN_TRAVEL * progress,
-                    opacity: 1. - progress,
-                },
-                switch.outgoing.render_page_body(window, cx),
-            ),
-            FirstRunPhase::In(progress) => self.first_run_layer(
-                "first-run-switch-incoming",
-                motion::Pose {
-                    x: (1. - progress) * sign * FIRST_RUN_TRAVEL,
-                    opacity: progress,
-                },
-                self.render_page_body(window, cx),
-            ),
-        })
-    }
-
-    fn first_run_layer(
-        &self,
-        id: &'static str,
-        pose: motion::Pose,
-        content: AnyElement,
-    ) -> AnyElement {
-        div()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .relative()
-            .overflow_hidden()
-            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
-            .child(motion::layer(id, pose, content).debug_selector(move || id.into()))
-            .into_any_element()
     }
 
     pub(super) fn motion_preferences(&self) -> Preferences {
@@ -423,7 +277,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        if self.visual_only || self.motion.frame.active() {
+        if self.visual_only {
             return content;
         }
         let scene = self.motion.scene(scope);
@@ -441,16 +295,15 @@ impl Block {
             viewport = viewport.capture_any_mouse_down(|_, _, cx| cx.stop_propagation());
         }
         if let (Some(pose), Some(outgoing)) = (frame.outgoing, scene.outgoing()) {
-            viewport = viewport.child(motion::layer(
-                ("motion-outgoing", scope as usize),
-                pose,
-                div()
-                    .size_full()
-                    .capture_key_down(|_, _, cx| cx.stop_propagation())
-                    .capture_key_up(|_, _, cx| cx.stop_propagation())
-                    .child(outgoing._snapshot.render_scene_fragment(scope, window, cx))
-                    .into_any_element(),
-            ));
+            viewport = viewport.child(
+                motion::layer(
+                    ("motion-outgoing", scope as usize),
+                    pose,
+                    outgoing._snapshot.render_scene_fragment(scope, window, cx),
+                )
+                .capture_key_down(|_, _, cx| cx.stop_propagation())
+                .capture_key_up(|_, _, cx| cx.stop_propagation()),
+            );
         }
         let current = motion::layer(
             ("motion-current", scope as usize),
@@ -480,9 +333,9 @@ impl Block {
                 self.render_settings_detail(cx)
             }
             Scope::Detail if self.page_spec().page == Page::Providers => {
-                self.provider_editor(cx).into_any_element()
+                self.render_providers(cx).body
             }
-            Scope::Detail => self.browser_detail_content(cx),
+            Scope::Detail => self.render_browser_detail(cx).body,
             Scope::Wizard if self.page_spec().page == Page::Authentication => {
                 self.render_auth_transition_body(cx)
             }
@@ -509,60 +362,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let content = self.render_page_body(window, cx);
-        if self.is_home_frame() {
-            return self.transition_content(Scope::Page, content, window, cx);
-        }
-        let Some(outgoing) = self
-            .motion
-            .page
-            .outgoing()
-            .filter(|layer| !layer._snapshot.is_home_frame())
-        else {
-            return content;
-        };
-        if outgoing._snapshot.wizard_task_active() && !self.wizard_task_active() {
-            return div()
-                .id("wizard-return")
-                .size_full()
-                .relative()
-                .overflow_hidden()
-                .child(content)
-                .child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
-                        .child(outgoing._snapshot.render_page_body(window, cx)),
-                )
-                .children(self.motion.page.paint_probe())
-                .into_any_element();
-        }
-        div()
-            .id("management-navigation")
-            .debug_selector(|| "management-navigation".into())
-            .size_full()
-            .relative()
-            .overflow_hidden()
-            .capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .id("management-outgoing")
-                    .absolute()
-                    .inset_0()
-                    .capture_key_down(|_, _, cx| cx.stop_propagation())
-                    .capture_key_up(|_, _, cx| cx.stop_propagation())
-                    .child(outgoing._snapshot.render_page_body(window, cx)),
-            )
-            .child(
-                div()
-                    .id("management-incoming")
-                    .absolute()
-                    .inset_0()
-                    .child(content),
-            )
-            .children(self.motion.page.paint_probe())
-            .into_any_element()
+        self.transition_content(Scope::Page, self.render_page_body(window, cx), window, cx)
     }
 
     /// Remove visual copies before Base traverses the focus tree. Keep every
@@ -653,7 +453,6 @@ impl Block {
             },
             motion_dirty: false,
             visual_only: true,
-            pending_window_size: None,
             settings_form: self.settings_form.as_ref().map(|draft| draft.snapshot(cx)),
             preferences: self.preferences.clone(),
             saved_preferences: self.saved_preferences.clone(),
@@ -738,6 +537,10 @@ impl ShellState {
             providers: self.providers.snapshot(cx),
             selector: self.selector.as_ref().map(|selector| selector.snapshot(cx)),
             revision: self.revision,
+            return_focus: HashMap::new(),
+            focus_entry: None,
+            focus_generation: 0,
+            pending_editor_exit: None,
             backwards: self.backwards,
             settings_page: self.settings_page,
             wizard: self.wizard.snapshot(cx),

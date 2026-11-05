@@ -236,6 +236,7 @@ fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()>
     cx.open_window(window_options, |window, cx| {
         window.set_window_title("Block");
         let view = cx.new(|cx| Block::new(window, cx, options));
+        block_ui::initialize_window_size(window);
         cx.new(|cx| block_ui::ProductRoot::new(view, window, cx))
     })?;
     tracing::info!(event = "window_opened", window = "launcher");
@@ -274,6 +275,7 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
             };
             let options = window_options(cx);
             match cx.open_window(options, |window, cx| {
+                block_ui::initialize_window_size(window);
                 window.set_window_title(&block_ui::crash_window_title(language));
                 let view = cx.new(|cx| {
                     let mut view =

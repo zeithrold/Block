@@ -33,6 +33,7 @@ REQUIRED_FIELDS = {
 def load_registry(path: Path = REGISTRY) -> dict[str, Any]:
     registry = json.loads(path.read_text())
     seen: set[str] = set()
+    active_stems: set[str] = set()
     for case in registry.get("cases", []):
         missing = REQUIRED_FIELDS - case.keys()
         if missing:
@@ -42,6 +43,14 @@ def load_registry(path: Path = REGISTRY) -> dict[str, Any]:
         seen.add(case["case_id"])
         if case["review_status"] == "unreviewed" and case["comparable_scope"] != "not_assessed":
             raise ValueError(f"unreviewed case {case['case_id']} cannot claim comparison scope")
+        if case.get("capture_contract_revision"):
+            if case.get("lifecycle") != "current" or case["review_status"] != "unreviewed" or case["reference_candidates"]:
+                raise ValueError(f"compact case {case['case_id']} must remain a current unreviewed native-only case")
+        if case.get("lifecycle", "current") == "current":
+            overlap = active_stems.intersection(case["native_stems"])
+            if overlap:
+                raise ValueError(f"duplicate current native stems: {sorted(overlap)}")
+            active_stems.update(case["native_stems"])
     return registry
 
 
@@ -125,7 +134,7 @@ def collect_images(registry: dict[str, Any], platform: str) -> tuple[list[dict[s
     reuse_by_hash = {group["sha256"]: group["reuse_group"] for group in reuse_groups}
 
     cases = []
-    registry_stems = {stem for case in registry["cases"] for stem in case["native_stems"]}
+    registry_stems = {stem for case in registry["cases"] if case.get("lifecycle", "current") == "current" for stem in case["native_stems"]}
     missing_registry = scenario_names() - registry_stems
     if missing_registry:
         raise ValueError(f"native scenarios missing semantic rows: {sorted(missing_registry)}")
@@ -138,6 +147,18 @@ def collect_images(registry: dict[str, Any], platform: str) -> tuple[list[dict[s
                 path = image_path(native_dir, stem, theme)
                 if path:
                     artifact = _artifact(path, "native", theme)
+                    revision = (artifact.get("capture_receipt") or {}).get("assertions", {}).get("contract_revision")
+                    expected_revision = case.get("capture_contract_revision")
+                    # Historical PNG names can be reused by the compact driver.
+                    # Only an asserted, revision-tagged receipt ties an image to
+                    # the authored compact contract; filename/size are insufficient.
+                    if expected_revision and (
+                        revision != expected_revision
+                        or (artifact.get("capture_receipt") or {}).get("assertions", {}).get("passed") is not True
+                    ):
+                        continue
+                    if case.get("lifecycle") in {"historical", "retired"} and revision:
+                        continue
                     if artifact["sha256"] in reuse_by_hash:
                         artifact["reuse_group"] = reuse_by_hash[artifact["sha256"]]
                     if case["case_id"] == "home-error" and not (artifact.get("capture_receipt") or {}).get("assertions", {}).get("passed"):
@@ -152,7 +173,7 @@ def collect_images(registry: dict[str, Any], platform: str) -> tuple[list[dict[s
                         artifact["reuse_group"] = reuse_by_hash[artifact["sha256"]]
                     references.append(artifact)
         case["artifacts"] = {"native": native, "reference_candidates": references}
-        case["coverage_counts_as_independent"] = case["review_status"] == "semantic_equivalent" and case["comparable_scope"] == "full_state"
+        case["coverage_counts_as_independent"] = case.get("lifecycle", "current") == "current" and case["review_status"] == "semantic_equivalent" and case["comparable_scope"] == "full_state"
         cases.append(case)
     return cases, reuse_groups
 

@@ -1,5 +1,35 @@
 {
   "_version": 2,
+  "common.back": {
+    "en": "Back",
+    "zh-Hans": "返回",
+    "ja": "戻る"
+  },
+  "common.editor_exit.title": {
+    "en": "Save your changes?",
+    "zh-Hans": "保存更改？",
+    "ja": "変更を保存しますか？"
+  },
+  "common.editor_exit.description": {
+    "en": "Save before leaving, or discard this draft. Keep editing to return without losing your changes.",
+    "zh-Hans": "离开前保存，或放弃此草稿。选择继续编辑可保留所有更改。",
+    "ja": "保存してから移動するか、この下書きを破棄してください。編集を続けると変更を保持して戻れます。"
+  },
+  "common.editor_exit.save": {
+    "en": "Save and leave",
+    "zh-Hans": "保存并离开",
+    "ja": "保存して移動"
+  },
+  "common.editor_exit.discard": {
+    "en": "Discard changes",
+    "zh-Hans": "放弃更改",
+    "ja": "変更を破棄"
+  },
+  "common.editor_exit.stay": {
+    "en": "Keep editing",
+    "zh-Hans": "继续编辑",
+    "ja": "編集を続ける"
+  },
   "common.cancel": {
     "en": "Cancel",
     "zh-Hans": "取消",

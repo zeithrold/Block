@@ -985,9 +985,14 @@ impl Block {
         }
     }
 
-    pub(super) fn focus_settings_heading(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn focus_settings_heading(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if let Some(draft) = &self.settings_form {
             draft.heading.focus(window, cx);
+            self.shell.focus_entry = Some(self.router.entry_id());
         }
     }
 
@@ -1385,43 +1390,45 @@ impl Block {
     fn settings_footer(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let language = self.language();
         let dirty = self.settings_dirty(draft, cx);
-        div()
-            .id("settings-footer")
-            .debug_selector(|| "settings-footer".into())
-            .flex_shrink_0()
-            .w_full()
-            .px_6()
-            .py_3()
-            .border_t_1()
-            .border_color(rgb(self.palette.border))
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(note(if dirty {
-                tr!(language, "settings.navigation.unsaved")
-            } else if draft.notice == Some(SettingsNotice::Saved) {
-                tr!(language, "settings.index.all_saved")
-            } else {
-                tr!(language, "settings.navigation.saved")
-            }))
-            .child(
-                components::button(
-                    "save-preferences",
-                    tr!(language, "settings.save_changes"),
-                    self.palette,
-                    components::ButtonVariant::Primary,
-                    ControlState {
-                        disabled: !dirty,
-                        busy: false,
-                        invalid: false,
-                    },
-                    cx.listener(|view, (): &(), window, cx| {
-                        view.handle(UiAction::SavePreferences, window, cx);
-                    }),
-                )
-                .w_full(),
-            )
-            .into_any_element()
+        self.action_footer(
+            div()
+                .id("settings-footer")
+                .debug_selector(|| "settings-footer".into())
+                .flex_shrink_0()
+                .w_full()
+                .px_6()
+                .py_3()
+                .border_t_1()
+                .border_color(rgb(self.palette.border))
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(note(if dirty {
+                    tr!(language, "settings.navigation.unsaved")
+                } else if draft.notice == Some(SettingsNotice::Saved) {
+                    tr!(language, "settings.index.all_saved")
+                } else {
+                    tr!(language, "settings.navigation.saved")
+                }))
+                .child(
+                    components::button(
+                        "save-preferences",
+                        tr!(language, "settings.save_changes"),
+                        self.palette,
+                        components::ButtonVariant::Primary,
+                        ControlState {
+                            disabled: !dirty,
+                            busy: false,
+                            invalid: false,
+                        },
+                        cx.listener(|view, (): &(), window, cx| {
+                            view.handle(UiAction::SavePreferences, window, cx);
+                        }),
+                    )
+                    .w_full(),
+                ),
+        )
+        .into_any_element()
     }
 
     fn settings_control(
@@ -1915,7 +1922,14 @@ impl Block {
         label: impl Into<SharedString>,
         path: &std::path::Path,
     ) -> gpui::Div {
+        let wrapped: String = path
+            .display()
+            .to_string()
+            .chars()
+            .flat_map(|character| [character, '\u{200b}'])
+            .collect();
         div()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap_2()
@@ -1930,13 +1944,15 @@ impl Block {
                     .id(id)
                     .debug_selector(move || id.into())
                     .w_full()
+                    .min_w_0()
                     .p_3()
                     .rounded_lg()
                     .border_1()
                     .border_color(rgb(self.palette.border))
                     .bg(rgb(self.palette.secondary))
                     .text_sm()
-                    .child(path.display().to_string()),
+                    .whitespace_normal()
+                    .child(wrapped),
             )
     }
 

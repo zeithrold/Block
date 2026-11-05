@@ -21,6 +21,10 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
             *cx = VisualTestContext::from_window(*window, &cx.cx);
         }
         crate::test_support::ensure_live_window(cx);
+        for _ in 0..2 {
+            cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+        }
         cx.run_until_parked();
         crate::test_support::ensure_live_window(cx);
     }
@@ -35,8 +39,13 @@ fn profile_subpage_cancel_restores_its_checkpoint_and_done_only_changes_the_draf
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view.snapshot = ready_snapshot();
             view.handle(UiAction::EditProfile, window, cx);
+            assert!(!view.profile_editor_dirty(cx));
         });
     });
     click(cx, "edit-profile-appearance");
@@ -45,10 +54,12 @@ fn profile_subpage_cancel_restores_its_checkpoint_and_done_only_changes_the_draf
             view.handle(UiAction::ProfileColor(ProfileColor::Purple), window, cx);
             view.handle(UiAction::ProfilePageCancel, window, cx);
             assert!(matches!(&view.form, Some(Form::Profile(form)) if form.original.appearance.color == ProfileColor::Gray));
+            assert!(!view.profile_editor_dirty(cx));
             view.handle(UiAction::ProfilePage(EditorPage::Appearance), window, cx);
             view.handle(UiAction::ProfileColor(ProfileColor::Green), window, cx);
             view.handle(UiAction::ProfilePageDone, window, cx);
             assert!(matches!(&view.form, Some(Form::Profile(form)) if form.original.appearance.color == ProfileColor::Green));
+            assert!(view.profile_editor_dirty(cx));
             assert_eq!(view.snapshot.profiles[0].appearance.color, ProfileColor::Gray);
             view.handle(UiAction::ProfilePage(EditorPage::Launch), window, cx);
             if let Some(Form::Profile(form)) = &view.form {
@@ -58,10 +69,49 @@ fn profile_subpage_cancel_restores_its_checkpoint_and_done_only_changes_the_draf
             assert!(matches!(&view.form, Some(Form::Profile(form)) if form.memory.read(cx).value() == "2"));
             view.handle(UiAction::CancelForm, window, cx);
             assert!(view.form.is_none());
+            assert!(matches!(view.router.screen(), crate::navigation::Screen::Record(crate::navigation::RecordRef::Profile(id)) if id == "profile-a"));
             assert_eq!(view.snapshot.profiles[0].memory_mib, 2048);
             assert_eq!(view.snapshot.profiles[0].appearance.color, ProfileColor::Gray);
         });
     });
+}
+
+#[gpui::test]
+fn root_dirty_check_preserves_invalid_and_hidden_raw_profile_values(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+    let result = cx.update(|window, cx| {
+        view.update(cx, |view, cx| -> anyhow::Result<()> {
+            view.snapshot = ready_snapshot();
+            view.router.open_record(
+                Tab::Instances,
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
+            view.handle(UiAction::EditProfile, window, cx);
+            assert!(!view.profile_editor_dirty(cx));
+            for index in 0..6 {
+                let Some(Form::Profile(form)) = &view.form else {
+                    anyhow::bail!("the routed editor owns a Profile draft");
+                };
+                let field = [
+                    &form.name,
+                    &form.memory,
+                    &form.java,
+                    &form.jvm,
+                    &form.game,
+                    &form.server,
+                ][index]
+                    .clone();
+                let initial = field.read(cx).value();
+                field.update(cx, |field, cx| field.set_value("\"invalid raw input", cx));
+                assert!(view.profile_editor_dirty(cx));
+                field.update(cx, |field, cx| field.set_value(&initial, cx));
+                assert!(!view.profile_editor_dirty(cx));
+            }
+            assert_eq!(view.snapshot.profiles[0].name, "Test profile");
+            Ok(())
+        })
+    });
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
@@ -74,6 +124,10 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view.snapshot = ready_snapshot();
             view.handle(UiAction::EditProfile, window, cx);
             if let Some(Form::Profile(form)) = &view.form {
@@ -131,11 +185,19 @@ fn final_save_persists_the_complete_profile_and_subpage_actions_do_not_write(
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Profiles);
+                view.router.open_record(
+                    view.router.tab(),
+                    crate::navigation::RecordRef::Profile("profile-a".into()),
+                );
                 view.engine = Some(engine);
                 view.messages = Some(messages);
                 view.snapshot = snapshot;
                 view.selected_instance = Some(instance.id);
                 view.selected_profile = Some(profile.id.clone());
+                view.router.open_record(
+                    Tab::Profiles,
+                    crate::navigation::RecordRef::Profile(profile.id.clone()),
+                );
                 view.handle(UiAction::EditProfile, window, cx);
                 view.handle(UiAction::ProfilePage(EditorPage::Launch), window, cx);
                 if let Some(Form::Profile(form)) = &view.form {
@@ -193,6 +255,7 @@ fn invalid_server_recovers_on_the_main_page_and_clearing_it_disables_automatic_c
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
+            view.router.open_record(view.router.tab(), crate::navigation::RecordRef::Profile("profile-a".into()));
             view.snapshot = ready_snapshot();
             view.handle(UiAction::EditProfile, window, cx);
             if let Some(Form::Profile(form)) = &view.form {
@@ -233,6 +296,10 @@ fn finish_operation(view: &gpui::Entity<Block>, cx: &mut VisualTestContext) {
         );
         std::thread::sleep(Duration::from_millis(5));
     }
+    for _ in 0..2 {
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
 }
 
 #[gpui::test]
@@ -245,6 +312,10 @@ fn main_cancel_restores_the_actual_edit_trigger_and_does_not_change_the_profile(
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
         view.router.navigate(Tab::Instances);
+        view.router.open_record(
+            view.router.tab(),
+            crate::navigation::RecordRef::Profile("profile-a".into()),
+        );
         view.shell.games.inspected = Some("profile-a".into());
         cx.notify();
     });
@@ -257,6 +328,8 @@ fn main_cancel_restores_the_actual_edit_trigger_and_does_not_change_the_profile(
         }
     });
     click(cx, "cancel-profile");
+    assert!(view.read_with(cx, |view, _| view.form.is_some()));
+    click(cx, "editor-exit-discard");
     cx.run_until_parked();
     cx.update(|window, cx| {
         view.read_with(cx, |view, _| {
@@ -287,7 +360,15 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
             view.engine = Some(engine);
             view.messages = Some(messages);
             view.router.navigate(Tab::Instances);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view.shell.games.inspected = Some(profile.id.clone());
+            view.router.open_record(
+                Tab::Instances,
+                crate::navigation::RecordRef::Profile(profile.id.clone()),
+            );
             cx.notify();
         });
         let trigger = view.update(cx, |view, cx| view.profile_editor_trigger_focus(cx));
@@ -355,6 +436,14 @@ fn saving_after_inspection_changes_restores_the_current_detail_instead_of_an_old
             view.engine = Some(engine);
             view.messages = Some(messages);
             view.router.navigate(Tab::Profiles);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
+            view.router.open_record(
+                Tab::Profiles,
+                crate::navigation::RecordRef::Profile(first.id.clone()),
+            );
             view.shell.profiles.inspected = Some(first.id);
             cx.notify();
         });
@@ -362,6 +451,10 @@ fn saving_after_inspection_changes_restores_the_current_detail_instead_of_an_old
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.handle(UiAction::SaveProfile, window, cx);
+                view.router.open_record(
+                    Tab::Profiles,
+                    crate::navigation::RecordRef::Profile(other.id.clone()),
+                );
                 view.shell.profiles.inspected = Some(other.id);
             });
         });
@@ -387,6 +480,10 @@ fn profile_memory_validation_uses_gb_and_enforces_the_one_to_thirty_two_gb_bound
         view.update(cx, |view, cx| {
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view.snapshot = ready_snapshot();
             view.handle(UiAction::EditProfile, window, cx);
             let Some(Form::Profile(form)) = &view.form else {
@@ -422,6 +519,10 @@ fn japanese_profile_editor_keeps_its_fields_and_actions(cx: &mut TestAppContext)
             view.preferences.reduce_motion = true;
             view.preferences.language = Some(crate::Language::Japanese);
             view.router.navigate(Tab::Instances);
+            view.router.open_record(
+                view.router.tab(),
+                crate::navigation::RecordRef::Profile("profile-a".into()),
+            );
             view.snapshot = ready_snapshot();
             view.handle(UiAction::EditProfile, window, cx);
         });

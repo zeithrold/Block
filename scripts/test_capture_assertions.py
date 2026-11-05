@@ -13,9 +13,9 @@ class CaptureAssertionsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.png = Path(self.temp.name) / "accounts.png"
-        self.png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", 960, 600))
-        self.window = {"title": "Block · Accounts", "width": 960, "height": 600}
-        self.expected = dict(title="Block · Accounts", viewport=(960, 600), required=["Account details", "PageSeed"],
+        self.png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", 360, 720))
+        self.window = {"title": "Block · Accounts", "width": 360, "height": 720}
+        self.expected = dict(title="Block · Accounts", viewport=(360, 720), required=["Account details", "PageSeed"],
                              observations=[{"text": "Account details"}, {"text": "PageSeed"}])
 
     def test_correct_capture_passes(self):
@@ -27,8 +27,19 @@ class CaptureAssertionsTest(unittest.TestCase):
                 validate(self.png, {**self.window, "title": title}, **self.expected)
 
     def test_wrong_viewport_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "Wrong logical viewport"):
-            validate(self.png, {**self.window, "width": 432, "height": 768}, **self.expected)
+        for width, height in ((432, 768), (1152, 720), (402, 762)):
+            with self.subTest(width=width, height=height), self.assertRaisesRegex(ValueError, "Wrong logical viewport"):
+                validate(self.png, {**self.window, "width": width, "height": height}, **self.expected)
+
+    def test_compact_pixels_must_have_the_content_aspect_and_supported_scale(self):
+        for width, height, accepted in ((720, 1440, True), (1152, 720, False), (720, 720, False), (1080, 2160, False)):
+            with self.subTest(width=width, height=height):
+                self.png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", width, height))
+                if accepted:
+                    self.assertEqual(validate(self.png, self.window, **self.expected)["dpr"], 2)
+                else:
+                    with self.assertRaisesRegex(ValueError, "does not match logical viewport"):
+                        validate(self.png, self.window, **self.expected)
 
     def test_correct_title_without_unique_content_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Page content assertions"):
@@ -46,7 +57,7 @@ class CaptureAssertionsTest(unittest.TestCase):
         original = self.png.read_bytes() + b"original"
         first = self.png.read_bytes() + b"first replacement"
         destination.write_bytes(original)
-        assertions = validate(self.png, self.window, **self.expected)
+        assertions = validate(self.png, self.window, **self.expected, contract_revision="compact-ui-20261105")
         with patch("capture_assertions.ROOT", root):
             self.png.write_bytes(first)
             first_receipt = publish(self.png, destination, {}, assertions)
@@ -58,6 +69,7 @@ class CaptureAssertionsTest(unittest.TestCase):
         self.assertEqual((root / second_receipt["replaced_original"]["path"]).read_bytes(), first)
         self.assertEqual(second_receipt["baseline_original"]["path"], str(baseline.relative_to(root)))
         self.assertEqual(sha256(root / second_receipt["replaced_receipt"]["path"]), first_receipt_hash)
+        self.assertEqual(second_receipt["assertions"]["contract_revision"], "compact-ui-20261105")
 
 
 if __name__ == "__main__":
