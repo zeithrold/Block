@@ -270,8 +270,8 @@ navigation without changing Home's composition:
 | --- | --- |
 | macOS ARM64 | Full `just check` passed on the initial implementation. The focused repair passed workspace strict `just clippy`; the integrated candidate passed `just fmt-check`, `cargo test --locked --package block-ui` (582 unit + 3 framework tests), `cargo build --locked --package block-app --bin block`, seven scenario-contract Python tests and `git diff --check`. |
 | Windows ARM64 | The integrated candidate passed `cargo test --locked --package block-ui` (581 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. |
-| Linux ARM64 | Integrated candidate passed `cargo test --locked --package block-ui` (582 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. The light-theme index rendered intact on Debian/KDE Wayland; native input awaits the user's system remote-control permission. |
-| Windows AMD64 | Initial full package run had one discard-navigation failure; the unchanged isolated rerun passed. The assertion remains intact with stronger diagnostics. Final full-suite rerun is pending disk space. |
+| Linux ARM64 | Integrated candidate passed `cargo test --locked --package block-ui` (582 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. Native light-theme navigation, scroll/focus restoration, conversion confirmation and dirty Close were verified on Debian/KDE Wayland. |
+| Windows AMD64 | Initial full package run had one discard-navigation failure; the unchanged isolated rerun passed. The assertion remains intact with stronger diagnostics. Final full-suite rerun and native checks are in progress. |
 | Linux AMD64 | Integrated candidate passed `cargo build --locked --package block-app --bin block`; native light-theme index, General and dirty Close dialog were inspected on Debian/XFCE X11. |
 
 On macOS ARM64, all nine Settings scenarios passed strict title, logical
@@ -296,6 +296,16 @@ desktop captures, not the corrupted window images, supplied the visual evidence.
 AT-SPI reads exposed controls, but subsequent token actions reported expired
 objects; desktop pointer input supplied the tested actions.
 
+On Linux ARM64, desktop captures showed the 360 × 720 content intact. Native
+interaction verified General's motion edit remaining pending across categories,
+Game's memory edit and retained reading position after returning through the
+index, and Tab revealing the Memory input and its label. The conversion dialog's
+two actions fit vertically; Alt+Left dismissed it without leaving Profile mode.
+Native Close offered all three dirty-exit actions, Keep editing retained the
+draft, and Discard closed the application. The Wayland window was absent from
+window enumeration, so authorized desktop input and captures supplied this
+evidence; these are not strict native-title/OCR capture-contract results.
+
 An earlier native macOS normal-engine run verified cross-category Save from
 Storage, saved memory/motion preferences after restart, Chinese live preview,
 and discard through the native Close prompt. Scenario fixtures have no engine:
@@ -305,8 +315,8 @@ Local native artifacts are under `target/settings-single-pane/` and
 
 ### Acceptance limits
 
-Acceptance remains pending required Linux ARM64 native interaction and the
-remaining platform checks. Static captures and GPUI test windows do not establish
+Acceptance remains pending the final Windows AMD64 checks.
+Static captures and GPUI test windows do not establish
 native IME composition, completed application Quit, game survival after launcher
 closure, or subjective motion comfort. No macOS AMD64 host was exercised.
 Independent source reviews accepted the draft lifecycle and scoped layout
