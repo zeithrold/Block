@@ -270,7 +270,7 @@ navigation without changing Home's composition:
 | --- | --- |
 | macOS ARM64 | Full `just check` passed on the initial implementation. The focused repair passed workspace strict `just clippy`; the integrated candidate passed `just fmt-check`, `cargo test --locked --package block-ui` (582 unit + 3 framework tests), `cargo build --locked --package block-app --bin block`, seven scenario-contract Python tests and `git diff --check`. |
 | Windows ARM64 | The integrated candidate passed `cargo test --locked --package block-ui` (581 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. |
-| Linux ARM64 | Initial implementation passed 579 unit + 3 framework tests. Desktop build and final native verification are blocked by insufficient free disk space. |
+| Linux ARM64 | Integrated candidate passed `cargo test --locked --package block-ui` (582 unit + 3 framework tests) and `cargo build --locked --package block-app --bin block`. The light-theme index rendered intact on Debian/KDE Wayland; native input awaits the user's system remote-control permission. |
 | Windows AMD64 | Initial full package run had one discard-navigation failure; the unchanged isolated rerun passed. The assertion remains intact with stronger diagnostics. Final full-suite rerun is pending disk space. |
 | Linux AMD64 | Integrated candidate passed `cargo build --locked --package block-app --bin block`; native light-theme index, General and dirty Close dialog were inspected on Debian/XFCE X11. |
 
