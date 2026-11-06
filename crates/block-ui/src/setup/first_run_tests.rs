@@ -318,6 +318,13 @@ fn the_center_exposes_the_language_entry(cx: &mut gpui::TestAppContext) {
         cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
         cx.run_until_parked();
         let entry = bounds(cx, "setup-language-entry")?;
+        let title = bounds(cx, "setup-overview-title")?;
+        assert!(
+            entry.left() >= title.right()
+                && entry.top() >= gpui::px(56.)
+                && (entry.center().y - title.center().y).abs() <= gpui::px(1.),
+            "language must align beside the body title, below window chrome"
+        );
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
@@ -1386,10 +1393,7 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             gpui_base::test_support::find(window, &[], &"setup-language-entry".into())
                 .and_then(|node| node.label().map(str::to_owned))
         });
-        assert_eq!(
-            label.as_deref(),
-            Some(tr!(crate::Language::English, "setup.language.label").as_str())
-        );
+        assert_eq!(label.as_deref(), Some(crate::Language::English.self_name()));
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {

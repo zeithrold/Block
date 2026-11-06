@@ -634,10 +634,45 @@ impl Block {
             .flex()
             .flex_col()
             .gap_5()
-            .child(page_heading(
-                tr!(language, "setup.overview.title"),
-                tr!(language, "setup.overview.description"),
-            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("setup-overview-title")
+                                    .debug_selector(|| "setup-overview-title".into())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_xl()
+                                    .line_height(px(28.))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .child(tr!(language, "setup.overview.title")),
+                            )
+                            .child(
+                                self.button_with_variant(
+                                    "setup-language-entry",
+                                    language.self_name(),
+                                    UiAction::Drawer(Some(super::Drawer::Language)),
+                                    ButtonVariant::Ghost,
+                                    cx,
+                                )
+                                .flex_shrink_0()
+                                .h(px(32.))
+                                .px_2()
+                                .text_xs()
+                                .gap_1()
+                                .child(Icon::ChevronDown.render(12., self.palette.muted)),
+                            ),
+                    )
+                    .child(note(tr!(language, "setup.overview.description"))),
+            )
             .child(
                 div()
                     .w_full()

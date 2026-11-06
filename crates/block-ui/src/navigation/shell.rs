@@ -437,17 +437,7 @@ impl Block {
                 )
                 .into_any_element()
             } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
-                self.button_with_variant(
-                    "setup-language-entry",
-                    tr!(language, "setup.language.label"),
-                    UiAction::Drawer(Some(Drawer::Language)),
-                    super::components::ButtonVariant::Ghost,
-                    cx,
-                )
-                .h(px(32.))
-                .px_2()
-                .text_xs()
-                .into_any_element()
+                div().into_any_element()
             } else if first_run {
                 div().w(px(32.)).into_any_element()
             } else if self.router.tab() == Tab::Settings {
