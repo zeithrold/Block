@@ -351,6 +351,9 @@ fn settings_language_select_previews_cancels_and_saves(cx: &mut gpui::TestAppCon
 fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early(
     cx: &mut gpui::TestAppContext,
 ) {
+    // This tests draft semantics; the dialog entrance uses a wall clock that
+    // settle's virtual clock cannot advance before the physical discard click.
+    let _system_motion = crate::platform::test_system_motion(true);
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
