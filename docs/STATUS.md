@@ -4,6 +4,8 @@ Updated: 2026-11-06. Built, native verification and user acceptance are separate
 
 Acceptance scope (2026-10-24): **no platform or page has passed full-product/visual acceptance.** The Windows ARM64 motion increment was only manually observed by the user because automated motion detection could not observe it there; that observation is not product acceptance. The user is reviewing scenarios one by one, and every `Accepted` marker remains Pending.
 
+Current scene-by-scene user review: [review status and findings](scene-review-status.md). The ledger covers 97 current scenarios after retiring the standalone Welcome page; implementation verification and user acceptance are recorded separately.
+
 ## Current checkpoint (2026-11-06)
 
 Milestone II basic usability is complete. The compact UI increment within Milestone III is implemented and locally verified; full-product user acceptance remains pending. Milestone IV architecture design and the v0 public unstable release remain future stages.

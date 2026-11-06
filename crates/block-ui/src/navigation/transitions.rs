@@ -102,7 +102,7 @@ impl Block {
     pub(super) fn navigation_trace_sample(&self, cx: &Context<'_, Self>) -> serde_json::Value {
         let now = cx.background_executor().now();
         let preferences = self.motion_preferences();
-        serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving,"welcome":self.shell.first_run.welcome_button.trace_sample(now)})
+        serde_json::json!({"title":self.navigation_title(),"panes":self.motion.page_frames.get(),"detail":self.motion.detail.sample(now, preferences),"wizard":self.motion.wizard.sample(now, preferences),"moving":self.motion.moving})
     }
     /// Freeze what is visible before an input or engine batch changes its model.
     /// Wheel offsets and text edits can change without changing a scene key.

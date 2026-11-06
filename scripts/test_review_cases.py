@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import review_cases
+from scenario_contracts import contract
 
 # Scenario stems that existed in archived captures but are no longer produced by
 # crates/block-ui/src/runtime/scenarios.rs. Their registry rows remain historical
@@ -115,6 +116,12 @@ class ReviewCaseTests(unittest.TestCase):
             self.assertEqual(case["comparable_scope"], "not_assessed", case["case_id"])
             self.assertFalse(case["coverage_counts_as_independent"], case["case_id"])
             self.assertEqual(case["reference_candidates"], [], case["case_id"])
+            for stem in case["native_stems"]:
+                self.assertEqual(
+                    case["capture_contract_revision"],
+                    contract(stem)["contract_revision"],
+                    case["case_id"],
+                )
         active_stems = {stem for case in active for stem in case["native_stems"]}
         self.assertEqual(len(active_stems), sum(len(case["native_stems"]) for case in active))
         self.assertEqual(active_stems, review_cases.scenario_names())

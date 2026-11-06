@@ -328,6 +328,12 @@ mod tests {
                         .and_then(serde_json::Value::as_str)
                         .ok_or_else(|| anyhow::anyhow!("{key} lacks {}", language.code()))?;
                     assert!(!value.trim().is_empty(), "{key}/{}", language.code());
+                    assert_eq!(
+                        tr!(language, key.as_str()),
+                        value,
+                        "compiled translation is stale: {key}/{}",
+                        language.code()
+                    );
                     let names = placeholders(value);
                     assert!(!names.contains(""), "malformed placeholder in {key}");
                     if let Some(expected) = &expected {

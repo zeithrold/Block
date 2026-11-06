@@ -125,8 +125,6 @@ mod tooltip;
 mod transitions;
 #[path = "runtime/ui_logging.rs"]
 mod ui_logging;
-#[path = "setup/welcome_button.rs"]
-mod welcome_button;
 #[path = "navigation/window_geometry.rs"]
 mod window_geometry;
 #[path = "navigation/wizard_entrance.rs"]

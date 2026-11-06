@@ -71,7 +71,6 @@ pub const SCENARIOS: &[&str] = &[
     "settings-socks5",
     "settings-storage",
     "about",
-    "setup-welcome",
     "setup-overview",
     "setup-overview-ready",
     "setup-game-choice",
@@ -623,10 +622,6 @@ impl Block {
         self.shell.first_run = first_run::State::default();
         self.shell.first_run.enabled = true;
         self.shell.first_run.stage = match name {
-            "setup-welcome"
-            | "setup-import-sources"
-            | "setup-import-list"
-            | "setup-import-long-destination" => FirstRunStage::Welcome,
             "setup-game-choice" => FirstRunStage::GameChoice,
             "setup-game" => FirstRunStage::GameWizard,
             _ => FirstRunStage::Overview,

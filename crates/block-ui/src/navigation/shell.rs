@@ -323,7 +323,7 @@ impl Block {
                 Tab::Home => "Block".to_owned(),
                 Tab::Onboarding if self.shell.first_run.enabled => match self.shell.first_run.stage
                 {
-                    super::first_run::Stage::Welcome | super::first_run::Stage::Overview => {
+                    super::first_run::Stage::Overview => {
                         tr!(language, "nav.setup_block")
                     }
                     super::first_run::Stage::GameChoice => tr!(language, "nav.setup_game"),
@@ -390,9 +390,7 @@ impl Block {
         let first_run = self.setup_incomplete() && self.shell.first_run.enabled;
         let task = self.wizard_task_active();
         let language = self.language();
-        let title = if home
-            || first_run && self.shell.first_run.stage == super::first_run::Stage::Welcome
-        {
+        let title = if home {
             String::new()
         } else {
             self.navigation_title()
@@ -439,18 +437,16 @@ impl Block {
                 )
                 .into_any_element()
             } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
-                let text = tr!(language, "chrome.back_to_welcome");
-                super::tooltip::trigger(
-                    self.chrome_icon_button(
-                        "setup-back-welcome",
-                        UiAction::FirstRun(super::first_run::Action::BackToWelcome),
-                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
-                        text.clone(),
-                        cx,
-                    ),
-                    text,
+                self.button_with_variant(
+                    "setup-language-entry",
+                    tr!(language, "setup.language.label"),
+                    UiAction::Drawer(Some(Drawer::Language)),
+                    super::components::ButtonVariant::Ghost,
                     cx,
                 )
+                .h(px(32.))
+                .px_2()
+                .text_xs()
                 .into_any_element()
             } else if first_run {
                 div().w(px(32.)).into_any_element()

@@ -87,7 +87,7 @@ fn version_entry(
 }
 
 #[gpui::test]
-fn begin_first_run_starts_welcome_at_home_size_and_resumes_after_setup_started(
+fn begin_first_run_opens_overview_at_home_size_and_preserves_a_legacy_marker(
     cx: &mut gpui::TestAppContext,
 ) {
     let result = (|| -> anyhow::Result<()> {
@@ -109,21 +109,30 @@ fn begin_first_run_starts_welcome_at_home_size_and_resumes_after_setup_started(
         assert!(view.read_with(cx, |view, _| {
             view.router.tab() == Tab::Onboarding
                 && view.shell.first_run.enabled
-                && view.shell.first_run.stage == Stage::Welcome
+                && view.shell.first_run.stage == Stage::Overview
+                && !view.wizard_task_active()
+                && !view.preferences.onboarding_complete
+                && view.shell.import_games.discovery.is_some()
         }));
-
-        fs::write(root.path().join("setup-started"), b"1")?;
+        assert!(!root.path().join("setup-started").exists());
+        fs::write(root.path().join("setup-started"), b"legacy marker")?;
         view.update(cx, |view, cx| view.begin_first_run(cx));
         assert!(view.read_with(cx, |view, _| {
             view.router.tab() == Tab::Onboarding && view.shell.first_run.stage == Stage::Overview
         }));
+        assert_eq!(
+            fs::read(root.path().join("setup-started"))?,
+            b"legacy marker"
+        );
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
-fn start_opens_the_setup_center_and_a_report_only_reports_a_count(cx: &mut gpui::TestAppContext) {
+fn initialization_opens_the_setup_center_and_a_report_only_reports_a_count(
+    cx: &mut gpui::TestAppContext,
+) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         let (engine, _messages) = Engine::with_root(root.path().to_owned())?;
@@ -133,19 +142,17 @@ fn start_opens_the_setup_center_and_a_report_only_reports_a_count(cx: &mut gpui:
             view.preferences.reduce_motion = true;
             view
         });
-        let request = cx.update(|window, cx| {
+        let request = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 view.begin_first_run(cx);
-                assert_eq!(view.shell.first_run.stage, Stage::Welcome);
-                view.handle_first_run(FirstRunAction::Start, window, cx);
                 assert_eq!(
                     view.shell.first_run.stage,
                     Stage::Overview,
-                    "Start hands over to the setup center, not to an import detour"
+                    "initialization opens the setup center without an import detour"
                 );
                 assert!(
-                    root.path().join("setup-started").is_file(),
-                    "the marker is what resumes setup at the center"
+                    !root.path().join("setup-started").exists(),
+                    "initialization must not create a legacy setup marker"
                 );
                 assert!(
                     !view.shell.surfaces.is_open(),
@@ -199,13 +206,12 @@ fn finished_setup_rejects_a_discovery_that_is_still_in_flight(cx: &mut gpui::Tes
         let request = cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.begin_first_run(cx);
-                view.handle_first_run(FirstRunAction::Start, window, cx);
                 let request = view
                     .shell
                     .import_games
                     .discovery
                     .unwrap_or_else(uuid::Uuid::nil);
-                // Skipping right after Start is the shortest possible race.
+                // Skipping right after initialization is the shortest possible race.
                 view.handle_first_run(FirstRunAction::Skip, window, cx);
                 assert!(
                     view.shell.import_games.discovery.is_none(),
@@ -248,7 +254,6 @@ fn rescan_retries_only_the_scan_and_keeps_the_answered_requests_apart(
         let (first, second) = cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.begin_first_run(cx);
-                view.handle_first_run(FirstRunAction::Start, window, cx);
                 let first = uuid::Uuid::new_v4();
                 view.shell.import_games.discovery = Some(first);
                 view.receive_game_discovery(first, discovery_report());
@@ -304,6 +309,7 @@ fn the_center_exposes_the_language_entry(cx: &mut gpui::TestAppContext) {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
+            view.preferences.language = Some(crate::Language::English);
             view.router.navigate(Tab::Onboarding);
             view.shell.first_run.enabled = true;
             view.shell.first_run.stage = Stage::Overview;
@@ -323,6 +329,16 @@ fn the_center_exposes_the_language_entry(cx: &mut gpui::TestAppContext) {
                     ))
                 )
         }));
+        assert_eq!(
+            view.read_with(cx, |view, _| {
+                view.surface_sheet_chrome(&super::shell::Surface::Drawer(
+                    super::shell::Drawer::Language,
+                ))
+                .1
+            }),
+            "Choose the language for Block.",
+            "the language drawer must show its translated description"
+        );
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -332,7 +348,6 @@ fn the_center_exposes_the_language_entry(cx: &mut gpui::TestAppContext) {
 fn empty_setup_can_leave_the_center_for_home(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, _messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -377,7 +392,6 @@ fn explicit_import_from_the_overview_opens_the_drawer_immediately(cx: &mut gpui:
             view.messages = Some(messages);
             view
         });
-        fs::write(root.path().join("setup-started"), b"1")?;
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.begin_first_run(cx);
@@ -396,7 +410,9 @@ fn explicit_import_from_the_overview_opens_the_drawer_immediately(cx: &mut gpui:
 }
 
 #[gpui::test]
-fn compact_setup_keeps_games_first_and_both_exit_actions_visible(cx: &mut gpui::TestAppContext) {
+fn compact_setup_keeps_accounts_first_with_equal_cards_and_both_exit_actions_visible(
+    cx: &mut gpui::TestAppContext,
+) {
     for language in crate::Language::ALL {
         let (_view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -423,10 +439,9 @@ fn compact_setup_keeps_games_first_and_both_exit_actions_visible(cx: &mut gpui::
         assert!(body.zip(footer).is_some_and(|(body, footer)| {
             body.size.height >= gpui::px(120.) && body.bottom() <= footer.top()
         }));
-        assert!(
-            game.zip(account)
-                .is_some_and(|(game, account)| game.bottom() <= account.top())
-        );
+        assert!(account.zip(game).is_some_and(|(account, game)| {
+            account.bottom() <= game.top() && account.size == game.size
+        }));
         for selector in ["setup-later", "setup-continue"] {
             let action = crate::test_support::control_bounds(cx, selector);
             assert!(
@@ -443,11 +458,55 @@ fn compact_setup_keeps_games_first_and_both_exit_actions_visible(cx: &mut gpui::
 }
 
 #[gpui::test]
+fn overview_keyboard_order_reaches_account_before_game(cx: &mut gpui::TestAppContext) {
+    let (_, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.router.navigate(Tab::Onboarding);
+        view.shell.first_run.enabled = true;
+        view.shell.first_run.stage = Stage::Overview;
+        view
+    });
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
+    cx.run_until_parked();
+    let mut reached_account = false;
+    for _ in 0..12 {
+        let focused = cx.update(|window, _| {
+            ["setup-account", "setup-game"].map(|id| {
+                gpui_base::test_support::find(window, &[], &id.into())
+                    .and_then(|node| node.focused())
+                    == Some(true)
+            })
+        });
+        assert!(
+            !focused[1],
+            "Game must not precede Account in keyboard order"
+        );
+        if focused[0] {
+            reached_account = true;
+            break;
+        }
+        crate::test_support::press(cx, "tab");
+        cx.run_until_parked();
+    }
+    assert!(
+        reached_account,
+        "the Account task must be keyboard reachable"
+    );
+    crate::test_support::press(cx, "tab");
+    cx.run_until_parked();
+    assert!(cx.update(|window, _| {
+        gpui_base::test_support::find(window, &[], &"setup-game".into())
+            .and_then(|node| node.focused())
+            == Some(true)
+    }));
+}
+
+#[gpui::test]
 fn pending_pack_offers_resume_or_home_without_opening_the_picker(cx: &mut gpui::TestAppContext) {
     for resume in [true, false] {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
-            fs::write(root.path().join("setup-started"), b"1")?;
             let (engine, _messages) = Engine::with_root(root.path().to_owned())?;
             let (view, cx) = crate::test_support::window(cx, move |window, cx| {
                 let mut view = crate::tests::test_view(window, cx);
@@ -504,7 +563,6 @@ fn pending_pack_offers_resume_or_home_without_opening_the_picker(cx: &mut gpui::
 fn finishing_first_run_confirms_a_changed_retained_game_draft(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, _messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -670,20 +728,26 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
 }
 
 #[gpui::test]
-fn overview_back_to_welcome_keeps_compact_geometry_and_saved_progress(
+fn game_task_returns_to_overview_with_compact_geometry_and_saved_progress(
     cx: &mut gpui::TestAppContext,
 ) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
+        let account = crate::test_support::test_account()?;
+        let account_id = crate::account_id(&account);
+        crate::global_config::update(root.path(), |config| {
+            config.accounts = vec![account.clone()];
+        })?;
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.engine = Some(engine);
             view.messages = Some(messages);
+            view.accounts = vec![account];
+            view.selected_account = Some(account_id);
             view.preferences.reduce_motion = true;
             view
         });
-        fs::write(root.path().join("setup-started"), b"1")?;
         let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
@@ -696,39 +760,43 @@ fn overview_back_to_welcome_keeps_compact_geometry_and_saved_progress(
         });
         cx.run_until_parked();
         assert!(
-            crate::test_support::control_bounds(cx, "setup-back-welcome").is_some(),
-            "the Overview chrome must expose Back to welcome"
+            crate::test_support::control_bounds(cx, "setup-back-welcome").is_none(),
+            "the Overview chrome must not expose the retired Welcome route"
         );
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle_first_run(FirstRunAction::BackToWelcome, window, cx);
+                view.handle_first_run(FirstRunAction::Game, window, cx);
+                view.handle_first_run(FirstRunAction::Back, window, cx);
             });
         });
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
             view.router.tab() == Tab::Onboarding
                 && view.shell.first_run.enabled
-                && view.shell.first_run.stage == Stage::Welcome
+                && view.shell.first_run.stage == Stage::Overview
                 && view.shell.first_run.entered.is_none()
                 && view.page_spec().page == crate::navigation::Page::FirstRun
                 && !view.page_spec().task
+                && view.first_run_account_ready()
         }));
         assert_eq!(
             cx.update(|window, _| window.viewport_size()),
             home,
-            "Back to welcome must keep the same compact frame"
+            "returning from a game task must keep the same compact frame"
         );
-        assert!(
-            root.path().join("setup-started").is_file(),
-            "returning to Welcome must keep saved setup progress"
+        assert_eq!(
+            crate::global_config::read(root.path())?.map(|config| config.accounts.len()),
+            Some(1)
         );
+        assert!(!crate::Preferences::load(root.path())?.onboarding_complete);
+        assert!(!root.path().join("setup-started").exists());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
-fn returning_to_welcome_keeps_the_hidden_game_draft_and_compact_bounds(
+fn returning_to_overview_keeps_the_hidden_game_draft_and_compact_bounds(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
@@ -744,8 +812,7 @@ fn returning_to_welcome_keeps_the_hidden_game_draft_and_compact_bounds(
                     .update(cx, |field, cx| field.set_value("Retained game", cx));
             }
             view.handle_first_run(FirstRunAction::Back, window, cx);
-            view.handle_first_run(FirstRunAction::BackToWelcome, window, cx);
-            assert_eq!(view.shell.first_run.stage, Stage::Welcome);
+            assert_eq!(view.shell.first_run.stage, Stage::Overview);
             assert_eq!(view.page_spec().page, crate::navigation::Page::FirstRun);
             assert!(!view.page_spec().task);
             assert_eq!(
@@ -756,90 +823,6 @@ fn returning_to_welcome_keeps_the_hidden_game_draft_and_compact_bounds(
                 if form.name.read(cx).value() == "Retained game"));
         });
     });
-}
-
-#[gpui::test]
-fn welcome_play_hover_resets_after_start_and_overview_back(cx: &mut gpui::TestAppContext) {
-    let result = (|| -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let (engine, messages) = Engine::with_root(root.path().to_owned())?;
-        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
-            let mut view = crate::tests::test_view(window, cx);
-            view.engine = Some(engine);
-            view.messages = Some(messages);
-            view.preferences.reduce_motion = true;
-            view.begin_first_run(cx);
-            view
-        });
-        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
-        cx.simulate_resize(home);
-        cx.run_until_parked();
-
-        for _ in 0..2 {
-            let play = bounds(cx, "welcome-play")?;
-            cx.simulate_mouse_move(play.center(), None, gpui::Modifiers::none());
-            cx.run_until_parked();
-            assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.welcome_button.is_hovered()
-            }));
-            cx.simulate_click(play.center(), gpui::Modifiers::none());
-            cx.run_until_parked();
-            view.read_with(cx, |view, _| {
-                assert_eq!(
-                    view.shell.first_run.stage,
-                    Stage::Overview,
-                    "Play shows the setup center immediately"
-                );
-                assert!(
-                    !view.shell.surfaces.is_open(),
-                    "Play must not open the import drawer"
-                );
-            });
-            assert_eq!(cx.update(|window, _| window.viewport_size()), home);
-            assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.stage == Stage::Overview
-            }));
-
-            let back = bounds(cx, "setup-back-welcome")?;
-            cx.simulate_mouse_move(back.center(), None, gpui::Modifiers::none());
-            cx.simulate_click(back.center(), gpui::Modifiers::none());
-            cx.run_until_parked();
-            assert_eq!(cx.update(|window, _| window.viewport_size()), home);
-            assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.stage == Stage::Welcome
-            }));
-            assert!(
-                !view.read_with(cx, |view, _| view
-                    .shell
-                    .first_run
-                    .welcome_button
-                    .is_hovered()),
-                "Back to Welcome must not retain the Play button's previous hover"
-            );
-            assert!(
-                root.path().join("setup-started").is_file(),
-                "resetting hover must preserve saved setup progress"
-            );
-
-            let play = bounds(cx, "welcome-play")?;
-            cx.simulate_mouse_move(play.center(), None, gpui::Modifiers::none());
-            cx.run_until_parked();
-            assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.welcome_button.is_hovered()
-            }));
-            cx.simulate_mouse_move(
-                gpui::point(play.left() - gpui::px(12.), play.center().y),
-                None,
-                gpui::Modifiers::none(),
-            );
-            cx.run_until_parked();
-            assert!(!view.read_with(cx, |view, _| {
-                view.shell.first_run.welcome_button.is_hovered()
-            }));
-        }
-        Ok(())
-    })();
-    assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
@@ -854,7 +837,6 @@ fn first_run_keeps_an_existing_saved_library(cx: &mut gpui::TestAppContext) {
             generation: None,
         }
         .save(root.path())?;
-        fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -868,6 +850,11 @@ fn first_run_keeps_an_existing_saved_library(cx: &mut gpui::TestAppContext) {
             view.read_with(cx, |view, _| view.first_run_game_parent()),
             saved,
             "automatic selection must not override an existing library"
+        );
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?.library(root.path()),
+            saved,
+            "initialization preserves the persisted library"
         );
         Ok(())
     })();
@@ -928,7 +915,6 @@ fn overview_footer_offers_one_exit_beside_the_later_choice(cx: &mut gpui::TestAp
 fn first_run_defaults_to_the_install_shaped_storage_parent(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -948,151 +934,12 @@ fn first_run_defaults_to_the_install_shaped_storage_parent(cx: &mut gpui::TestAp
             view.read_with(cx, |view, _| view.first_run_game_parent()),
             expected
         );
-        assert!(
-            !root.path().join("block.toml").exists(),
-            "opening the Overview must not write a storage choice"
-        );
-        Ok(())
-    })();
-    assert!(result.is_ok(), "{result:?}");
-}
-
-#[gpui::test]
-fn welcome_pointer_events_keep_the_window_alive_and_hit_area_fixed(cx: &mut gpui::TestAppContext) {
-    let _system = crate::platform::test_system_motion(false);
-    let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = crate::tests::test_view(window, cx);
-        view.begin_first_run(cx);
-        view
-    });
-    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
-    cx.run_until_parked();
-    let button = crate::test_support::control_bounds(cx, "welcome-play");
-    assert!(button.is_some(), "Welcome must expose the start control");
-    if let Some(button) = button {
-        let outside = gpui::point(button.left() - gpui::px(12.), button.center().y);
-        for (position, hovered) in [
-            (
-                gpui::point(button.left() + gpui::px(4.), button.center().y),
-                true,
-            ),
-            (outside, false),
-            (
-                gpui::point(button.right() - gpui::px(4.), button.center().y),
-                true,
-            ),
-            (outside, false),
-        ] {
-            cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
-            cx.run_until_parked();
-            assert_eq!(
-                view.read_with(cx, |view, _| view
-                    .shell
-                    .first_run
-                    .welcome_button
-                    .is_hovered()),
-                hovered
-            );
-            cx.executor()
-                .advance_clock(std::time::Duration::from_millis(40));
-            cx.update(|window, _| window.refresh());
-            cx.run_until_parked();
-            assert_eq!(
-                crate::test_support::control_bounds(cx, "welcome-play"),
-                Some(button)
-            );
-        }
-    }
-    assert!(view.read_with(cx, |view, _| {
-        view.shell.first_run.stage == Stage::Welcome && view.shell.first_run.error.is_none()
-    }));
-}
-
-#[gpui::test]
-fn welcome_pointer_activation_stays_inside_the_visible_circle(cx: &mut gpui::TestAppContext) {
-    let _system = crate::platform::test_system_motion(false);
-    let result = (|| -> anyhow::Result<()> {
-        let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            let mut view = crate::tests::test_view(window, cx);
-            view.begin_first_run(cx);
-            view
-        });
-        cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(540.)));
-        cx.run_until_parked();
-        let button = bounds(cx, "welcome-play")?;
-        // Four pixels inside the square frame's corner is far outside the circle
-        // inscribed in that frame, which is the control's visible shape.
-        let corner = gpui::point(
-            button.origin.x + gpui::px(4.),
-            button.origin.y + gpui::px(4.),
-        );
-        let started = |cx: &mut gpui::VisualTestContext, view: &gpui::Entity<super::Block>| {
-            view.read_with(cx, |view, _| view.shell.first_run.notice.is_some())
-        };
-
-        // The engine-free fixture reports the setup-save failure only when Start
-        // actually runs, so this observes activation without persisting a setup.
-        cx.simulate_click(corner, gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(
-            !started(cx, &view),
-            "a press inside the square frame but outside the circle must not start setup"
-        );
         assert_eq!(
-            view.read_with(cx, |view, _| view.shell.first_run.stage),
-            Stage::Welcome
+            block_launcher::storage::Locations::load(root.path())?.library(root.path()),
+            expected,
+            "initialization persists the automatic game parent"
         );
-
-        cx.simulate_click(button.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(
-            started(cx, &view),
-            "the visible circle must still start setup when pressed"
-        );
-
-        // A press is accepted only when it both starts and ends on the circle.
-        view.update(cx, |view, _| view.shell.first_run.notice = None);
-        cx.simulate_mouse_down(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
-        cx.simulate_mouse_up(
-            button.center(),
-            gpui::MouseButton::Left,
-            gpui::Modifiers::none(),
-        );
-        cx.run_until_parked();
-        assert!(
-            !started(cx, &view),
-            "a press that starts outside the circle must not start setup"
-        );
-        cx.simulate_mouse_down(
-            button.center(),
-            gpui::MouseButton::Left,
-            gpui::Modifiers::none(),
-        );
-        cx.simulate_mouse_up(corner, gpui::MouseButton::Left, gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(
-            !started(cx, &view),
-            "a press that ends outside the circle must not start setup"
-        );
-        assert_eq!(
-            view.read_with(cx, |view, _| view.shell.first_run.stage),
-            Stage::Welcome
-        );
-
-        // Keyboard activation does not depend on where the pointer rests.
-        view.update(cx, |view, _| view.shell.first_run.notice = None);
-        cx.simulate_mouse_move(corner, None, gpui::Modifiers::none());
-        cx.run_until_parked();
-        crate::test_support::press(cx, "enter");
-        cx.run_until_parked();
-        assert!(
-            started(cx, &view),
-            "Enter must start setup while the pointer is outside the circle"
-        );
-        view.update(cx, |view, _| view.shell.first_run.notice = None);
-        crate::test_support::press(cx, "space");
-        cx.run_until_parked();
-        assert!(started(cx, &view), "Space must start setup");
+        assert!(!root.path().join("setup-started").exists());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -1254,7 +1101,6 @@ fn the_game_card_counts_instances_not_profiles(cx: &mut gpui::TestAppContext) {
 fn center_tasks_open_independently_and_a_ready_game_leaves_for_home(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -1380,7 +1226,6 @@ fn restart_reconstructs_account_and_game_completion_from_saved_data(cx: &mut gpu
             view.selected_account = Some(account_id);
             view
         });
-        fs::write(root.path().join("setup-started"), b"1")?;
         view.update(cx, |view, cx| view.begin_first_run(cx));
         assert!(view.read_with(cx, |view, _| {
             view.shell.first_run.stage == Stage::Overview
@@ -1528,7 +1373,6 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
                         .update(cx, |field, cx| field.set_value("Retained game", cx));
                 }
                 view.handle_first_run(FirstRunAction::Back, window, cx);
-                view.handle_first_run(FirstRunAction::BackToWelcome, window, cx);
             });
         });
         let draft_id = view.read_with(cx, |view, _| match &view.form {
@@ -1537,12 +1381,15 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
         });
         assert!(draft_id.is_some());
         cx.run_until_parked();
-        let entry = bounds(cx, "not-your-language")?;
+        let entry = bounds(cx, "setup-language-entry")?;
         let label = cx.update(|window, _| {
-            gpui_base::test_support::find(window, &[], &"not-your-language".into())
+            gpui_base::test_support::find(window, &[], &"setup-language-entry".into())
                 .and_then(|node| node.label().map(str::to_owned))
         });
-        assert_eq!(label.as_deref(), Some("Not your language?"));
+        assert_eq!(
+            label.as_deref(),
+            Some(tr!(crate::Language::English, "setup.language.label").as_str())
+        );
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
@@ -1601,7 +1448,7 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             view.read_with(cx, |view, _| view.shell.surfaces.top().cloned())
         );
         assert!(view.read_with(cx, |view, cx| {
-            view.shell.first_run.stage == Stage::Welcome
+            view.shell.first_run.stage == Stage::Overview
                 && view.preferences.language == Some(crate::Language::Japanese)
                 && view.saved_preferences.language == Some(crate::Language::Japanese)
                 && !view.preferences.onboarding_complete
@@ -1656,7 +1503,7 @@ fn first_setup_language_save_failure_is_visible_and_never_claimed_as_saved(
         let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
-        let entry = bounds(cx, "not-your-language")?;
+        let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         let select = bounds(cx, "setup-language")?;
@@ -1694,7 +1541,7 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
         cx.run_until_parked();
         for _ in 0..8 {
             let focused = cx.update(|window, _| {
-                gpui_base::test_support::find(window, &[], &"not-your-language".into())
+                gpui_base::test_support::find(window, &[], &"setup-language-entry".into())
                     .and_then(|node| node.focused())
                     == Some(true)
             });
@@ -1705,13 +1552,13 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
             cx.run_until_parked();
         }
         let entry_focused = cx.update(|window, _| {
-            gpui_base::test_support::find(window, &[], &"not-your-language".into())
+            gpui_base::test_support::find(window, &[], &"setup-language-entry".into())
                 .and_then(|node| node.focused())
                 == Some(true)
         });
         assert!(
             entry_focused,
-            "the Welcome language entry is keyboard reachable"
+            "the Overview language entry is keyboard reachable"
         );
         let entry_focus = cx.update(|window, cx| window.focused(cx));
         crate::test_support::press(cx, "enter");
@@ -1782,7 +1629,12 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
         ] {
             crate::test_support::press(cx, key);
             cx.run_until_parked();
-            for id in ["welcome-play", "setup-skip", "not-your-language"] {
+            for id in [
+                "setup-account",
+                "setup-game",
+                "setup-continue",
+                "setup-language-entry",
+            ] {
                 let focused = cx.update(|window, _| {
                     gpui_base::test_support::find(window, &[], &id.into())
                         .and_then(|node| node.focused())
@@ -1794,7 +1646,7 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
                 "focus left the language drawer after {key}"
             );
             assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.stage == Stage::Welcome
+                view.shell.first_run.stage == Stage::Overview
                     && !view.preferences.onboarding_complete
             }));
         }
@@ -1828,9 +1680,9 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
         assert_eq!(
             cx.update(|window, cx| window.focused(cx)),
             entry_focus,
-            "closing the drawer restores its Welcome trigger"
+            "closing the drawer restores its Overview trigger"
         );
-        let entry = bounds(cx, "not-your-language")?;
+        let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         let select = bounds(cx, "setup-language")?;
@@ -1865,7 +1717,7 @@ fn focus_language_drawer_close(cx: &mut gpui::VisualTestContext) {
 }
 
 #[gpui::test]
-fn language_drawer_blocks_background_welcome_actions(cx: &mut gpui::TestAppContext) {
+fn language_drawer_blocks_background_overview_actions(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
@@ -1880,16 +1732,23 @@ fn language_drawer_blocks_background_welcome_actions(cx: &mut gpui::TestAppConte
         let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
-        let entry = bounds(cx, "not-your-language")?.center();
         let targets = [
-            bounds(cx, "welcome-play")?.center(),
-            bounds(cx, "setup-skip")?.center(),
-            entry,
+            "setup-account",
+            "setup-game",
+            "setup-continue",
+            "setup-language-entry",
         ];
-        for target in targets {
+        for selector in targets {
+            // A click over the selector can change the language. Locate the
+            // translated controls again before testing the next modal boundary.
+            let entry = bounds(cx, "setup-language-entry")?.center();
+            let target = bounds(cx, selector)?.center();
             cx.simulate_click(entry, gpui::Modifiers::none());
             cx.run_until_parked();
-            assert!(view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
+            assert!(
+                view.read_with(cx, |view, _| view.shell.surfaces.is_open()),
+                "{selector}: the language drawer must open"
+            );
             let select = bounds(cx, "setup-language")?;
             cx.simulate_click(select.center(), gpui::Modifiers::none());
             cx.run_until_parked();
@@ -1902,8 +1761,11 @@ fn language_drawer_blocks_background_welcome_actions(cx: &mut gpui::TestAppConte
             cx.simulate_click(target, gpui::Modifiers::none());
             cx.run_until_parked();
             assert!(view.read_with(cx, |view, _| {
-                view.shell.first_run.stage == Stage::Welcome
+                view.shell.first_run.stage == Stage::Overview
                     && !view.preferences.onboarding_complete
+                    && view.router.tab() == Tab::Onboarding
+                    && !view.wizard_task_active()
+                    && view.shell.auth.is_none()
             }));
             assert!(!root.path().join("setup-started").exists());
             for _ in 0..2 {
@@ -1932,7 +1794,7 @@ fn language_drawer_dismissal_respects_its_nested_select(cx: &mut gpui::TestAppCo
         let home = cx.update(|window, _| crate::window_geometry::home_size(window));
         cx.simulate_resize(home);
         cx.run_until_parked();
-        let entry = bounds(cx, "not-your-language")?;
+        let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         let select = bounds(cx, "setup-language")?;
@@ -1951,7 +1813,7 @@ fn language_drawer_dismissal_respects_its_nested_select(cx: &mut gpui::TestAppCo
         assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
 
         cx.run_until_parked();
-        let entry = bounds(cx, "not-your-language")?;
+        let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         let backdrop = bounds(cx, "block-drawer-backdrop")?;
@@ -1963,7 +1825,7 @@ fn language_drawer_dismissal_respects_its_nested_select(cx: &mut gpui::TestAppCo
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
         assert!(view.read_with(cx, |view, _| {
-            view.shell.first_run.stage == Stage::Welcome && !view.preferences.onboarding_complete
+            view.shell.first_run.stage == Stage::Overview && !view.preferences.onboarding_complete
         }));
         Ok(())
     })();

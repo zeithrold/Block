@@ -32,17 +32,19 @@ fn page_spec_shares_the_rendered_page_and_detail_transition_identity(cx: &mut Te
 }
 
 #[gpui::test]
-fn reducing_motion_during_welcome_swap_settles_and_releases_the_outgoing_page(
+fn reducing_motion_during_page_swap_settles_and_releases_the_outgoing_page(
     cx: &mut TestAppContext,
 ) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
-        view.begin_first_run(cx);
+        view.router.navigate(Tab::Accounts);
         view
     });
     cx.run_until_parked();
-    view.update_in(cx, |view, window, cx| view.first_run_overview(window, cx));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::Tab(Tab::About), window, cx);
+    });
     frame(cx, 20);
     let outgoing = view.read_with(cx, |view, _| {
         view.motion
@@ -59,7 +61,7 @@ fn reducing_motion_during_welcome_swap_settles_and_releases_the_outgoing_page(
     assert!(view.read_with(cx, |view, _| {
         view.motion.page.outgoing().is_none()
             && !view.motion.moving
-            && view.shell.first_run.stage == crate::first_run::Stage::Overview
+            && view.router.tab() == Tab::About
     }));
     assert!(outgoing.is_some_and(|outgoing| outgoing.upgrade().is_none()));
 }
@@ -327,20 +329,21 @@ fn early_tab_events_settle_navigation_and_forward_once_after_the_clean_focus_tre
 }
 
 #[gpui::test]
-fn welcome_overview_uses_the_shared_reversible_transition_at_fixed_bounds(cx: &mut TestAppContext) {
-    use crate::first_run::{Action as FirstRunAction, Stage};
-
+fn home_about_navigation_is_reversible_at_fixed_bounds(cx: &mut TestAppContext) {
     let _system = crate::platform::test_system_motion(false);
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
-        view.begin_first_run(cx);
+        view.router.navigate(Tab::Home);
         view
     });
+    cx.simulate_resize(size(px(360.), px(720.)));
     cx.run_until_parked();
-    assert!(view.read_with(cx, |view, _| view.shell.first_run.stage == Stage::Welcome));
+    assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::Home));
     let native = cx.update(|window, _| window.bounds());
 
-    view.update_in(cx, |view, window, cx| view.first_run_overview(window, cx));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::Tab(Tab::About), window, cx);
+    });
     cx.run_until_parked();
     frame(cx, 20);
     assert!(view.read_with(cx, |view, _| {
@@ -349,12 +352,12 @@ fn welcome_overview_uses_the_shared_reversible_transition_at_fixed_bounds(cx: &m
                 .motion
                 .page
                 .outgoing()
-                .is_some_and(|layer| layer._snapshot.shell.first_run.stage == Stage::Welcome)
+                .is_some_and(|layer| layer._snapshot.router.tab() == Tab::Home)
     }));
     let incoming = cx.debug_bounds("navigation-current-0");
     assert!(
         incoming.is_some_and(|bounds| bounds.left() > px(0.) && bounds.left() <= px(12.)),
-        "Overview enters from the right within the compact frame: {incoming:?}"
+        "About enters from the right within the compact frame: {incoming:?}"
     );
     assert_eq!(cx.update(|window, _| window.bounds()), native);
 
@@ -363,29 +366,25 @@ fn welcome_overview_uses_the_shared_reversible_transition_at_fixed_bounds(cx: &m
         && view.motion.page.outgoing().is_none()));
 
     view.update_in(cx, |view, window, cx| {
-        view.handle(
-            UiAction::FirstRun(FirstRunAction::BackToWelcome),
-            window,
-            cx,
-        )
+        view.handle(UiAction::NavigationBack, window, cx)
     });
     cx.run_until_parked();
     frame(cx, 20);
     let incoming = cx.debug_bounds("navigation-current-0");
     assert!(
         incoming.is_some_and(|bounds| bounds.left() < px(0.) && bounds.left() >= px(-12.)),
-        "Welcome must slide back in from the left: {incoming:?}"
+        "Home must slide back in from the left: {incoming:?}"
     );
     assert!(view.read_with(cx, |view, _| {
         view.motion
             .page
             .outgoing()
-            .is_some_and(|layer| layer._snapshot.shell.first_run.stage == Stage::Overview)
+            .is_some_and(|layer| layer._snapshot.router.tab() == Tab::About)
     }));
     assert_eq!(cx.update(|window, _| window.bounds()), native);
     frame(cx, 260);
     assert!(view.read_with(cx, |view, _| {
-        view.shell.first_run.stage == Stage::Welcome
+        view.router.tab() == Tab::Home
             && !view.motion.moving
             && view.motion.page.outgoing().is_none()
     }));

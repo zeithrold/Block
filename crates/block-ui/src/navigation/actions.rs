@@ -177,7 +177,7 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
             | UiAction::ProfilePageCancel
             | UiAction::ProfilePageDone
             | UiAction::Tab(Tab::Home)
-            | UiAction::FirstRun(first_run::Action::Back | first_run::Action::BackToWelcome)
+            | UiAction::FirstRun(first_run::Action::Back)
     ) {
         motion::Direction::Back
     } else {

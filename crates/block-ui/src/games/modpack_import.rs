@@ -3043,7 +3043,6 @@ mod tests {
     fn back_to_sources_keeps_the_first_run_parent_protected_on_quit(cx: &mut gpui::TestAppContext) {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
-            std::fs::write(root.path().join("setup-started"), b"1")?;
             let (engine, _receiver) = crate::Engine::with_root(root.path().to_path_buf())?;
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
                 let mut view = crate::tests::test_view(window, cx);
@@ -3863,7 +3862,7 @@ mod tests {
                 view.preferences.onboarding_complete = false;
                 view.saved_preferences.onboarding_complete = false;
                 view.shell.first_run.enabled = true;
-                view.shell.first_run.stage = Stage::Welcome;
+                view.shell.first_run.stage = Stage::Overview;
                 view.router.navigate(Tab::Onboarding);
                 view.snapshot = crate::test_support::ready_snapshot();
                 view.open_pack_import(window, cx);
@@ -4377,7 +4376,7 @@ mod tests {
     ) {
         use crate::first_run::{Action as FirstRunAction, Stage};
 
-        for origin in [Stage::Welcome, Stage::Overview, Stage::GameChoice] {
+        for origin in [Stage::Overview, Stage::GameChoice] {
             let result = (|| -> anyhow::Result<()> {
                 let (view, cx) = crate::test_support::window(cx, |window, cx| {
                     let mut view = crate::tests::test_view(window, cx);
@@ -4423,16 +4422,8 @@ mod tests {
                             form.loader_version = Some(String::from("47.2.20"));
                         }
                         view.handle(UiAction::FirstRun(FirstRunAction::Back), window, cx);
-                        match origin {
-                            Stage::Welcome => view.handle(
-                                UiAction::FirstRun(FirstRunAction::BackToWelcome),
-                                window,
-                                cx,
-                            ),
-                            Stage::GameChoice => {
-                                view.handle(UiAction::FirstRun(FirstRunAction::Game), window, cx);
-                            }
-                            Stage::Overview | Stage::GameWizard => {}
+                        if origin == Stage::GameChoice {
+                            view.handle(UiAction::FirstRun(FirstRunAction::Game), window, cx);
                         }
                         view.open_import_games(window, cx);
                     });
@@ -4593,12 +4584,7 @@ mod tests {
     ) {
         use crate::{Tab, first_run::Stage, shell::Drawer};
 
-        for origin in [
-            None,
-            Some(Stage::Welcome),
-            Some(Stage::Overview),
-            Some(Stage::GameChoice),
-        ] {
+        for origin in [None, Some(Stage::Overview), Some(Stage::GameChoice)] {
             let result = (|| -> anyhow::Result<()> {
                 let (view, cx) = crate::test_support::window(cx, |window, cx| {
                     let mut view = crate::tests::test_view(window, cx);

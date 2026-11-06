@@ -1,7 +1,7 @@
 //! First-run setup center.
 //!
-//! Welcome records that setup started and then hands over to the center: games
-//! first, accounts second, each step saving on its own. Discovery runs in the
+//! Cold starts enter the center directly: accounts first, games second, each
+//! task saving on its own. Discovery runs in the
 //! background, so the center can only report how many games are importable, and
 //! finishing setup rejects a report that is still in flight.
 #![expect(
@@ -12,7 +12,7 @@
 use super::scroll_area::ScrollAreaExt as _;
 use super::{
     Block, Form, Preferences, Tab, UiAction,
-    components::{self, ButtonSize, ButtonVariant, ControlState},
+    components::{self, ButtonVariant},
     design::Icon,
     game_wizard::WizardStep,
     note,
@@ -22,7 +22,7 @@ use crate::Language;
 use block_launcher::catalog::{InstallStatus, PackStatus};
 use gpui::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, Styled as _,
-    Window, div, prelude::FluentBuilder as _, px, rgb,
+    Window, div, px, rgb,
 };
 use std::{
     path::{Path, PathBuf},
@@ -32,7 +32,6 @@ use std::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Stage {
     #[default]
-    Welcome,
     Overview,
     GameChoice,
     GameWizard,
@@ -40,14 +39,12 @@ pub(super) enum Stage {
 
 #[derive(Clone, Debug)]
 pub(super) enum Action {
-    Start,
     Continue,
     Account,
     Game,
     Recommended,
     Custom,
     Back,
-    BackToWelcome,
     Import,
     /// Start the one step the saved game still needs, chosen from its state.
     Prepare,
@@ -126,7 +123,6 @@ pub(super) struct State {
     /// Older component-only fixtures still exercise the shared draft helpers.
     pub enabled: bool,
     pub stage: Stage,
-    pub welcome_button: super::welcome_button::WelcomeButton,
     pub game_parent: Option<PathBuf>,
     pub entered: Option<Instant>,
     pub error: Option<crate::i18n::UiText>,
@@ -148,25 +144,24 @@ impl Block {
         self.router.navigate(Tab::Onboarding);
         self.form = None;
         self.shell.first_run.enabled = true;
+        self.shell.first_run.stage = Stage::Overview;
         let Some(engine) = &self.engine else {
             return;
         };
-        self.shell.first_run.stage = if engine.root.join("setup-started").is_file() {
-            Stage::Overview
-        } else {
-            Stage::Welcome
-        };
         let fallback = engine.root.join("instances");
         let existing = block_launcher::storage::Locations::load(&engine.root).ok();
-        self.shell.first_run.game_parent = Some(
-            existing
-                .and_then(|value| value.library)
-                .unwrap_or_else(|| automatic_game_parent(&fallback)),
-        );
+        let parent = if let Some(parent) = existing.and_then(|value| value.library) {
+            parent
+        } else {
+            let parent = automatic_game_parent(&fallback);
+            if let Err(error) = super::setup_storage::save_game_parent(&engine.root, &parent) {
+                self.shell.first_run.notice = Some(Notice::SetupProgress(format!("{error:#}")));
+            }
+            parent
+        };
+        self.shell.first_run.game_parent = Some(parent);
         self.shell.onboarding.account = self.selected_account.clone();
-        if self.shell.first_run.stage == Stage::Overview {
-            self.ensure_setup_scan();
-        }
+        self.ensure_setup_scan();
         self.motion_dirty = true;
         cx.notify();
     }
@@ -273,25 +268,6 @@ impl Block {
         })
     }
 
-    fn mark_first_run_started(&mut self) -> bool {
-        let parent = self.first_run_game_parent();
-        let result = self
-            .engine
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Block's data directory is unavailable"))
-            .and_then(|engine| {
-                std::fs::create_dir_all(&engine.root)?;
-                std::fs::write(engine.root.join("setup-started"), b"1")?;
-                super::setup_storage::save_game_parent(&engine.root, &parent)?;
-                Ok(())
-            });
-        if let Err(error) = result {
-            self.shell.first_run.notice = Some(Notice::SetupProgress(format!("{error:#}")));
-            return false;
-        }
-        true
-    }
-
     /// Apply a first-setup language choice immediately.
     ///
     /// The preview is usable even when the write fails. Only a successful
@@ -388,15 +364,6 @@ impl Block {
         self.shell.first_run.notice = None;
         match action {
             Action::Language(language) => self.choose_first_run_language(language, window, cx),
-            Action::Start => {
-                // The marker is the only thing that remembers setup started. A
-                // failed write stays on Welcome with its notice rather than
-                // pretending the center can be resumed later.
-                if !self.mark_first_run_started() {
-                    return;
-                }
-                self.first_run_overview(window, cx);
-            }
             Action::Continue => {
                 let state = self.first_run_game_state();
                 if state == GameState::PendingPack {
@@ -456,18 +423,6 @@ impl Block {
                 self.shell.surfaces.clear(window, &self.focus, cx);
                 self.first_run_overview(window, cx);
             }
-            Action::BackToWelcome => {
-                // Returning to Welcome is navigation, not a reset: `setup-started`
-                // and the saved game parent keep the draft resumable.
-                // The previous control was unmounted while hovered and may
-                // never receive mouse-leave. Give the returning control fresh
-                // hover/pointer state when the page returns.
-                self.shell.first_run.welcome_button = Default::default();
-                self.shell.first_run.stage = Stage::Welcome;
-                self.router.leave_task();
-                self.shell.first_run.entered = None;
-                self.motion_dirty = true;
-            }
             Action::Import => self.open_import_games(window, cx),
             Action::Prepare => match self.first_run_game_state() {
                 GameState::PendingPack => {
@@ -488,141 +443,9 @@ impl Block {
         cx.notify();
     }
 
-    pub(super) fn first_run_page(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
-        if self.shell.first_run.stage == Stage::Welcome {
-            return self.first_run_welcome(window, cx);
-        }
-        self.first_run_progress_page(window, cx)
-    }
-
-    /// Welcome is the only full-height page: the invitation control is centred
-    /// and Skip setup sits at the bottom edge.
-    fn first_run_welcome(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let language = self.language();
-        let button_size = px(super::welcome_button::DIAMETER);
-        div()
-            .id("setup-welcome")
-            .debug_selector(|| "setup-welcome".into())
-            .relative()
-            .size_full()
-            .child(
-                div()
-                    .absolute()
-                    .top(px(24.))
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .justify_center()
-                    .child(components::button_sized(
-                        "not-your-language",
-                        "Not your language?",
-                        self.palette,
-                        ButtonVariant::Ghost,
-                        ButtonSize::ExtraSmall,
-                        ControlState::default(),
-                        cx.listener(|view, (): &(), window, cx| {
-                            view.handle(
-                                UiAction::Drawer(Some(super::Drawer::Language)),
-                                window,
-                                cx,
-                            );
-                        }),
-                    )),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(gpui::relative(0.52))
-                    .mt(-button_size * 0.5)
-                    .left_0()
-                    .right_0()
-                    .h(button_size)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .absolute()
-                            .bottom(gpui::relative(1.))
-                            .mb(px(32.))
-                            .left_0()
-                            .right_0()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .text_2xl()
-                                    .line_height(px(32.))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .child(tr!(language, "setup.welcome.title")),
-                            )
-                            .child(
-                                note(tr!(language, "setup.welcome.subtitle")).line_height(px(18.)),
-                            ),
-                    )
-                    .child(super::welcome_button::render(
-                        &self.shell.first_run.welcome_button,
-                        self.palette,
-                        self.motion_preferences(),
-                        tr!(language, "setup.welcome.start"),
-                        window,
-                        cx,
-                        cx.listener(|view, _, window, cx| {
-                            view.handle(UiAction::FirstRun(Action::Start), window, cx)
-                        }),
-                    ))
-                    .children(self.first_run_feedback(language).map(|message| {
-                        div()
-                            .absolute()
-                            .top(gpui::relative(1.))
-                            .mt(px(24.))
-                            .left_0()
-                            .right_0()
-                            .px_6()
-                            .child(
-                                note(message)
-                                    .id("setup-notice")
-                                    .debug_selector(|| "setup-notice".into())
-                                    .text_color(rgb(self.palette.destructive)),
-                            )
-                    })),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .bottom(px(24.))
-                    .left_0()
-                    .right_0()
-                    .flex()
-                    .justify_center()
-                    .child(
-                        self.button_with_variant(
-                            "setup-skip",
-                            tr!(language, "setup.welcome.skip"),
-                            UiAction::FirstRun(Action::Skip),
-                            ButtonVariant::Ghost,
-                            cx,
-                        )
-                        .h(px(28.))
-                        .py_0()
-                        .px_3()
-                        .text_xs()
-                        .font_weight(gpui::FontWeight::NORMAL)
-                        .text_color(rgb(self.palette.muted)),
-                    ),
-            )
-            .into_any_element()
-    }
-
     /// Overview and Game choice share one scrollable body; only Overview owns a
     /// footer, because those are the two steps it tracks.
-    fn first_run_progress_page(
+    pub(super) fn first_run_page(
         &self,
         _window: &Window,
         cx: &Context<'_, Self>,
@@ -664,7 +487,7 @@ impl Block {
                         div()
                             .min_h_full()
                             .flex()
-                            .items_center()
+                            .items_start()
                             .justify_center()
                             .p_4()
                             .child(
@@ -798,7 +621,7 @@ impl Block {
             .into_any_element()
     }
 
-    /// Games first, accounts second, then the facts that decide what the
+    /// Accounts first, games second, then the facts that decide what the
     /// center still offers. Every row states one thing and owns at most one
     /// action.
     fn first_run_tasks(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
@@ -823,21 +646,21 @@ impl Block {
                     .items_stretch()
                     .gap_4()
                     .child(self.setup_task_card(
-                        "setup-game",
-                        &tr!(language, "setup.game.title"),
-                        &game_description,
-                        Icon::Games,
-                        game,
-                        Action::Game,
-                        cx,
-                    ))
-                    .child(self.setup_task_card(
                         "setup-account",
                         &tr!(language, "setup.account.title"),
                         &account_description,
                         Icon::Account,
                         account,
                         Action::Account,
+                        cx,
+                    ))
+                    .child(self.setup_task_card(
+                        "setup-game",
+                        &tr!(language, "setup.game.title"),
+                        &game_description,
+                        Icon::Games,
+                        game,
+                        Action::Game,
                         cx,
                     )),
             )
@@ -865,7 +688,7 @@ impl Block {
 
     /// The center's own state: where games are saved, what the background scan
     /// found, the draft it can resume, the one step the saved game still needs
-    /// and the language entry a returning user needs.
+    /// while language remains reachable in the fixed window chrome.
     fn first_run_notes(&self, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         div()
@@ -894,21 +717,6 @@ impl Block {
             .children(self.first_run_import_note(cx))
             .children(self.first_run_draft_note(cx))
             .children(self.first_run_prepare_note())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap_3()
-                    .child(note(tr!(language, "setup.language.description")))
-                    .child(self.button_with_variant(
-                        "setup-language-entry",
-                        tr!(language, "setup.language.label"),
-                        UiAction::Drawer(Some(super::Drawer::Language)),
-                        ButtonVariant::Ghost,
-                        cx,
-                    )),
-            )
     }
 
     /// The background scan, which can only report a number: searching, a
@@ -1108,7 +916,6 @@ impl Block {
         action: Action,
         cx: &Context<'_, Self>,
     ) -> components::Control {
-        let game = matches!(action, Action::Game);
         self.button_with_variant(
             id,
             "",
@@ -1121,7 +928,6 @@ impl Block {
         .min_w_0()
         .h_auto()
         .p_4()
-        .when(game, |card| card.p_6())
         .items_start()
         .justify_start()
         .child(
@@ -1133,7 +939,7 @@ impl Block {
                 .flex_col()
                 .items_start()
                 .gap_4()
-                .child(icon.render(if game { 28. } else { 20. }, self.palette.foreground))
+                .child(icon.render(20., self.palette.foreground))
                 .child(
                     div()
                         .w_full()

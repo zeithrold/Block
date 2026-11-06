@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "title": "Historical comparisons and authored compact native review cases",
-  "compact_review_policy": "Historical and retired rows preserve the original comparison observations, never current acceptance. Current compact rows are native-only, unreviewed and not_assessed. Only hash-checked passed capture receipts with assertions.contract_revision = compact-ui-20261105 attach images to compact rows; old matching filenames remain historical. Historical viewport/source wording describes its earlier audit, not current geometry.",
+  "compact_review_policy": "Historical and retired rows preserve the original comparison observations, never current acceptance. Current compact rows are native-only, unreviewed and not_assessed. Only hash-checked passed capture receipts with assertions.contract_revision matching the row's capture_contract_revision attach images to current rows; old matching filenames remain historical. Historical viewport/source wording describes its earlier audit, not current geometry.",
   "description": "Historical Milestone II comparison, not the current Wizard acceptance contract. Scenario names, source locations and React/native correspondence below describe that review and may have been retired by the subsequent Wizard redesign. Use scripts/scenario_contracts.py for current capture expectations; new captures do not retroactively validate these archived comparisons. Exact filenames are candidate lookup only. Capture semantics and provenance are reviewed independently. Unknown archive fields are intentionally null/unknown.",
   "capture_receipt_schema": {
     "schema_version": 1,
@@ -5557,51 +5557,9 @@
       "coverage_counts_as_independent": false
     },
     {
-      "case_id": "compact-setup-welcome",
-      "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
-      "native_stems": [
-        "setup-welcome"
-      ],
-      "reference_candidates": [],
-      "review_status": "unreviewed",
-      "object": {
-        "type": "native compact launcher",
-        "identity": "setup-welcome"
-      },
-      "trigger": {
-        "value": "--scenario setup-welcome --theme light|dark",
-        "source": "crates/block-ui/src/runtime/scenarios.rs"
-      },
-      "data": {
-        "value": "Network-free synthetic fixture; authored visible anchors are specified independently in scripts/scenario_contracts.py. No capture has been assessed for this row.",
-        "source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs"
-      },
-      "viewport": {
-        "native": {
-          "width": 360,
-          "height": 720,
-          "unit": "logical content",
-          "observed": "unknown until a capture receipt records it"
-        },
-        "react": "not mapped"
-      },
-      "focus": "not assessed",
-      "scroll": "not assessed",
-      "source_provenance": {
-        "native_source": "crates/block-ui/src/runtime/scenarios.rs; crates/block-ui/src/setup/first_run.rs",
-        "native_image_commit": "unknown until supplied by a capture receipt",
-        "react_source": null,
-        "react_image_commit": null
-      },
-      "comparable_scope": "not_assessed",
-      "rationale": "Authored compact UI contract only. Native layout, interaction, motion and acceptance remain unreviewed; no React correspondence is claimed.",
-      "coverage_counts_as_independent": false
-    },
-    {
       "case_id": "compact-setup-overview",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-overview"
       ],
@@ -5643,7 +5601,7 @@
     {
       "case_id": "compact-setup-overview-ready",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-overview-ready"
       ],
@@ -5685,7 +5643,7 @@
     {
       "case_id": "compact-setup-game-choice",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-game-choice"
       ],
@@ -5727,7 +5685,7 @@
     {
       "case_id": "compact-setup-import-sources",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-import-sources"
       ],
@@ -5769,7 +5727,7 @@
     {
       "case_id": "compact-setup-import-list",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-import-list"
       ],
@@ -5811,7 +5769,7 @@
     {
       "case_id": "compact-setup-account",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-account"
       ],
@@ -5853,7 +5811,7 @@
     {
       "case_id": "compact-setup-game",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-game"
       ],
@@ -7239,7 +7197,7 @@
     {
       "case_id": "compact-setup-overview-draft",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-overview-draft"
       ],
@@ -7323,7 +7281,7 @@
     {
       "case_id": "compact-setup-import-long-destination",
       "lifecycle": "current",
-      "capture_contract_revision": "compact-ui-20261105",
+      "capture_contract_revision": "direct-setup-20261106",
       "native_stems": [
         "setup-import-long-destination"
       ],

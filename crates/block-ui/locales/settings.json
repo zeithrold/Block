@@ -585,26 +585,6 @@
     "zh-Hans": "无法保存设置：%{detail}",
     "ja": "設定を保存できませんでした: %{detail}"
   },
-  "setup.welcome.title": {
-    "en": "Welcome Back",
-    "zh-Hans": "欢迎回来",
-    "ja": "おかえりなさい"
-  },
-  "setup.welcome.subtitle": {
-    "en": "Add an account and set up a game.",
-    "zh-Hans": "添加账户并设置游戏。",
-    "ja": "アカウントを追加してゲームをセットアップしましょう。"
-  },
-  "setup.welcome.start": {
-    "en": "Start setup",
-    "zh-Hans": "开始设置",
-    "ja": "セットアップを開始"
-  },
-  "setup.welcome.skip": {
-    "en": "Skip setup",
-    "zh-Hans": "跳过设置",
-    "ja": "セットアップをスキップ"
-  },
   "setup.language.label": {
     "en": "Language",
     "zh-Hans": "语言",
@@ -621,9 +601,9 @@
     "ja": "Block をセットアップ"
   },
   "setup.overview.description": {
-    "en": "Create or import a game, add an account, or continue to Home. Each saved task is kept.",
-    "zh-Hans": "创建或导入游戏、添加账户，或直接进入主页。已保存的内容会保留。",
-    "ja": "ゲームの作成やインポート、アカウントの追加、またはホームへの移動を選べます。保存した内容は保持されます。"
+    "en": "Add an account and create or import a game. Each task saves separately, so you can finish later.",
+    "zh-Hans": "添加账户并创建或导入游戏。设置独立保存，可稍后继续。",
+    "ja": "各設定は個別に保存され、後で続けられます。"
   },
   "setup.account.title": {
     "en": "Account",

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCENARIO_SOURCE = ROOT / "crates/block-ui/src/runtime/scenarios.rs"
 HOME_VIEWPORT = (360, 720)
 CAPTURE_CONTRACT_REVISION = "compact-ui-20261105"
+FIRST_RUN_CONTRACT_REVISION = "direct-setup-20261106"
 
 
 def scenario_names(source: Path = SCENARIO_SOURCE) -> set[str]:
@@ -149,10 +150,9 @@ _add("settings-downloads", "Downloads & network", "Parallel downloads")
 _add("settings-socks5", "Downloads & network", "socks5h://127.0.0.1:1080")
 _add("settings-storage", "Storage", "Game storage", "Download cache")
 _add("about", "One block at a time.", "Build information")
-_add("setup-welcome", "Welcome Back", "Add an account and set up a game.", "Skip setup")
-_add("setup-overview", "Set up Block", "Account", "Game", "Go to Home")
-_add("setup-overview-ready", "Set up Block", "Go to Home")
-_add("setup-overview-draft", "Set up Block", "A game draft is still open.", "Continue draft")
+_add("setup-overview", "Set up Block", "Account", "Game", "Language", "Go to Home")
+_add("setup-overview-ready", "Set up Block", "Language", "Go to Home")
+_add("setup-overview-draft", "Set up Block", "Language", "A game draft is still open.", "Continue draft")
 _add("setup-game-choice", "Set up a game", "Recommended setup", "Custom setup")
 _add("setup-account", "Sign in with Microsoft", "Open browser")
 _add("setup-game", "Create your game", "Minecraft")
@@ -227,5 +227,8 @@ def contract(name: str) -> dict[str, object]:
         "title": _window_title(name),
         "viewport": HOME_VIEWPORT,
         "required": list(required),
-        "contract_revision": CAPTURE_CONTRACT_REVISION,
+        "contract_revision": (
+            FIRST_RUN_CONTRACT_REVISION if name.startswith("setup-")
+            else CAPTURE_CONTRACT_REVISION
+        ),
     }

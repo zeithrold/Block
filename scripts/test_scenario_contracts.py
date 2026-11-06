@@ -5,6 +5,7 @@ import unittest
 from scenario_contracts import (
     HOME_VIEWPORT,
     CAPTURE_CONTRACT_REVISION,
+    FIRST_RUN_CONTRACT_REVISION,
     _REQUIRED,
     contract,
     scenario_names,
@@ -20,7 +21,11 @@ class ScenarioContractsTest(unittest.TestCase):
                 value = contract(name)
                 self.assertTrue(value["title"])
                 self.assertEqual(value["viewport"], (360, 720))
-                self.assertEqual(value["contract_revision"], CAPTURE_CONTRACT_REVISION)
+                expected_revision = (
+                    FIRST_RUN_CONTRACT_REVISION if name.startswith("setup-")
+                    else CAPTURE_CONTRACT_REVISION
+                )
+                self.assertEqual(value["contract_revision"], expected_revision)
                 self.assertGreaterEqual(len(value["required"]), 2)
                 self.assertEqual(len(value["required"]), len(set(value["required"])))
 
@@ -52,6 +57,7 @@ class ScenarioContractsTest(unittest.TestCase):
         for name in (
             "wizard-review",
             "auth-offline-complete",
+            "setup-welcome",
             "welcome-1",
             "welcome-2",
             "welcome-3",
@@ -83,7 +89,7 @@ class ScenarioContractsTest(unittest.TestCase):
         self.assertIn("Go to Home", contract("setup-overview")["required"])
 
     def test_first_run_scenarios_follow_their_page_titles_and_frames(self) -> None:
-        for name in ("setup-welcome", "setup-import-sources", "setup-import-list"):
+        for name in ("setup-import-sources", "setup-import-list"):
             with self.subTest(name=name):
                 self.assertEqual(contract(name)["title"], "Block · Set up Block")
                 self.assertEqual(contract(name)["viewport"], HOME_VIEWPORT)

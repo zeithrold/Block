@@ -226,7 +226,6 @@ fn first_run_completion_saves_the_account_draft_and_retries_after_failure(cx: &m
 fn saved_account_returns_to_center_and_game_task_remains_available(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        std::fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, mut receiver) = first_run_engine(root.path())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
@@ -257,7 +256,11 @@ fn saved_account_returns_to_center_and_game_task_remains_available(cx: &mut Test
             view.shell.first_run.stage == FirstRunStage::GameChoice
         }));
         assert_eq!(saved_accounts(root.path())?, accounts);
-        assert!(!root.path().join("block.toml").exists());
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?.library(root.path()),
+            view.read_with(cx, |view, _| view.first_run_game_parent())
+        );
+        assert!(!crate::Preferences::load(root.path())?.onboarding_complete);
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -267,7 +270,6 @@ fn saved_account_returns_to_center_and_game_task_remains_available(cx: &mut Test
 fn a_saved_identity_returns_from_first_run_to_its_center(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        std::fs::write(root.path().join("setup-started"), b"1")?;
         let (engine, mut receiver) = first_run_engine(root.path())?;
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         let dimensions = cx.update(|window, _| crate::window_geometry::home_size(window));
@@ -358,7 +360,11 @@ fn cancelling_first_run_account_setup_leaves_no_account_behind(cx: &mut TestAppC
             });
         });
         assert!(saved_accounts(root.path())?.is_empty());
-        assert!(!root.path().join("block.toml").exists());
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?.library(root.path()),
+            view.read_with(cx, |view, _| view.first_run_game_parent())
+        );
+        assert!(!crate::Preferences::load(root.path())?.onboarding_complete);
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
