@@ -1,14 +1,36 @@
 # Block Pilot Status
 
-Updated: 2026-10-25. Built, native verification and user acceptance are separate gates.
+Updated: 2026-11-06. Built, native verification and user acceptance are separate gates.
 
 Acceptance scope (2026-10-24): **no platform or page has passed full-product/visual acceptance.** The Windows ARM64 motion increment was only manually observed by the user because automated motion detection could not observe it there; that observation is not product acceptance. The user is reviewing scenarios one by one, and every `Accepted` marker remains Pending.
 
-## Automatic CI coverage
+## Current checkpoint (2026-11-06)
+
+Milestone II basic usability is complete. The compact UI increment within Milestone III is implemented and locally verified; full-product user acceptance remains pending. Milestone IV architecture design and the v0 public unstable release remain future stages.
+
+The latest delivery record is the final "恢复交付验收" section of [UI_REFINEMENT_HANDOFF.md](../UI_REFINEMENT_HANDOFF.md). It supersedes that file's earlier paused 9/19 ledger and unverified-change snapshots. Its implementation commit is `d7b65da`; the handoff commit is `9fa9c3e`. The delivery recorded a clean tracked worktree and neither commit pushed. This documentation update does not recheck remote CI or publish a release.
+
+- All pages, including standalone crash help, use 360×720 logical content bounds. Collections use list → detail → editor navigation; setup, import, authentication, Settings/About and overlays fit the compact frame.
+- Completed fixes cover outgoing scroll snapshots, per-entry and per-record scroll restoration, shared Back/native-close/Quit guards, draft retention, actual input focus restoration, rapid Back, and narrow-window text layout.
+- Delta's 55 child directories were archived, checked for recoverability and removed. Framework/application research and native evidence are retained; owned QA applications and temporary roots were cleaned up.
+
+| Verification of this increment | Recorded result |
+| --- | --- |
+| `CARGO_TARGET_DIR=target/ui-refinement-build just check` | PASS: formatting, workspace checks, strict Clippy and tests; UI 599 tests and framework 3 tests passed (`resumed-check-9.log`). |
+| `cargo build --locked -p block-app --bin block` | PASS on macOS ARM64 and Linux ARM64 (`resumed-build-11.log`, `resumed-linux-build-11.log`). |
+| Python suite | 23 passed (`resumed-python-11.log`). |
+| Linux ARM64 native scenes | 98 scenes × light/dark = 196 reviewed initial captures; 196/196 content assertions passed. |
+| Linux ARM64 actual input and motion | Scroll, Back/Escape, native close/Quit, draft/focus restoration, busy Back, wizard drafts and standalone crash search/return have evidence. Normal/reduced-motion toast traces were reviewed in both themes. |
+
+Logs and native records are indexed in the local [delivery evidence](../target/ui-refinement-20261105/DELIVERY.md). This ignored evidence directory is not uploaded with source. Content assertions do not replace interaction acceptance; toast slide-out used application replay rather than a physical gesture. XWayland full-screen recordings were black and do not prove continuous motion between windows; separate window recordings and action/ownership records establish the documented crash-help behavior.
+
+Remaining gates: user page-by-page acceptance, applicable native verification of this increment on other platforms, and remote CI/package evidence for the delivered revision. This increment did not repeat live Microsoft authentication or game gameplay acceptance. Linux ARM64 results do not establish other-platform behavior. LSP services were unavailable or timed out; actual build, Clippy and test results are the verification basis.
+
+## Automatic CI coverage (recorded 2026-10-25)
 
 The cross-platform workflow's current six-target matrix includes Windows AMD64/ARM64, Linux AMD64/ARM64 and macOS AMD64/ARM64 on every push and pull request. All jobs use the same 60-minute timeout and verification script: actual runner/Rust host architecture, formatting, checks, strict Clippy, workspace tests, a native launcher build and an executable OS/architecture check. Each job uploads `block-<platform>` from the executable path verified by the script. Linux retains its native desktop dependencies; macOS uses GPUI's existing `runtime_shaders` feature and does not require a separate build-time Metal compiler preparation step. The separate manual Windows ARM64 workflow is removed; this platform uses the main CI matrix. Each commit requires its own six-target CI result; historical results below retain their original scope. Native game rendering and visual acceptance remain separate gates.
 
-Latest remote result (`d9041b0`, run `40153043866`): five of six native jobs passed (Windows AMD64/ARM64, Linux ARM64, macOS AMD64/ARM64). Linux AMD64 failed at link time in vendored D-Bus with undefined `__isoc23_strtol`/`__isoc23_strtoul`; package jobs were skipped. This run does not prove a Linux AMD64 repair or a successful package build.
+Historical remote result recorded on 2026-10-25 (`d9041b0`, run `40153043866`): five of six native jobs passed (Windows AMD64/ARM64, Linux ARM64, macOS AMD64/ARM64). Linux AMD64 failed at link time in vendored D-Bus with undefined `__isoc23_strtol`/`__isoc23_strtoul`; package jobs were skipped. This run does not prove a Linux AMD64 repair or a successful package build, and is not CI evidence for the compact UI increment.
 
 Cache remediation (2026-10-25): that job restored an Ubuntu 24.04-built `target/` on Ubuntu 22.04 under an unchanged cache key, retaining incompatible vendored D-Bus objects. All eight existing Actions caches were deleted. The check and package workflow configuration now uses sccache's GitHub Actions backend with matching OS/architecture/runner-label namespaces and read-only PR access instead of whole-`target` caching. Remote execution and the new package glibc measurement remain pending; see [the evidence and remediation](linux-glibc-baseline.md#cache-baseline-failure-and-remediation).
 
@@ -19,7 +41,7 @@ CI coverage cleanup (2026-10-23): the supervisor-death, direct-child cancellatio
 User decision, 2026-10-23; full scope and ownership: [next-tasks.md](next-tasks.md).
 
 - **Pilot Milestone II — basic usability (DeepSeek):** complete at `f2a5fd7`. Core native flows, final live sign-in checks and the screenshot handoff are recorded below, with explicit platform and test-environment limits. Interaction polish and visual acceptance are not completion gates for this stage.
-- **Pilot Milestone III — interaction quality (Codex):** inspect and repair interactions one by one, including visual presentation, focus/input, navigation, overlays, motion and feedback. Defer architecture design. Reference/mapping gaps, user review and the remaining Mac interaction checks belong here.
+- **Pilot Milestone III — interaction quality (Codex):** compact UI increment implemented at `d7b65da`, with full local checks and Linux ARM64 native evidence recorded above. Full-product user acceptance, other-platform verification and remaining reference/mapping review are still pending. Architecture design remains deferred.
 - **Pilot Milestone IV — architecture design:** begin design after the interaction stage; preserve earlier evidence as design input.
 - **v0 — public unstable release:** prepare and publish the first unstable release as a separate stage.
 

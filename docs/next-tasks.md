@@ -1,21 +1,33 @@
 # Block: Pilot Task List
 
-Date: 2026-10-21; updated 2026-10-25. E01–E03 evidence calibration, including source-stamped Windows verification, was completed 2026-10-24. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [archived goal prompt](archive/codex-goal-prompt.md).
+Date: 2026-10-21; updated 2026-11-06. The current checkpoint below incorporates the compact UI delivery; dated assessments and checklists retain their historical evidence and do not override it. E01–E03 evidence calibration, including source-stamped Windows verification, was completed 2026-10-24. This file replaces `gpui-ui-parity-plan.md` and `gpui-ui-parity-goal-prompt.md` as the entry point. Milestone II execution prompt: [archived goal prompt](archive/codex-goal-prompt.md).
 
 ## Development milestones (user decision, 2026-10-23)
 
 | Stage | Focus | Owner / current state |
 | --- | --- | --- |
 | Pilot Milestone II | Basic usability: real features and end-to-end flows work. Interaction polish is deferred. | DeepSeek; complete at `f2a5fd7`, with documented compatibility and environment boundaries. |
-| Pilot Milestone III | Interaction quality: inspect and fix interactions one by one, including visual presentation, navigation, input, focus, overlays, motion and feedback. Architecture design is deferred. | Codex; initial screenshot/source assessment complete at `5538bf3`; implementation and native interaction acceptance pending. |
+| Pilot Milestone III | Interaction quality: inspect and fix interactions one by one, including visual presentation, navigation, input, focus, overlays, motion and feedback. Architecture design is deferred. | Codex; compact UI increment implemented at `d7b65da`, with full local checks and Linux ARM64 native verification. Full-product user acceptance and other-platform verification remain pending. |
 | Pilot Milestone IV | Begin architecture design, using the working product and interaction findings as inputs. | Future stage; implementation of a redesign needs its own scope. |
 | v0 | First public unstable release. | Future stage; release preparation and publication are separate from Pilot completion. |
 
 These stages supersede the earlier combined Pilot acceptance gate and the rule that architecture waits for v0. Milestone II still requires real behavior rather than placeholders, safe persistence, and explicit compatibility limits. An interaction defect that blocks a core flow remains a Milestone II usability issue; visual or interaction refinement belongs to Milestone III. Only the user's review sets Accepted in Milestone III. Missing visual acceptance does not by itself block Milestone II completion.
 
-## Current checkpoint
+## Current checkpoint (2026-11-06)
 
-- Latest remote CI (`d9041b0`, run `40153043866`): five of six native jobs passed, including macOS AMD64; Linux AMD64 failed while linking vendored D-Bus, and package jobs were skipped. The failed job does not prove a repair or produce a package baseline; see [current status](STATUS.md) and the [glibc baseline report](linux-glibc-baseline.md).
+- The compact UI increment is delivered: all pages use 360×720 logical content bounds; collections use list → detail → editor navigation; setup/import, authentication, Settings/About, crash help and overlays are adapted. Scroll snapshots/restoration, exit guards, retained drafts and focus restoration have regression coverage.
+- `just check` passed, including 599 UI tests and 3 framework tests; Python's 23 tests passed. Native app builds passed on macOS ARM64 and Linux ARM64. Linux ARM64 evidence covers 98 scenes in both themes (196 captures, 196/196 content assertions), actual input journeys and normal/reduced-motion toast traces.
+- Delta archival/removal, research, implementation and owned QA-resource cleanup are complete for this increment. Earlier paused 9/19 task counts are historical. See the final "恢复交付验收" section in [the handoff](../UI_REFINEMENT_HANDOFF.md) and the local [delivery index](../target/ui-refinement-20261105/DELIVERY.md).
+- Delivery records identify implementation `d7b65da` and handoff `9fa9c3e`, with a clean tracked worktree at delivery and neither commit pushed. This documentation update does not verify current remote CI, push commits or publish a release.
+
+Remaining work:
+
+1. Complete the user's page-by-page visual and interaction acceptance. The current scene contracts do not inherit older React/reference equivalence conclusions; no `Accepted` marker changes here.
+2. Verify the compact increment on the other applicable native platforms, retaining the documented compatibility limits. Linux ARM64 evidence and macOS build success do not establish Windows/macOS native interaction acceptance.
+3. Obtain remote CI and package evidence for the delivered revision before release. The historical 2026-10-25 run (`d9041b0`, `40153043866`) had five of six jobs pass and a Linux AMD64 D-Bus link failure; its package jobs were skipped. It is not evidence for this increment. See [current status](STATUS.md) and the [glibc baseline report](linux-glibc-baseline.md).
+4. After the interaction stage, proceed to Milestone IV architecture design; prepare and publish v0 as a separate stage.
+
+The compact increment did not repeat live Microsoft authentication or game gameplay acceptance. Black XWayland full-screen recordings do not prove cross-window motion; the handoff records the narrower usable evidence. Full gate logs, native evidence and remaining limits are summarized in [STATUS.md](STATUS.md#current-checkpoint-2026-11-06).
 
 ## Historical handoff snapshot (2026-10-23, reviewed HEAD `f2a5fd7`)
 
