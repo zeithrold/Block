@@ -30,6 +30,32 @@ pub struct Library {
     storage: crate::storage::StorageUse,
 }
 
+struct PackImportGuard(std::fs::File);
+
+impl Drop for PackImportGuard {
+    fn drop(&mut self) {
+        // A concurrent spawn can inherit the open description until exec.
+        // End import ownership now, even while that descriptor is still open.
+        if let Err(error) = fs2::FileExt::unlock(&self.0) {
+            tracing::warn!(event = "pack_import_unlock_failed", %error);
+        }
+    }
+}
+
+impl PackImportGuard {
+    fn acquire(parent: &Path, operation_id: &str) -> anyhow::Result<Self> {
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(parent.join(format!(".block-pack-{operation_id}.lock")))?;
+        fs2::FileExt::try_lock_exclusive(&lock)
+            .context("this pack import is already in progress")?;
+        Ok(Self(lock))
+    }
+}
+
 impl Library {
     /// # Errors
     /// Fails if the catalog/cache cannot be opened.
@@ -153,14 +179,7 @@ impl Library {
             .context("pack Minecraft version is missing")?;
         let parent = &self.storage.library;
         std::fs::create_dir_all(parent)?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(parent.join(format!(".block-pack-{operation_id}.lock")))?;
-        fs2::FileExt::try_lock_exclusive(&lock)
-            .context("this pack import is already in progress")?;
+        let _guard = PackImportGuard::acquire(parent, operation_id)?;
         let destination = parent.join(operation_id);
         match std::fs::symlink_metadata(&destination) {
             Ok(metadata) => {

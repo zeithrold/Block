@@ -569,6 +569,24 @@ fn long_pack_name_can_be_replaced_without_changing_the_original_descriptor() -> 
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn completed_pack_import_releases_inherited_lock_descriptions() -> anyhow::Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let operation = uuid::Uuid::new_v4().to_string();
+    let guard = super::PackImportGuard::acquire(temporary.path(), &operation)?;
+    let inherited = guard.0.try_clone()?;
+    assert!(super::PackImportGuard::acquire(temporary.path(), &operation).is_err());
+
+    drop(guard);
+    let next_owner = super::PackImportGuard::acquire(temporary.path(), &operation)?;
+    drop(inherited);
+    assert!(super::PackImportGuard::acquire(temporary.path(), &operation).is_err());
+    drop(next_owner);
+    assert!(super::PackImportGuard::acquire(temporary.path(), &operation).is_ok());
+    Ok(())
+}
+
 #[test]
 fn create_pack_preserves_unrelated_data_and_a_foreign_destination() -> anyhow::Result<()> {
     let temporary = tempfile::tempdir()?;
