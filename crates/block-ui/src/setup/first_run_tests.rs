@@ -937,6 +937,12 @@ fn first_run_defaults_to_the_install_shaped_storage_parent(cx: &mut gpui::TestAp
         let Some(expected) = expected else {
             anyhow::bail!("the test host must classify its own install");
         };
+        let expected = block_launcher::storage::Locations {
+            library: Some(expected),
+            ..Default::default()
+        }
+        .validate(root.path())?
+        .library(root.path());
         assert_eq!(
             view.read_with(cx, |view, _| view.first_run_game_parent()),
             expected

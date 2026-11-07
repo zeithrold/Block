@@ -154,10 +154,13 @@ impl Block {
             parent
         } else {
             let parent = automatic_game_parent(&fallback);
-            if let Err(error) = super::setup_storage::save_game_parent(&engine.root, &parent) {
-                self.shell.first_run.notice = Some(Notice::SetupProgress(format!("{error:#}")));
+            match super::setup_storage::save_game_parent(&engine.root, &parent) {
+                Ok(parent) => parent,
+                Err(error) => {
+                    self.shell.first_run.notice = Some(Notice::SetupProgress(format!("{error:#}")));
+                    parent
+                }
             }
-            parent
         };
         self.shell.first_run.game_parent = Some(parent);
         self.shell.onboarding.account = self.selected_account.clone();

@@ -115,7 +115,8 @@ pub(super) fn import_parent(preferred: &Path, source: &Path, fallback: &Path) ->
 
 /// Persist a library choice while preserving cache and generation settings.
 /// Existing game directories are not moved or rewritten.
-pub(super) fn save_game_parent(root: &Path, parent: &Path) -> anyhow::Result<()> {
+/// Return the validated library path written to storage.
+pub(super) fn save_game_parent(root: &Path, parent: &Path) -> anyhow::Result<PathBuf> {
     anyhow::ensure!(parent.is_absolute(), "Choose an absolute game-library path");
     anyhow::ensure!(
         parent.parent().is_some(),
@@ -127,7 +128,7 @@ pub(super) fn save_game_parent(root: &Path, parent: &Path) -> anyhow::Result<()>
     locations.library = Some(parent.to_owned());
     let locations = locations.validate(root)?;
     block_launcher::storage::Locations::save(&locations, root)?;
-    Ok(())
+    Ok(locations.library(root))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,8 +501,9 @@ mod tests {
         // generation so the save must preserve both.
         block_launcher::storage::Locations::save(&before, &root)?;
 
-        save_game_parent(&root, &game_parent)?;
+        let parent = save_game_parent(&root, &game_parent)?;
         let saved = block_launcher::storage::Locations::load(&root)?;
+        assert_eq!(parent, saved.library(&root));
         assert_eq!(
             saved.library.as_deref(),
             Some(comparable_path(&game_parent).as_path())
