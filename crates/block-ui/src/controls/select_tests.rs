@@ -175,18 +175,37 @@ fn settings_select_tab_closes_and_traverses_once_in_both_directions(cx: &mut gpu
 fn drawer_select_tab_closes_only_the_popup_and_stays_in_the_sheet(cx: &mut gpui::TestAppContext) {
     use crate::shell::Drawer;
 
-    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.simulate_resize(size(px(1152.), px(720.)));
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.preferences.reduce_motion = true;
-            view.handle(UiAction::Drawer(Some(Drawer::Language)), window, cx);
-        });
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view
+    });
+    cx.simulate_resize(size(px(360.), px(720.)));
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::Drawer(Some(Drawer::Language)), window, cx);
     });
     settle(cx);
-    click(cx, "setup-language");
+    let before = view.read_with(cx, |view, _| view.preferences.language);
+    // The drawer no longer offers a nested selector. Exercise the existing
+    // layered-host contract through the shared settings-language action.
+    view.update_in(cx, |view, window, cx| {
+        view.handle(
+            UiAction::OpenProductSelect(ProductChoice::Language),
+            window,
+            cx,
+        );
+    });
+    settle(cx);
+    assert!(
+        select_open(&view, cx),
+        "the shared selector must really open"
+    );
     crate::test_support::press(cx, "escape");
     settle(cx);
+    assert!(view.read_with(cx, |view, _| matches!(
+        view.shell.surfaces.top().map(|layer| &layer.kind),
+        Some(Surface::Drawer(Drawer::Language))
+    )));
     let trigger = cx.update(|window, cx| window.focused(cx));
     assert!(
         trigger.is_some(),
@@ -200,7 +219,19 @@ fn drawer_select_tab_closes_only_the_popup_and_stays_in_the_sheet(cx: &mut gpui:
         crate::test_support::press(cx, keys);
         settle(cx);
         let expected = cx.update(|window, cx| window.focused(cx));
-        click(cx, "setup-language");
+        cx.update(|window, cx| trigger.focus(window, cx));
+        view.update_in(cx, |view, window, cx| {
+            view.handle(
+                UiAction::OpenProductSelect(ProductChoice::Language),
+                window,
+                cx,
+            );
+        });
+        settle(cx);
+        assert!(
+            select_open(&view, cx),
+            "the shared selector must really reopen"
+        );
         crate::test_support::press(cx, keys);
         settle_tab(cx);
         assert!(!select_open(&view, cx), "{keys} closes only the selector");
@@ -209,12 +240,15 @@ fn drawer_select_tab_closes_only_the_popup_and_stays_in_the_sheet(cx: &mut gpui:
             expected,
             "{keys}"
         );
-        assert!(view.read_with(cx, |view, _| {
-            matches!(
-                view.shell.surfaces.top().map(|layer| &layer.kind),
-                Some(Surface::Drawer(Drawer::Language))
-            )
-        }));
+        assert!(view.read_with(cx, |view, _| matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(Surface::Drawer(Drawer::Language))
+        )));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.preferences.language),
+            before,
+            "{keys} chooses no language"
+        );
         assert!(
             cx.update(|window, cx| {
                 gpui_base::active_focus_trap(window, cx)
@@ -223,6 +257,9 @@ fn drawer_select_tab_closes_only_the_popup_and_stays_in_the_sheet(cx: &mut gpui:
             "{keys} keeps focus inside the sheet"
         );
     }
+    crate::test_support::press(cx, "escape");
+    settle(cx);
+    assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
 }
 
 #[gpui::test]

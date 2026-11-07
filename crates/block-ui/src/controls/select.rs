@@ -324,27 +324,17 @@ impl Block {
     ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
         let language = self.language();
         match kind {
-            ProductChoice::Language => {
-                let setup =
-                    self.shell.surfaces.layers().any(|layer| {
-                        matches!(layer.kind, Surface::Drawer(super::Drawer::Language))
-                    });
-                Some((
-                    "settings.language.label",
-                    Language::ALL
-                        .into_iter()
-                        .map(|choice| SelectChoice {
-                            label: choice.self_name().to_owned(),
-                            selected: choice == language,
-                            action: if setup {
-                                UiAction::FirstRun(super::first_run::Action::Language(choice))
-                            } else {
-                                UiAction::SetLanguage(choice)
-                            },
-                        })
-                        .collect(),
-                ))
-            }
+            ProductChoice::Language => Some((
+                "settings.language.label",
+                Language::ALL
+                    .into_iter()
+                    .map(|choice| SelectChoice {
+                        label: choice.self_name().to_owned(),
+                        selected: choice == language,
+                        action: UiAction::SetLanguage(choice),
+                    })
+                    .collect(),
+            )),
             ProductChoice::AuthProvider => {
                 let choices = self.auth_provider_choices();
                 (!choices.is_empty()).then_some(("select.auth_provider", choices))

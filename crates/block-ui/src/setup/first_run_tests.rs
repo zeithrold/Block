@@ -1410,45 +1410,19 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
                 )
             })
         }));
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.surfaces.top().is_some_and(|layer| matches!(
-                &layer.kind,
-                super::shell::Surface::Select(state)
-                    if state.choices.iter().map(|choice| choice.label.as_str()).collect::<Vec<_>>()
-                        == ["English", "简体中文", "日本語"]
-            ))
-        }));
-        for (id, expected) in [
-            ("select-choice-0", "English"),
-            ("select-choice-1", "简体中文"),
-            ("select-choice-2", "日本語"),
+        for (id, expected, checked) in [
+            ("setup-language-en", "English", true),
+            ("setup-language-zh-Hans", "简体中文", false),
+            ("setup-language-ja", "日本語", false),
         ] {
-            let label = cx.update(|window, _| {
-                gpui_base::test_support::find(window, &[], &id.into())
-                    .and_then(|node| node.label().map(str::to_owned))
-            });
-            assert_eq!(label.as_deref(), Some(expected));
+            let node =
+                cx.update(|window, _| gpui_base::test_support::find(window, &[], &id.into()));
+            let node = node.ok_or_else(|| anyhow::anyhow!("missing language row: {id}"))?;
+            assert_eq!(node.label(), Some(expected));
+            assert_eq!(node.role(), Some(gpui::Role::RadioButton));
+            assert_eq!(node.checked(), Some(checked));
         }
-        crate::test_support::press(cx, "escape");
-        assert!(
-            view.read_with(cx, |view, _| {
-                view.shell.surfaces.top().is_some_and(|layer| {
-                    matches!(
-                        layer.kind,
-                        super::shell::Surface::Drawer(super::shell::Drawer::Language)
-                    )
-                })
-            }),
-            "surface after select escape: {:?}",
-            view.read_with(cx, |view, _| view.shell.surfaces.top().cloned())
-        );
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        let japanese = bounds(cx, "select-choice-2")?;
+        let japanese = bounds(cx, "setup-language-ja")?;
         cx.simulate_click(japanese.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert_eq!(
@@ -1470,18 +1444,15 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
         let stored = crate::Preferences::load(root.path())?;
         assert_eq!(stored.language, Some(crate::Language::Japanese));
         assert!(!stored.onboarding_complete);
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.surfaces.top().is_some_and(|layer| {
-                matches!(
-                    layer.kind,
-                    super::shell::Surface::Drawer(super::shell::Drawer::Language)
-                )
-            })
-        }));
-        let close = bounds(cx, "drawer-close")?;
-        cx.simulate_click(close.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
+        assert_eq!(
+            cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &"setup-language-entry".into())
+                    .and_then(|node| node.focused())
+            }),
+            Some(true),
+            "successful selection restores the Overview language trigger"
+        );
         // A later start keeps the stored choice instead of re-detecting the OS.
         let (restarted, error) =
             crate::Preferences::initialize_language(root.path(), crate::Language::English);
@@ -1516,10 +1487,7 @@ fn first_setup_language_save_failure_is_visible_and_never_claimed_as_saved(
         let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        let chinese = bounds(cx, "select-choice-1")?;
+        let chinese = bounds(cx, "setup-language-zh-Hans")?;
         cx.simulate_click(chinese.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
@@ -1532,13 +1500,35 @@ fn first_setup_language_save_failure_is_visible_and_never_claimed_as_saved(
             crate::test_support::control_bounds(cx, "setup-language-notice").is_some(),
             "the failed save must be visible in the open language drawer"
         );
+        assert!(view.read_with(cx, |view, _| matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(super::shell::Surface::Drawer(
+                super::shell::Drawer::Language
+            ))
+        )));
+        // Retrying the now-previewed language must write again, even though its
+        // row is already checked.
+        fs::remove_file(root.path().join("block.toml"))?;
+        let chinese = bounds(cx, "setup-language-zh-Hans")?;
+        cx.simulate_click(chinese.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(
+            crate::Preferences::load(root.path())?.language,
+            Some(crate::Language::SimplifiedChinese)
+        );
+        assert!(view.read_with(cx, |view, _| {
+            !view.shell.surfaces.is_open()
+                && view.saved_preferences.language == Some(crate::Language::SimplifiedChinese)
+                && view.shell.first_run.notice.is_none()
+                && !view.preferences.onboarding_complete
+        }));
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
-fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAppContext) {
+fn language_drawer_choices_keep_tab_focus_inside_the_sheet(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -1578,51 +1568,16 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
                 view.shell.surfaces.top().map(|layer| layer.focus.clone())
             })
             .ok_or_else(|| anyhow::anyhow!("language drawer is missing"))?;
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(view.read_with(cx, |view, _| {
-            view.shell
-                .surfaces
-                .top()
-                .is_some_and(|layer| matches!(&layer.kind, super::shell::Surface::Select(_)))
-        }));
-        crate::test_support::press(cx, "escape");
-        cx.run_until_parked();
-        let trigger = cx
-            .update(|window, cx| window.focused(cx))
-            .ok_or_else(|| anyhow::anyhow!("the language trigger did not regain focus"))?;
-        for key in ["tab", "shift-tab"] {
-            cx.update(|window, cx| trigger.focus(window, cx));
-            crate::test_support::press(cx, key);
-            cx.run_until_parked();
-            let expected = cx.update(|window, cx| window.focused(cx));
-            let select = bounds(cx, "setup-language")?;
-            cx.simulate_click(select.center(), gpui::Modifiers::none());
-            cx.run_until_parked();
-            crate::test_support::press(cx, key);
-            for _ in 0..2 {
-                cx.update(|window, cx| window.simulate_next_frame(cx));
-                cx.run_until_parked();
-            }
-            assert_eq!(
-                cx.update(|window, cx| window.focused(cx)),
-                expected,
-                "{key}"
-            );
-            assert!(
-                view.read_with(cx, |view, _| {
-                    matches!(
-                        view.shell.surfaces.top().map(|layer| &layer.kind),
-                        Some(super::shell::Surface::Drawer(
-                            super::shell::Drawer::Language
-                        ))
-                    )
-                }),
-                "{key} closes only the Select"
-            );
-            assert!(cx.update(|window, cx| sheet_focus.contains_focused(window, cx)));
+        for id in [
+            "setup-language-en",
+            "setup-language-zh-Hans",
+            "setup-language-ja",
+        ] {
+            let row = bounds(cx, id)?;
+            assert!(row.left() >= gpui::px(0.) && row.right() <= home.width);
+            assert!(row.top() >= gpui::px(56.) && row.bottom() <= home.height);
         }
+        let mut reached = std::collections::HashSet::new();
         for key in [
             "tab",
             "tab",
@@ -1639,6 +1594,19 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
         ] {
             crate::test_support::press(cx, key);
             cx.run_until_parked();
+            for id in [
+                "setup-language-en",
+                "setup-language-zh-Hans",
+                "setup-language-ja",
+            ] {
+                if cx.update(|window, _| {
+                    gpui_base::test_support::find(window, &[], &id.into())
+                        .and_then(|node| node.focused())
+                        == Some(true)
+                }) {
+                    reached.insert(id);
+                }
+            }
             for id in [
                 "setup-account",
                 "setup-game",
@@ -1660,29 +1628,12 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
                     && !view.preferences.onboarding_complete
             }));
         }
+        assert_eq!(
+            reached.len(),
+            3,
+            "all three language choices are keyboard reachable"
+        );
         focus_language_drawer_close(cx);
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        assert!(
-            view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(
-                |layer| { matches!(layer.kind, super::shell::Surface::Select(_)) }
-            )),
-            "the reopened Select must be on top before Escape"
-        );
-        crate::test_support::press(cx, "escape");
-        assert!(
-            view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(
-                |layer| {
-                    matches!(
-                        layer.kind,
-                        super::shell::Surface::Drawer(super::shell::Drawer::Language)
-                    )
-                }
-            )),
-            "Escape after tabbing must close only the Select: {:?}",
-            view.read_with(cx, |view, _| view.shell.surfaces.top().cloned())
-        );
         crate::test_support::press(cx, "escape");
         assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
 
@@ -1695,14 +1646,11 @@ fn language_drawer_select_keeps_tab_focus_inside_the_sheet(cx: &mut gpui::TestAp
         let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
         focus_language_drawer_close(cx);
         crate::test_support::press(cx, "enter");
         assert!(
             view.read_with(cx, |view, _| !view.shell.surfaces.is_open()),
-            "the close control must not leave a selector behind"
+            "the close control must dismiss the language choices"
         );
         Ok(())
     })();
@@ -1749,7 +1697,7 @@ fn language_drawer_blocks_background_overview_actions(cx: &mut gpui::TestAppCont
             "setup-language-entry",
         ];
         for selector in targets {
-            // A click over the selector can change the language. Locate the
+            // A click over a choice can change the language. Locate the
             // translated controls again before testing the next modal boundary.
             let entry = bounds(cx, "setup-language-entry")?.center();
             let target = bounds(cx, selector)?.center();
@@ -1759,14 +1707,13 @@ fn language_drawer_blocks_background_overview_actions(cx: &mut gpui::TestAppCont
                 view.read_with(cx, |view, _| view.shell.surfaces.is_open()),
                 "{selector}: the language drawer must open"
             );
-            let select = bounds(cx, "setup-language")?;
-            cx.simulate_click(select.center(), gpui::Modifiers::none());
-            cx.run_until_parked();
             assert!(view.read_with(cx, |view, _| {
-                view.shell
-                    .surfaces
-                    .top()
-                    .is_some_and(|layer| matches!(layer.kind, super::shell::Surface::Select(_)))
+                view.shell.surfaces.top().is_some_and(|layer| {
+                    matches!(
+                        layer.kind,
+                        super::shell::Surface::Drawer(super::shell::Drawer::Language)
+                    )
+                })
             }));
             cx.simulate_click(target, gpui::Modifiers::none());
             cx.run_until_parked();
@@ -1793,7 +1740,7 @@ fn language_drawer_blocks_background_overview_actions(cx: &mut gpui::TestAppCont
 }
 
 #[gpui::test]
-fn language_drawer_dismissal_respects_its_nested_select(cx: &mut gpui::TestAppContext) {
+fn language_drawer_dismisses_in_one_step_without_a_nested_select(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
@@ -1807,18 +1754,6 @@ fn language_drawer_dismissal_respects_its_nested_select(cx: &mut gpui::TestAppCo
         let entry = bounds(cx, "setup-language-entry")?;
         cx.simulate_click(entry.center(), gpui::Modifiers::none());
         cx.run_until_parked();
-        let select = bounds(cx, "setup-language")?;
-        cx.simulate_click(select.center(), gpui::Modifiers::none());
-        cx.run_until_parked();
-        crate::test_support::press(cx, "escape");
-        assert!(view.read_with(cx, |view, _| {
-            view.shell.surfaces.top().is_some_and(|layer| {
-                matches!(
-                    layer.kind,
-                    super::shell::Surface::Drawer(super::shell::Drawer::Language)
-                )
-            })
-        }));
         crate::test_support::press(cx, "escape");
         assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
 

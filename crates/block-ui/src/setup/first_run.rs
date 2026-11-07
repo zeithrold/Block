@@ -290,7 +290,17 @@ impl Block {
             None => Err(anyhow::anyhow!("Block's data directory is unavailable")),
         };
         match result {
-            Ok(()) => self.saved_preferences.language = Some(language),
+            Ok(()) => {
+                self.saved_preferences.language = Some(language);
+                if self.shell.surfaces.top().is_some_and(|layer| {
+                    matches!(
+                        layer.kind,
+                        super::shell::Surface::Drawer(super::shell::Drawer::Language)
+                    )
+                }) {
+                    self.shell.surfaces.close(window, &self.focus, cx);
+                }
+            }
             Err(error) => {
                 self.shell.first_run.notice = Some(Notice::LanguageNotSaved(format!("{error:#}")));
             }

@@ -1271,7 +1271,7 @@ impl Block {
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
-                260.,
+                320.,
             ),
             Surface::Drawer(Drawer::Profiles) => (
                 tr!(language, "sheet.profiles_title"),
@@ -1308,13 +1308,49 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(self.product_select_field(
-                        "setup-language",
-                        tr!(self.language(), "setup.language.label"),
-                        self.language().self_name(),
-                        super::select::ProductChoice::Language,
-                        cx,
-                    ))
+                    .child(
+                        div()
+                            .id("setup-language-options")
+                            .role(gpui::Role::RadioGroup)
+                            .aria_label(tr!(self.language(), "setup.language.label"))
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .children(crate::Language::ALL.into_iter().map(|language| {
+                                let selected = language == self.language();
+                                super::components::button_role(
+                                    format!("setup-language-{}", language.code()),
+                                    language.self_name(),
+                                    self.palette,
+                                    super::components::ButtonVariant::Ghost,
+                                    super::components::ControlState::default(),
+                                    gpui::Role::RadioButton,
+                                    cx.listener(move |view, &(): &(), window, cx| {
+                                        view.handle(
+                                            UiAction::FirstRun(super::first_run::Action::Language(
+                                                language,
+                                            )),
+                                            window,
+                                            cx,
+                                        );
+                                    }),
+                                )
+                                .aria_selected(selected)
+                                .aria_toggled(if selected {
+                                    gpui::Toggled::True
+                                } else {
+                                    gpui::Toggled::False
+                                })
+                                .w_full()
+                                .h(px(44.))
+                                .px_3()
+                                .justify_between()
+                                .children(selected.then(|| {
+                                    super::design::Icon::Check.render(16., self.palette.foreground)
+                                }))
+                            })),
+                    )
                     .children(self.first_run_feedback(self.language()).map(|message| {
                         note(message).debug_selector(|| "setup-language-notice".into())
                     }))
