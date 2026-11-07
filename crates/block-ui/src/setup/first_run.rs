@@ -977,7 +977,15 @@ impl Block {
                 .flex_col()
                 .items_start()
                 .gap_4()
-                .child(icon.render(20., self.palette.foreground))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(icon.render(20., self.palette.foreground))
+                        .child(Icon::ChevronRight.render(16., self.palette.muted)),
+                )
                 .child(
                     div()
                         .w_full()
