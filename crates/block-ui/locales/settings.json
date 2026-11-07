@@ -595,6 +595,16 @@
     "zh-Hans": "选择 Block 的语言。",
     "ja": "Block の言語を選択してください。"
   },
+  "setup.language.search": {
+    "en": "Search languages",
+    "zh-Hans": "搜索语言",
+    "ja": "言語を検索"
+  },
+  "setup.language.search_placeholder": {
+    "en": "Name, English name or code",
+    "zh-Hans": "语言名称、英文名或代码",
+    "ja": "言語名、英語名、コード"
+  },
   "setup.overview.title": {
     "en": "Set up Block",
     "zh-Hans": "设置 Block",

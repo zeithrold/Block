@@ -42,6 +42,16 @@ impl Language {
         }
     }
 
+    /// Stable English name for language-picker descriptions and search.
+    #[must_use]
+    pub const fn english_name(self) -> &'static str {
+        match self {
+            Self::English => "English",
+            Self::SimplifiedChinese => "Simplified Chinese",
+            Self::Japanese => "Japanese",
+        }
+    }
+
     const fn component_code(self) -> &'static str {
         match self {
             Self::English => "en",

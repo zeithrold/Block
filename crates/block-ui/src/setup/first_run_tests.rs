@@ -1422,6 +1422,10 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             assert_eq!(node.role(), Some(gpui::Role::RadioButton));
             assert_eq!(node.checked(), Some(checked));
         }
+        let search = bounds(cx, "setup-language-search")?;
+        cx.simulate_click(search.center(), gpui::Modifiers::none());
+        cx.simulate_input("Japanese");
+        cx.run_until_parked();
         let japanese = bounds(cx, "setup-language-ja")?;
         cx.simulate_click(japanese.center(), gpui::Modifiers::none());
         cx.run_until_parked();
@@ -1734,6 +1738,78 @@ fn language_drawer_blocks_background_overview_actions(cx: &mut gpui::TestAppCont
             assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
         }
         assert!(!crate::Preferences::load(root.path())?.onboarding_complete);
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[gpui::test]
+fn language_search_matches_names_and_codes_without_selecting(cx: &mut gpui::TestAppContext) {
+    let result = (|| -> anyhow::Result<()> {
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.begin_first_run(cx);
+            view
+        });
+        let home = cx.update(|window, _| crate::window_geometry::home_size(window));
+        cx.simulate_resize(home);
+        cx.run_until_parked();
+        let entry = bounds(cx, "setup-language-entry")?;
+        cx.simulate_click(entry.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        let before = view.read_with(cx, |view, _| view.preferences.language);
+        for (query, expected) in [
+            ("  jApAnEsE  ", Some("ja")),
+            ("简体", Some("zh-Hans")),
+            ("ZH-HANS", Some("zh-Hans")),
+            ("日本", Some("ja")),
+            (" CHINESE ", Some("zh-Hans")),
+            ("en", Some("en")),
+            ("no such language", None),
+        ] {
+            let search = bounds(cx, "setup-language-search")?;
+            cx.simulate_click(search.center(), gpui::Modifiers::none());
+            cx.simulate_input(query);
+            cx.run_until_parked();
+            for code in ["en", "zh-Hans", "ja"] {
+                let id = format!("setup-language-{code}");
+                let present = cx.update(|window, _| {
+                    gpui_base::test_support::find(window, &[], &id.into()).is_some()
+                });
+                assert_eq!(present, expected == Some(code), "{query}: {code}");
+            }
+            assert_eq!(
+                crate::test_support::control_bounds(cx, "setup-language-empty").is_some(),
+                expected.is_none()
+            );
+            assert_eq!(
+                view.read_with(cx, |view, _| view.preferences.language),
+                before
+            );
+            assert!(view.read_with(cx, |view, _| {
+                view.shell.surfaces.is_open() && !view.preferences.onboarding_complete
+            }));
+            let clear = bounds(cx, "setup-language-clear")?;
+            cx.simulate_click(clear.center(), gpui::Modifiers::none());
+            cx.run_until_parked();
+            for code in ["en", "zh-Hans", "ja"] {
+                let id = format!("setup-language-{code}");
+                assert!(cx.update(|window, _| {
+                    gpui_base::test_support::find(window, &[], &id.into()).is_some()
+                }));
+            }
+        }
+        let search = bounds(cx, "setup-language-search")?;
+        cx.simulate_click(search.center(), gpui::Modifiers::none());
+        cx.simulate_input("Japanese");
+        crate::test_support::press(cx, "escape");
+        cx.run_until_parked();
+        let entry = bounds(cx, "setup-language-entry")?;
+        cx.simulate_click(entry.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(crate::test_support::control_bounds(cx, "setup-language-en").is_some());
+        assert!(crate::test_support::control_bounds(cx, "setup-language-clear").is_none());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");

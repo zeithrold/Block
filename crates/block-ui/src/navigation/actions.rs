@@ -1209,6 +1209,13 @@ impl Block {
                 .surfaces
                 .open(Surface::Drawer(drawer), window, cx)
             {
+                if drawer == Drawer::Language {
+                    self.shell.first_run.language_search = Some(crate::input(
+                        "",
+                        &tr!(self.language(), "setup.language.search_placeholder"),
+                        cx,
+                    ));
+                }
                 self.open_selector(drawer, window, cx);
             }
         } else if self

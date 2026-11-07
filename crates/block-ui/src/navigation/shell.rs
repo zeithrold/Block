@@ -10,7 +10,7 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, Image, ImageFormat, InteractiveElement as _, IntoElement,
+    AnyElement, Context, Focusable as _, Image, ImageFormat, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, WindowControlArea,
     div, img, px, rgb,
 };
@@ -1271,7 +1271,7 @@ impl Block {
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
-                320.,
+                420.,
             ),
             Surface::Drawer(Drawer::Profiles) => (
                 tr!(language, "sheet.profiles_title"),
@@ -1303,11 +1303,61 @@ impl Block {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
             Surface::Drawer(Drawer::Language) => {
+                let search = self.shell.first_run.language_search.as_ref();
+                let query = search
+                    .map(|field| field.read(cx).value().trim().to_lowercase())
+                    .unwrap_or_default();
+                let choices = crate::Language::ALL
+                    .into_iter()
+                    .filter(|language| {
+                        [
+                            language.self_name(),
+                            language.english_name(),
+                            language.code(),
+                        ]
+                        .iter()
+                        .any(|name| name.to_lowercase().contains(&query))
+                    })
+                    .collect::<Vec<_>>();
+                let empty = choices.is_empty();
                 div()
                     .w_full()
                     .flex()
                     .flex_col()
                     .gap_3()
+                    .children(search.map(|field| {
+                        let clear = field.clone();
+                        div()
+                            .flex()
+                            .items_end()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("setup-language-search")
+                                    .debug_selector(|| "setup-language-search".into())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(super::components::field(
+                                        tr!(self.language(), "setup.language.search"),
+                                        field,
+                                    )),
+                            )
+                            .children((!field.read(cx).value().is_empty()).then(|| {
+                                super::components::button(
+                                    "setup-language-clear",
+                                    tr!(self.language(), "search.clear"),
+                                    self.palette,
+                                    super::components::ButtonVariant::Ghost,
+                                    super::components::ControlState::default(),
+                                    move |(), window, cx| {
+                                        clear.update(cx, |field, cx| {
+                                            field.set_value("", cx);
+                                            field.focus_handle(cx).focus(window, cx);
+                                        });
+                                    },
+                                )
+                            }))
+                    }))
                     .child(
                         div()
                             .id("setup-language-options")
@@ -1317,11 +1367,11 @@ impl Block {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .children(crate::Language::ALL.into_iter().map(|language| {
+                            .children(choices.into_iter().map(|language| {
                                 let selected = language == self.language();
                                 super::components::button_role(
                                     format!("setup-language-{}", language.code()),
-                                    language.self_name(),
+                                    "",
                                     self.palette,
                                     super::components::ButtonVariant::Ghost,
                                     super::components::ControlState::default(),
@@ -1336,6 +1386,8 @@ impl Block {
                                         );
                                     }),
                                 )
+                                .aria_label(language.self_name())
+                                .aria_description(language.english_name())
                                 .aria_selected(selected)
                                 .aria_toggled(if selected {
                                     gpui::Toggled::True
@@ -1343,14 +1395,33 @@ impl Block {
                                     gpui::Toggled::False
                                 })
                                 .w_full()
-                                .h(px(44.))
+                                .h_auto()
+                                .min_h(px(64.))
+                                .py_2()
                                 .px_3()
                                 .justify_between()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .items_start()
+                                        .gap_1()
+                                        .child(div().text_sm().child(language.self_name()))
+                                        .child(note(language.english_name())),
+                                )
                                 .children(selected.then(|| {
                                     super::design::Icon::Check.render(16., self.palette.foreground)
                                 }))
                             })),
                     )
+                    .children(empty.then(|| {
+                        div()
+                            .id("setup-language-empty")
+                            .debug_selector(|| "setup-language-empty".into())
+                            .child(note(tr!(self.language(), "search.no_results")))
+                    }))
                     .children(self.first_run_feedback(self.language()).map(|message| {
                         note(message).debug_selector(|| "setup-language-notice".into())
                     }))

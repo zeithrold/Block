@@ -558,6 +558,11 @@ impl Block {
         }
         self.shell.wizard.refresh_placeholders(language, cx);
         self.shell.providers.refresh_placeholders(language, cx);
+        if let Some(search) = &self.shell.first_run.language_search {
+            search.update(cx, |field, cx| {
+                field.set_placeholder(&tr!(language, "setup.language.search_placeholder"), cx);
+            });
+        }
         if let Some(selector) = &self.shell.selector {
             selector.refresh_placeholder(language, cx);
         }

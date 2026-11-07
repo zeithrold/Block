@@ -21,8 +21,8 @@ use super::{
 use crate::Language;
 use block_launcher::catalog::{InstallStatus, PackStatus};
 use gpui::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, Styled as _,
-    Window, div, px, rgb,
+    Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
+    Styled as _, Window, div, px, rgb,
 };
 use std::{
     path::{Path, PathBuf},
@@ -127,6 +127,7 @@ pub(super) struct State {
     pub entered: Option<Instant>,
     pub error: Option<crate::i18n::UiText>,
     pub notice: Option<Notice>,
+    pub language_search: Option<Entity<super::TextInput>>,
     pub scroll: ScrollHandle,
 }
 
