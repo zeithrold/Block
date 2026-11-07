@@ -1412,7 +1412,18 @@ impl Block {
                                         .child(note(language.english_name())),
                                 )
                                 .children(selected.then(|| {
-                                    super::design::Icon::Check.render(16., self.palette.foreground)
+                                    div()
+                                        .size(px(18.))
+                                        .flex_shrink_0()
+                                        .rounded_full()
+                                        .bg(rgb(self.palette.primary))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            super::design::Icon::Check
+                                                .render(12., self.palette.on_primary),
+                                        )
                                 }))
                             })),
                     )
