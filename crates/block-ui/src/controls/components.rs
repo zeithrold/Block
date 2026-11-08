@@ -591,7 +591,15 @@ pub(super) fn checkbox(
     state: ControlState,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
 ) -> Control {
-    choice(id, label, checked, false, palette, state, on_activate)
+    choice(
+        id,
+        label,
+        checked,
+        ChoiceKind::Checkbox,
+        palette,
+        state,
+        on_activate,
+    )
 }
 
 pub(super) fn radio(
@@ -602,7 +610,61 @@ pub(super) fn radio(
     state: ControlState,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
 ) -> Control {
-    choice(id, label, checked, true, palette, state, on_activate)
+    choice(
+        id,
+        label,
+        checked,
+        ChoiceKind::Radio,
+        palette,
+        state,
+        on_activate,
+    )
+}
+
+pub(super) fn checkbox_row(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    checked: bool,
+    palette: Palette,
+    state: ControlState,
+    on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
+) -> Control {
+    choice(
+        id,
+        label,
+        checked,
+        ChoiceKind::CheckboxRow,
+        palette,
+        state,
+        on_activate,
+    )
+}
+
+pub(super) fn radio_row(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    checked: bool,
+    palette: Palette,
+    state: ControlState,
+    on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
+) -> Control {
+    choice(
+        id,
+        label,
+        checked,
+        ChoiceKind::RadioRow,
+        palette,
+        state,
+        on_activate,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum ChoiceKind {
+    Checkbox,
+    Radio,
+    CheckboxRow,
+    RadioRow,
 }
 
 /// Choice presentation stays with each consumer; keyboard and focus stay here.
@@ -723,7 +785,7 @@ fn choice(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     checked: bool,
-    round: bool,
+    kind: ChoiceKind,
     palette: Palette,
     state: ControlState,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
@@ -731,50 +793,16 @@ fn choice(
     let label = label.into();
     let id = id.into();
     let selector = id.to_string();
-    let indicator_selector = format!("{selector}-indicator");
-    let dot_selector = format!("{selector}-dot");
+    let round = matches!(kind, ChoiceKind::Radio | ChoiceKind::RadioRow);
+    let row = matches!(kind, ChoiceKind::CheckboxRow | ChoiceKind::RadioRow);
     let color = if state.invalid {
         palette.destructive
     } else {
         palette.ring
     };
-    let mut indicator = div()
-        .debug_selector(move || indicator_selector.clone())
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(16.))
-        .flex_shrink_0()
-        .rounded(px(if round { 8. } else { 4. }))
-        .border_1()
-        .border_color(rgb(if checked {
-            palette.primary
-        } else {
-            palette.input
-        }))
-        .bg(rgb(if checked {
-            palette.primary
-        } else {
-            palette.input_background
-        }));
-    if checked {
-        indicator = if round {
-            indicator.child(
-                div()
-                    .debug_selector(move || dot_selector.clone())
-                    // Match the outer circle's even diameter: a 7 px dot
-                    // centers on half pixels and GPUI snaps its box off-center.
-                    .size(px(8.))
-                    .rounded_full()
-                    .bg(rgb(palette.on_primary)),
-            )
-        } else {
-            indicator.child(Icon::Check.render(14., palette.on_primary))
-        };
-    }
     let control = if round {
         Control::radio(
-            id,
+            id.clone(),
             label.clone(),
             checked,
             !state.interactive(),
@@ -782,14 +810,14 @@ fn choice(
         )
     } else {
         Control::checkbox(
-            id,
+            id.clone(),
             label.clone(),
             checked,
             !state.interactive(),
             on_activate,
         )
     };
-    control_state(control, state)
+    let mut control = control_state(control, state)
         .debug_selector(move || selector)
         .flex()
         .items_center()
@@ -801,11 +829,44 @@ fn choice(
         .text_size(px(BODY_FONT_SIZE))
         .line_height(px(BODY_LINE_HEIGHT))
         .text_color(rgb(palette.foreground))
-        .focus_visible(move |style| style.border_color(rgb(color)).shadow(focus_ring(color)))
-        .child(indicator)
-        .children(
-            (!label.is_empty()).then(|| div().min_w_0().flex_1().whitespace_normal().child(label)),
-        )
+        .focus_visible(move |style| style.border_color(rgb(color)).shadow(focus_ring(color)));
+    if row {
+        control = control
+            .w_full()
+            .min_w_0()
+            .h_auto()
+            .p(px(15.))
+            .gap_3()
+            .rounded(px(CONTROL_RADIUS))
+            .flex_row_reverse()
+            .bg(rgb(if checked {
+                palette.accent
+            } else {
+                palette.popover
+            }))
+            .hover(move |style| style.bg(rgb(palette.accent)));
+    }
+    let indicator_id = id.clone();
+    Control::Selection(Box::new(super::selection_motion::SelectionPresentation {
+        control,
+        id,
+        checked,
+        disabled: !state.interactive(),
+        decorate: Box::new(move |control, progress| {
+            control
+                .child(super::selection_motion::indicator(
+                    indicator_id,
+                    round,
+                    progress,
+                    palette,
+                ))
+                .children(
+                    (!label.is_empty())
+                        .then(|| div().min_w_0().flex_1().whitespace_normal().child(label)),
+                )
+        }),
+        children: Vec::new(),
+    }))
 }
 
 /// Initials use complete graphemes, including non-Latin names and emoji.
@@ -1234,6 +1295,51 @@ mod tests {
 
     struct RadioGeometryFixture;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An isolated motion fixture must run successfully."
+    )]
+    fn motion_test_process(name: &str) -> bool {
+        if std::env::var("BLOCK_SELECTION_TEST").as_deref() == Ok(name) {
+            return true;
+        }
+        let directory = tempfile::tempdir().expect("motion trace directory");
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", name, "--nocapture"])
+            .env("BLOCK_SELECTION_TEST", name)
+            .env(
+                "BLOCK_SELECTION_MOTION_TRACE",
+                directory.path().join("paint.jsonl"),
+            )
+            .output()
+            .expect("isolated motion test");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "the isolated motion test must execute"
+        );
+        false
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "The fixture observes an actual canvas paint."
+    )]
+    fn motion_paint(id: &str) -> serde_json::Value {
+        let path = std::env::var_os("BLOCK_SELECTION_MOTION_TRACE").expect("isolated trace");
+        std::fs::read_to_string(path)
+            .expect("painted trace")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("paint JSON"))
+            .rfind(|record| record["id"] == id)
+            .expect("selection paint")
+    }
+
     impl Render for RadioGeometryFixture {
         fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
             div().p_4().child(
@@ -1256,19 +1362,166 @@ mod tests {
         reason = "Missing painted geometry is a test failure."
     )]
     fn selected_radio_dot_and_circle_share_a_center(cx: &mut gpui::TestAppContext) {
+        if !motion_test_process("components::tests::selected_radio_dot_and_circle_share_a_center") {
+            return;
+        }
         let (_, cx) = crate::test_support::window(cx, |_, _| RadioGeometryFixture);
         cx.run_until_parked();
         let indicator = cx
             .debug_bounds("geometry-radio-indicator")
             .expect("painted radio indicator");
-        let dot = cx
-            .debug_bounds("geometry-radio-dot")
-            .expect("painted selected radio dot");
+        let paint = motion_paint("geometry-radio");
+        let center = paint["circle_center"].as_array().expect("painted circle");
+        let radius = paint["circle_radius"].as_f64().expect("painted radius") as f32;
         assert_eq!(indicator.size.width, px(16.));
         assert_eq!(indicator.size.height, px(16.));
-        assert_eq!(dot.size.width, px(8.));
-        assert_eq!(dot.size.height, px(8.));
-        assert_eq!(indicator.center(), dot.center());
+        assert_eq!(px(radius * 2.), px(8.));
+        assert_eq!(
+            indicator.center(),
+            point(
+                px(center[0].as_f64().expect("painted x") as f32),
+                px(center[1].as_f64().expect("painted y") as f32),
+            )
+        );
+    }
+
+    struct SelectionFixture {
+        checked: bool,
+        disabled: bool,
+        mounted: bool,
+    }
+
+    impl Render for SelectionFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            if !self.mounted {
+                return div().p_4();
+            }
+            div().p_4().child(
+                super::checkbox_row(
+                    "motion-choice",
+                    "Choice",
+                    self.checked,
+                    Palette::LIGHT,
+                    ControlState {
+                        disabled: self.disabled,
+                        ..ControlState::default()
+                    },
+                    |&(), _, _| {},
+                )
+                .w(px(240.)),
+            )
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "The fixture must paint a numeric selection sample."
+    )]
+    fn render_selection(
+        view: &Entity<SelectionFixture>,
+        cx: &mut gpui::VisualTestContext,
+        checked: bool,
+        disabled: bool,
+    ) -> f64 {
+        view.update(cx, |view, cx| {
+            view.checked = checked;
+            view.disabled = disabled;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        motion_paint("motion-choice")["p"]
+            .as_f64()
+            .expect("painted progress")
+    }
+
+    #[gpui::test]
+    fn selection_progress_preserves_immediate_state_and_continuous_retargeting(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        if !motion_test_process(
+            "components::tests::selection_progress_preserves_immediate_state_and_continuous_retargeting",
+        ) {
+            return;
+        }
+        let (view, cx) = crate::test_support::window(cx, |_, _| SelectionFixture {
+            checked: false,
+            disabled: false,
+            mounted: true,
+        });
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        assert_eq!(render_selection(&view, cx, false, false), 0.);
+        let before = cx.debug_bounds("motion-choice");
+        let indicator = cx.debug_bounds("motion-choice-indicator");
+        assert!(
+            before.zip(indicator).is_some_and(|(row, indicator)| {
+                row.size.height == px(52.)
+                    && row.right() - indicator.right() == px(16.)
+                    && row.center().y == indicator.center().y
+            }),
+            "a single line uses its20px line box and two16px insets; row {before:?}, indicator {indicator:?}"
+        );
+        assert_eq!(render_selection(&view, cx, true, false), 0.);
+        assert_eq!(control_node(cx, "motion-choice").checked(), Some(true));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(40));
+        let entering = render_selection(&view, cx, true, false);
+        assert!(entering > 0. && entering < 1., "{entering}");
+        let reversed = render_selection(&view, cx, false, false);
+        assert!((entering - reversed).abs() < 0.0001);
+        assert_eq!(control_node(cx, "motion-choice").checked(), Some(false));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(40));
+        let exiting = render_selection(&view, cx, false, false);
+        assert!(exiting < reversed);
+        let resumed = render_selection(&view, cx, true, false);
+        assert!((resumed - exiting).abs() < 0.0001);
+        assert_eq!(cx.debug_bounds("motion-choice"), before);
+        cx.update(|_, cx| cx.set_reduce_motion(true));
+        assert_eq!(render_selection(&view, cx, true, false), 1.);
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        assert_eq!(render_selection(&view, cx, false, true), 0.);
+        assert_eq!(control_node(cx, "motion-choice").disabled(), Some(true));
+    }
+
+    #[gpui::test]
+    fn selection_remount_settles_without_replaying_interrupted_progress(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        if !motion_test_process(
+            "components::tests::selection_remount_settles_without_replaying_interrupted_progress",
+        ) {
+            return;
+        }
+        let (view, cx) = crate::test_support::window(cx, |_, _| SelectionFixture {
+            checked: false,
+            disabled: false,
+            mounted: true,
+        });
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        assert_eq!(render_selection(&view, cx, false, false), 0.);
+        assert_eq!(render_selection(&view, cx, true, false), 0.);
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(40));
+        let progress = render_selection(&view, cx, true, false);
+        assert!(progress > 0. && progress < 1.);
+        for checked in [true, false] {
+            view.update(cx, |view, cx| {
+                view.mounted = false;
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("motion-choice").is_none());
+            view.update(cx, |view, cx| {
+                view.checked = checked;
+                view.mounted = true;
+                cx.notify();
+            });
+            assert_eq!(
+                render_selection(&view, cx, checked, false),
+                f64::from(checked)
+            );
+            assert_eq!(control_node(cx, "motion-choice").checked(), Some(checked));
+        }
     }
 
     #[test]

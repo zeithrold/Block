@@ -11,9 +11,9 @@
     "ja": "ライブラリの場所を保存しました。既存のゲームは移動していません。"
   },
   "setup.library.import_fallback": {
-    "en": "To keep the source unchanged, this import will copy to: %{path}",
-    "zh-Hans": "为保持源目录不变，本次导入将复制到：%{path}",
-    "ja": "元のフォルダーを変更しないよう、今回の読み込み先：%{path}"
+    "en": "Copy to: %{path}",
+    "zh-Hans": "复制到：%{path}",
+    "ja": "コピー先：%{path}"
   },
   "setup.library.choose": {
     "en": "Choose game library folder",
@@ -26,9 +26,9 @@
     "ja": "変更"
   },
   "setup.library.scope": {
-    "en": "Default for new games. Existing games and individually chosen directories stay unchanged.",
-    "zh-Hans": "用于新游戏的默认位置，不移动已有游戏，也不覆盖单独指定的目录。",
-    "ja": "新しいゲームの既定保存先です。既存のゲームや個別に指定した場所は変更しません。"
+    "en": "Default location for new games.",
+    "zh-Hans": "新游戏的默认位置。",
+    "ja": "新しいゲームの既定の保存先。"
   },
   "setup.library.pending": {
     "en": "Saved when you confirm creation or import.",

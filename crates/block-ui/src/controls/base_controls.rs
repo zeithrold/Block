@@ -18,6 +18,7 @@ pub(super) enum Control {
     Button(Box<gpui_base::Button>),
     Checkbox(Box<gpui_base::Checkbox>),
     Radio(Box<gpui_base::Radio>),
+    Selection(Box<super::selection_motion::SelectionPresentation>),
 }
 
 /// The supplied label is the control's accessible name. It is applied through
@@ -109,6 +110,10 @@ impl Control {
             Self::Button(control) => Self::Button(Box::new((*control).track_focus(handle))),
             Self::Checkbox(control) => Self::Checkbox(Box::new((*control).track_focus(handle))),
             Self::Radio(control) => Self::Radio(Box::new((*control).track_focus(handle))),
+            Self::Selection(mut presentation) => {
+                presentation.control = presentation.control.track_focus(handle);
+                Self::Selection(presentation)
+            }
         }
     }
 
@@ -117,6 +122,10 @@ impl Control {
             Self::Button(control) => Self::Button(Box::new((*control).tab_stop(tab_stop))),
             Self::Checkbox(control) => Self::Checkbox(Box::new((*control).tab_stop(tab_stop))),
             Self::Radio(control) => Self::Radio(Box::new((*control).tab_stop(tab_stop))),
+            Self::Selection(mut presentation) => {
+                presentation.control = presentation.control.tab_stop(tab_stop);
+                Self::Selection(presentation)
+            }
         }
     }
 
@@ -131,6 +140,10 @@ impl Control {
             Self::Radio(control) => {
                 Self::Radio(Box::new((*control).tab_index(index).tab_stop(index >= 0)))
             }
+            Self::Selection(mut presentation) => {
+                presentation.control = presentation.control.tab_index(index);
+                Self::Selection(presentation)
+            }
         }
     }
 }
@@ -141,6 +154,7 @@ impl Styled for Control {
             Self::Button(control) => control.style(),
             Self::Checkbox(control) => control.style(),
             Self::Radio(control) => control.style(),
+            Self::Selection(presentation) => presentation.control.style(),
         }
     }
 }
@@ -151,6 +165,7 @@ impl ParentElement for Control {
             Self::Button(control) => control.extend(elements),
             Self::Checkbox(control) => control.extend(elements),
             Self::Radio(control) => control.extend(elements),
+            Self::Selection(presentation) => presentation.children.extend(elements),
         }
     }
 }
@@ -161,6 +176,7 @@ impl InteractiveElement for Control {
             Self::Button(control) => control.interactivity(),
             Self::Checkbox(control) => control.interactivity(),
             Self::Radio(control) => control.interactivity(),
+            Self::Selection(presentation) => presentation.control.interactivity(),
         }
     }
 }
@@ -168,11 +184,12 @@ impl InteractiveElement for Control {
 impl StatefulInteractiveElement for Control {}
 
 impl RenderOnce for Control {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         match self {
             Self::Button(control) => (*control).into_any_element(),
             Self::Checkbox(control) => (*control).into_any_element(),
             Self::Radio(control) => (*control).into_any_element(),
+            Self::Selection(presentation) => (*presentation).render(window, cx).into_any_element(),
         }
     }
 }

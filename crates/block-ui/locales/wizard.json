@@ -1117,14 +1117,14 @@
     "ja": "ゲームが見つかりません。"
   },
   "import.source.one": {
-    "en": "1 game found",
-    "zh-Hans": "发现 1 个游戏",
-    "ja": "1 件のゲームが見つかりました"
+    "en": "1 game",
+    "zh-Hans": "1 个游戏",
+    "ja": "1 ゲーム"
   },
   "import.source.many": {
-    "en": "%{count} games found",
-    "zh-Hans": "找到 %{count} 个游戏",
-    "ja": "%{count} 件のゲームが見つかりました"
+    "en": "%{count} games",
+    "zh-Hans": "%{count} 个游戏",
+    "ja": "%{count} ゲーム"
   },
   "import.unknownVersion": {
     "en": "Unknown version",

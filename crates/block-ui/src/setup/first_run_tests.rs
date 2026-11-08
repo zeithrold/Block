@@ -1011,7 +1011,7 @@ fn compact_setup_keeps_accounts_first_with_equal_cards_and_both_exit_actions_vis
             body.size.height >= gpui::px(120.) && body.bottom() <= footer.top()
         }));
         assert!(account.zip(game).is_some_and(|(account, game)| {
-            account.bottom() <= game.top() && account.size == game.size
+            game.top() - account.bottom() == gpui::px(12.) && account.size == game.size
         }));
         for selector in ["setup-later", "setup-continue"] {
             let action = crate::test_support::control_bounds(cx, selector);
@@ -2062,6 +2062,7 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             }),
             Some(gpui::Role::RadioGroup)
         );
+        let mut previous_bottom = None;
         for (id, expected, checked) in [
             ("setup-language-en", "English", true),
             ("setup-language-zh-Hans", "简体中文", false),
@@ -2073,6 +2074,20 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             assert_eq!(node.label(), Some(expected));
             assert_eq!(node.role(), Some(gpui::Role::RadioButton));
             assert_eq!(node.checked(), Some(checked));
+            let row = bounds(cx, id)?;
+            assert_eq!(
+                row.size.height,
+                gpui::px(52.),
+                "single-line language choices retain exactly16px vertical insets"
+            );
+            if let Some(bottom) = previous_bottom {
+                assert_eq!(
+                    row.top() - bottom,
+                    gpui::px(4.),
+                    "language choices retain a small vertical gap"
+                );
+            }
+            previous_bottom = Some(row.bottom());
         }
         let search = bounds(cx, "setup-language-search")?;
         cx.simulate_click(search.center(), gpui::Modifiers::none());

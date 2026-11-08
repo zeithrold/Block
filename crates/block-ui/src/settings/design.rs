@@ -30,6 +30,7 @@ pub fn load_fonts(cx: &gpui::App) -> anyhow::Result<()> {
 pub(super) const CONTROL_HEIGHT: f32 = 32.;
 pub(super) const CONTROL_RADIUS: f32 = 10.;
 pub(super) const CARD_RADIUS: f32 = 16.;
+pub(super) const FOCUS_RING_SPREAD: f32 = 3.;
 pub(super) const FIELD_GAP: f32 = 6.;
 pub(super) const BODY_FONT_SIZE: f32 = 14.;
 pub(super) const SMALL_FONT_SIZE: f32 = 12.;
@@ -46,7 +47,7 @@ pub(super) fn focus_ring(color: u32) -> Vec<BoxShadow> {
         color,
         offset: point(px(0.), px(0.)),
         blur_radius: px(0.),
-        spread_radius: px(3.),
+        spread_radius: px(FOCUS_RING_SPREAD),
     }]
 }
 

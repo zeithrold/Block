@@ -714,7 +714,7 @@ impl Block {
                     .flex()
                     .flex_col()
                     .items_stretch()
-                    .gap_4()
+                    .gap_3()
                     .child(self.setup_task_card(
                         "setup-account",
                         &tr!(language, "setup.account.title"),

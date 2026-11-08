@@ -73,6 +73,19 @@ fn control_node(
         .expect("header control has a native accessibility node")
 }
 
+fn assert_import_selection_summary(cx: &mut VisualTestContext, label: &str) {
+    let title = bounds(cx, "drawer-title-text");
+    let count = bounds(cx, "import-selection-count");
+    assert!(
+        title.bottom() < count.top() && count.right() <= bounds(cx, "import-select-all").left(),
+        "selection summary stays in the body beside its bulk action"
+    );
+    assert_eq!(
+        control_node(cx, "import-selection-count").label(),
+        Some(label)
+    );
+}
+
 fn focus_by_tab(cx: &mut VisualTestContext, id: &'static str) {
     let mut reached = false;
     for _ in 0..20 {
@@ -120,20 +133,28 @@ fn assert_control_color(cx: &mut VisualTestContext, selector: &'static str, expe
     assert!(painted, "{selector} did not paint the expected color");
 }
 
-fn assert_control_border(cx: &mut VisualTestContext, selector: &'static str, width: f32) {
-    let expected = cx.update(|window, _| width * window.scale_factor());
+fn assert_selection_surface(
+    view: &Entity<Block>,
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+    selected: bool,
+) {
+    let palette = view.read_with(cx, |view, _| view.palette);
+    assert_control_color(
+        cx,
+        selector,
+        if selected {
+            palette.accent
+        } else {
+            palette.popover
+        },
+    );
+    let scale = cx.update(|window, _| window.scale_factor());
     assert!(
-        control_quads(cx, selector).into_iter().any(|quad| {
-            [
-                quad.border_widths.top,
-                quad.border_widths.right,
-                quad.border_widths.bottom,
-                quad.border_widths.left,
-            ]
-            .into_iter()
-            .all(|side| (side.0 - expected).abs() < 0.01)
-        }),
-        "{selector} must paint a {width}px border"
+        !control_quads(cx, selector)
+            .iter()
+            .any(|quad| { quad.border_color.a > 0.99 && quad.border_widths.top.0 > scale }),
+        "selection must use a surface and indicator without a thick perimeter"
     );
 }
 
@@ -215,6 +236,12 @@ fn headers_keep_their_text_aligned_without_a_back_action(cx: &mut TestAppContext
 fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext) {
     assert!(crate::test_support::control_bounds(cx, "import-source-AdjacentMinecraft").is_none());
     let source = bounds(cx, "import-source-OfficialLauncher");
+    if let Some(inactive) = cx.debug_bounds("import-list-content") {
+        assert!(
+            inactive.left() >= bounds(cx, "import-sources-content").right(),
+            "inactive page decorations must not overlap the visible viewport"
+        );
+    }
     let footer = bounds(cx, "import-new");
     assert_eq!(source.left(), footer.left());
     assert_eq!(source.right(), footer.right());
@@ -227,8 +254,19 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
         control_node(cx, "import-source-OfficialLauncher").role(),
         Some(gpui::Role::RadioButton)
     );
-    assert_control_border(cx, "import-source-OfficialLauncher", 1.);
+    assert_selection_surface(view, cx, "import-source-OfficialLauncher", false);
     let view_button = bounds(cx, "import-view-OfficialLauncher");
+    let title = bounds(cx, "import-source-title-OfficialLauncher");
+    assert_eq!(
+        title.left() - source.left(),
+        px(16.),
+        "source title starts at the content inset without a folder icon slot"
+    );
+    assert!(
+        title.right() <= view_button.left()
+            && f32::from(title.center().y - view_button.center().y).abs() <= 0.5,
+        "the independent View button belongs beside the source card title"
+    );
     cx.simulate_click(
         point(source.left() + px(24.), source.bottom() - px(24.)),
         Modifiers::none(),
@@ -239,7 +277,19 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
         control_node(cx, "import-source-OfficialLauncher").checked(),
         Some(true)
     );
-    assert_control_border(cx, "import-source-OfficialLauncher", 3.);
+    assert_selection_surface(view, cx, "import-source-OfficialLauncher", true);
+    crate::test_support::press(cx, "tab");
+    focus_by_tab(cx, "import-source-OfficialLauncher");
+    assert_selection_surface(view, cx, "import-source-OfficialLauncher", true);
+    let max_base_border = cx.update(|window, _| 1.5 * window.scale_factor());
+    assert!(
+        !control_quads(cx, "import-source-OfficialLauncher")
+            .iter()
+            .any(|quad| {
+                quad.border_color.a > 0.99 && quad.border_widths.top.0 > max_base_border
+            }),
+        "keyboard focus must not add a thick inner border underneath the outer selection"
+    );
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.import_games.page),
         Page::Sources,
@@ -247,7 +297,7 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
     );
     assert_eq!(
         control_node(cx, "import-view-OfficialLauncher").label(),
-        Some("2 games found")
+        Some("2 games")
     );
     assert_eq!(view_button.size.height, px(24.));
     assert!(view_button.size.width < source.size.width - px(80.));
@@ -280,7 +330,8 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
         cx.notify();
     });
     act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
-    for width in [360., 432.] {
+    let mut wide_pair = None;
+    for width in [360., 432., 504.] {
         cx.simulate_resize(size(px(width), px(768.)));
         view.update(cx, |view, cx| {
             view.shell.import_games.source = SourceKind::AdjacentMinecraft;
@@ -288,6 +339,19 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
         });
         cx.run_until_parked();
         assert_source_card_selection(&view, cx);
+        if width >= 432. {
+            let pair = (
+                bounds(cx, "import-source-title-OfficialLauncher").size,
+                bounds(cx, "import-view-OfficialLauncher").origin,
+            );
+            if let Some(previous) = wide_pair {
+                assert_eq!(
+                    pair, previous,
+                    "extra width stays after the title/button pair, not between them"
+                );
+            }
+            wide_pair = Some(pair);
+        }
     }
     click(cx, "import-view-OfficialLauncher");
     assert_eq!(
@@ -392,16 +456,30 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
     click(cx, "import-view-OfficialLauncher");
 
+    assert_import_selection_summary(cx, "1 / 2 selected");
     assert!(
         crate::test_support::control_bounds(cx, "import-sources").is_none(),
         "the header owns the only return action"
     );
     let panel = bounds(cx, "block-drawer");
+    // The compact viewport may show only part of the last row initially.
+    // Reach the real scroll limit before requiring its full outer perimeter.
+    view.update(cx, |view, cx| {
+        let scroll = &view.shell.import_games.list_scroll;
+        scroll.set_offset(point(px(0.), -scroll.max_offset().y));
+        cx.notify();
+    });
+    cx.run_until_parked();
     let card = bounds(cx, "import-game-two");
     assert_eq!(
         bounds(cx, "import-game-one").top(),
-        bounds(cx, "import-select-all").bottom() + px(8.),
+        bounds(cx, "import-select-all").bottom() + px(12.),
         "one selection row must directly precede the cards without a separate count row"
+    );
+    assert_eq!(
+        card.top() - bounds(cx, "import-game-one").bottom(),
+        px(4.),
+        "candidate choices retain a small vertical gap"
     );
     assert_eq!(
         control_node(cx, "import-game-two").role(),
@@ -414,22 +492,42 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         cx.simulate_click(position, Modifiers::none());
         cx.run_until_parked();
         assert_eq!(
+            bounds(cx, "import-game-two"),
+            card,
+            "selection cannot move its hitbox"
+        );
+        assert_eq!(
             view.read_with(cx, |view, _| view.shell.import_games.selected.clone()),
             ["one".to_owned(), "two".to_owned()].into_iter().collect(),
             "clicking the metadata or trailing indicator must toggle the complete card once"
         );
         assert_eq!(control_node(cx, "import-game-two").checked(), Some(true));
-        assert_control_border(cx, "import-game-two", 3.);
+        assert_import_selection_summary(cx, "2 / 2 selected");
+        assert_selection_surface(&view, cx, "import-game-two", true);
         crate::test_support::press(cx, "space");
         cx.run_until_parked();
         assert_eq!(control_node(cx, "import-game-two").checked(), Some(false));
-        assert_control_border(cx, "import-game-two", 1.);
+        assert_import_selection_summary(cx, "1 / 2 selected");
+        assert_eq!(
+            bounds(cx, "import-game-two"),
+            card,
+            "deselection cannot move its hitbox"
+        );
+        assert_selection_surface(&view, cx, "import-game-two", false);
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.import_games.selected.clone()),
             ["one".to_owned()].into_iter().collect(),
             "keyboard activation toggles this card without clearing its neighbor"
         );
     }
+    view.update(cx, |view, cx| {
+        view.shell
+            .import_games
+            .list_scroll
+            .set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    });
+    cx.run_until_parked();
     assert_eq!(
         bounds(cx, "import-select-all").right(),
         panel.right() - px(20.),

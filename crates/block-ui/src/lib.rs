@@ -108,6 +108,8 @@ mod scroll_area;
 mod search_selector;
 #[path = "controls/select.rs"]
 mod select;
+#[path = "controls/selection_motion.rs"]
+mod selection_motion;
 #[path = "settings/settings.rs"]
 mod settings;
 #[path = "setup/setup_storage.rs"]

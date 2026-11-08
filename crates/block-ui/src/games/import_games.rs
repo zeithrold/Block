@@ -15,7 +15,10 @@ use gpui::{
     Context, InteractiveElement as _, IntoElement as _, ParentElement as _, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Window, div, relative, rgb,
 };
-use gpui_base::motion::{Easing, Interpolate as _, Timing};
+use gpui_base::{
+    TestSupportExt as _,
+    motion::{Easing, Interpolate as _, Timing},
+};
 
 use super::{
     Block, UiAction,
@@ -268,7 +271,6 @@ impl State {
         }
         self.report = Some(report);
     }
-    /// The sheet header copy for the current page.
     pub(super) fn chrome(&self, language: Language) -> (String, String, f32) {
         match self.page {
             Page::Sources => (
@@ -711,7 +713,8 @@ impl Block {
             ),
             None => tr!(language, "import.header.choose"),
         };
-        let mut body = div().flex().flex_col().gap_3().child(note(summary));
+        let body = div().flex().flex_col().gap_3().child(note(summary));
+        let mut rows = div().flex().flex_col().gap_1();
         for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher]
             .into_iter()
             .filter(|_| state.report.is_some())
@@ -749,41 +752,42 @@ impl Block {
                     .w_full()
                     .flex()
                     .items_center()
-                    .gap_3()
-                    .child(Icon::Folder.render(20., self.palette.foreground))
+                    .gap_2()
                     .child(
                         div()
                             .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .items_start()
-                            .gap_1()
-                            .child(div().w_full().whitespace_normal().child(label.clone())),
-                    ),
+                            .debug_selector(move || format!("import-source-title-{source:?}"))
+                            .whitespace_normal()
+                            .child(label.clone()),
+                    )
+                    .child(if interactive && count > 1 {
+                        self.button_with_variant(
+                            format!("import-view-{source:?}"),
+                            summary,
+                            UiAction::ImportGames(Action::View(source)),
+                            ButtonVariant::Secondary,
+                            cx,
+                        )
+                        .h(gpui::px(24.))
+                        .flex_shrink_0()
+                        .px_2()
+                        .py_0()
+                        .rounded_full()
+                        .text_xs()
+                        .line_height(gpui::px(16.))
+                        .gap_1()
+                        .child(Icon::ChevronRight.render(12., self.palette.muted))
+                        .into_any_element()
+                    } else {
+                        components::badge(
+                            summary,
+                            self.palette,
+                            components::BadgeVariant::Secondary,
+                        )
+                        .self_start()
+                        .into_any_element()
+                    }),
             );
-            content = content.child(if interactive && count > 1 {
-                self.button_with_variant(
-                    format!("import-view-{source:?}"),
-                    summary,
-                    UiAction::ImportGames(Action::View(source)),
-                    ButtonVariant::Secondary,
-                    cx,
-                )
-                .h(gpui::px(24.))
-                .px_2()
-                .py_0()
-                .rounded_full()
-                .text_xs()
-                .line_height(gpui::px(16.))
-                .gap_1()
-                .child(Icon::ChevronRight.render(12., self.palette.muted))
-                .into_any_element()
-            } else {
-                components::badge(summary, self.palette, components::BadgeVariant::Secondary)
-                    .self_start()
-                    .into_any_element()
-            });
             content = content.children(path.map(|path| {
                 div()
                     .w_full()
@@ -793,8 +797,8 @@ impl Block {
                     .whitespace_normal()
                     .child(path.root.display().to_string())
             }));
-            body = body.child(
-                components::radio(
+            rows = rows.child(
+                components::radio_row(
                     format!("import-source-{source:?}"),
                     "",
                     selected,
@@ -813,22 +817,14 @@ impl Block {
                 .h_auto()
                 .flex_row_reverse()
                 .gap_3()
-                .rounded_2xl()
-                .border(gpui::px(if selected { 3. } else { 1. }))
-                .border_color(rgb(if selected {
-                    self.palette.foreground
-                } else {
-                    self.palette.border
-                }))
-                .p(gpui::px(if selected { 17. } else { 19. }))
                 .child(content.flex_1()),
             );
             if selected {
-                body = body.children(path.and_then(|path| path.warning.as_ref()).map(|warning| {
+                rows = rows.children(path.and_then(|path| path.warning.as_ref()).map(|warning| {
                     note(tr!(language, "common.diagnostic_detail", detail = warning))
                 }));
                 if let [candidate] = candidates.as_slice() {
-                    body = body.children(candidate.unsupported_reason.as_ref().map(|reason| {
+                    rows = rows.children(candidate.unsupported_reason.as_ref().map(|reason| {
                         note(tr!(
                             language,
                             "common.diagnostic_detail",
@@ -838,7 +834,7 @@ impl Block {
                 }
             }
         }
-        body.into_any_element()
+        body.child(rows).into_any_element()
     }
 
     fn render_list(
@@ -848,41 +844,40 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let candidates = state.candidates(state.source);
-        let eligible = candidates
-            .iter()
-            .filter(|candidate| {
-                candidate.importable
-                    && !matches!(state.outcomes.get(&candidate.id), Some(Outcome::Saved))
-            })
-            .collect::<Vec<_>>();
-        let all_selected = state.all_selected();
-        let language = self.language();
+        let eligible = state.eligible_ids();
         let selected_count = eligible
             .iter()
-            .filter(|candidate| state.selected.contains(&candidate.id))
+            .filter(|id| state.selected.contains(*id))
             .count();
+        let all_selected = state.all_selected();
+        let language = self.language();
         let selection_label = if all_selected {
             tr!(language, "import.select.clear")
         } else {
             tr!(language, "import.select.all")
         };
-        let mut body = div().flex().flex_col().gap_2().child(
+        let mut body = div().flex().flex_col().gap_3().child(
             div()
                 .flex()
                 .justify_between()
                 .items_center()
                 .gap_2()
-                .child(
-                    note(tr!(
+                .child({
+                    let summary = tr!(
                         language,
                         "import.selectedCount",
                         count = selected_count,
                         total = eligible.len()
-                    ))
-                    .min_w_0()
-                    .flex_1()
-                    .whitespace_normal(),
-                )
+                    );
+                    note(summary.clone())
+                        .id("import-selection-count")
+                        .debug_selector(|| "import-selection-count".into())
+                        .aria_label(summary)
+                        .min_w_0()
+                        .flex_1()
+                        .whitespace_normal()
+                        .test_support()
+                })
                 .child(if interactive {
                     self.button_with_variant(
                         "import-select-all",
@@ -907,6 +902,7 @@ impl Block {
         if candidates.is_empty() {
             body = body.child(note(tr!(language, "import.list.empty")));
         }
+        let mut rows = div().flex().flex_col().gap_1();
         for candidate in candidates {
             let saved = matches!(state.outcomes.get(&candidate.id), Some(Outcome::Saved));
             let checked = saved || state.selected.contains(&candidate.id);
@@ -949,8 +945,8 @@ impl Block {
                     detail = warning
                 )));
             }
-            body = body.child(
-                components::checkbox(
+            rows = rows.child(
+                components::checkbox_row(
                     format!("import-game-{}", candidate.id),
                     "",
                     checked,
@@ -972,17 +968,10 @@ impl Block {
                 .min_w_0()
                 .flex_row_reverse()
                 .gap_3()
-                .p(gpui::px(if checked { 17. } else { 19. }))
-                .rounded_2xl()
-                .border(gpui::px(if checked { 3. } else { 1. }))
-                .border_color(rgb(if checked {
-                    self.palette.foreground
-                } else {
-                    self.palette.border
-                }))
                 .child(content),
             );
         }
+        body = body.child(rows);
         if let Some(error) = &state.error {
             body = body.child(note(error.text(language)));
         }
@@ -1064,6 +1053,9 @@ impl Block {
             }),
             _ => destination.clone(),
         };
+        // Borrow focus paint room from the surrounding inset. Keep compensation
+        // in scroll content so the outer paint remains reachable at its limits.
+        let paint_outset = gpui::px(super::design::FOCUS_RING_SPREAD);
         let mut running_motion = false;
         let body = match state.page {
             Page::Sources | Page::List => {
@@ -1081,6 +1073,8 @@ impl Block {
                     .child(
                         div()
                             .w_full()
+                            .pl(paint_outset)
+                            .py(paint_outset)
                             .flex()
                             .flex_col()
                             .gap_3()
@@ -1104,6 +1098,8 @@ impl Block {
                     .child(
                         div()
                             .w_full()
+                            .pl(paint_outset)
+                            .py(paint_outset)
                             .flex()
                             .flex_col()
                             .gap_3()
@@ -1118,35 +1114,29 @@ impl Block {
                                     .whitespace_normal()
                             })),
                     );
+                let page = |offset: f32, content: gpui::AnyElement| {
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(relative(offset))
+                        .w(relative(1.))
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(content)
+                };
                 div()
                     .id("import-games-body")
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    .ml(-paint_outset)
+                    .mt(-paint_outset)
+                    .mb(-paint_outset)
                     .mr(gpui::rems(-1.))
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .bottom_0()
-                            .left(relative(-position))
-                            .w(relative(1.))
-                            .min_h_0()
-                            .overflow_hidden()
-                            .child(source),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .bottom_0()
-                            .left(relative(1. - position))
-                            .w(relative(1.))
-                            .min_h_0()
-                            .overflow_hidden()
-                            .child(list),
-                    )
+                    .child(page(-position, source.into_any_element()))
+                    .child(page(1. - position, list.into_any_element()))
                     .into_any_element()
             }
             Page::Progress | Page::Results => div()
@@ -1294,7 +1284,7 @@ mod tests {
         );
         assert_eq!(
             tr!(Language::Japanese, "import.source.many", count = 3),
-            "3 件のゲームが見つかりました"
+            "3 ゲーム"
         );
     }
 
@@ -1343,16 +1333,20 @@ mod tests {
         state
             .selected
             .extend(["a".into(), "saved".into(), "other".into()]);
+        assert_eq!(state.pending().len(), 1);
         assert!(!state.all_selected());
         state.toggle_all();
+        assert_eq!(state.pending().len(), 2);
         assert!(state.all_selected());
         assert!(!state.selected.contains("bad"));
         assert!(state.selected.contains("other"));
         state.source = launcher;
+        assert_eq!(state.pending().len(), 1);
         assert!(state.selected.contains("a"));
         assert!(state.selected.contains("other"));
         state.source = adjacent;
         state.toggle_all();
+        assert!(state.pending().is_empty());
         assert!(!state.selected.contains("a") && !state.selected.contains("b"));
         assert!(state.selected.contains("saved"));
     }

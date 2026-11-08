@@ -1371,7 +1371,7 @@ impl Block {
                             .gap_1()
                             .children(choices.into_iter().map(|language| {
                                 let selected = language == self.language();
-                                let mut choice = super::components::radio(
+                                let mut choice = super::components::radio_row(
                                     format!("setup-language-{}", language.code()),
                                     "",
                                     selected,
@@ -1406,15 +1406,6 @@ impl Block {
                                     .aria_selected(selected)
                                     .w_full()
                                     .h_auto()
-                                    .min_h(px(64.))
-                                    .rounded_2xl()
-                                    .border(px(if selected { 3. } else { 1. }))
-                                    .border_color(rgb(if selected {
-                                        self.palette.primary
-                                    } else {
-                                        self.palette.border
-                                    }))
-                                    .p(px(if selected { 17. } else { 19. }))
                                     .flex_row_reverse()
                                     .justify_between()
                                     .child(
@@ -1422,11 +1413,22 @@ impl Block {
                                             .flex_1()
                                             .min_w_0()
                                             .flex()
-                                            .flex_col()
-                                            .items_start()
-                                            .gap_1()
-                                            .child(div().text_sm().child(language.self_name()))
-                                            .child(note(language.english_name())),
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .whitespace_nowrap()
+                                                    .child(language.self_name()),
+                                            )
+                                            .children(
+                                                (language.self_name() != language.english_name())
+                                                    .then(|| {
+                                                        note(language.english_name())
+                                                            .min_w_0()
+                                                            .truncate()
+                                                    }),
+                                            ),
                                     )
                             }))
                             .test_support(),

@@ -329,6 +329,25 @@ impl DrawerFrame {
     }
 }
 
+impl DrawerFrame {
+    fn title_row(&self) -> gpui::Div {
+        div()
+            .debug_selector(|| "drawer-title".into())
+            .flex_1()
+            .min_w_0()
+            .text_lg()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .child(
+                div()
+                    .id("drawer-title-text")
+                    .debug_selector(|| "drawer-title-text".into())
+                    .aria_label(self.title.clone())
+                    .min_w_0()
+                    .child(self.title.clone()),
+            )
+    }
+}
+
 /// Rendering helpers that turn one resolved frame into elements.
 impl DrawerLayer {
     /// Finish an exit: drop the presentation and return focus once no dialog
@@ -515,18 +534,7 @@ impl DrawerLayer {
                             .items_center()
                             .gap(px(8.))
                             .children(import_back)
-                            .child(
-                                div()
-                                    .debug_selector(|| "drawer-title".into())
-                                    .flex_1()
-                                    .min_w_0()
-                                    .text_lg()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .flex()
-                                    .items_start()
-                                    .gap_2()
-                                    .child(div().min_w_0().flex_1().child(frame.title.clone())),
-                            )
+                            .child(frame.title_row())
                             .children(refresh)
                             .child(close),
                     )

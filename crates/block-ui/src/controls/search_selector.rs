@@ -16,7 +16,6 @@ use gpui::{
 use super::{
     Block, TextInput, UiAction, account_id,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
-    design::Icon,
     input, note,
     shell::{Drawer, Surface},
 };
@@ -345,6 +344,9 @@ impl Block {
             .debug_selector(|| "selector-results".into())
             .flex_1()
             .min_h_0()
+            .flex()
+            .flex_col()
+            .gap_1()
             .children(choices.iter().enumerate().map(|(index, choice)| {
                 self.selector_row(drawer, choice, active == Some(index), state, window, cx)
             }));
@@ -412,8 +414,7 @@ impl Block {
         .flex_1()
         .min_w_0()
         .h_auto()
-        .min_h(px(64.))
-        .p_3()
+        .p(px(15.))
         .justify_start()
         .gap_3()
         .bg(rgb(if active {
@@ -421,24 +422,33 @@ impl Block {
         } else {
             self.palette.popover
         }))
-        .child(choice.appearance.map_or_else(
-            || {
-                components::account_avatar(
-                    &choice.title,
-                    self.account_avatars.get(&choice.id),
-                    self.palette,
-                    36.,
-                    AvatarState::Fallback,
-                )
-            },
-            |appearance| components::profile_avatar(appearance, self.palette, 36.),
-        ))
-        .child(self.selector_row_text(choice))
-        .children(
+        .child(
             choice
-                .current
-                .then(|| Icon::Check.render(16., self.palette.foreground)),
-        );
+                .appearance
+                .map_or_else(
+                    || {
+                        components::account_avatar(
+                            &choice.title,
+                            self.account_avatars.get(&choice.id),
+                            self.palette,
+                            36.,
+                            AvatarState::Fallback,
+                        )
+                    },
+                    |appearance| components::profile_avatar(appearance, self.palette, 36.),
+                )
+                .debug_selector({
+                    let selector = format!("selector-avatar-{id}");
+                    move || selector
+                }),
+        )
+        .child(self.selector_row_text(choice))
+        .child(super::selection_motion::indicator(
+            format!("selector-current-{id}").into(),
+            true,
+            if choice.current { 1. } else { 0. },
+            self.palette,
+        ));
         if active {
             primary = primary.track_focus(&state.row_focus);
         }
@@ -446,7 +456,9 @@ impl Block {
     }
 
     fn selector_row_text(&self, choice: &Choice) -> gpui::Div {
+        let selector = format!("selector-text-{}", choice.id);
         div()
+            .debug_selector(move || selector)
             .flex_1()
             .min_w_0()
             .flex()
@@ -743,6 +755,40 @@ mod tests {
                     painted,
                     "{appearance:?} {drawer:?}: colored badges must paint"
                 );
+                let (row_id, indicator_id) = if drawer == Drawer::Accounts {
+                    (
+                        "switch-account-00000000-0000-4000-8000-000000000001",
+                        "selector-current-00000000-0000-4000-8000-000000000001-indicator",
+                    )
+                } else {
+                    (
+                        "switch-profile-profile-a",
+                        "selector-current-profile-a-indicator",
+                    )
+                };
+                let row = crate::test_support::control_bounds(cx, row_id);
+                let indicator = cx.debug_bounds(indicator_id);
+                assert!(
+                    row.zip(indicator).is_some_and(|(row, indicator)| {
+                        indicator.size == size(px(16.), px(16.))
+                            && row.right() - indicator.right() == px(16.)
+                    }),
+                    "{drawer:?}: every choice reserves the same inset Radio indicator"
+                );
+                if drawer == Drawer::Profiles {
+                    let avatar = cx.debug_bounds("selector-avatar-profile-a");
+                    let text = cx.debug_bounds("selector-text-profile-a");
+                    assert!(
+                        row.zip(avatar)
+                            .zip(text)
+                            .is_some_and(|((row, avatar), text)| {
+                                avatar.size == size(px(36.), px(36.))
+                                    && avatar.left() - row.left() == px(16.)
+                                    && text.left() - avatar.right() == px(12.)
+                            }),
+                        "Profile avatar keeps its inset and gap before the text"
+                    );
+                }
             }
         }
     }
