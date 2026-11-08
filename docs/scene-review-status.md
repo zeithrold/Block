@@ -1,6 +1,6 @@
 # Block 逐场景评审状态
 
-更新日期：2026-11-07
+更新日期：2026-11-08
 
 建档基线：`036cc5fef32789aa59da1900d4f42f6cdaa7437e`  
 场景契约：初始化场景为 `direct-setup-20261106`，其余为 `compact-ui-20261105`；360×720 逻辑内容尺寸。
@@ -11,10 +11,10 @@
 
 | 总场景 | 待评审 | 评审中 | 待修复 | 待复核 | 已通过 | 阻塞 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 97 | 96 | 0 | 0 | 1 | 0 | 0 |
+| 97 | 88 | 0 | 0 | 8 | 1 | 0 |
 
-- 当前场景：`setup-overview`，首次启动直接进入初始化总览。
-- 建议下一场景：先复核新总览，再进入 `setup-account`。
+- 当前验收结论：仅 Welcome 页面（当前 `setup-overview` 首次设置总览）已通过，见 [R016](#r016)；其他页面及变体尚未验收通过。
+- 建议下一场景：`setup-account`，等待用户开始评审。
 - 当前评审记录：[R001：移除独立欢迎页](#r001)、[R002：首设卡片导航提示](#r002)、[R003：语言抽屉直接选择](#r003)、[R004：语言英文副标题与搜索](#r004)、[R005：语言选中标记](#r005)。
 - 已退役场景：`setup-welcome`；其历史证据保留，不计入当前 97 项。
 - 统计按场景计数，浅色与深色不重复计数。每次更新场景状态时同步本表。
@@ -61,15 +61,15 @@
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
-| `setup-overview` | 首次直达总览、标题右侧当前语言、账户优先与返回 Home | 待复核 | [R001](#r001)、[R002](#r002)、[R003](#r003)、[R004](#r004)、[R005](#r005) |
-| `setup-overview-draft` | 未完成草稿的继续入口与滚动可达性 | 待评审 | — |
-| `setup-overview-ready` | 任务完成状态与进入 Home | 待评审 | — |
-| `setup-game-choice` | 推荐、自定义与导入的选择含义 | 待评审 | — |
-| `setup-account` | 首次添加账户的入口和退出路径 | 待评审 | — |
-| `setup-game` | 首次创建游戏、保存与后续准备 | 待评审 | — |
-| `setup-import-sources` | 来源识别、复制说明与导入入口 | 待评审 | — |
-| `setup-import-list` | 多项选择、数量反馈与导入操作 | 待评审 | — |
-| `setup-import-long-destination` | 长目标路径、滚动与固定操作区 | 待评审 | — |
+| `setup-overview` | 首次直达总览、标题右侧当前语言、账户优先与返回 Home | 已通过 | [R001](#r001)、[R002](#r002)、[R003](#r003)、[R004](#r004)、[R005](#r005)、[R006](#r006)、[R007](#r007)、[R013](#r013)、[R014](#r014)、[R015](#r015)、[R016](#r016) |
+| `setup-overview-draft` | 未完成草稿的继续入口与滚动可达性 | 待复核 | [R014](#r014) |
+| `setup-overview-ready` | 任务完成状态与进入 Home | 待复核 | [R014](#r014) |
+| `setup-game-choice` | 推荐、自定义与导入的选择含义 | 待复核 | [R008](#r008)、[R013](#r013) |
+| `setup-account` | 首次添加账户的入口和退出路径 | 待复核 | [R013](#r013) |
+| `setup-game` | 首次创建游戏、保存与后续准备 | 待复核 | [R013](#r013) |
+| `setup-import-sources` | 来源识别、复制说明与导入入口 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R014](#r014) |
+| `setup-import-list` | 多项选择、数量反馈与导入操作 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R011](#r011)、[R012](#r012)、[R014](#r014) |
+| `setup-import-long-destination` | 长目标路径、滚动与固定操作区 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R011](#r011)、[R012](#r012)、[R014](#r014) |
 
 ### Home（4）
 
@@ -294,6 +294,151 @@
 - 验证：34 项首设回归、严格 Clippy 和格式检查通过；Linux ARM64 浅深色实际截图已查看，无新增裁切或重叠。实际点击浅色圆形标记区域仍保存当前语言并关闭抽屉。此纯视觉改动复用未受影响的完整包测试证据，未重新运行其他平台 GUI 或全平台 CI。
 - 证据：[浅色标记](../target/setup-language-indicator-20261107/evidence/filled-indicator-light.png)、[深色标记](../target/setup-language-indicator-20261107/evidence/filled-indicator-dark.png)、[验证记录](../target/setup-language-indicator-20261107/QA.md)，均为本地文件。任务进程和临时数据已清理，保留共享缓存与用户数据。
 - 用户确认：实现待复核，总览状态保持“待复核”。
+
+<a id="r006"></a>
+
+### R006：首设游戏提醒与确认页存储位置 / 2026-11-07
+
+- 场景：`setup-overview`、游戏创建流程、`setup-import-sources`、`setup-import-list`、`setup-import-long-destination`、新实例整合包确认。
+- 要求：发现可导入游戏时在游戏卡显示绿色 Badge，并执行此前讨论的首设调整。
+- 修改：总览移除存储卡，将检测说明放入游戏流程；仅可导入且尚未保存的候选贡献绿色提醒。已知候选优先呈现导入入口，进入流程后不因迟到的扫描结果重排入口。单按钮底栏使用对称间距。
+- 位置：创建、来源直接确认、候选列表和新实例整合包确认提供游戏库位置。目录选择只修改所属流程草稿，实际确认并通过预检后才保存；取消、过期请求和其他来源不接受旧回调。保留单游戏独立目录，已有游戏不迁移，缓存位置不变。默认与复制位置相同时只显示一次；保护来源而使用其他目标时另行说明实际位置。
+- 自动检查：596 项 UI 测试、3 项框架测试、`cargo clippy --locked -p block-ui --all-targets --all-features -- -D warnings`、格式检查通过。多个新增回归先在旧实现失败，包括来源页直接确认。既有依赖 `block v0.1.6` 的 future-incompatibility 提示仍在。
+- 原生证据：Linux ARM64 / KDE XWayland / 360×720 产品内容。浅深色总览、创建、导入来源、候选列表与长路径截图已查看；最终来源页位置入口可滚动到达，底栏固定，无重复目标路径。实际目录选择、取消、待确认预览、独立游戏目录及创建保存已操作；磁盘配置确认默认库与独立目录分别保留。
+- 真实发现与复制：使用自有普通配置文件的 Linux 文件租约暂停真实读取，实际查看 Searching 状态后释放；不增加生产测试接口。等待时无绿色误报。随后 Vanilla 1.20.6 单游戏直接导入成功，世界副本存在于所选库，源目录四个文件 SHA-256 前后相同；磁盘实例目录与默认库一致，先前独立创建的 26.3 实例目录未变。未启动 Minecraft 或验证世界玩法。
+- 范围与证据缺口：未运行其他平台原生 GUI、全工作区检查；整合包确认、异常及过期回调的分支以自动回归覆盖，本轮未逐个执行其原生故障操作。版本为本轮未提交改动，Linux 二进制由对应源码构建。
+- 证据：[验证记录](../target/setup-overview-refinement-20261107/QA.md)、[浅色长路径](../target/setup-overview-refinement-20261107/evidence/reviewed-setup-import-long-destination-light-scrolled.png)、[深色来源确认](../target/setup-overview-refinement-20261107/evidence/reviewed-setup-import-sources-dark-scrolled.png)、[真实扫描等待](../target/setup-overview-refinement-20261107/evidence/live-searching-light.png)、[真实导入结果](../target/setup-overview-refinement-20261107/evidence/live-import-result.png)，均为本地文件。
+- 用户确认：实现待复核；未将实现完成记为验收通过，其他尚未评审场景状态保留。
+
+<a id="r007"></a>
+
+### R007：Game 自动导入提示、Drawer 重排与 Wizard 图标 / 2026-11-07
+
+- 当前请求：点击 Game 自动弹出导入提示 Drawer，重新设计 Drawer；Set up a game 与各 Wizard 配上易懂图标。本记录替代 R006 中“Game 只进入选择页”的入口约定，其余数据保护与延迟确认规则保留。
+- 入口：先进入游戏选择任务，再打开一层导入 Drawer。复用首设已有或进行中的发现；关闭后仍在同一任务，草稿可继续。Create a new game 返回选择页，不再调用会重新弹提示的 Game 动作；晚到结果不重开提示、不重排已进入页面的入口。
+- Drawer：620px 来源提示面板，标题导入图标、发现状态/错误、重试、来源图标及选中状态；当前来源的路径和诊断可查看，多候选保留直达查看入口。整合包入口与来源分组区分；空来源不显示 Import 0，提供明确创建出口。保留候选勾选、返回、结果、完整目的地及 Change、固定确认区与原始文件保护。
+- 图标：共享 `wizard_heading` 使用现有24px单色 SVG，与既有20px标题和独立说明对齐。创建/实例选择用 Games，版本用 Blocks，Loader/整合包用 Layers，配置/Profile 用 Settings，OptiFine 用 Leaf；账户按连接、等待、验证、失败和完成状态分别表达。Set up a game 及其入口卡也有对应图标。创建类型标题收紧为三语言等义短标题，避免图标加入后英文孤立问号换行。
+- 焦点回归：真实 Linux 操作发现点击重试后，忙碌按钮卸载/禁用会使 Escape 离开 Sheet 路径。新增操作回归先红；仅保留按钮仍失败，读取组件到 pinned gpui-base 的禁用焦点实现后，将焦点交给现有顶层 ImportGames Sheet。实际阻塞读取期间 Escape 现可关闭提示，释放后保持关闭，未加入全局键盘补丁。
+- 自动检查：597项 UI测试、3项框架测试、doc0；完整 `block-ui --all-features` 测试、严格 Clippy、格式检查通过。Linux ARM64 最终构建通过。LSP 超时/工具不可用，未将其记为通过；未安装依赖或语言服务。
+- 原生覆盖：Linux ARM64 / KDE XWayland，360×720产品内容。38个既有场景的双主题首屏及滚动末端152张均已查看；另外实际进入创建类型、实例选择、Profile 和整合包检查确认，均覆盖浅深色。最终来源/候选/长路径6个主题目标另行复查。标题局部验证不等于完整 Microsoft 登录或逐场景全部功能验收。
+- 连续操作：有草稿时 Game 自动弹出，Escape 返回；继续草稿保留名称 Unfinished creative world 与版本1.21.1。真实空态、重试等待、关闭、晚到结果均有截图；失败恢复使用明确的无后端场景夹具。真实单游戏复制前磁盘只有 storage 配置，确认后1/1 Saved，源4文件 SHA-256不变，世界副本哈希相同，目录与缓存符合配置。仅检查自有 `.mrpack`，未安装包；检查前后游戏配置相同。
+- 未扩展：既有 `wizard-configuration-invalid` 重复底部错误行在滚动末端横向裁切，字段内错误完整换行；图标修改未改变该错误渲染路径，作为相邻未改问题记录。未运行其他平台 GUI、全工作区 CI、Minecraft 启动/玩法或真实 Microsoft 登录。
+- 证据：[本轮 QA](../target/wizard-import-drawer-20261107/QA.md)、[自动提示](../target/wizard-import-drawer-20261107/evidence/draft-auto-drawer.png)、[等待时 Escape 成功](../target/wizard-import-drawer-20261107/evidence/final-searching-escaped.png)、[真实导入](../target/wizard-import-drawer-20261107/evidence/final-import-saved.png)、[最终创建类型](../target/wizard-import-drawer-20261107/evidence/wizard-start-final-light.png)、[深色整合包](../target/wizard-import-drawer-20261107/evidence/pack-review-dark.png)。
+- 状态：实现与所述验证完成，未提交或推送；用户待复核。保留97场景清单与既有用户验收状态，不把本轮局部验证自动记作全部场景通过。
+
+<a id="r008"></a>
+
+### R008：导入 Drawer 六点简化与 Wizard 入口 / 2026-11-07
+
+- 最新要求替代 R007 的 Drawer 图标、独立重试与整合包分区：标题和可导入总数无图标；来源卡仅标题、实际数量、路径，View 在所属卡内部；右上角为刷新与 X；整合包移回 Wizard 推荐、自定义、整合包三张主卡，已有游戏导入保留次要入口。
+- 未假设 `.minecraft` 只有一个版本或 Vanilla。真实自有相邻来源发现3个候选，进入列表分别显示 Vanilla1.19.4、Fabric/Minecraft1.20.1、Forge/Minecraft1.20.1。本次不修改扫描器。
+- 环境与版本：对应未提交源码最终构建，Linux ARM64 / KDE XWayland，360×720产品内容。四场景浅深主题、首屏与滚动末端16张截图已查看，长路径可换行，操作区可达。
+- 实际操作：卡片内View3、返回来源、刷新等待与禁用、Escape和X关闭、晚到扫描不重开、次要入口重新打开。Wizard整合包卡打开原生文件选择器，取消后仍为Wizard Modpack第2步，来源Drawer保持关闭。
+- 自动检查：597 UI、3框架、15发现测试通过；严格block-ui Clippy、格式检查与最终Linux构建通过。LSP不可用；未运行完整just check、其他平台GUI、真实游戏导入/启动、CF认证下载。未将既有复制证据重算为本轮实际导入。
+- 证据：[本轮QA及R008](../target/import-drawer-simplify-20261107/QA.md)、[多版本来源](../target/import-drawer-simplify-20261107/evidence/multi-source-card.png)、[候选列表](../target/import-drawer-simplify-20261107/evidence/multi-version-list.png)、[刷新等待](../target/import-drawer-simplify-20261107/evidence/multi-refresh-wait.png)、[Wizard整合包](../target/import-drawer-simplify-20261107/evidence/wizard-pack-after-picker-cancel.png)。
+- CF只读研究另见 `target/curseforge-import-research-20261107.md`；研究报告不代表完整CF导入已实现。没有读取密钥或调用真实Key。
+- 自有测试应用、输入设备、扫描锁及两端临时根目录已清理，日志与截图保留，未提交或推送。四个直接修改场景转为待复核；未将实现完成或自动检查通过记为用户验收通过。
+
+<a id="r009"></a>
+
+### R009：导入 Drawer 滚动条侵入卡片 / 2026-11-07
+
+- 用户指出R008截图中的滚动条压入来源卡片。原因：共享滚动组件在同一视口上覆盖绘制10px轨道，而导入内容铺满该宽度，没有留轨道间距。R008关于来源卡边界的视觉检查遗漏由本记录纠正。
+- 修复：仅在导入来源、候选列表和进度/结果三个视口增加16px右内边距，容纳轨道及间距；共享滚动组件、标题、底栏和选择状态不变。生产代码为 `games/import_games.rs` 三行，扩展既有Drawer几何用例，保留选择、清空和返回断言。
+- 自动检查：旧布局的来源间距断言先失败；最终597 UI、3框架、doc0、严格block-ui Clippy、格式检查通过。LSP超时未记为通过；Linux ARM64最终构建通过。
+- 原生检查：对应未提交源码，Linux ARM64 / KDE XWayland，360×720产品内容。来源、候选列表、长目标路径的浅深主题首屏及实际滚动末端12张均已查看；卡片边框与轨道明确分离，长路径换行、末端内容与固定操作正常。
+- 范围：进度/结果页复用同一留白及UI回归，未单独执行原生故障导入；未运行全工作区检查、其他平台GUI或真实游戏导入。本次未改变发现、复制或持久化语义。
+- 证据：[QA及检查日志](../target/drawer-scrollbar-gutter-20261107/QA.md)、[浅色来源](../target/drawer-scrollbar-gutter-20261107/evidence/setup-import-sources-light.png)、[深色来源](../target/drawer-scrollbar-gutter-20261107/evidence/setup-import-sources-dark.png)、[长路径末端](../target/drawer-scrollbar-gutter-20261107/evidence/setup-import-long-destination-light-end.png)。六个自有应用进程及两端临时目录已清理，未提交或推送。
+- 用户确认：待复核，场景统计不变，不将自动检查或截图通过等同于用户验收。
+
+<a id="r010"></a>
+
+### R010：导入 Drawer 移除 Game library 的 Change / 2026-11-07
+
+- 用户指出Block已自动判定路径，确认删除导入Drawer中的Change。本条替代R006/R007关于在导入来源与候选页提供默认库目录选择入口的约定。
+- 实现：共享目录组件对 `Scope::Import` 不再渲染Change；保留路径、说明、预检错误和固定操作。自动路径判定、已保存配置优先级、来源重叠保护与复制实现不改；单游戏独立目录及其他创建流程不在本次修改范围。
+- 自动回归：来源/候选页的无目录选择器断言先在旧代码失败，修复后598 UI、3框架、doc0通过；严格block-ui Clippy、格式检查及Linux ARM64构建通过。LSP超时，未记为通过。
+- 原生：对应未提交源码，Linux ARM64 / KDE XWayland / 360×720产品内容。来源、候选列表、长路径的浅深主题首屏与实际滚动末端12张已全部查看：Change消失，目录与长路径完整，滚动轨道间距和固定操作保持正常。
+- 范围：未运行完整just check、其他平台GUI或真实游戏导入。这里的场景目录是合成样本，未将截图宣称为本轮真实导入证据。
+- 证据：[本轮QA与日志](../target/import-library-readonly-20261107/QA.md)、[浅色来源](../target/import-library-readonly-20261107/evidence/setup-import-sources-light.png)、[深色来源](../target/import-library-readonly-20261107/evidence/setup-import-sources-dark.png)、[候选列表末端](../target/import-library-readonly-20261107/evidence/setup-import-list-light-end.png)。六个应用进程及两端自有临时目录均已清理，未提交或推送。
+- 用户确认：实现待复核，场景统计及其他场景状态不变。
+
+<a id="r011"></a>
+
+### R011：候选多选列表改为右侧Checkbox卡片 / 2026-11-07
+
+- 用户确认候选列表改为整卡可选：左侧游戏名、Minecraft版本与Loader，右侧方形Checkbox；选中强调边框和填充标记。保留全选/清空、底部导入数量与返回选择。
+- 实现：每张卡本身就是既有原生Checkbox，文字、说明和诊断纳入同一点击区域，没有外层第二个点击处理器。共享choice为空可见标签时不占用多余文字空间，卡片显式提供真实可访问名称；键盘、焦点、CheckBox角色和禁用语义继续由原生控件负责。
+- 回归：扩展既有Drawer用例，旧分割线列表点击metadata不切换，因此先红；新卡片验证metadata、右侧区域和Space只切换当前项一次。保留全选、清空和返回断言，新增已保存/不支持项的禁用与勾选状态检查。
+- 自动检查：599 UI、3框架、doc0、严格block-ui Clippy通过；两处纯格式差异修正后格式检查通过。LSP超时未记为通过。Linux ARM64最终构建通过。
+- 原生：对应未提交源码，Linux ARM64 / KDE XWayland / 360×720产品内容。候选列表、长路径的浅深主题首屏及实际滚动末端8张均已查看；右侧方框、选中/未选边框、轨道间距、只读目标路径和固定操作正常。
+- 实际交互：浅色空白内边距、版本说明、方框、Space依次切换4→3→4→3→4；清空/全选4→0→4，0时导入禁用；来源返回再进入仍选4。深色说明和方框切换4→3→4。未执行真实游戏复制或故障导入，未运行全工作区检查及其他平台GUI。
+- 证据：[QA与检查日志](../target/import-candidate-cards-20261107/QA.md)、[浅色卡片](../target/import-candidate-cards-20261107/evidence/setup-import-list-light.png)、[深色卡片](../target/import-candidate-cards-20261107/evidence/setup-import-list-dark.png)、[实际整卡点击](../target/import-candidate-cards-20261107/evidence/live-card-padding-toggle.png)、[深色未选状态](../target/import-candidate-cards-20261107/evidence/live-dark-metadata-toggle.png)。六个原生应用及残留自有等待脚本、两端临时根目录已清理，未提交或推送。
+- 用户确认：待复核，场景统计不变。
+
+<a id="r012"></a>
+
+### R012：选中计数与全选/清空合并为一行 / 2026-11-07
+
+- 用户指出Select all独占靠右一行显得突兀，确认合并为列表顶部一行：左侧已选数/可选总数，右侧轻量全选或清空，移除计数独占一行的留白。
+- 实现：当前来源的selected/eligible计数与Ghost操作同排，卡片以8px间距直接跟随。操作缩小字号但保留点击高度；三语言同步短清空与双参数计数。分母排除不支持和已保存项，与既有全选及计数规则一致。
+- 回归：现有Drawer用例新增卡片紧接选择栏的几何断言，旧双行布局先红；原有整卡、键盘、禁用、全选/清空与返回断言保留，只更新Clear标签预期。599 UI、3框架、doc0、严格block-ui Clippy及格式检查通过；LSP超时/JSON Biome缺失未记为通过，未安装工具。Linux ARM64构建通过。
+- 原生：对应未提交源码，Linux ARM64 / KDE XWayland / 360×720产品内容。候选与长路径两场景浅深主题首屏、滚动末端8张已查看；同排对齐、卡片、只读路径、长路径换行及固定操作正常。
+- 实际操作：浅深两主题均验证4/4→清空0/4→全选4/4→单卡取消3/4；Clear/Select all、卡片选择和底部导入数量同步，0时导入禁用。原生截图为英文，其他语言复用资源/编译及自动回归；未运行全工作区检查、其他平台GUI或真实游戏导入。
+- 证据：[本轮QA及日志](../target/import-selectionbar-20261107/QA.md)、[浅色选择栏](../target/import-selectionbar-20261107/evidence/setup-import-list-light.png)、[深色选择栏](../target/import-selectionbar-20261107/evidence/setup-import-list-dark.png)、[实际部分选择](../target/import-selectionbar-20261107/evidence/live-light-partial.png)。六个自有应用与两端临时目录均已清理，未提交或推送。
+- 用户确认：待复核，场景统计不变。
+
+<a id="r013"></a>
+
+### R013：Game 入口互斥分流与全部 Wizard 纯文字标题 / 2026-11-07
+
+- 问题：Game 点击先进入 GameChoice，再无条件打开 Import Drawer，造成两层同时出现，零候选时也出现空 Drawer。回归在旧代码上复现，扫描回调本身不会自动打开 Drawer。
+- 修复：仅明确的 `Scan::Found` 从总览直接打开 Drawer，总览保持在后方；空结果、扫描中、失败、未知、仅不支持项及全部已保存时进入创建选择页。晚到发现结果不改变当前目的地。Drawer 的新建操作关闭后再进入 GameChoice，Escape 返回原总览。
+- 标题专项：检查全部 12 处 `wizard_heading`，移除共享组件的 Icon 参数及标题装饰。覆盖账户所有阶段、Provider 添加、游戏来源、实例选择、Profile 创建选项、Setup、Version、Loader、OptiFine、Configuration、所有整合包阶段及首次 GameChoice；卡片、状态及返回/关闭功能图标保留。没有修改管理页的身份头像。
+- 自动验证：599 UI、3 框架、doc0、严格 block-ui Clippy 与格式检查通过；保留草稿、退出确认、整合包完成、异步晚到与返回的原有断言。具体记录见 [QA](../target/wizard-entry-20261107/QA.md)。
+- Linux ARM64 原生验证与资源清理记录见上述 QA；逐场景浅深主题截图仅用于标题专项，不代表真实登录、安装/游戏流程或整场景用户验收。其余尚未开展完整用户评审的 Wizard 场景仍保留“待评审”，不将标题检查扩展为全流程通过。
+- 当前状态：待复核，未提交或推送。之前滚动条右移建议不在本次实现范围。
+
+<a id="r014"></a>
+
+### R014：选择卡、来源可见性、轨道与配置状态八项修正 / 2026-11-07
+
+1. 语言与来源单选卡使用原生 Active Radio，语言的即选即存、再次确认当前语言关闭和搜索/焦点合同保留；候选游戏继续使用多选 Checkbox。
+2. 来源卡的原生控件包住标题、路径、留白与卡片内容，整卡可选；内部 View 独立激活并阻止事件冒泡。
+3. View 的箭头从翻译文本字符改成 16px 语义 SVG，与文字居中对齐。
+4. 语言、来源和候选卡的选中边框为 2px，未选为 1px，补偿 padding 保持外部尺寸稳定。
+5. 来源名改为 Local Minecraft folder / 本地 Minecraft 文件夹 / ローカルの Minecraft フォルダー；完整路径继续显示。
+6. 实际候选数为零的来源不渲染卡片，不再显示本次不存在的 Minecraft Launcher 目标。
+7. 卡片与底栏恢复左右 20px 对齐；只将中间滚动/运动区域伸入原有右边距，保留内部 pr4 与所有裁剪。默认 16px rem 下轨道区右端距面板 4px，未新增左留白或改变共享滚动组件。
+8. 导入计数使用蓝色 info 角色；Account 和 Game 各自显示灰色 Not Configured 或绿色 Configured，并同步三语言文案，沿用原有就绪判断。
+
+- 反证与自动验证：恢复旧宽度时，卡片右边界396px、底栏412px，精确重现16px不对称。完整599 UI、3框架、doc0通过；扩展后的来源用例再以360/432宽度验证，严格Clippy、格式通过。没有删除、跳过或削弱既有交互断言。
+- 原生：Linux ARM64 / KDE XWayland / 360×720。六场景浅深主题首屏与滚动末端24图均已查看；语言卡另有真实浅深主题和中英切换证据。实际点击路径与边缘留白切换来源，箭头进入候选页，来源/候选轨道拖动不改变选择或拖动Drawer。
+- 真实发现：自有文件系统中发现Vanilla/Fabric/Forge三项，仅显示一个有游戏的来源；蓝色3 to import、两个灰色状态正常。随后仅在自有隔离库导入三项，结果全为Saved，返回后Game绿色、Account灰色，源三份元数据逐文件cmp一致。没有验证游戏启动、完整运行文件或真实登录。
+- 配置状态四种组合与三语言均由实际渲染回归覆盖；原生另验证全未配置、全已配置和仅Game已配置。更多证据、限定范围与资源清理见 [QA](../target/card-refinement-20261107/QA.md)。
+- 用户确认：待复核；旧手测实例和数据保留，未提交或推送。
+
+<a id="r015"></a>
+
+### R015：统一大圆角卡片与紧凑 Badge / 2026-11-07
+
+- 用户要求：配置状态 Badge 与导入计数同规格同行；来源数量改为含 chevron-right 的可点击 Badge；所有卡片统一较大圆角并增加 padding；修正 Radio 内圆偏心并检查外圆；选中边框更粗。
+- 实现：全应用卡片圆角统一16px；共享卡片padding20px，小型资源/关联卡片8→12px、向导组件卡片12→16px。语言、来源和候选选中边框3px，未选中1px，通过padding补偿保持边界稳定。状态与导入计数均为12px字、16px行高、水平8px/垂直2px内边距，位于图标行。来源数量为24px高、内容宽度的原生按钮，保留整卡Radio和独立入口；单游戏来源显示静态Badge。
+- 原因：16px Radio内的7px白点经过GPUI像素取整后偏心半像素，改为8px并新增真实控件几何回归。旧版原生截图放大未复现额外矩形裁切，不加入推测性偏移或裁剪豁免。语言卡片增高后原420px预算不足，Drawer改为540px。
+- 自动检查：600项UI、3项框架测试、严格Clippy与格式通过。向导位置卡片的既有覆盖增加真实滚轮输入和完整可见断言，保留草稿和嵌套选择器原断言。Rust LSP不可用，未声称通过。
+- 原生：Linux ARM64 / KDE XWayland / 360×720；32场景浅深色首屏/滚动截图128张完成审查，创建方式卡片遗漏圆角已补齐。帮助滚动复核发现默认flex收缩会裁切卡片正文，已保留卡片固有高度并绑定内部viewport，最终浅深色实际滚轮可读到完整第三段和当前模式。真实文件系统发现三项，状态/计数同行同高，Badge箭头进入多选页，正文单次切换到2/3；语言切换及浅深色Radio已操作查看。
+- 限定与证据：圆弧未复现额外裁切；修复有实证的内圆偏心。普通Toast场景无Toast不计验收，已开启现有回放取得实际浅深色卡片。个别活动窗口抓图滞后，实际交互改用合成器完整截图。详见 [QA](../target/card-unification-20261107/QA.md)。用户待复核，未提交、未推送。
+- 后续顺序调整：导入计数移至配置状态左侧，现为“3 to import → Not Configured → chevron”；44项首设测试、格式及Linux ARM64真实三项发现窗口检查通过，见 [顺序验证](../target/badge-order-20261107/QA.md)。
+
+<a id="r016"></a>
+
+### R016：仅 Welcome 页面验收通过 / 2026-11-08
+
+- 用户确认原话：“首先，仅限Welcome那个页面验收通过了。”
+- 对应场景：当前首次设置总览 `setup-overview`；独立旧场景 `setup-welcome` 已退役，不重新纳入清单。
+- 本轮状态：仅 `setup-overview` 标记已通过。`setup-overview-draft`、`setup-overview-ready`、语言 Drawer、导入 Drawer、Account、Game 及其他页面均不由此获得验收通过。
+- 确认上下文：用户查看的是 Linux ARM64 实例 `Block-Import-20261107.tHK1C7` 的最新总览，包括“3 to import → Not Configured → chevron”排列。此结论不推广到未查看的平台。
+- 统计：97 项中已通过1项、待复核8项、待评审88项。没有自动开启下一页面评审。
 
 每次评审后，在此追加对应场景记录，并更新清单中的状态和记录链接。问题按 `R001`、`R002` 连续编号；一个问题影响多个场景时，复用同一编号并列出受影响场景。
 
