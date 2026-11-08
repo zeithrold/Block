@@ -593,6 +593,7 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
 #[gpui::test]
 fn games_help_opens_as_a_dialog_inside_the_product_window(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
+    cx.simulate_resize(size(px(360.), px(720.)));
     let trigger_focus = cx.update(|window, cx| window.focused(cx));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -609,6 +610,23 @@ fn games_help_opens_as_a_dialog_inside_the_product_window(cx: &mut TestAppContex
         ));
     });
     assert!(crate::test_support::control_bounds(cx, "games-help-settings").is_some());
+    let viewport = view.read_with(cx, |view, _| view.shell.help_scroll.bounds());
+    assert!(
+        view.read_with(cx, |view, _| view.shell.help_scroll.max_offset().y) > px(0.),
+        "help cards must retain their full text height rather than shrink and clip"
+    );
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: viewport.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+        ..gpui::ScrollWheelEvent::default()
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("games-help-mode").is_some_and(|mode| {
+            mode.top() >= viewport.top() && mode.bottom() <= viewport.bottom()
+        }),
+        "the final help text must be reachable inside the bounded card viewport"
+    );
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
@@ -1344,6 +1362,18 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
         assert_eq!(view.page_spec().wizard, route);
     });
 
+    let body = view.read_with(cx, |view, _| view.shell.wizard.body_scroll.bounds());
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: body.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
+        ..gpui::ScrollWheelEvent::default()
+    });
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::control_bounds(cx, "wizard-component-location")
+            .is_some_and(|card| card.top() >= body.top() && card.bottom() <= body.bottom()),
+        "the larger location card must remain reachable by scrolling"
+    );
     click(cx, "wizard-component-location");
     cx.update(|window, _| {
         let controls =

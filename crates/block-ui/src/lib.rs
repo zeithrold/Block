@@ -71,6 +71,8 @@ mod instance_editor;
 #[cfg(test)]
 #[path = "runtime/interaction_tests.rs"]
 mod interaction_tests;
+#[path = "setup/library_location.rs"]
+mod library_location;
 #[path = "games/modpack_import.rs"]
 mod modpack_import;
 #[path = "navigation/motion.rs"]
@@ -2088,8 +2090,8 @@ fn panel() -> gpui::Div {
     div()
         .flex()
         .flex_col()
-        .p_4()
-        .rounded_md()
+        .p_5()
+        .rounded(px(design::CARD_RADIUS))
         .border_1()
         .border_color(rgb(0x0073_7373))
         .bg(gpui::transparent_black())

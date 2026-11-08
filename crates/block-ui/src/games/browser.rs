@@ -1597,7 +1597,7 @@ impl Block {
                     .p_3()
                     .border_1()
                     .border_color(rgb(self.palette.border))
-                    .rounded_xl()
+                    .rounded(px(super::design::CARD_RADIUS))
                     .child(contents),
                 );
             } else {
@@ -1665,8 +1665,8 @@ impl Block {
                 )
                 .h_auto()
                 .w_full()
-                .p_2()
-                .rounded_lg()
+                .p_3()
+                .rounded(px(super::design::CARD_RADIUS))
                 .border_0()
                 .bg(rgb(self.palette.background))
                 .flex()
@@ -1707,8 +1707,8 @@ impl Block {
                 )
                 .h_auto()
                 .w_full()
-                .p_4()
-                .rounded_xl()
+                .p_5()
+                .rounded(px(super::design::CARD_RADIUS))
                 .flex()
                 .items_center()
                 .gap_3()
@@ -1734,8 +1734,8 @@ impl Block {
             div()
                 .w_full()
                 .min_w_0()
-                .rounded_xl()
-                .p_4()
+                .rounded(px(super::design::CARD_RADIUS))
+                .p_5()
                 .bg(rgb(self.palette.secondary))
                 .flex()
                 .flex_col()
@@ -1851,7 +1851,12 @@ impl Block {
                     .w_full()
                     .child(
                         super::scroll_area::viewport(
-                            div().id("games-help-scroll").flex().flex_col().gap_3(),
+                            div()
+                                .id("games-help-scroll")
+                                .size_full()
+                                .flex()
+                                .flex_col()
+                                .gap_3(),
                             &self.shell.help_scroll,
                             "games.help",
                             self.palette,
@@ -1859,27 +1864,34 @@ impl Block {
                         )
                         .child(
                             components::card(self.palette)
-                                .p_3()
+                                .flex_shrink_0()
+                                .p_4()
                                 .child(tr!(language, "games.browser.instance"))
                                 .child(note(tr!(language, "games.help.instance_body"))),
                         )
                         .child(
                             components::card(self.palette)
-                                .p_3()
+                                .flex_shrink_0()
+                                .p_4()
                                 .child(tr!(language, "games.mode.bundled_profile"))
                                 .child(note(tr!(language, "games.help.bundled_body"))),
                         )
                         .child(
                             components::card(self.palette)
-                                .p_3()
+                                .flex_shrink_0()
+                                .p_4()
                                 .child(tr!(language, "games.mode.separated_profile"))
                                 .child(note(tr!(language, "games.help.separated_body"))),
                         )
-                        .child(note(tr!(
-                            language,
-                            "games.help.current_mode",
-                            mode = tr!(language, mode)
-                        ))),
+                        .child(
+                            note(tr!(
+                                language,
+                                "games.help.current_mode",
+                                mode = tr!(language, mode)
+                            ))
+                            .flex_shrink_0()
+                            .debug_selector(|| "games-help-mode".into()),
+                        ),
                     ),
             )
             .into_any_element()

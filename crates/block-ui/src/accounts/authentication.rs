@@ -832,7 +832,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "accounts.auth.provider_add.title"),
                 tr!(language, "accounts.auth.provider_add.description"),
             ))
@@ -2004,19 +2004,12 @@ impl Block {
     fn auth_body(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         let (title, description) = self.auth_heading(state);
-        let mut body = div().min_w_0().flex().flex_col().gap_4().child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .child(
-                    div()
-                        .text_2xl()
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .child(title),
-                )
-                .child(note(description)),
-        );
+        let mut body = div()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(patterns::wizard_heading(title, description));
         body = match state.phase {
             Phase::Connect => body.child(self.auth_connect(state, cx)),
             // Waiting and verification happen on the page the attempt started

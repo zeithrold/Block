@@ -1797,7 +1797,7 @@ async fn send_catalog(root: &Path, sender: &EventSender) {
 const IMPORT_SOURCE_OVERLAP: &str =
     "Import destination or launcher data root overlaps a selected source";
 
-fn import_overlaps_source(
+pub(super) fn import_overlaps_source(
     root: &Path,
     parent: &Path,
     candidate: &block_launcher::game_import::GameCandidate,

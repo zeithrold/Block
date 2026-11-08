@@ -1,5 +1,65 @@
 {
   "_version": 2,
+  "setup.import.complete": {
+    "en": "All games found in this scan have been imported.",
+    "zh-Hans": "本次发现的游戏已全部导入。",
+    "ja": "今回見つかったゲームはすべて読み込み済みです。"
+  },
+  "setup.library.saved": {
+    "en": "Library location saved. Existing games were not moved.",
+    "zh-Hans": "游戏库位置已保存，已有游戏未移动。",
+    "ja": "ライブラリの場所を保存しました。既存のゲームは移動していません。"
+  },
+  "setup.library.import_fallback": {
+    "en": "To keep the source unchanged, this import will copy to: %{path}",
+    "zh-Hans": "为保持源目录不变，本次导入将复制到：%{path}",
+    "ja": "元のフォルダーを変更しないよう、今回の読み込み先：%{path}"
+  },
+  "setup.library.choose": {
+    "en": "Choose game library folder",
+    "zh-Hans": "选择游戏库文件夹",
+    "ja": "ゲームライブラリのフォルダーを選択"
+  },
+  "setup.library.change": {
+    "en": "Change",
+    "zh-Hans": "更改",
+    "ja": "変更"
+  },
+  "setup.library.scope": {
+    "en": "Default for new games. Existing games and individually chosen directories stay unchanged.",
+    "zh-Hans": "用于新游戏的默认位置，不移动已有游戏，也不覆盖单独指定的目录。",
+    "ja": "新しいゲームの既定保存先です。既存のゲームや個別に指定した場所は変更しません。"
+  },
+  "setup.library.pending": {
+    "en": "Saved when you confirm creation or import.",
+    "zh-Hans": "确认创建或导入时才会保存此位置。",
+    "ja": "作成または読み込みの確認時に保存します。"
+  },
+  "setup.library.actual_game": {
+    "en": "This game will be saved to: %{path}",
+    "zh-Hans": "此游戏保存到：%{path}",
+    "ja": "このゲームの保存先：%{path}"
+  },
+  "setup.library.choose_failed": {
+    "en": "Could not open the game library folder chooser.",
+    "zh-Hans": "无法打开游戏库文件夹选择器。",
+    "ja": "ゲームライブラリのフォルダー選択を開けませんでした。"
+  },
+  "setup.library.save_failed": {
+    "en": "Could not save the game library location: %{detail}",
+    "zh-Hans": "无法保存游戏库位置：%{detail}",
+    "ja": "ゲームライブラリの場所を保存できませんでした：%{detail}"
+  },
+  "setup.library.preflight_failed": {
+    "en": "Check the game settings before importing: %{detail}",
+    "zh-Hans": "请先检查游戏设置再导入：%{detail}",
+    "ja": "読み込み前にゲーム設定を確認してください：%{detail}"
+  },
+  "setup.library.import_overlap": {
+    "en": "The import destination or launcher data folder overlaps a selected source. Choose another folder.",
+    "zh-Hans": "导入目的地或启动器数据文件夹与所选源目录重叠，请选择其他文件夹。",
+    "ja": "読み込み先またはランチャーのデータフォルダーが選択した元のフォルダーと重複しています。別の場所を選択してください。"
+  },
   "settings.index.choose": {
     "en": "Choose what to adjust",
     "zh-Hans": "选择要调整的内容",
@@ -650,6 +710,16 @@
     "zh-Hans": "已保存",
     "ja": "保存済み"
   },
+  "setup.status.configured": {
+    "en": "Configured",
+    "zh-Hans": "已配置",
+    "ja": "設定済み"
+  },
+  "setup.status.notConfigured": {
+    "en": "Not Configured",
+    "zh-Hans": "未配置",
+    "ja": "未設定"
+  },
   "setup.library.label": {
     "en": "Game library",
     "zh-Hans": "游戏库",
@@ -674,6 +744,21 @@
     "en": "%{count} games can be imported",
     "zh-Hans": "可导入 %{count} 个游戏",
     "ja": "%{count} 個のゲームをインポートできます"
+  },
+  "setup.import.badge": {
+    "en": "%{count} to import",
+    "zh-Hans": "可导入 %{count} 个",
+    "ja": "読み込み可能 %{count}"
+  },
+  "setup.game.pack_pending_summary": {
+    "en": "Saved, import pending",
+    "zh-Hans": "已保存，导入待完成",
+    "ja": "保存済み・読み込み未完了"
+  },
+  "setup.game.unprepared_summary": {
+    "en": "Saved, preparation needed",
+    "zh-Hans": "已保存，等待准备",
+    "ja": "保存済み・準備が必要"
   },
   "setup.import.none": {
     "en": "No games to import were found.",
@@ -756,9 +841,14 @@
     "ja": "ゲームをセットアップ"
   },
   "setup.game_choice.description": {
-    "en": "Use the current release of Minecraft, or choose its version and components.",
-    "zh-Hans": "使用当前版本的 Minecraft，或选择其版本和组件。",
-    "ja": "現在の Minecraft リリースを使用するか、バージョンとコンポーネントを選択します。"
+    "en": "Create a game or import an existing installation.",
+    "zh-Hans": "创建游戏，或导入已有的安装。",
+    "ja": "ゲームを作成するか、既存の環境を読み込みます。"
+  },
+  "setup.game_choice.import_description": {
+    "en": "Choose an existing game folder. The original files stay unchanged.",
+    "zh-Hans": "选择已有游戏文件夹，原文件保持不变。",
+    "ja": "既存のゲームフォルダーを選択します。元のファイルは変更しません。"
   },
   "setup.game_choice.recommended_title": {
     "en": "Recommended setup",

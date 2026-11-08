@@ -14,6 +14,7 @@ use gpui::{
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, WindowControlArea,
     div, img, px, rgb,
 };
+use gpui_base::TestSupportExt as _;
 
 use super::{Block, Form, Tab, UiAction, account_id, note, scroll_area::ScrollAreaExt as _};
 
@@ -664,7 +665,7 @@ impl Block {
             .w_full()
             .min_w_0()
             .h(px(80.))
-            .rounded_xl()
+            .rounded_2xl()
             .px_5()
             .pr(px(76.))
             .items_center()
@@ -717,7 +718,7 @@ impl Block {
                     .top_0()
                     .w(px(56.))
                     .h_full()
-                    .rounded_xl()
+                    .rounded_2xl()
                     .border_0()
                     .child(
                         div()
@@ -1032,8 +1033,8 @@ impl Block {
             .debug_selector(|| "home-task".into())
             .min_h(px(80.))
             .w_full()
-            .rounded_xl()
-            .p_4()
+            .rounded_2xl()
+            .p_5()
             .bg(rgb(self.palette.surface))
             .flex()
             .items_center()
@@ -1271,7 +1272,7 @@ impl Block {
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
-                420.,
+                540.,
             ),
             Surface::Drawer(Drawer::Profiles) => (
                 tr!(language, "sheet.profiles_title"),
@@ -1361,6 +1362,7 @@ impl Block {
                     .child(
                         div()
                             .id("setup-language-options")
+                            .debug_selector(|| "setup-language-options".into())
                             .role(gpui::Role::RadioGroup)
                             .aria_label(tr!(self.language(), "setup.language.label"))
                             .w_full()
@@ -1369,13 +1371,12 @@ impl Block {
                             .gap_1()
                             .children(choices.into_iter().map(|language| {
                                 let selected = language == self.language();
-                                super::components::button_role(
+                                let mut choice = super::components::radio(
                                     format!("setup-language-{}", language.code()),
                                     "",
+                                    selected,
                                     self.palette,
-                                    super::components::ButtonVariant::Ghost,
                                     super::components::ControlState::default(),
-                                    gpui::Role::RadioButton,
                                     cx.listener(move |view, &(): &(), window, cx| {
                                         view.handle(
                                             UiAction::FirstRun(super::first_run::Action::Language(
@@ -1385,47 +1386,50 @@ impl Block {
                                             cx,
                                         );
                                     }),
-                                )
-                                .aria_label(language.self_name())
-                                .aria_description(language.english_name())
-                                .aria_selected(selected)
-                                .aria_toggled(if selected {
-                                    gpui::Toggled::True
-                                } else {
-                                    gpui::Toggled::False
-                                })
-                                .w_full()
-                                .h_auto()
-                                .min_h(px(64.))
-                                .py_2()
-                                .px_3()
-                                .justify_between()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .flex_col()
-                                        .items_start()
-                                        .gap_1()
-                                        .child(div().text_sm().child(language.self_name()))
-                                        .child(note(language.english_name())),
-                                )
-                                .children(selected.then(|| {
-                                    div()
-                                        .size(px(18.))
-                                        .flex_shrink_0()
-                                        .rounded_full()
-                                        .bg(rgb(self.palette.primary))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            super::design::Icon::Check
-                                                .render(12., self.palette.on_primary),
-                                        )
-                                }))
-                            })),
+                                );
+                                if selected {
+                                    choice =
+                                        choice.on_click(cx.listener(move |view, _, window, cx| {
+                                            view.handle(
+                                                UiAction::FirstRun(
+                                                    super::first_run::Action::Language(language),
+                                                ),
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }));
+                                }
+                                choice
+                                    .aria_label(language.self_name())
+                                    .aria_description(language.english_name())
+                                    .aria_selected(selected)
+                                    .w_full()
+                                    .h_auto()
+                                    .min_h(px(64.))
+                                    .rounded_2xl()
+                                    .border(px(if selected { 3. } else { 1. }))
+                                    .border_color(rgb(if selected {
+                                        self.palette.primary
+                                    } else {
+                                        self.palette.border
+                                    }))
+                                    .p(px(if selected { 17. } else { 19. }))
+                                    .flex_row_reverse()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex()
+                                            .flex_col()
+                                            .items_start()
+                                            .gap_1()
+                                            .child(div().text_sm().child(language.self_name()))
+                                            .child(note(language.english_name())),
+                                    )
+                            }))
+                            .test_support(),
                     )
                     .children(empty.then(|| {
                         div()

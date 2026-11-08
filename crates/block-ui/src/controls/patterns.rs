@@ -21,6 +21,23 @@ pub(super) fn page_heading(
         .child(super::note(subtitle))
 }
 
+/// Wizard task identity, with a full-width title and subtitle.
+/// An empty subtitle keeps title-only wizard headings compact.
+pub(super) fn wizard_heading(
+    title: impl Into<gpui::SharedString>,
+    subtitle: impl Into<gpui::SharedString>,
+) -> Div {
+    let subtitle = subtitle.into();
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(div().min_w_0().child(page_title(title)))
+        .children((!subtitle.is_empty()).then(|| super::note(subtitle)))
+}
+
 /// A standalone bold page title for pages without a subtitle.
 pub(super) fn page_title(title: impl Into<gpui::SharedString>) -> Div {
     div()

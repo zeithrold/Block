@@ -161,9 +161,9 @@
     "ja": "作成タイプ"
   },
   "wizard.start.heading": {
-    "en": "What would you like to create?",
-    "zh-Hans": "你想创建什么？",
-    "ja": "何を作成しますか？"
+    "en": "Choose what to create",
+    "zh-Hans": "选择要创建的内容",
+    "ja": "作成するものを選択"
   },
   "wizard.start.subtitle": {
     "en": "Create a fresh game, import a pack, or use an existing Instance.",
@@ -1097,9 +1097,9 @@
   "import.header.results": {"en": "Import results", "zh-Hans": "导入结果", "ja": "インポート結果"},
   "import.header.review": {"en": "Review the games added to Block.", "zh-Hans": "查看已添加到 Block 的游戏。", "ja": "Block に追加されたゲームを確認してください。"},
   "import.source.adjacent": {
-    "en": "This folder · .minecraft",
-    "zh-Hans": "当前文件夹 · .minecraft",
-    "ja": "このフォルダー · .minecraft"
+    "en": "Local Minecraft folder",
+    "zh-Hans": "本地 Minecraft 文件夹",
+    "ja": "ローカルの Minecraft フォルダー"
   },
   "import.source.launcher": {
     "en": "Minecraft Launcher",
@@ -1117,9 +1117,9 @@
     "ja": "ゲームが見つかりません。"
   },
   "import.source.one": {
-    "en": "1 game · %{name} · %{version} · %{loader}",
-    "zh-Hans": "1 个游戏 · %{name} · %{version} · %{loader}",
-    "ja": "1 件のゲーム · %{name} · %{version} · %{loader}"
+    "en": "1 game found",
+    "zh-Hans": "发现 1 个游戏",
+    "ja": "1 件のゲームが見つかりました"
   },
   "import.source.many": {
     "en": "%{count} games found",
@@ -1137,9 +1137,9 @@
     "ja": "不明なローダー"
   },
   "import.viewCount": {
-    "en": "View %{count} games →",
-    "zh-Hans": "查看 %{count} 个游戏 →",
-    "ja": "%{count} 件のゲームを表示 →"
+    "en": "View %{count} games",
+    "zh-Hans": "查看 %{count} 个游戏",
+    "ja": "%{count} 件のゲームを表示"
   },
   "import.viewCountPlain": {
     "en": "View %{count} games",
@@ -1152,14 +1152,14 @@
     "ja": "すべて選択"
   },
   "import.select.clear": {
-    "en": "Clear selection",
-    "zh-Hans": "清除选择",
-    "ja": "選択を解除"
+    "en": "Clear",
+    "zh-Hans": "清空",
+    "ja": "選択解除"
   },
   "import.selectedCount": {
-    "en": "%{count} selected",
-    "zh-Hans": "已选择 %{count} 个",
-    "ja": "%{count} 件を選択中"
+    "en": "%{count} / %{total} selected",
+    "zh-Hans": "已选 %{count} / %{total}",
+    "ja": "%{count} / %{total} 件を選択中"
   },
   "import.list.empty": {
     "en": "No games were found for this source.",

@@ -405,9 +405,17 @@ impl DrawerLayer {
                     .bg(rgb(palette.border)),
             );
         let dismiss = frame.owner.clone();
+        let import = matches!(
+            frame.kind,
+            Surface::Drawer(super::shell::Drawer::ImportGames)
+        );
         let close = components::button(
             "drawer-close",
-            tr!(frame.language, "common.close"),
+            if import {
+                String::new()
+            } else {
+                tr!(frame.language, "common.close")
+            },
             palette,
             ButtonVariant::Ghost,
             ControlState::default(),
@@ -417,6 +425,55 @@ impl DrawerLayer {
                 });
             },
         );
+        let close = close.aria_label(tr!(frame.language, "common.close"));
+        let close = if import {
+            close
+                .w(px(32.))
+                .h(px(32.))
+                .px_0()
+                .child(Icon::Close.render(16., palette.foreground))
+        } else {
+            close
+        };
+        let refresh = (import
+            && matches!(
+                owner.read(cx).shell.import_games.page,
+                super::import_games::Page::Sources | super::import_games::Page::List
+            ))
+        .then(|| {
+            let target = frame.owner.clone();
+            let state = &owner.read(cx).shell.import_games;
+            components::button_sized(
+                "import-rescan",
+                "",
+                palette,
+                ButtonVariant::Ghost,
+                ButtonSize::Icon,
+                ControlState {
+                    disabled: state.running || state.discovery.is_some(),
+                    ..ControlState::default()
+                },
+                move |_, window, cx| {
+                    let _ = target.update(cx, |view, cx| {
+                        if view.shell.surfaces.top().is_some_and(|layer| {
+                            layer.revision == revision
+                                && matches!(
+                                    layer.kind,
+                                    Surface::Drawer(super::shell::Drawer::ImportGames)
+                                )
+                        }) {
+                            view.handle(
+                                super::UiAction::ImportGames(super::import_games::Action::Rescan),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
+                },
+            )
+            .aria_label(tr!(frame.language, "setup.import.retry"))
+            .child(Icon::Refresh.render(16., palette.foreground))
+        });
         let import_back = self.import_header_back(frame, owner, cx);
         let closing = frame.closing;
         let panel = div()
@@ -465,8 +522,12 @@ impl DrawerLayer {
                                     .min_w_0()
                                     .text_lg()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(frame.title.clone()),
+                                    .flex()
+                                    .items_start()
+                                    .gap_2()
+                                    .child(div().min_w_0().flex_1().child(frame.title.clone())),
                             )
+                            .children(refresh)
                             .child(close),
                     )
                     .child(

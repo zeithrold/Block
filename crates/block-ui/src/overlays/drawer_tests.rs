@@ -8,7 +8,7 @@ use crate::{
     import_games::Page,
     shell::{Drawer, Surface},
 };
-use block_launcher::game_import::{DiscoveryReport, GameCandidate, SourceKind};
+use block_launcher::game_import::{DiscoveryReport, GameCandidate, ImportSourceReport, SourceKind};
 use gpui::{Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px, size};
 
 fn fixture(
@@ -51,7 +51,8 @@ fn frame(cx: &mut VisualTestContext, millis: u64) {
     reason = "Missing painted geometry is a test failure."
 )]
 fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> gpui::Bounds<gpui::Pixels> {
-    crate::test_support::control_bounds(cx, selector).expect("drawer control painted")
+    let message = format!("drawer control painted: {selector}");
+    crate::test_support::control_bounds(cx, selector).expect(&message)
 }
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -117,6 +118,23 @@ fn assert_control_color(cx: &mut VisualTestContext, selector: &'static str, expe
             .is_some_and(|actual| matches_rgb(actual.to_rgb(), expected))
     });
     assert!(painted, "{selector} did not paint the expected color");
+}
+
+fn assert_control_border(cx: &mut VisualTestContext, selector: &'static str, width: f32) {
+    let expected = cx.update(|window, _| width * window.scale_factor());
+    assert!(
+        control_quads(cx, selector).into_iter().any(|quad| {
+            [
+                quad.border_widths.top,
+                quad.border_widths.right,
+                quad.border_widths.bottom,
+                quad.border_widths.left,
+            ]
+            .into_iter()
+            .all(|side| (side.0 - expected).abs() < 0.01)
+        }),
+        "{selector} must paint a {width}px border"
+    );
 }
 
 fn control_has_ghost_border(
@@ -194,18 +212,83 @@ fn headers_keep_their_text_aligned_without_a_back_action(cx: &mut TestAppContext
     }
 }
 
+fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext) {
+    assert!(crate::test_support::control_bounds(cx, "import-source-AdjacentMinecraft").is_none());
+    let source = bounds(cx, "import-source-OfficialLauncher");
+    let footer = bounds(cx, "import-new");
+    assert_eq!(source.left(), footer.left());
+    assert_eq!(source.right(), footer.right());
+    assert_eq!(
+        bounds(cx, "import-sources-content").right(),
+        bounds(cx, "block-drawer").right() - px(4.),
+        "the track belongs in the existing outer right margin"
+    );
+    assert_eq!(
+        control_node(cx, "import-source-OfficialLauncher").role(),
+        Some(gpui::Role::RadioButton)
+    );
+    assert_control_border(cx, "import-source-OfficialLauncher", 1.);
+    let view_button = bounds(cx, "import-view-OfficialLauncher");
+    cx.simulate_click(
+        point(source.left() + px(24.), source.bottom() - px(24.)),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    assert_eq!(bounds(cx, "import-source-OfficialLauncher"), source);
+    assert_eq!(
+        control_node(cx, "import-source-OfficialLauncher").checked(),
+        Some(true)
+    );
+    assert_control_border(cx, "import-source-OfficialLauncher", 3.);
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page),
+        Page::Sources,
+        "the path area selects the source without navigating"
+    );
+    assert_eq!(
+        control_node(cx, "import-view-OfficialLauncher").label(),
+        Some("2 games found")
+    );
+    assert_eq!(view_button.size.height, px(24.));
+    assert!(view_button.size.width < source.size.width - px(80.));
+    assert_eq!(
+        view.read_with(cx, |view, _| view
+            .shell
+            .import_games
+            .source_scroll
+            .max_offset()
+            .x),
+        px(0.),
+        "using the outer gutter must not introduce horizontal scrolling"
+    );
+}
+
 #[gpui::test]
 fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     view.update(cx, |view, cx| {
         view.shell.import_games.report = Some(DiscoveryReport {
-            sources: Vec::new(),
+            sources: vec![ImportSourceReport {
+                kind: SourceKind::OfficialLauncher,
+                root: "/synthetic/launcher".into(),
+                candidates_found: 2,
+                warning: None,
+            }],
             candidates: vec![import_candidate("one"), import_candidate("two")],
         });
         view.shell.import_games.selected.insert("one".into());
         cx.notify();
     });
     act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    for width in [360., 432.] {
+        cx.simulate_resize(size(px(width), px(768.)));
+        view.update(cx, |view, cx| {
+            view.shell.import_games.source = SourceKind::AdjacentMinecraft;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_source_card_selection(&view, cx);
+    }
     click(cx, "import-view-OfficialLauncher");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.import_games.page),
@@ -314,11 +397,46 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         "the header owns the only return action"
     );
     let panel = bounds(cx, "block-drawer");
+    let card = bounds(cx, "import-game-two");
+    assert_eq!(
+        bounds(cx, "import-game-one").top(),
+        bounds(cx, "import-select-all").bottom() + px(8.),
+        "one selection row must directly precede the cards without a separate count row"
+    );
+    assert_eq!(
+        control_node(cx, "import-game-two").role(),
+        Some(gpui::Role::CheckBox)
+    );
+    for position in [
+        point(card.left() + px(12.), card.top() + px(52.)),
+        point(card.right() - px(20.), card.center().y),
+    ] {
+        cx.simulate_click(position, Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.import_games.selected.clone()),
+            ["one".to_owned(), "two".to_owned()].into_iter().collect(),
+            "clicking the metadata or trailing indicator must toggle the complete card once"
+        );
+        assert_eq!(control_node(cx, "import-game-two").checked(), Some(true));
+        assert_control_border(cx, "import-game-two", 3.);
+        crate::test_support::press(cx, "space");
+        cx.run_until_parked();
+        assert_eq!(control_node(cx, "import-game-two").checked(), Some(false));
+        assert_control_border(cx, "import-game-two", 1.);
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.import_games.selected.clone()),
+            ["one".to_owned()].into_iter().collect(),
+            "keyboard activation toggles this card without clearing its neighbor"
+        );
+    }
     assert_eq!(
         bounds(cx, "import-select-all").right(),
         panel.right() - px(20.),
-        "bulk selection stays at the trailing edge"
+        "bulk selection stays aligned with the fixed footer"
     );
+    assert_eq!(card.left(), panel.left() + px(20.));
+    assert_eq!(card.right(), panel.right() - px(20.));
     assert_eq!(
         control_node(cx, "import-select-all").label(),
         Some("Select all")
@@ -329,10 +447,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         assert!(view.shell.import_games.selected.contains("one"));
         assert!(view.shell.import_games.selected.contains("two"));
     });
-    assert_eq!(
-        control_node(cx, "import-select-all").label(),
-        Some("Clear selection")
-    );
+    assert_eq!(control_node(cx, "import-select-all").label(), Some("Clear"));
     click(cx, "import-header-back");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.import_games.page),
@@ -344,10 +459,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     );
 
     click(cx, "import-view-OfficialLauncher");
-    assert_eq!(
-        control_node(cx, "import-select-all").label(),
-        Some("Clear selection")
-    );
+    assert_eq!(control_node(cx, "import-select-all").label(), Some("Clear"));
     click(cx, "import-select-all");
     assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
     assert_eq!(
@@ -360,6 +472,38 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         Page::Sources
     );
     assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
+}
+
+#[gpui::test]
+fn import_cards_keep_unsupported_and_saved_games_disabled(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        let mut unsupported = import_candidate("unsupported");
+        unsupported.importable = false;
+        unsupported.unsupported_reason = Some("Unsupported fixture".into());
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![unsupported, import_candidate("saved")],
+        });
+        view.shell
+            .import_games
+            .outcomes
+            .insert("saved".into(), crate::import_games::Outcome::Saved);
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+    for (id, checked) in [
+        ("import-game-unsupported", false),
+        ("import-game-saved", true),
+    ] {
+        let node = control_node(cx, id);
+        assert_eq!(node.role(), Some(gpui::Role::CheckBox));
+        assert_eq!(node.disabled(), Some(true));
+        assert_eq!(node.checked(), Some(checked));
+        click(cx, id);
+        assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
+    }
 }
 
 #[gpui::test]

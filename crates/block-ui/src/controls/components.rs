@@ -456,7 +456,7 @@ pub(super) fn card(palette: Palette) -> Div {
         .min_w_0()
         .overflow_hidden()
         .gap(px(16.))
-        .p(px(16.))
+        .p(px(20.))
         .rounded(px(CARD_RADIUS))
         .border_1()
         .border_color(rgb(palette.border))
@@ -728,12 +728,18 @@ fn choice(
     state: ControlState,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
 ) -> Control {
+    let label = label.into();
+    let id = id.into();
+    let selector = id.to_string();
+    let indicator_selector = format!("{selector}-indicator");
+    let dot_selector = format!("{selector}-dot");
     let color = if state.invalid {
         palette.destructive
     } else {
         palette.ring
     };
     let mut indicator = div()
+        .debug_selector(move || indicator_selector.clone())
         .flex()
         .items_center()
         .justify_center()
@@ -755,7 +761,10 @@ fn choice(
         indicator = if round {
             indicator.child(
                 div()
-                    .size(px(7.))
+                    .debug_selector(move || dot_selector.clone())
+                    // Match the outer circle's even diameter: a 7 px dot
+                    // centers on half pixels and GPUI snaps its box off-center.
+                    .size(px(8.))
                     .rounded_full()
                     .bg(rgb(palette.on_primary)),
             )
@@ -763,9 +772,6 @@ fn choice(
             indicator.child(Icon::Check.render(14., palette.on_primary))
         };
     }
-    let label = label.into();
-    let id = id.into();
-    let selector = id.to_string();
     let control = if round {
         Control::radio(
             id,
@@ -797,7 +803,9 @@ fn choice(
         .text_color(rgb(palette.foreground))
         .focus_visible(move |style| style.border_color(rgb(color)).shadow(focus_ring(color)))
         .child(indicator)
-        .child(div().min_w_0().flex_1().whitespace_normal().child(label))
+        .children(
+            (!label.is_empty()).then(|| div().min_w_0().flex_1().whitespace_normal().child(label)),
+        )
 }
 
 /// Initials use complete graphemes, including non-Latin names and emoji.
@@ -1222,6 +1230,45 @@ mod tests {
             ProgressState::from_counts(100, Some(80)).fraction(),
             Some(1.)
         );
+    }
+
+    struct RadioGeometryFixture;
+
+    impl Render for RadioGeometryFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            div().p_4().child(
+                radio(
+                    "geometry-radio",
+                    "Selected option",
+                    true,
+                    Palette::LIGHT,
+                    ControlState::default(),
+                    |&(), _, _| {},
+                )
+                .w(px(240.)),
+            )
+        }
+    }
+
+    #[gpui::test]
+    #[expect(
+        clippy::expect_used,
+        reason = "Missing painted geometry is a test failure."
+    )]
+    fn selected_radio_dot_and_circle_share_a_center(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = crate::test_support::window(cx, |_, _| RadioGeometryFixture);
+        cx.run_until_parked();
+        let indicator = cx
+            .debug_bounds("geometry-radio-indicator")
+            .expect("painted radio indicator");
+        let dot = cx
+            .debug_bounds("geometry-radio-dot")
+            .expect("painted selected radio dot");
+        assert_eq!(indicator.size.width, px(16.));
+        assert_eq!(indicator.size.height, px(16.));
+        assert_eq!(dot.size.width, px(8.));
+        assert_eq!(dot.size.height, px(8.));
+        assert_eq!(indicator.center(), dot.center());
     }
 
     #[test]

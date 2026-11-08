@@ -29,7 +29,7 @@ pub fn load_fonts(cx: &gpui::App) -> anyhow::Result<()> {
 /// Logical pixels: these remain independent of the display scale factor.
 pub(super) const CONTROL_HEIGHT: f32 = 32.;
 pub(super) const CONTROL_RADIUS: f32 = 10.;
-pub(super) const CARD_RADIUS: f32 = 14.;
+pub(super) const CARD_RADIUS: f32 = 16.;
 pub(super) const FIELD_GAP: f32 = 6.;
 pub(super) const BODY_FONT_SIZE: f32 = 14.;
 pub(super) const SMALL_FONT_SIZE: f32 = 12.;

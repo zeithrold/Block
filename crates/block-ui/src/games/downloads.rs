@@ -369,8 +369,8 @@ impl Block {
             .flex()
             .flex_col()
             .gap_2()
-            .p_2()
-            .rounded_lg()
+            .p_3()
+            .rounded(px(super::design::CARD_RADIUS))
             .border_1()
             .border_color(rgb(self.palette.border))
             .child(

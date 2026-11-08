@@ -865,7 +865,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.optifine.heading"),
                 tr!(language, "wizard.optifine.body"),
             ))
@@ -1763,7 +1763,7 @@ impl Block {
 
     /// Commit the Setup page. Validation and the busy status stay here, so the
     /// one remaining step can never submit a draft the page has not accepted.
-    pub(super) fn submit_game_wizard(&mut self, cx: &Context<'_, Self>) {
+    pub(super) fn submit_game_wizard(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy
             || self.shell.wizard.step != WizardStep::Setup
             || self.shell.wizard.page.is_some()
@@ -1823,6 +1823,15 @@ impl Block {
                 engine.create_profile_draft(instance, values);
             }
         } else {
+            if let Some(scope) = self.setup_game_library_scope()
+                && !self.commit_setup_library(&scope, cx)
+            {
+                return;
+            }
+            let directory = match &self.form {
+                Some(Form::Instance(form)) => form.directory.read(cx).value().to_string(),
+                _ => directory,
+            };
             let directory =
                 (!directory.trim().is_empty()).then(|| std::path::PathBuf::from(directory.trim()));
             let defaults = values.defaults.clone();
@@ -2231,7 +2240,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.start.heading"),
                 tr!(
                     language,
@@ -2319,7 +2328,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.instance.heading"),
                 tr!(language, "wizard.instance.subtitle"),
             ))
@@ -2349,9 +2358,9 @@ impl Block {
                             }),
                         )
                         .w_full()
-                        .rounded(px(14.))
+                        .rounded(px(super::design::CARD_RADIUS))
                         .border_color(rgb(self.palette.border))
-                        .p_3()
+                        .p_4()
                         .child(div().flex_1())
                         .child(components::badge(
                             instance.minecraft_version.clone(),
@@ -2391,7 +2400,8 @@ impl Block {
             .flex_col()
             .gap_4()
             .children(
-                show_name.then(|| patterns::page_title(tr!(language, "wizard.profile.title"))),
+                show_name
+                    .then(|| patterns::wizard_heading(tr!(language, "wizard.profile.title"), "")),
             )
             .children(show_name.then(|| {
                 self.wizard_field(
@@ -2857,7 +2867,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.setup.heading"),
                 tr!(language, "wizard.setup.subtitle"),
             ))
@@ -2897,6 +2907,10 @@ impl Block {
                     )),
             )
             .child(note(tr!(language, "wizard.setup.openCard")))
+            .children(
+                self.setup_game_library_scope()
+                    .map(|scope| self.setup_library_location(scope, true, cx)),
+            )
             .children(
                 self.shell
                     .wizard
@@ -3006,7 +3020,8 @@ impl Block {
         .items_center()
         .min_h(px(80.))
         .gap_3()
-        .p_3()
+        .p_4()
+        .rounded(px(super::design::CARD_RADIUS))
         .track_focus(&self.shell.wizard.creation_focus(id, cx));
         let card = card
             .child(
@@ -3084,7 +3099,8 @@ impl Block {
         .items_start()
         .justify_between()
         .gap_3()
-        .p_4()
+        .p_5()
+        .rounded(px(super::design::CARD_RADIUS))
         .child(Icon::Info.render(20., self.palette.muted))
         .child(
             div()
@@ -3245,7 +3261,7 @@ impl Block {
             .flex_col()
             .gap_4()
             .on_key_down(cx.listener(Self::move_wizard_version))
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.version.heading"),
                 tr!(language, "wizard.version.subtitle"),
             ))
@@ -3659,7 +3675,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_3()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.loader.heading"),
                 tr!(language, "wizard.loader.subtitle"),
             ))
@@ -3671,7 +3687,7 @@ impl Block {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .rounded_xl()
+                    .rounded(px(super::design::CARD_RADIUS))
                     .border_1()
                     .border_color(rgb(self.palette.border))
                     .child(
@@ -3988,7 +4004,7 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::page_heading(
+            .child(patterns::wizard_heading(
                 tr!(language, "wizard.config.heading"),
                 tr!(language, "wizard.config.subtitle"),
             ))

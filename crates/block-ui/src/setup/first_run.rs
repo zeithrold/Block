@@ -16,14 +16,15 @@ use super::{
     design::Icon,
     game_wizard::WizardStep,
     note,
-    patterns::page_heading,
+    patterns::wizard_heading,
 };
 use crate::Language;
 use block_launcher::catalog::{InstallStatus, PackStatus};
 use gpui::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
-    Styled as _, Window, div, px, rgb,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
+use gpui_base::TestSupportExt as _;
 use std::{
     path::{Path, PathBuf},
     time::Instant,
@@ -46,10 +47,9 @@ pub(super) enum Action {
     Custom,
     Back,
     Import,
+    ChooseLibrary(super::library_location::Scope),
     /// Start the one step the saved game still needs, chosen from its state.
     Prepare,
-    /// Scan the automatic sources again without touching the rest of setup.
-    Rescan,
     Skip,
     /// A concrete language choice from the first-setup selector.
     Language(Language),
@@ -123,7 +123,13 @@ pub(super) struct State {
     /// Older component-only fixtures still exercise the shared draft helpers.
     pub enabled: bool,
     pub stage: Stage,
+
     pub game_parent: Option<PathBuf>,
+    pub library_draft: Option<super::library_location::Draft>,
+    pub library_picker: Option<super::library_location::Picker>,
+    pub generated_game: Option<(gpui::EntityId, PathBuf)>,
+    pub library_error: Option<(super::library_location::Scope, crate::i18n::UiText)>,
+    pub library_saved: Option<super::library_location::Scope>,
     pub entered: Option<Instant>,
     pub error: Option<crate::i18n::UiText>,
     pub notice: Option<Notice>,
@@ -214,12 +220,8 @@ impl Block {
         if let Some(error) = &state.error {
             return Some(Scan::Failed(error.text(language)));
         }
-        let report = state.report.as_ref()?;
-        let found = report
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.importable)
-            .count();
+        state.report.as_ref()?;
+        let found = state.remaining_imports();
         Some(if found == 0 {
             Scan::Empty
         } else {
@@ -393,9 +395,11 @@ impl Block {
                 self.open_auth_wizard(window, cx);
             }
             Action::Game => {
-                self.shell.first_run.stage = Stage::GameChoice;
-                self.router.enter_game_choice();
-                self.shell.first_run.entered = Some(cx.background_executor().now());
+                if matches!(self.first_run_scan(self.language()), Some(Scan::Found(_))) {
+                    self.open_import_games(window, cx);
+                } else {
+                    self.enter_setup_game_choice(cx);
+                }
             }
             Action::Recommended | Action::Custom => {
                 // Any game entry resumes the draft the user already has instead
@@ -421,6 +425,8 @@ impl Block {
                     .first_run_game_parent()
                     .join(uuid::Uuid::new_v4().to_string());
                 if let Some(Form::Instance(form)) = &self.form {
+                    self.shell.first_run.generated_game =
+                        Some((form.directory.entity_id(), directory.clone()));
                     form.directory.update(cx, |field, cx| {
                         field.set_value(&directory.display().to_string(), cx)
                     });
@@ -438,6 +444,7 @@ impl Block {
                 self.first_run_overview(window, cx);
             }
             Action::Import => self.open_import_games(window, cx),
+            Action::ChooseLibrary(scope) => self.browse_setup_library(scope, cx),
             Action::Prepare => match self.first_run_game_state() {
                 GameState::PendingPack => {
                     if let Some(instance) =
@@ -449,12 +456,17 @@ impl Block {
                 GameState::Unprepared => self.handle(UiAction::Repair, window, cx),
                 GameState::None | GameState::Ready => {}
             },
-            Action::Rescan => self.scan_games_for_setup(),
             Action::Skip => {
                 self.complete_onboarding();
             }
         }
         cx.notify();
+    }
+
+    pub(super) fn enter_setup_game_choice(&mut self, cx: &Context<'_, Self>) {
+        self.shell.first_run.stage = Stage::GameChoice;
+        self.router.enter_game_choice();
+        self.shell.first_run.entered = Some(cx.background_executor().now());
     }
 
     /// Overview and Game choice share one scrollable body; only Overview owns a
@@ -547,6 +559,7 @@ impl Block {
                 .h_auto()
                 .min_h(px(super::design::MANAGEMENT_FOOTER))
                 .py_3()
+                .justify_center()
                 .child(
                     div()
                         .w_full()
@@ -593,22 +606,34 @@ impl Block {
             .flex()
             .flex_col()
             .gap_5()
-            .child(page_heading(
+            .child(wizard_heading(
                 tr!(language, "setup.game_choice.title"),
                 tr!(language, "setup.game_choice.description"),
             ))
+            .children(self.first_run_draft_note(cx))
+            .children(self.first_run_prepare_note())
             .child(self.setup_choice(
                 "setup-recommended",
                 &tr!(language, "setup.game_choice.recommended_title"),
                 &recommended,
-                Action::Recommended,
+                UiAction::FirstRun(Action::Recommended),
+                Icon::Games,
                 cx,
             ))
             .child(self.setup_choice(
                 "setup-custom",
                 &tr!(language, "setup.game_choice.custom_title"),
                 &tr!(language, "setup.game_choice.custom_description"),
-                Action::Custom,
+                UiAction::FirstRun(Action::Custom),
+                Icon::Settings,
+                cx,
+            ))
+            .child(self.setup_choice(
+                "setup-import-pack",
+                &tr!(language, "modpack.action.import_pack"),
+                &tr!(language, "modpack.entry.pack_note"),
+                UiAction::PackImport(super::modpack_import::Action::Open),
+                Icon::Layers,
                 cx,
             ))
             .child(self.button_with_variant(
@@ -616,13 +641,6 @@ impl Block {
                 tr!(language, "setup.game_choice.import"),
                 UiAction::FirstRun(Action::Import),
                 ButtonVariant::Ghost,
-                cx,
-            ))
-            .child(self.button_with_variant(
-                "setup-import-pack",
-                tr!(language, "modpack.action.import_pack"),
-                UiAction::PackImport(super::modpack_import::Action::Open),
-                ButtonVariant::Outline,
                 cx,
             ))
             .child(self.button_with_variant(
@@ -635,15 +653,18 @@ impl Block {
             .into_any_element()
     }
 
-    /// Accounts first, games second, then the facts that decide what the
-    /// center still offers. Every row states one thing and owns at most one
-    /// action.
+    /// The center exposes two tasks. Discovery adds a passive game badge;
+    /// destinations and detailed progress belong to the game flow.
     fn first_run_tasks(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let language = self.language();
         let account = self.first_run_account_ready();
         let game = self.first_run_game_ready();
         let account_description = self.first_run_account_description(language);
         let game_description = self.first_run_game_description(language);
+        let importable = match self.first_run_scan(language) {
+            Some(Scan::Found(count)) => Some(count),
+            _ => None,
+        };
         div()
             .flex()
             .flex_col()
@@ -700,6 +721,7 @@ impl Block {
                         &account_description,
                         Icon::Account,
                         account,
+                        None,
                         Action::Account,
                         cx,
                     ))
@@ -709,6 +731,7 @@ impl Block {
                         &game_description,
                         Icon::Games,
                         game,
+                        importable,
                         Action::Game,
                         cx,
                     )),
@@ -731,103 +754,10 @@ impl Block {
                     )
                 }),
             )
-            .child(self.first_run_notes(cx))
             .into_any_element()
     }
 
-    /// The center's own state: where games are saved, what the background scan
-    /// found, the draft it can resume, the one step the saved game still needs
-    /// while language remains reachable in the fixed window chrome.
-    fn first_run_notes(&self, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .rounded_lg()
-            .border_1()
-            .border_color(rgb(self.palette.border))
-            .p_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(note(tr!(language, "setup.library.label")))
-                    .child(
-                        div()
-                            .text_sm()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .child(self.first_run_game_parent().display().to_string()),
-                    ),
-            )
-            .children(self.first_run_import_note(cx))
-            .children(self.first_run_draft_note(cx))
-            .children(self.first_run_prepare_note())
-    }
-
-    /// The background scan, which can only report a number: searching, a
-    /// failure with its retry, how many games are importable, or an explicit
-    /// empty result. The drawer opens only when the user asks for it.
-    fn first_run_import_note(&self, cx: &Context<'_, Self>) -> Option<gpui::AnyElement> {
-        let language = self.language();
-        match self.first_run_scan(language)? {
-            Scan::Searching => {
-                Some(note(tr!(language, "setup.import.scanning")).into_any_element())
-            }
-            Scan::Failed(detail) => Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(note(detail))
-                    .child(self.button_with_variant(
-                        "setup-rescan",
-                        tr!(language, "setup.import.retry"),
-                        UiAction::FirstRun(Action::Rescan),
-                        ButtonVariant::Ghost,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-            Scan::Empty => Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.))
-                    .child(note(tr!(language, "setup.import.none")))
-                    .child(self.button_with_variant(
-                        "setup-rescan",
-                        tr!(language, "setup.import.retry"),
-                        UiAction::FirstRun(Action::Rescan),
-                        ButtonVariant::Ghost,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-            Scan::Found(count) => Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap_3()
-                    .child(note(tr!(language, "setup.import.found", count = count)))
-                    .child(self.button_with_variant(
-                        "setup-import",
-                        tr!(language, "setup.import.open"),
-                        UiAction::FirstRun(Action::Import),
-                        ButtonVariant::Ghost,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-        }
-    }
-
-    /// A game draft that was left in the wizard stays resumable here; nothing
-    /// is written until its own save runs.
+    /// A game draft stays resumable until its own save runs.
     fn first_run_draft_note(&self, cx: &Context<'_, Self>) -> Option<gpui::AnyElement> {
         matches!(self.form, Some(Form::Instance(_))).then(|| {
             let language = self.language();
@@ -906,6 +836,14 @@ impl Block {
             }
             super::browser::CollectionLoad::Ready => {}
         }
+        if matches!(self.form, Some(Form::Instance(_))) {
+            return tr!(language, "setup.draft.found");
+        }
+        match self.first_run_game_state() {
+            GameState::PendingPack => return tr!(language, "setup.game.pack_pending_summary"),
+            GameState::Unprepared => return tr!(language, "setup.game.unprepared_summary"),
+            GameState::None | GameState::Ready => {}
+        }
         let count = self.snapshot.instances.len();
         if self.first_run_game_ready() {
             if count == 1 {
@@ -923,32 +861,31 @@ impl Block {
         id: &'static str,
         title: &str,
         description: &str,
-        action: Action,
+        action: UiAction,
+        icon: Icon,
         cx: &Context<'_, Self>,
     ) -> components::Control {
-        self.button_with_variant(
-            id,
-            "",
-            UiAction::FirstRun(action),
-            ButtonVariant::Outline,
-            cx,
-        )
-        .w_full()
-        .h_auto()
-        .min_h(px(90.))
-        .p_4()
-        .justify_start()
-        .child(
-            div()
-                .min_w_0()
-                .w_full()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap_2()
-                .child(div().w_full().whitespace_normal().child(title.to_owned()))
-                .child(note(description.to_owned()).w_full().whitespace_normal()),
-        )
+        self.button_with_variant(id, "", action, ButtonVariant::Outline, cx)
+            .w_full()
+            .h_auto()
+            .min_h(px(90.))
+            .p_5()
+            .rounded_2xl()
+            .gap_3()
+            .items_start()
+            .justify_start()
+            .child(icon.render(20., self.palette.foreground))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_2()
+                    .child(div().w_full().whitespace_normal().child(title.to_owned()))
+                    .child(note(description.to_owned()).w_full().whitespace_normal()),
+            )
     }
 
     #[expect(
@@ -962,6 +899,7 @@ impl Block {
         description: &str,
         icon: Icon,
         complete: bool,
+        importable: Option<usize>,
         action: Action,
         cx: &Context<'_, Self>,
     ) -> components::Control {
@@ -976,7 +914,17 @@ impl Block {
         .flex_shrink_0()
         .min_w_0()
         .h_auto()
-        .p_4()
+        .p_5()
+        .rounded_2xl()
+        .aria_description(importable.map_or_else(
+            || description.to_owned(),
+            |count| {
+                format!(
+                    "{description} {}",
+                    tr!(self.language(), "setup.import.badge", count = count)
+                )
+            },
+        ))
         .items_start()
         .justify_start()
         .child(
@@ -995,7 +943,60 @@ impl Block {
                         .items_center()
                         .justify_between()
                         .child(icon.render(20., self.palette.foreground))
-                        .child(Icon::ChevronRight.render(16., self.palette.muted)),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .children(importable.map(|count| {
+                                    let label =
+                                        tr!(self.language(), "setup.import.badge", count = count);
+                                    div()
+                                        .id("setup-import-badge")
+                                        .debug_selector(|| "setup-import-badge".into())
+                                        .aria_label(label.clone())
+                                        .flex_shrink_0()
+                                        .rounded_full()
+                                        .px_2()
+                                        .py(px(2.))
+                                        .text_xs()
+                                        .line_height(px(16.))
+                                        .bg(rgb(self.palette.info_background))
+                                        .text_color(rgb(self.palette.info))
+                                        .child(label)
+                                }))
+                                .child({
+                                    let label = if complete {
+                                        tr!(self.language(), "setup.status.configured")
+                                    } else {
+                                        tr!(self.language(), "setup.status.notConfigured")
+                                    };
+                                    let selector = format!("{id}-status");
+                                    div()
+                                        .id(gpui::SharedString::from(selector.clone()))
+                                        .debug_selector(move || selector.clone())
+                                        .aria_label(label.clone())
+                                        .flex_shrink_0()
+                                        .rounded_full()
+                                        .px_2()
+                                        .py(px(2.))
+                                        .text_xs()
+                                        .line_height(px(16.))
+                                        .bg(rgb(if complete {
+                                            self.palette.success_background
+                                        } else {
+                                            self.palette.secondary
+                                        }))
+                                        .text_color(rgb(if complete {
+                                            self.palette.success
+                                        } else {
+                                            self.palette.muted
+                                        }))
+                                        .child(label)
+                                        .test_support()
+                                })
+                                .child(Icon::ChevronRight.render(16., self.palette.muted)),
+                        ),
                 )
                 .child(
                     div()
@@ -1015,12 +1016,7 @@ impl Block {
                                         .text_lg()
                                         .font_weight(gpui::FontWeight::BOLD)
                                         .child(title.to_owned()),
-                                )
-                                .children(complete.then(|| {
-                                    div()
-                                        .text_xs()
-                                        .child(tr!(self.language(), "setup.game.saved_badge"))
-                                })),
+                                ),
                         )
                         .child(note(description.to_owned())),
                 ),

@@ -13,7 +13,7 @@ use block_launcher::{
 };
 use gpui::{
     Context, InteractiveElement as _, IntoElement as _, ParentElement as _, ScrollHandle,
-    Styled as _, Window, div, relative, rgb,
+    StatefulInteractiveElement as _, Styled as _, Window, div, relative, rgb,
 };
 use gpui_base::motion::{Easing, Interpolate as _, Timing};
 
@@ -21,7 +21,7 @@ use super::{
     Block, UiAction,
     components::{self, ButtonVariant, ControlState},
     design::Icon,
-    modpack_import, note,
+    note,
     scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
 };
@@ -113,6 +113,7 @@ pub(super) enum Action {
     Import,
     Stop,
     Retry,
+    Rescan,
     Done,
     New,
 }
@@ -168,6 +169,20 @@ impl Default for State {
 }
 
 impl State {
+    fn can_import(&self, candidate: &GameCandidate) -> bool {
+        candidate.importable && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
+    }
+
+    pub(super) fn remaining_imports(&self) -> usize {
+        self.report.as_ref().map_or(0, |report| {
+            report
+                .candidates
+                .iter()
+                .filter(|candidate| self.can_import(candidate))
+                .count()
+        })
+    }
+
     fn candidates(&self, source: SourceKind) -> Vec<&GameCandidate> {
         self.report.as_ref().map_or_else(Vec::new, |report| {
             report
@@ -180,21 +195,14 @@ impl State {
     fn pending(&self) -> Vec<GameCandidate> {
         self.candidates(self.source)
             .into_iter()
-            .filter(|candidate| {
-                candidate.importable
-                    && self.selected.contains(&candidate.id)
-                    && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
-            })
+            .filter(|candidate| self.can_import(candidate) && self.selected.contains(&candidate.id))
             .cloned()
             .collect()
     }
     fn eligible_ids(&self) -> Vec<String> {
         self.candidates(self.source)
             .into_iter()
-            .filter(|candidate| {
-                candidate.importable
-                    && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
-            })
+            .filter(|candidate| self.can_import(candidate))
             .map(|candidate| candidate.id.clone())
             .collect()
     }
@@ -266,7 +274,7 @@ impl State {
             Page::Sources => (
                 tr!(language, "surface.import_games"),
                 tr!(language, "import.header.choose"),
-                550.,
+                620.,
             ),
             Page::List => (
                 source_label(self.source, language),
@@ -327,6 +335,7 @@ impl Block {
             UiAction::ImportGames(Action::Import | Action::Retry) => {
                 state.running || state.discovery.is_some() || state.pending().is_empty()
             }
+            UiAction::ImportGames(Action::Rescan) => state.running || state.discovery.is_some(),
             UiAction::ImportGames(Action::Toggle(id)) => {
                 state.running
                     || state.report.as_ref().is_none_or(|report| {
@@ -349,7 +358,20 @@ impl Block {
         }
     }
     pub(super) fn open_import_games(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.begin_import_discovery();
+        if !self.setup_incomplete()
+            || (self.shell.import_games.report.is_none()
+                && self.shell.import_games.discovery.is_none())
+        {
+            self.begin_import_discovery();
+        }
+        if !self.shell.import_games.running {
+            self.shell.import_games.page = Page::Sources;
+            self.shell
+                .import_games
+                .motion
+                .borrow_mut()
+                .settle(Page::Sources);
+        }
         self.shell
             .surfaces
             .open(Surface::Drawer(Drawer::ImportGames), window, cx);
@@ -475,7 +497,9 @@ impl Block {
         _window: &mut Window,
         _cx: &mut Context<'_, Self>,
     ) {
-        self.shell.import_games.discovery = None;
+        if !self.setup_incomplete() {
+            self.shell.import_games.discovery = None;
+        }
         if self.shell.import_games.running {
             self.shell.import_games.cancel.cancel();
         }
@@ -488,6 +512,19 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) {
         match action {
+            Action::Rescan => {
+                self.begin_import_discovery();
+                // Base disables the invoking button's focus target while busy.
+                // Hand it to the stable sheet before the next render.
+                if let Some(layer) = self
+                    .shell
+                    .surfaces
+                    .top()
+                    .filter(|layer| matches!(layer.kind, Surface::Drawer(Drawer::ImportGames)))
+                {
+                    layer.focus.focus(window, cx);
+                }
+            }
             Action::Source(source) => {
                 self.shell.import_games.choose_source(source);
             }
@@ -535,6 +572,34 @@ impl Block {
                 }
                 let request = uuid::Uuid::new_v4();
                 let parent = self.proposed_import_parent(&candidates);
+                let Some(engine) = &self.engine else {
+                    self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
+                    return;
+                };
+                if candidates.iter().any(|candidate| {
+                    super::engine::import_overlaps_source(&engine.root, &parent, candidate)
+                }) {
+                    let error = msg!("setup.library.import_overlap");
+                    if let Some(scope) = self.setup_import_library_scope() {
+                        self.library_location_error(&scope, error);
+                    } else {
+                        self.shell.import_games.error = Some(error);
+                    }
+                    return;
+                }
+                if let Err(error) = self.saved_preferences.game.validate() {
+                    self.shell.import_games.error = Some(msg!(
+                        "setup.library.preflight_failed",
+                        detail = format!("{error:#}")
+                    ));
+                    return;
+                }
+                if let Some(scope) = self.setup_import_library_scope()
+                    && !self.commit_setup_library(&scope, cx)
+                {
+                    return;
+                }
+                let parent = self.proposed_import_parent(&candidates);
                 let state = &mut self.shell.import_games;
                 state.batch = Some(request);
                 state.cancel = CancellationToken::new();
@@ -578,7 +643,7 @@ impl Block {
                 if self.setup_incomplete() {
                     self.first_run_overview(window, cx);
                     if matches!(action, Action::New) {
-                        self.handle_first_run(super::first_run::Action::Game, window, cx);
+                        self.enter_setup_game_choice(cx);
                     }
                 } else if matches!(action, Action::New) {
                     self.open_new_instance_setup(window, cx);
@@ -606,7 +671,10 @@ impl Block {
     }
 
     fn proposed_import_parent(&self, candidates: &[GameCandidate]) -> PathBuf {
-        let preferred = self.first_run_game_parent();
+        let preferred = self.setup_import_library_scope().map_or_else(
+            || self.first_run_game_parent(),
+            |scope| self.setup_library_parent(&scope),
+        );
         let fallback = self
             .engine
             .as_ref()
@@ -623,169 +691,154 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let language = self.language();
-        let mut body = div().flex().flex_col().gap_3();
-        if state.discovery.is_some() {
-            body = body.child(note(tr!(language, "import.searching")));
-        }
-        for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher] {
+        let summary = match self.first_run_scan(language) {
+            Some(super::first_run::Scan::Searching) => tr!(language, "import.searching"),
+            Some(super::first_run::Scan::Failed(detail)) => detail,
+            Some(super::first_run::Scan::Found(count)) => {
+                tr!(language, "setup.import.found", count = count)
+            }
+            Some(super::first_run::Scan::Empty) => tr!(
+                language,
+                if state
+                    .outcomes
+                    .values()
+                    .any(|outcome| matches!(outcome, Outcome::Saved))
+                {
+                    "setup.import.complete"
+                } else {
+                    "setup.import.none"
+                }
+            ),
+            None => tr!(language, "import.header.choose"),
+        };
+        let mut body = div().flex().flex_col().gap_3().child(note(summary));
+        for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher]
+            .into_iter()
+            .filter(|_| state.report.is_some())
+        {
             let candidates = state.candidates(source);
             let count = candidates.len();
-            let summary = match count {
-                0 => tr!(language, "import.source.none"),
-                1 => {
-                    let candidate = candidates[0];
-                    let unknown_version = tr!(language, "import.unknownVersion");
-                    let version = candidate
-                        .minecraft_version
-                        .as_deref()
-                        .unwrap_or(&unknown_version);
-                    let loader = candidate.loader.as_ref().map_or_else(
-                        || tr!(language, "import.unknownLoader"),
-                        |loader| format!("{:?}", loader.kind),
-                    );
-                    tr!(
-                        language,
-                        "import.source.one",
-                        name = candidate.name,
-                        version = version,
-                        loader = loader
-                    )
-                }
-                _ => tr!(language, "import.source.many", count = count),
-            };
-            let source_path = state
+            if count == 0 {
+                continue;
+            }
+            let summary = tr!(
+                language,
+                if count == 1 {
+                    "import.source.one"
+                } else {
+                    "import.source.many"
+                },
+                count = count
+            );
+            let path = state
                 .report
                 .as_ref()
-                .and_then(|report| report.sources.iter().find(|item| item.kind == source));
+                .and_then(|report| report.sources.iter().find(|path| path.kind == source));
+            let selected = state.source == source;
             let label = source_label(source, language);
-            let mut row = div()
-                .rounded_lg()
-                .border_1()
-                .border_color(rgb(if state.source == source {
+            let accessible_label = format!("{label}. {summary}");
+            let mut content = div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2();
+            content = content.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(Icon::Folder.render(20., self.palette.foreground))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap_1()
+                            .child(div().w_full().whitespace_normal().child(label.clone())),
+                    ),
+            );
+            content = content.child(if interactive && count > 1 {
+                self.button_with_variant(
+                    format!("import-view-{source:?}"),
+                    summary,
+                    UiAction::ImportGames(Action::View(source)),
+                    ButtonVariant::Secondary,
+                    cx,
+                )
+                .h(gpui::px(24.))
+                .px_2()
+                .py_0()
+                .rounded_full()
+                .text_xs()
+                .line_height(gpui::px(16.))
+                .gap_1()
+                .child(Icon::ChevronRight.render(12., self.palette.muted))
+                .into_any_element()
+            } else {
+                components::badge(summary, self.palette, components::BadgeVariant::Secondary)
+                    .self_start()
+                    .into_any_element()
+            });
+            content = content.children(path.map(|path| {
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_xs()
+                    .text_color(rgb(self.palette.muted))
+                    .whitespace_normal()
+                    .child(path.root.display().to_string())
+            }));
+            body = body.child(
+                components::radio(
+                    format!("import-source-{source:?}"),
+                    "",
+                    selected,
+                    self.palette,
+                    ControlState {
+                        disabled: !interactive,
+                        ..ControlState::default()
+                    },
+                    cx.listener(move |view, (): &(), window, cx| {
+                        view.handle(UiAction::ImportGames(Action::Source(source)), window, cx);
+                    }),
+                )
+                .aria_label(accessible_label)
+                .w_full()
+                .min_w_0()
+                .h_auto()
+                .flex_row_reverse()
+                .gap_3()
+                .rounded_2xl()
+                .border(gpui::px(if selected { 3. } else { 1. }))
+                .border_color(rgb(if selected {
                     self.palette.foreground
                 } else {
                     self.palette.border
                 }))
-                .p_3()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(if interactive {
-                    self.button_with_variant(
-                        format!("import-source-{source:?}"),
-                        label.clone(),
-                        UiAction::ImportGames(Action::Source(source)),
-                        ButtonVariant::Ghost,
-                        cx,
-                    )
-                    .w_full()
-                    .justify_start()
-                    .child(
-                        if state.source == source {
-                            Icon::Check
-                        } else {
-                            Icon::Folder
-                        }
-                        .render(16., self.palette.foreground),
-                    )
-                    .into_any_element()
-                } else {
-                    div()
-                        .w_full()
-                        .py_2()
-                        .text_sm()
-                        .child(label)
-                        .into_any_element()
-                })
-                .child(note(summary));
-            if let Some(source_path) = source_path {
-                row = row.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .text_xs()
-                        .text_color(rgb(self.palette.muted))
-                        .whitespace_normal()
-                        .child(source_path.root.display().to_string()),
-                );
-                if let Some(warning) = &source_path.warning {
-                    row = row.child(note(tr!(
-                        language,
-                        "common.diagnostic_detail",
-                        detail = warning
-                    )));
+                .p(gpui::px(if selected { 17. } else { 19. }))
+                .child(content.flex_1()),
+            );
+            if selected {
+                body = body.children(path.and_then(|path| path.warning.as_ref()).map(|warning| {
+                    note(tr!(language, "common.diagnostic_detail", detail = warning))
+                }));
+                if let [candidate] = candidates.as_slice() {
+                    body = body.children(candidate.unsupported_reason.as_ref().map(|reason| {
+                        note(tr!(
+                            language,
+                            "common.diagnostic_detail",
+                            detail = reason.clone()
+                        ))
+                    }));
                 }
             }
-            if count > 1 {
-                row = row.child(if interactive {
-                    self.button_with_variant(
-                        format!("import-view-{source:?}"),
-                        tr!(language, "import.viewCount", count = count),
-                        UiAction::ImportGames(Action::View(source)),
-                        ButtonVariant::Ghost,
-                        cx,
-                    )
-                    .into_any_element()
-                } else {
-                    div()
-                        .text_sm()
-                        .text_color(rgb(self.palette.muted))
-                        .child(tr!(language, "import.viewCountPlain", count = count))
-                        .into_any_element()
-                });
-            } else if count == 1
-                && let Some(reason) = &candidates[0].unsupported_reason
-            {
-                row = row.child(note(tr!(
-                    language,
-                    "import.cannot_import_detail",
-                    detail = reason
-                )));
-            }
-            body = body.child(row);
         }
-        if let Some(error) = &state.error {
-            body = body.child(note(error.text(language)));
-        }
-        body = body.child(self.import_pack_entry(interactive, cx));
         body.into_any_element()
-    }
-
-    /// A local pack archive is offered beside the game directories. The
-    /// directory sources above keep their own path into the launcher.
-    fn import_pack_entry(&self, interactive: bool, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        let label = tr!(language, "modpack.action.import_pack");
-        let entry = if interactive {
-            self.button_with_variant(
-                "import-pack",
-                label,
-                UiAction::PackImport(modpack_import::Action::Open),
-                ButtonVariant::Ghost,
-                cx,
-            )
-            .w_full()
-            .justify_start()
-            .child(Icon::Layers.render(16., self.palette.foreground))
-            .into_any_element()
-        } else {
-            div()
-                .w_full()
-                .py_2()
-                .text_sm()
-                .child(label)
-                .into_any_element()
-        };
-        div()
-            .rounded_lg()
-            .border_1()
-            .border_color(rgb(self.palette.border))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(entry)
-            .child(note(tr!(language, "modpack.entry.pack_note")))
     }
 
     fn render_list(
@@ -813,37 +866,44 @@ impl Block {
         } else {
             tr!(language, "import.select.all")
         };
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .items_center()
-                    .child(if interactive {
-                        self.button_with_variant(
-                            "import-select-all",
-                            selection_label.clone(),
-                            UiAction::ImportGames(Action::All),
-                            ButtonVariant::Ghost,
-                            cx,
-                        )
+        let mut body = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .justify_between()
+                .items_center()
+                .gap_2()
+                .child(
+                    note(tr!(
+                        language,
+                        "import.selectedCount",
+                        count = selected_count,
+                        total = eligible.len()
+                    ))
+                    .min_w_0()
+                    .flex_1()
+                    .whitespace_normal(),
+                )
+                .child(if interactive {
+                    self.button_with_variant(
+                        "import-select-all",
+                        selection_label.clone(),
+                        UiAction::ImportGames(Action::All),
+                        ButtonVariant::Ghost,
+                        cx,
+                    )
+                    .text_xs()
+                    .into_any_element()
+                } else {
+                    div()
+                        .text_xs()
+                        .min_h(gpui::px(super::design::CONTROL_HEIGHT))
+                        .flex()
+                        .items_center()
+                        .text_color(rgb(self.palette.muted))
+                        .child(selection_label)
                         .into_any_element()
-                    } else {
-                        div()
-                            .text_sm()
-                            .text_color(rgb(self.palette.muted))
-                            .child(selection_label)
-                            .into_any_element()
-                    }),
-            )
-            .child(note(tr!(
-                language,
-                "import.selectedCount",
-                count = selected_count
-            )));
+                }),
+        );
         if candidates.is_empty() {
             body = body.child(note(tr!(language, "import.list.empty")));
         }
@@ -852,23 +912,6 @@ impl Block {
             let checked = saved || state.selected.contains(&candidate.id);
             let disabled = !interactive || saved || !candidate.importable;
             let callback_id = candidate.id.clone();
-            let checkbox = components::checkbox(
-                format!("import-game-{}", candidate.id),
-                candidate.name.clone(),
-                checked,
-                self.palette,
-                ControlState {
-                    disabled,
-                    ..ControlState::default()
-                },
-                cx.listener(move |view, (): &(), window, cx| {
-                    view.handle(
-                        UiAction::ImportGames(Action::Toggle(callback_id.clone())),
-                        window,
-                        cx,
-                    )
-                }),
-            );
             let status = if saved {
                 tr!(language, "import.status.imported")
             } else if let Some(reason) = &candidate.unsupported_reason {
@@ -890,24 +933,55 @@ impl Block {
                     loader = loader
                 )
             };
-            body = body.child(
-                div()
-                    .border_b_1()
-                    .border_color(rgb(self.palette.border))
-                    .py_2()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(checkbox)
-                    .child(note(status)),
-            );
+            let mut content = div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .whitespace_normal()
+                .child(candidate.name.clone())
+                .child(note(status));
             if let Some(warning) = &candidate.metadata_warning {
-                body = body.child(note(tr!(
+                content = content.child(note(tr!(
                     language,
                     "common.diagnostic_detail",
                     detail = warning
                 )));
             }
+            body = body.child(
+                components::checkbox(
+                    format!("import-game-{}", candidate.id),
+                    "",
+                    checked,
+                    self.palette,
+                    ControlState {
+                        disabled,
+                        ..ControlState::default()
+                    },
+                    cx.listener(move |view, (): &(), window, cx| {
+                        view.handle(
+                            UiAction::ImportGames(Action::Toggle(callback_id.clone())),
+                            window,
+                            cx,
+                        )
+                    }),
+                )
+                .aria_label(candidate.name.clone())
+                .w_full()
+                .min_w_0()
+                .flex_row_reverse()
+                .gap_3()
+                .p(gpui::px(if checked { 17. } else { 19. }))
+                .rounded_2xl()
+                .border(gpui::px(if checked { 3. } else { 1. }))
+                .border_color(rgb(if checked {
+                    self.palette.foreground
+                } else {
+                    self.palette.border
+                }))
+                .child(content),
+            );
         }
         if let Some(error) = &state.error {
             body = body.child(note(error.text(language)));
@@ -968,13 +1042,28 @@ impl Block {
         let state = &self.shell.import_games;
         let language = self.language();
         let pending = state.pending();
-        let destination = (!pending.is_empty()).then(|| {
+        let library_scope = self.setup_import_library_scope();
+        let destination_parent =
+            (!pending.is_empty()).then(|| self.proposed_import_parent(&pending));
+        let destination = destination_parent.as_ref().map(|parent| {
             tr!(
                 language,
                 "import.footer.destination",
-                path = self.proposed_import_parent(&pending).display()
+                path = parent.display()
             )
         });
+        let list_destination = match (&library_scope, &destination_parent) {
+            (Some(scope), Some(parent)) => (super::setup_storage::comparable_path(parent)
+                != super::setup_storage::comparable_path(&self.setup_library_parent(scope)))
+            .then(|| {
+                tr!(
+                    language,
+                    "setup.library.import_fallback",
+                    path = parent.display()
+                )
+            }),
+            _ => destination.clone(),
+        };
         let mut running_motion = false;
         let body = match state.page {
             Page::Sources | Page::List => {
@@ -985,7 +1074,9 @@ impl Block {
                 running_motion = running;
                 let source = div()
                     .id("import-sources-content")
+                    .debug_selector(|| "import-sources-content".into())
                     .size_full()
+                    .pr_4()
                     .scroll_area(&state.source_scroll, "import.sources", self.palette, false)
                     .child(
                         div()
@@ -994,7 +1085,10 @@ impl Block {
                             .flex_col()
                             .gap_3()
                             .child(self.render_sources(state, state.page == Page::Sources, cx))
-                            .children(destination.as_ref().map(|destination| {
+                            .children(library_scope.clone().map(|scope| {
+                                self.setup_library_location(scope, state.page == Page::Sources, cx)
+                            }))
+                            .children(list_destination.as_ref().map(|destination| {
                                 note(destination.clone())
                                     .id("import-destination")
                                     .w_full()
@@ -1003,7 +1097,9 @@ impl Block {
                     );
                 let list = div()
                     .id("import-list-content")
+                    .debug_selector(|| "import-list-content".into())
                     .size_full()
+                    .pr_4()
                     .scroll_area(&state.list_scroll, "import.list", self.palette, false)
                     .child(
                         div()
@@ -1012,7 +1108,10 @@ impl Block {
                             .flex_col()
                             .gap_3()
                             .child(self.render_list(state, state.page == Page::List, cx))
-                            .children(destination.as_ref().map(|destination| {
+                            .children(library_scope.map(|scope| {
+                                self.setup_library_location(scope, state.page == Page::List, cx)
+                            }))
+                            .children(list_destination.as_ref().map(|destination| {
                                 note(destination.clone())
                                     .id("import-list-destination")
                                     .w_full()
@@ -1024,7 +1123,7 @@ impl Block {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .w_full()
+                    .mr(gpui::rems(-1.))
                     .overflow_hidden()
                     .child(
                         div()
@@ -1054,6 +1153,8 @@ impl Block {
                 .id("import-games-body")
                 .flex_1()
                 .min_h_0()
+                .mr(gpui::rems(-1.))
+                .pr_4()
                 .scroll_area(&state.scroll, "import.results", self.palette, false)
                 .child(self.render_progress_results(state))
                 .into_any_element(),
@@ -1095,26 +1196,32 @@ impl Block {
             if n > 0 {
                 footer = footer.child(note(tr!(language, "import.footer.originalFiles")));
             }
-            footer = footer.child(self.button_with_variant(
-                "import-copy",
-                {
-                    let import_key = if n == 1 {
-                        "import.footer.importOne"
-                    } else {
-                        "import.footer.importMany"
-                    };
-                    tr!(language, import_key, count = n)
-                },
-                UiAction::ImportGames(Action::Import),
-                ButtonVariant::Primary,
-                cx,
-            ));
+            if n > 0 || state.page != Page::Sources {
+                footer = footer.child(self.button_with_variant(
+                    "import-copy",
+                    {
+                        let import_key = if n == 1 {
+                            "import.footer.importOne"
+                        } else {
+                            "import.footer.importMany"
+                        };
+                        tr!(language, import_key, count = n)
+                    },
+                    UiAction::ImportGames(Action::Import),
+                    ButtonVariant::Primary,
+                    cx,
+                ));
+            }
             if state.page == Page::Sources {
                 footer = footer.child(self.button_with_variant(
                     "import-new",
                     tr!(language, "import.footer.newGame"),
                     UiAction::ImportGames(Action::New),
-                    ButtonVariant::Ghost,
+                    if n == 0 {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Ghost
+                    },
                     cx,
                 ));
             }
@@ -1163,11 +1270,11 @@ mod tests {
     fn import_copy_resolves_per_language_and_keeps_arguments() {
         assert_eq!(
             source_label(SourceKind::AdjacentMinecraft, Language::English),
-            "This folder · .minecraft"
+            "Local Minecraft folder"
         );
         assert_eq!(
             source_label(SourceKind::AdjacentMinecraft, Language::SimplifiedChinese),
-            "当前文件夹 · .minecraft"
+            "本地 Minecraft 文件夹"
         );
         assert_eq!(
             source_label(SourceKind::OfficialLauncher, Language::Japanese),

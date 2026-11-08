@@ -2096,6 +2096,7 @@ fn compact_wizard_entrance_settles_before_source_controls_activate(cx: &mut Test
 fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
+        let unconfirmed = tempfile::tempdir()?;
         let catalog = block_launcher::catalog::Catalog::open(root.path())?;
         let (instance, original) = catalog.create_instance(
             "Shared".into(),
@@ -2106,6 +2107,7 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
         catalog.separate_profiles()?;
         let snapshot = catalog.snapshot()?;
         let (engine, mut receiver) = crate::Engine::with_root(root.path().into())?;
+        let storage_before = block_launcher::storage::Locations::load(root.path())?;
         let instance_id = instance.id;
         let original_id = original.id.clone();
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
@@ -2147,6 +2149,16 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
             }
             view.wizard_profile_color(ProfileColor::Green);
             view.wizard_profile_icon(ProfileIcon::Leaf);
+            view.shell.first_run.enabled = true;
+            view.shell.first_run.stage = crate::first_run::Stage::GameWizard;
+            view.preferences.onboarding_complete = false;
+            view.saved_preferences.onboarding_complete = false;
+            if let Some(Form::Instance(form)) = &view.form {
+                view.shell.first_run.library_draft = Some(crate::library_location::Draft {
+                    scope: crate::library_location::Scope::Game(form.directory.entity_id()),
+                    parent: unconfirmed.path().join("must-not-become-the-library"),
+                });
+            }
             view.submit_game_wizard(cx);
             assert!(view.busy);
             view.submit_game_wizard(cx);
@@ -2207,6 +2219,11 @@ fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut T
         let snapshot = catalog.snapshot()?;
         assert_eq!(snapshot.instances.len(), 1);
         assert_eq!(snapshot.profiles.len(), 2);
+        assert_eq!(
+            block_launcher::storage::Locations::load(root.path())?,
+            storage_before,
+            "creating a Profile on an existing Instance must not accept a library draft"
+        );
         assert!(
             snapshot
                 .profiles

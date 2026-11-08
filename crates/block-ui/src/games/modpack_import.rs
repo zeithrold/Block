@@ -1331,6 +1331,20 @@ impl Block {
             cx.notify();
             return;
         };
+        if let Err(error) = self.saved_preferences.game.validate() {
+            self.shell.pack_import.error = Some(msg!(
+                "setup.library.preflight_failed",
+                detail = format!("{error:#}")
+            ));
+            cx.notify();
+            return;
+        }
+        if self.shell.pack_import.instance.is_none()
+            && let Some(scope) = self.setup_pack_library_scope()
+            && !self.commit_setup_library(&scope, cx)
+        {
+            return;
+        }
         let instance = self
             .shell
             .pack_import
@@ -1769,7 +1783,7 @@ impl Block {
             .flex_col()
             .gap_4()
             .child(
-                patterns::page_heading(title, description)
+                patterns::wizard_heading(title, description)
                     .id("modpack-heading")
                     .debug_selector(|| "modpack-heading".into()),
             );
@@ -1885,6 +1899,10 @@ impl Block {
                 BadgeVariant::Secondary,
             ))
             .child(self.modpack_pack_details(state, language, window, cx))
+            .children(
+                self.setup_pack_library_scope()
+                    .map(|scope| self.setup_library_location(scope, true, cx)),
+            )
     }
 
     /// A blocked import keeps its review on screen, so a choice that blocks it
@@ -2966,7 +2984,8 @@ mod tests {
                 cx.notify();
             });
             cx.run_until_parked();
-            click_pack(cx, "import-pack")?;
+            click_pack(cx, "drawer-close")?;
+            click_pack(cx, "wizard-kind-pack")?;
             assert!(view.read_with(cx, |view, _| view.pack_wizard_active()));
             assert!(
                 cx.did_prompt_for_paths(),
@@ -2974,12 +2993,10 @@ mod tests {
             );
             cx.simulate_path_prompt_response(|_| None);
             cx.run_until_parked();
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "wizard-back")?;
             assert!(view.read_with(cx, |view, _| {
-                matches!(
-                    view.shell.surfaces.top().map(|layer| &layer.kind),
-                    Some(Surface::Drawer(super::super::shell::Drawer::ImportGames))
-                ) && view.router.game_wizard()
+                !view.shell.surfaces.is_open()
+                    && view.router.game_wizard()
                     && view.shell.wizard.step == WizardStep::GetStarted
                     && matches!(&view.form, Some(super::super::Form::Instance(form))
                         if form.name.entity_id() == original.entity_id())
@@ -3056,6 +3073,7 @@ mod tests {
             cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(900.)));
             cx.update(|_, cx| crate::initialize_application_quit(cx));
             click_pack(cx, "setup-game")?;
+            assert!(!view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
             click_pack(cx, "setup-custom")?;
             let name = view
                 .read_with(cx, |view, _| match &view.form {
@@ -3066,6 +3084,7 @@ mod tests {
             name.update(cx, |field, cx| field.set_value("Edited parent", cx));
             click_pack(cx, "cancel-instance")?;
             click_pack(cx, "setup-game")?;
+            assert!(!view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
             click_pack(cx, "setup-import-pack")?;
             assert!(cx.did_prompt_for_paths());
             cx.simulate_path_prompt_response(|_| None);
@@ -3902,6 +3921,7 @@ mod tests {
                     view.shell.first_run.stage = Stage::Overview;
                     view.router.navigate(Tab::Onboarding);
                     view.snapshot = crate::test_support::ready_snapshot();
+                    view.enter_setup_game_choice(cx);
                     view.open_import_games(window, cx);
                     view
                 });
@@ -3912,7 +3932,11 @@ mod tests {
                     scroll.set_offset(gpui::point(gpui::px(0.), -scroll.max_offset().y));
                     cx.notify();
                 });
-                click_pack(cx, "import-pack")?;
+                if !view.read_with(cx, |view, _| view.shell.surfaces.is_open()) {
+                    click_pack(cx, "setup-import-game")?;
+                }
+                click_pack(cx, "drawer-close")?;
+                click_pack(cx, "setup-import-pack")?;
                 view.update(cx, |view, cx| {
                     view.shell.pack_import.phase = Phase::Complete;
                     view.shell.pack_import.instance = Some(String::from("instance-a"));
@@ -3931,6 +3955,7 @@ mod tests {
                     }
                 }
                 click_pack(cx, "setup-game")?;
+                assert!(!view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
                 click_pack(cx, "setup-custom")?;
                 assert!(view.read_with(cx, |view, _| {
                     view.shell.first_run.stage == Stage::GameWizard
@@ -4425,6 +4450,7 @@ mod tests {
                         if origin == Stage::GameChoice {
                             view.handle(UiAction::FirstRun(FirstRunAction::Game), window, cx);
                         }
+                        view.enter_setup_game_choice(cx);
                         view.open_import_games(window, cx);
                     });
                 });
@@ -4438,7 +4464,11 @@ mod tests {
                         cx.notify();
                     });
                     cx.run_until_parked();
-                    click_pack(cx, "import-pack")?;
+                    if !view.read_with(cx, |view, _| view.shell.surfaces.is_open()) {
+                        click_pack(cx, "setup-import-game")?;
+                    }
+                    click_pack(cx, "drawer-close")?;
+                    click_pack(cx, "setup-import-pack")?;
                     view.update(cx, |view, cx| {
                         assert!(
                             view.shell
@@ -4461,7 +4491,7 @@ mod tests {
                     click_pack(cx, "cancel-instance")?;
                     assert!(
                         view.read_with(cx, |view, cx| {
-                            view.shell.first_run.stage == origin
+                            view.shell.first_run.stage == Stage::GameChoice
                                 && matches!(&view.form, Some(crate::Form::Instance(form))
                                 if form.name.entity_id() == name.entity_id()
                                     && form.name.read(cx).value() == value
@@ -4482,7 +4512,11 @@ mod tests {
                     cx.notify();
                 });
                 cx.run_until_parked();
-                click_pack(cx, "import-pack")?;
+                if !view.read_with(cx, |view, _| view.shell.surfaces.is_open()) {
+                    click_pack(cx, "setup-import-game")?;
+                }
+                click_pack(cx, "drawer-close")?;
+                click_pack(cx, "setup-import-pack")?;
                 view.update(cx, |view, cx| {
                     view.shell.pack_import.phase = Phase::Complete;
                     view.shell.pack_import.instance = Some(String::from("instance-a"));
@@ -4579,11 +4613,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn directory_shortcut_cancel_returns_to_its_original_drawer_and_page(
+    fn directory_import_moves_to_the_wizard_without_reopening_a_closed_drawer(
         cx: &mut gpui::TestAppContext,
     ) {
-        use crate::{Tab, first_run::Stage, shell::Drawer};
-
+        use crate::{Tab, first_run::Stage};
         for origin in [None, Some(Stage::Overview), Some(Stage::GameChoice)] {
             let result = (|| -> anyhow::Result<()> {
                 let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -4595,49 +4628,37 @@ mod tests {
                         view.shell.first_run.enabled = true;
                         view.shell.first_run.stage = stage;
                         view.router.navigate(Tab::Onboarding);
-                        if stage == Stage::GameChoice {
-                            view.router.enter_game_choice();
-                        }
+                        view.enter_setup_game_choice(cx);
                     } else {
                         view.router.navigate(Tab::Home);
                     }
                     view.open_import_games(window, cx);
                     view
                 });
-                let parent = view.read_with(cx, |view, _| view.router.entry_id());
                 cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(1000.)));
                 cx.run_until_parked();
-                view.update(cx, |view, cx| {
-                    let scroll = &view.shell.import_games.source_scroll;
-                    scroll.set_offset(gpui::point(gpui::px(0.), -scroll.max_offset().y));
-                    cx.notify();
-                });
-                cx.run_until_parked();
-                click_pack(cx, "import-pack")?;
+                assert!(crate::test_support::control_bounds(cx, "import-pack").is_none());
+                click_pack(cx, "drawer-close")?;
+                if origin.is_some() {
+                    click_pack(cx, "setup-import-pack")?;
+                } else {
+                    view.update_in(cx, |view, window, cx| {
+                        view.handle(UiAction::CreateInstance, window, cx)
+                    });
+                    cx.run_until_parked();
+                    click_pack(cx, "wizard-kind-pack")?;
+                }
                 assert!(view.read_with(cx, |view, _| view.pack_wizard_active()));
-                assert_eq!(
-                    view.read_with(cx, |view, _| view.router.tab()),
-                    if origin.is_some() {
-                        Tab::Onboarding
-                    } else {
-                        Tab::Home
-                    }
-                );
+                let tab = if origin.is_some() {
+                    Tab::Onboarding
+                } else {
+                    Tab::Home
+                };
+                assert_eq!(view.read_with(cx, |view, _| view.router.tab()), tab);
                 click_pack(cx, "cancel-instance")?;
-                assert!(view.read_with(cx, |view, _| {
-                    matches!(
-                        view.shell.surfaces.top().map(|layer| &layer.kind),
-                        Some(Surface::Drawer(Drawer::ImportGames))
-                    ) && view.router.tab()
-                        == if origin.is_some() {
-                            Tab::Onboarding
-                        } else {
-                            Tab::Home
-                        }
-                        && origin.is_none_or(|stage| view.shell.first_run.stage == stage)
-                        && (origin != Some(Stage::GameChoice) || view.wizard_task_active())
-                        && view.router.entry_id() == parent
-                }));
+                assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()
+                    && view.router.tab() == tab
+                    && !view.pack_wizard_active()));
                 Ok(())
             })();
             assert!(result.is_ok(), "origin={origin:?}: {result:?}");
@@ -4742,6 +4763,71 @@ mod tests {
                     Some("My selected name")
                 );
             });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[gpui::test]
+    fn invalid_pack_defaults_do_not_accept_a_pending_library_location(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let data = root.path().join("data");
+            let source = root.path().join("pack.mrpack");
+            crate::test_support::write_modpack(&source)?;
+            let inspection = block_launcher::modpack::inspect(&source)?;
+            let (engine, _messages) = crate::Engine::with_root(data.clone())?;
+            let old = crate::setup_storage::save_game_parent(
+                &data,
+                &root.path().join("initial-library"),
+            )?;
+            let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+                let mut view = crate::tests::test_view(window, cx);
+                view.engine = Some(engine);
+                view.start_pack_wizard(cx);
+                view.shell.first_run.enabled = true;
+                view.preferences.onboarding_complete = false;
+                view.saved_preferences.onboarding_complete = false;
+                view.shell.first_run.game_parent = Some(old.clone());
+                view.shell.pack_import.inspection = Some(inspection);
+                view.shell.pack_import.source = Some(source);
+                view.shell.pack_import.phase = Phase::Review;
+                view.adopt_pack_name("Deferred library pack", cx);
+                view.saved_preferences.game.memory_mib = 0;
+                view
+            });
+            view.update(cx, |view, cx| {
+                let scope = view
+                    .setup_pack_library_scope()
+                    .ok_or_else(|| anyhow::anyhow!("missing pack library scope"))?;
+                view.shell.first_run.library_draft = Some(crate::library_location::Draft {
+                    scope,
+                    parent: root.path().join("unconfirmed-library"),
+                });
+                assert!(
+                    view.shell.pack_import.can_start(),
+                    "the inspected pack is otherwise valid"
+                );
+                view.begin_pack_install(cx);
+                assert!(view.shell.pack_import.request.is_none());
+                assert!(view.shell.pack_import.operation_id.is_none());
+                assert!(view.shell.first_run.library_draft.is_some());
+                assert_eq!(
+                    view.shell
+                        .pack_import
+                        .error
+                        .as_ref()
+                        .and_then(|error| error.key()),
+                    Some("setup.library.preflight_failed")
+                );
+                Ok::<(), anyhow::Error>(())
+            })?;
+            assert_eq!(
+                block_launcher::storage::Locations::load(&data)?.library(&data),
+                crate::setup_storage::comparable_path(&root.path().join("initial-library"))
+            );
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
