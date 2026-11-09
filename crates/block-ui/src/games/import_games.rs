@@ -724,14 +724,24 @@ impl Block {
             if count == 0 {
                 continue;
             }
+            let summary_count = if count > 1 {
+                candidates
+                    .iter()
+                    .filter(|candidate| {
+                        state.can_import(candidate) && state.selected.contains(&candidate.id)
+                    })
+                    .count()
+            } else {
+                count
+            };
             let summary = tr!(
                 language,
-                if count == 1 {
+                if summary_count == 1 {
                     "import.source.one"
                 } else {
                     "import.source.many"
                 },
-                count = count
+                count = summary_count
             );
             let path = state
                 .report
@@ -752,7 +762,7 @@ impl Block {
                     .w_full()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_1()
                     .child(
                         div()
                             .min_w_0()
@@ -765,7 +775,7 @@ impl Block {
                             format!("import-view-{source:?}"),
                             summary,
                             UiAction::ImportGames(Action::View(source)),
-                            ButtonVariant::Secondary,
+                            ButtonVariant::Info,
                             cx,
                         )
                         .h(gpui::px(24.))
@@ -776,7 +786,7 @@ impl Block {
                         .text_xs()
                         .line_height(gpui::px(16.))
                         .gap_1()
-                        .child(Icon::ChevronRight.render(12., self.palette.muted))
+                        .child(Icon::ChevronRight.render(12., self.palette.info))
                         .into_any_element()
                     } else {
                         components::badge(

@@ -297,7 +297,7 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
     );
     assert_eq!(
         control_node(cx, "import-view-OfficialLauncher").label(),
-        Some("2 games")
+        Some("1 game")
     );
     assert_eq!(view_button.size.height, px(24.));
     assert!(view_button.size.width < source.size.width - px(80.));
@@ -570,6 +570,92 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         Page::Sources
     );
     assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
+}
+
+#[gpui::test]
+fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut TestAppContext) {
+    for (selected, label) in [(0, "0 games"), (1, "1 game"), (2, "2 games")] {
+        let (view, cx, _system_motion) = fixture(cx, true);
+        view.update(cx, |view, cx| {
+            let mut adjacent = import_candidate("adjacent");
+            adjacent.source = SourceKind::AdjacentMinecraft;
+            view.shell.import_games.report = Some(DiscoveryReport {
+                sources: Vec::new(),
+                candidates: vec![
+                    import_candidate("one"),
+                    import_candidate("two"),
+                    import_candidate("three"),
+                    adjacent,
+                ],
+            });
+            view.shell.import_games.selected = ["one", "two", "three"]
+                .into_iter()
+                .take(selected)
+                .chain(std::iter::once("adjacent"))
+                .map(str::to_owned)
+                .collect();
+            cx.notify();
+        });
+        act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+        assert_eq!(
+            control_node(cx, "import-view-OfficialLauncher").label(),
+            Some(label)
+        );
+        click(cx, "import-view-OfficialLauncher");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.shell.import_games.page),
+            Page::List,
+            "partial and empty selections must retain access to all candidates"
+        );
+        assert_import_selection_summary(cx, &format!("{selected} / 3 selected"));
+        click(cx, "import-header-back");
+        assert_eq!(
+            control_node(cx, "import-view-OfficialLauncher").label(),
+            Some(label)
+        );
+    }
+}
+
+#[gpui::test]
+fn import_source_count_button_stays_distinct_from_the_selected_card(cx: &mut TestAppContext) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        view.shell.import_games.selected = ["one".into(), "two".into()].into_iter().collect();
+        view.shell.import_games.source = SourceKind::OfficialLauncher;
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    for (appearance, palette) in [
+        (crate::Appearance::Light, crate::Palette::LIGHT),
+        (crate::Appearance::Dark, crate::Palette::DARK),
+    ] {
+        view.update(cx, |view, cx| {
+            view.preferences.appearance = appearance;
+            cx.notify();
+        });
+        cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
+        cx.run_until_parked();
+        assert_selection_surface(&view, cx, "import-source-OfficialLauncher", true);
+        assert_control_color(cx, "import-view-OfficialLauncher", palette.info_background);
+        let position = bounds(cx, "import-view-OfficialLauncher").center();
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        cx.run_until_parked();
+        assert!(
+            control_quads(cx, "import-view-OfficialLauncher")
+                .iter()
+                .any(|quad| {
+                    quad.background.as_solid().is_some_and(|color| {
+                        !matches_rgb(color.to_rgb(), palette.accent)
+                            && !matches_rgb(color.to_rgb(), palette.info_background)
+                    })
+                }),
+            "hover feedback must stay distinct from the selected card and idle button"
+        );
+    }
 }
 
 #[gpui::test]

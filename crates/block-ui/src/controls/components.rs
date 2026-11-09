@@ -84,6 +84,7 @@ pub(super) enum ButtonVariant {
     Primary,
     #[default]
     Secondary,
+    Info,
     Outline,
     Ghost,
     Destructive,
@@ -189,6 +190,12 @@ fn styled_control(
             palette.foreground,
             palette.secondary,
             mix(palette.secondary, palette.foreground, 95),
+        ),
+        ButtonVariant::Info => (
+            palette.info_background,
+            palette.info,
+            palette.info_background,
+            mix(palette.info_background, palette.info, 90),
         ),
         ButtonVariant::Outline => (
             palette.background,
