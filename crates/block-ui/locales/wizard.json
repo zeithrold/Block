@@ -871,7 +871,7 @@
     "ja": "このゲームをインポートできませんでした。詳細を確認して再試行してください: %{detail}"
   },
   "import.header.choose": {"en": "Choose a source.", "zh-Hans": "选择来源。", "ja": "ソースを選択してください。"},
-  "import.header.select": {"en": "Select games to copy.", "zh-Hans": "选择要复制的游戏。", "ja": "コピーするゲームを選択してください。"},
+  "import.header.select": {"en": "Select instances to add.", "zh-Hans": "选择要添加的实例。", "ja": "追加するインスタンスを選択してください。"},
   "import.header.importing": {"en": "Importing games", "zh-Hans": "正在导入游戏", "ja": "ゲームをインポート中"},
   "import.header.saved_individually": {"en": "Completed games are saved individually.", "zh-Hans": "完成的游戏会分别保存。", "ja": "完了したゲームは個別に保存されます。"},
   "import.header.results": {"en": "Import results", "zh-Hans": "导入结果", "ja": "インポート結果"},
@@ -972,9 +972,9 @@
     "ja": "インポートされませんでした"
   },
   "import.status.waiting": {
-    "en": "Waiting for copy",
-    "zh-Hans": "等待复制",
-    "ja": "コピー待ち"
+    "en": "Waiting to add",
+    "zh-Hans": "等待添加",
+    "ja": "追加待ち"
   },
   "import.progress.summary": {
     "en": "%{count} of %{total} games imported",
@@ -1046,6 +1046,21 @@
     "zh-Hans": "Block 的数据目录不可用。",
     "ja": "Block のデータディレクトリを利用できません。"
   },
+  "import.error.review": {
+    "en": "Could not continue the import. Check the source files and Block settings, then retry.",
+    "zh-Hans": "无法继续导入。请检查来源文件和 Block 设置后重试。",
+    "ja": "インポートを続行できませんでした。元のファイルと Block の設定を確認して再試行してください。"
+  },
+  "import.mode.shared": {"en": "Shared", "zh-Hans": "共享", "ja": "共有"},
+  "import.mode.isolated": {"en": "Isolated", "zh-Hans": "隔离", "ja": "隔離"},
+  "import.mode.unavailable": {"en": "Choose data location", "zh-Hans": "请选择数据位置", "ja": "保存先を選択"},
+  "import.risk.adjust": {"en": "Adjust", "zh-Hans": "调整", "ja": "変更"},
+  "import.risk.adjust_for": {"en": "Adjust the data location for %{name}", "zh-Hans": "调整 %{name} 的数据位置", "ja": "%{name} のデータ保存先を変更"},
+  "import.risk.pending": {"en": "%{count} to review", "zh-Hans": "%{count} 项待确认", "ja": "要確認 %{count} 件"},
+  "import.risk.pending_detail": {"en": "%{count} instances need their data location reviewed", "zh-Hans": "%{count} 个实例的数据位置待确认", "ja": "%{count} 件のインスタンスのデータ保存先を確認してください"},
+  "import.risk.shared": {"en": "Shared data may complicate maintaining other versions.", "zh-Hans": "共享数据可能影响其他版本的维护。", "ja": "データの共有は、他のバージョンの管理に影響する場合があります。"},
+  "import.risk.isolated": {"en": "Using isolated data; existing data may not appear.", "zh-Hans": "暂用隔离，原有数据可能不可见。", "ja": "隔離を仮選択しています。既存データが見えない場合があります。"},
+  "import.risk.unavailable": {"en": "Choose a valid game data location.", "zh-Hans": "请选择有效的游戏数据位置。", "ja": "有効なゲームデータの保存先を選択してください。"},
   "import.policy.title": {"en": "Game data location", "zh-Hans": "游戏数据位置", "ja": "ゲームデータの場所"},
   "import.policy.subtitle": {"en": "Choose where this instance reads and saves game data.", "zh-Hans": "选择此实例读取和保存游戏数据的位置。", "ja": "このインスタンスがゲームデータを読み書きする場所を選択します。"},
   "import.policy.shared": {"en": "Shared", "zh-Hans": "共享", "ja": "共有"},

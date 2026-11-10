@@ -2058,7 +2058,7 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
             if let Some(bottom) = previous_bottom {
                 assert_eq!(
                     row.top() - bottom,
-                    gpui::px(4.),
+                    gpui::px(8.),
                     "language choices retain a small vertical gap"
                 );
             }

@@ -3,6 +3,7 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -114,6 +115,7 @@ impl SourceListMotion {
 pub(super) enum Action {
     OpenDataPolicy(String),
     SelectDataPolicy(String, DataPolicy),
+    ApplyDataPolicy(String),
     Back,
     Source(SourceKind),
     View(SourceKind),
@@ -135,6 +137,43 @@ pub(super) enum Outcome {
     Cancelled,
 }
 
+#[derive(Clone, Debug)]
+struct DataConfirmation {
+    resource_directory: PathBuf,
+    evidence: GameDataEvidence,
+    policy: DataPolicy,
+    game_directory: PathBuf,
+}
+
+impl DataConfirmation {
+    fn matches(&self, selection: &ImportSelection) -> bool {
+        self.resource_directory == selection.candidate.resource_directory
+            && self.evidence == selection.candidate.data
+            && self.policy == selection.data_policy
+            && self.game_directory == selection.game_directory
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DataRisk {
+    Shared,
+    Isolated,
+    Unavailable,
+}
+
+impl DataRisk {
+    fn text(self, language: Language) -> String {
+        tr!(
+            language,
+            match self {
+                Self::Shared => "import.risk.shared",
+                Self::Isolated => "import.risk.isolated",
+                Self::Unavailable => "import.risk.unavailable",
+            }
+        )
+    }
+}
+
 /// A background scan the setup center started only reports a count, so this
 /// state never opens the drawer on its own.
 #[derive(Clone, Debug)]
@@ -146,10 +185,11 @@ pub(super) struct State {
     pub source: SourceKind,
     pub selected: BTreeSet<String>,
     pub selections: BTreeMap<String, ImportSelection>,
-    pub acknowledged: BTreeSet<String>,
+    confirmed: BTreeMap<String, DataConfirmation>,
     policy_return: Option<Page>,
     policy_focus: Option<gpui::FocusHandle>,
     radio_focus: RefCell<std::collections::HashMap<String, gpui::FocusHandle>>,
+    adjust_focus: RefCell<BTreeMap<String, gpui::FocusHandle>>,
     pub submitted: Vec<String>,
     pub outcomes: BTreeMap<String, Outcome>,
     pub cancel: CancellationToken,
@@ -171,10 +211,11 @@ impl Default for State {
             source: SourceKind::AdjacentMinecraft,
             selected: BTreeSet::new(),
             selections: BTreeMap::new(),
-            acknowledged: BTreeSet::new(),
+            confirmed: BTreeMap::new(),
             policy_return: None,
             policy_focus: None,
             radio_focus: RefCell::new(std::collections::HashMap::new()),
+            adjust_focus: RefCell::new(BTreeMap::new()),
             submitted: Vec::new(),
             outcomes: BTreeMap::new(),
             cancel: CancellationToken::new(),
@@ -191,6 +232,110 @@ impl Default for State {
 impl State {
     fn can_import(&self, candidate: &GameCandidate) -> bool {
         candidate.importable && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
+    }
+
+    fn can_open_policy(&self, id: &str) -> bool {
+        !self.running
+            && matches!(self.page, Page::Sources | Page::List)
+            && self
+                .candidates(self.source)
+                .into_iter()
+                .any(|candidate| candidate.id == id && self.can_import(candidate))
+    }
+
+    fn can_edit_policy(&self, id: &str) -> bool {
+        !self.running && matches!(&self.page, Page::DataPolicy(current) if current.as_str() == id)
+    }
+
+    fn is_confirmed(&self, id: &str) -> bool {
+        self.confirmed
+            .get(id)
+            .zip(self.selections.get(id))
+            .is_some_and(|(confirmation, selection)| confirmation.matches(selection))
+    }
+
+    fn policy_action_focus(&self, id: &str, cx: &gpui::App) -> gpui::FocusHandle {
+        self.adjust_focus
+            .borrow_mut()
+            .entry(id.into())
+            .or_insert_with(|| cx.focus_handle())
+            .clone()
+    }
+
+    fn risk(&self, candidate: &GameCandidate) -> Option<DataRisk> {
+        if !self.can_import(candidate)
+            || !self.selected.contains(&candidate.id)
+            || self.is_confirmed(&candidate.id)
+        {
+            return None;
+        }
+        let Some(selection) = self.selection(candidate) else {
+            return Some(DataRisk::Unavailable);
+        };
+        if selection.data_policy == DataPolicy::Shared {
+            Some(DataRisk::Shared)
+        } else if !matches!(candidate.data, GameDataEvidence::Isolated { .. }) {
+            Some(DataRisk::Isolated)
+        } else {
+            None
+        }
+    }
+
+    fn pending_reviews(&self, source: SourceKind) -> usize {
+        self.candidates(source)
+            .into_iter()
+            .filter(|candidate| self.risk(candidate).is_some())
+            .count()
+    }
+
+    fn can_submit(&self) -> bool {
+        if self.running || self.discovery.is_some() {
+            return false;
+        }
+        let selected = self
+            .candidates(self.source)
+            .into_iter()
+            .filter(|candidate| self.can_import(candidate) && self.selected.contains(&candidate.id))
+            .collect::<Vec<_>>();
+        !selected.is_empty()
+            && selected
+                .iter()
+                .all(|candidate| self.selection(candidate).is_some())
+    }
+
+    fn confirm_data_policy(&mut self, id: &str) -> anyhow::Result<()> {
+        let candidate = self
+            .report
+            .as_ref()
+            .and_then(|report| {
+                report
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.id == id)
+            })
+            .filter(|candidate| self.can_import(candidate))
+            .ok_or_else(|| anyhow::anyhow!("The import source is no longer available"))?;
+        let policy = self
+            .selection(candidate)
+            .ok_or_else(|| anyhow::anyhow!("Choose a valid game data location"))?
+            .data_policy;
+        let game_directory = candidate.data_directory(policy)?;
+        let confirmation = DataConfirmation {
+            resource_directory: candidate.resource_directory.clone(),
+            evidence: candidate.data.clone(),
+            policy,
+            game_directory: game_directory.clone(),
+        };
+        self.selections.insert(
+            id.into(),
+            ImportSelection {
+                candidate: candidate.clone(),
+                data_policy: policy,
+                game_directory,
+            },
+        );
+        self.confirmed.insert(id.into(), confirmation);
+        Ok(())
     }
 
     pub(super) fn remaining_imports(&self) -> usize {
@@ -281,8 +426,21 @@ impl State {
             .collect::<BTreeSet<_>>();
         self.selected.retain(|id| new_ids.contains(id));
         self.selections.retain(|id, _| new_ids.contains(id));
-        self.acknowledged.retain(|id| new_ids.contains(id));
+        self.adjust_focus
+            .borrow_mut()
+            .retain(|id, _| new_ids.contains(id));
         for candidate in &report.candidates {
+            if let Some(selection) = self.selections.get_mut(&candidate.id) {
+                match candidate.data_directory(selection.data_policy) {
+                    Ok(game_directory) => {
+                        selection.candidate = candidate.clone();
+                        selection.game_directory = game_directory;
+                    }
+                    Err(_) => {
+                        self.selections.remove(&candidate.id);
+                    }
+                }
+            }
             if let Some(selection) = self.selection(candidate) {
                 self.selections.insert(
                     candidate.id.clone(),
@@ -293,6 +451,11 @@ impl State {
                 );
             }
         }
+        self.confirmed.retain(|id, confirmation| {
+            self.selections
+                .get(id)
+                .is_some_and(|selection| confirmation.matches(selection))
+        });
 
         if !report
             .candidates
@@ -346,6 +509,13 @@ impl State {
                 (260. + self.submitted.len() as f32 * 74.).min(620.),
             ),
         }
+    }
+
+    fn error_text(&self, language: Language) -> Option<String> {
+        self.error.as_ref().map(|error| match error {
+            crate::i18n::UiText::Raw(_) => tr!(language, "import.error.review"),
+            crate::i18n::UiText::Message { .. } => error.text(language),
+        })
     }
 }
 
@@ -569,37 +739,36 @@ impl Block {
     ) {
         match action {
             Action::OpenDataPolicy(id) => {
-                if !self.shell.import_games.running {
-                    let state = &mut self.shell.import_games;
-                    state.policy_return = Some(state.page.clone());
-                    state.policy_focus = window.focused(cx);
-                    let policy = state
-                        .report
-                        .as_ref()
-                        .and_then(|report| {
-                            report
-                                .candidates
-                                .iter()
-                                .find(|candidate| candidate.id == id)
-                        })
-                        .and_then(|candidate| state.selection(candidate))
-                        .map_or(DataPolicy::Isolated, |selection| selection.data_policy);
-                    let key = match policy {
-                        DataPolicy::Shared => "shared",
-                        DataPolicy::Isolated => "isolated",
-                    };
-                    let focus = state
-                        .radio_focus
-                        .borrow_mut()
-                        .entry(format!("import-data-policy:{key}"))
-                        .or_insert_with(|| cx.focus_handle())
-                        .clone();
-                    state.page = Page::DataPolicy(id);
-                    focus.focus(window, cx);
+                let state = &mut self.shell.import_games;
+                if !state.can_open_policy(&id) {
+                    return;
                 }
+                state.policy_return = Some(state.page.clone());
+                state.policy_focus = Some(state.policy_action_focus(&id, cx));
+                let policy = state
+                    .candidates(state.source)
+                    .into_iter()
+                    .find(|candidate| candidate.id == id)
+                    .and_then(|candidate| state.selection(candidate))
+                    .map_or(DataPolicy::Isolated, |selection| selection.data_policy);
+                let key = match policy {
+                    DataPolicy::Shared => "shared",
+                    DataPolicy::Isolated => "isolated",
+                };
+                let focus = components::radio_option_focus(
+                    &state.radio_focus,
+                    "import-data-policy",
+                    key,
+                    cx,
+                );
+                state.page = Page::DataPolicy(id);
+                focus.focus(window, cx);
             }
             Action::SelectDataPolicy(id, data_policy) => {
                 let state = &mut self.shell.import_games;
+                if !state.can_edit_policy(&id) {
+                    return;
+                }
                 if let Some(candidate) = state.report.as_ref().and_then(|report| {
                     report
                         .candidates
@@ -616,12 +785,27 @@ impl Block {
                                     game_directory,
                                 },
                             );
-                            state.acknowledged.insert(id);
                             state.error = None;
                         }
                         Err(error) => {
                             state.error = Some(crate::i18n::UiText::Raw(error.to_string()))
                         }
+                    }
+                }
+            }
+            Action::ApplyDataPolicy(id) => {
+                let state = &mut self.shell.import_games;
+                if !state.can_edit_policy(&id) {
+                    return;
+                }
+                match state.confirm_data_policy(&id) {
+                    Ok(()) => {
+                        state.error = None;
+                        self.handle_import_games(Action::Back, window, cx);
+                    }
+                    Err(error) => {
+                        self.shell.import_games.error =
+                            Some(crate::i18n::UiText::Raw(error.to_string()));
                     }
                 }
             }
@@ -686,7 +870,7 @@ impl Block {
                 }
             }
             Action::Import | Action::Retry => {
-                if self.shell.import_games.running {
+                if !self.shell.import_games.can_submit() {
                     return;
                 }
                 let candidates = self.shell.import_games.pending();
@@ -768,95 +952,46 @@ impl Block {
         );
     }
 
-    fn import_data_status(
+    fn import_policy_action(
         &self,
         state: &State,
         candidate: &GameCandidate,
         interactive: bool,
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
-        let language = self.language();
-        let Some(selection) = state.selection(candidate) else {
-            return div().into_any_element();
-        };
-        let unknown = matches!(candidate.data, GameDataEvidence::Unknown)
-            && !state.acknowledged.contains(&candidate.id);
-        let shared = selection.data_policy == DataPolicy::Shared;
-        let heading = tr!(
-            language,
-            if shared {
-                "import.policy.shared_warning"
-            } else if unknown {
-                "import.policy.unknown_warning"
-            } else {
-                "import.policy.isolated"
-            }
-        );
-        let explanation = tr!(
-            language,
-            if shared {
-                "import.policy.shared_explanation"
-            } else if unknown {
-                "import.policy.unknown_explanation"
-            } else {
-                "import.policy.isolated_explanation"
-            }
-        );
-        let label = format!(
-            "{heading}. {explanation}. {}",
-            tr!(language, "import.policy.change")
-        );
-        let mut content = div()
-            .font_weight(gpui::FontWeight::NORMAL)
-            .min_w_0()
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .whitespace_normal()
-            .child(div().font_weight(gpui::FontWeight::BOLD).child(heading))
-            .child(div().text_sm().child(explanation))
-            .child(
-                div()
-                    .text_xs()
-                    .child(selection.game_directory.display().to_string()),
-            );
-        if !unknown && !shared && matches!(candidate.data, GameDataEvidence::Unknown) {
-            content = content.child(note(tr!(language, "import.policy.files_remain")));
-        }
-        if !interactive {
-            return content.into_any_element();
-        }
-        let button = self
-            .button_with_variant(
-                format!("import-data-{}", candidate.id),
-                "",
-                UiAction::ImportGames(Action::OpenDataPolicy(candidate.id.clone())),
-                ButtonVariant::Outline,
-                cx,
-            )
-            .aria_label(label)
-            .w_full()
-            .h_auto()
-            .items_start()
-            .justify_start()
-            .gap_3()
-            .p_3();
-        if shared || unknown {
-            button
-                .bg(rgb(self.palette.warning_background))
-                .border_color(rgb(self.palette.warning))
-                .text_color(rgb(self.palette.warning))
-                .child(Icon::Warning.render(18., self.palette.warning))
-                .child(content)
-                .child(Icon::ChevronRight.render(16., self.palette.warning))
-                .into_any_element()
-        } else {
-            button
-                .child(content)
-                .child(Icon::ChevronRight.render(16., self.palette.muted))
-                .into_any_element()
-        }
+        let id = candidate.id.clone();
+        components::button(
+            format!("import-data-{id}"),
+            tr!(self.language(), "import.risk.adjust"),
+            self.palette,
+            ButtonVariant::Ghost,
+            ControlState {
+                disabled: !interactive || !state.can_open_policy(&candidate.id),
+                ..ControlState::default()
+            },
+            cx.listener(move |view, (): &(), window, cx| {
+                view.handle(
+                    UiAction::ImportGames(Action::OpenDataPolicy(id.clone())),
+                    window,
+                    cx,
+                );
+            }),
+        )
+        .aria_label(tr!(
+            self.language(),
+            "import.risk.adjust_for",
+            name = &candidate.name
+        ))
+        .track_focus(&state.policy_action_focus(&candidate.id, cx))
+        .block_mouse_except_scroll()
+        .w(gpui::px(56.))
+        .h(gpui::px(24.))
+        .px_1()
+        .py_0()
+        .text_xs()
+        .font_weight(gpui::FontWeight::NORMAL)
+        .flex_shrink_0()
+        .into_any_element()
     }
 
     fn render_import_data_policy(
@@ -914,7 +1049,7 @@ impl Block {
                 view.handle(action.clone(), window, cx)
             }),
         );
-        let mut cards = group.container().flex().flex_col().gap_3();
+        let mut cards = group.container().flex().flex_col().gap_2();
         for ((key, policy, heading, explanation), path) in choices.into_iter().zip(paths) {
             let id = id.to_owned();
             let path_text = match &path {
@@ -944,9 +1079,7 @@ impl Block {
                     .aria_label(format!("{}. {path_text}", tr!(language, heading)))
                     .w_full()
                     .h_auto()
-                    .items_start()
                     .gap_3()
-                    .p_4()
                     .child(
                         div()
                             .min_w_0()
@@ -980,7 +1113,8 @@ impl Block {
                     .gap_3()
                     .child(candidate.name.clone())
                     .child(cards)
-                    .child(note(tr!(language, "import.policy.files_remain"))),
+                    .child(note(tr!(language, "import.policy.files_remain")))
+                    .children(state.error_text(language).map(note)),
             )
             .into_any_element()
     }
@@ -994,7 +1128,7 @@ impl Block {
         let language = self.language();
         let summary = match self.first_run_scan(language) {
             Some(super::first_run::Scan::Searching) => tr!(language, "import.searching"),
-            Some(super::first_run::Scan::Failed(detail)) => detail,
+            Some(super::first_run::Scan::Failed(_)) => tr!(language, "import.error.review"),
             Some(super::first_run::Scan::Found(count)) => {
                 tr!(language, "setup.import.found", count = count)
             }
@@ -1013,16 +1147,23 @@ impl Block {
             None => tr!(language, "import.header.choose"),
         };
         let body = div().flex().flex_col().gap_3().child(note(summary));
-        let mut rows = div().flex().flex_col().gap_1();
-        for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher]
-            .into_iter()
-            .filter(|_| state.report.is_some())
-        {
+        let mut rows = div().flex().flex_col().gap_2();
+        for source in [SourceKind::AdjacentMinecraft, SourceKind::OfficialLauncher] {
             let candidates = state.candidates(source);
             let count = candidates.len();
             if count == 0 {
                 continue;
             }
+            let single = {
+                let mut eligible = candidates
+                    .iter()
+                    .copied()
+                    .filter(|candidate| state.can_import(candidate));
+                match (eligible.next(), eligible.next()) {
+                    (Some(candidate), None) => Some(candidate),
+                    _ => None,
+                }
+            };
             let summary_count = if count > 1 {
                 candidates
                     .iter()
@@ -1049,105 +1190,243 @@ impl Block {
             let selected = state.source == source;
             let label = source_label(source, language);
             let accessible_label = format!("{label}. {summary}");
+            let risk = if selected {
+                single
+                    .and_then(|candidate| state.risk(candidate))
+                    .map(|risk| risk.text(language))
+            } else {
+                None
+            };
+            let detail = if single.is_some() {
+                risk
+            } else {
+                let count = state.pending_reviews(source);
+                (count > 0).then(|| tr!(language, "import.risk.pending", count = count))
+            };
+            let title = div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .min_w_0()
+                        .debug_selector(move || format!("import-source-title-{source:?}"))
+                        .whitespace_normal()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child(label),
+                )
+                .child(if interactive && count > 1 {
+                    self.button_with_variant(
+                        format!("import-view-{source:?}"),
+                        summary,
+                        UiAction::ImportGames(Action::View(source)),
+                        ButtonVariant::Info,
+                        cx,
+                    )
+                    .h(gpui::px(24.))
+                    .flex_shrink_0()
+                    .px_2()
+                    .py_0()
+                    .rounded_full()
+                    .text_xs()
+                    .line_height(gpui::px(16.))
+                    .gap_1()
+                    .block_mouse_except_scroll()
+                    .child(Icon::ChevronRight.render(12., self.palette.info))
+                    .into_any_element()
+                } else {
+                    components::badge(summary, self.palette, components::BadgeVariant::Info)
+                        .into_any_element()
+                });
+            let metadata = div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_h(gpui::px(24.))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_xs()
+                        .whitespace_normal()
+                        .children(path.map(|path| path.root.display().to_string())),
+                )
+                .child(if let Some(candidate) = single.filter(|_| selected) {
+                    self.import_policy_action(state, candidate, interactive, cx)
+                } else {
+                    div()
+                        .w(gpui::px(56.))
+                        .h(gpui::px(24.))
+                        .flex_shrink_0()
+                        .into_any_element()
+                });
             let mut content = div()
                 .w_full()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .items_start()
-                .gap_2();
-            content = content.child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .debug_selector(move || format!("import-source-title-{source:?}"))
-                            .whitespace_normal()
-                            .child(label.clone()),
-                    )
-                    .child(if interactive && count > 1 {
-                        self.button_with_variant(
-                            format!("import-view-{source:?}"),
-                            summary,
-                            UiAction::ImportGames(Action::View(source)),
-                            ButtonVariant::Info,
-                            cx,
-                        )
-                        .h(gpui::px(24.))
-                        .flex_shrink_0()
-                        .px_2()
-                        .py_0()
-                        .rounded_full()
-                        .text_xs()
-                        .line_height(gpui::px(16.))
-                        .gap_1()
-                        .child(Icon::ChevronRight.render(12., self.palette.info))
-                        .into_any_element()
-                    } else {
-                        components::badge(
-                            summary,
-                            self.palette,
-                            components::BadgeVariant::Secondary,
-                        )
-                        .self_start()
-                        .into_any_element()
-                    }),
-            );
-            content = content.children(path.map(|path| {
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .text_xs()
-                    .text_color(rgb(self.palette.muted))
-                    .whitespace_normal()
-                    .child(path.root.display().to_string())
-            }));
+                .gap_1()
+                .child(title)
+                .child(metadata);
+            if selected {
+                content =
+                    content.children(path.and_then(|path| path.warning.as_ref()).map(|warning| {
+                        note(tr!(language, "common.diagnostic_detail", detail = warning))
+                    }));
+                if let [candidate] = candidates.as_slice() {
+                    content =
+                        content.children(candidate.unsupported_reason.as_ref().map(|reason| {
+                            note(tr!(language, "common.diagnostic_detail", detail = reason))
+                        }));
+                }
+            }
+            let selection = components::radio_row(
+                format!("import-source-{source:?}"),
+                "",
+                selected,
+                self.palette,
+                ControlState {
+                    disabled: !interactive,
+                    ..ControlState::default()
+                },
+                cx.listener(move |view, (): &(), window, cx| {
+                    view.handle(UiAction::ImportGames(Action::Source(source)), window, cx);
+                }),
+            )
+            .aria_label(accessible_label)
+            .aria_description(detail.clone().unwrap_or_default());
             rows = rows.child(
-                components::radio_row(
-                    format!("import-source-{source:?}"),
-                    "",
-                    selected,
+                components::selection_card(
+                    selection,
+                    div()
+                        .text_color(rgb(self.palette.foreground))
+                        .opacity(if interactive { 1. } else { 0.5 })
+                        .child(content)
+                        .child(super::selection_reveal::reveal(
+                            format!("import-source-risk-{source:?}"),
+                            detail,
+                            if single.is_some() {
+                                self.palette.warning
+                            } else {
+                                self.palette.foreground
+                            },
+                            self.preferences.reduce_motion,
+                        )),
+                )
+                .debug_selector(move || format!("import-source-card-{source:?}")),
+            );
+        }
+        body.child(rows).into_any_element()
+    }
+
+    fn import_selection_counter(
+        &self,
+        state: &State,
+        interactive: bool,
+        pending_anchor: &gpui::ScrollAnchor,
+        cx: &Context<'_, Self>,
+    ) -> gpui::Div {
+        let eligible = state.eligible_ids();
+        let selected_count = eligible
+            .iter()
+            .filter(|id| state.selected.contains(*id))
+            .count();
+        let language = self.language();
+        let selection_label = tr!(
+            language,
+            if state.all_selected() {
+                "import.select.clear"
+            } else {
+                "import.select.all"
+            }
+        );
+        let pending_reviews = state.pending_reviews(state.source);
+        let first_review = state
+            .candidates(state.source)
+            .into_iter()
+            .find(|candidate| state.risk(candidate).is_some())
+            .map(|candidate| candidate.id.clone());
+        let summary = tr!(
+            language,
+            "import.selectedCount",
+            count = selected_count,
+            total = eligible.len()
+        );
+        div()
+            .flex()
+            .justify_between()
+            .items_center()
+            .gap_2()
+            .child(
+                note(summary.clone())
+                    .id("import-selection-count")
+                    .debug_selector(|| "import-selection-count".into())
+                    .aria_label(summary)
+                    .min_w_0()
+                    .flex_1()
+                    .whitespace_normal()
+                    .test_support(),
+            )
+            .child(if let Some(id) = first_review {
+                let focus = state.policy_action_focus(&id, cx);
+                let anchor = pending_anchor.clone();
+                components::button(
+                    "import-review-pending",
+                    tr!(language, "import.risk.pending", count = pending_reviews),
                     self.palette,
+                    ButtonVariant::Ghost,
                     ControlState {
                         disabled: !interactive,
                         ..ControlState::default()
                     },
                     cx.listener(move |view, (): &(), window, cx| {
-                        view.handle(UiAction::ImportGames(Action::Source(source)), window, cx);
+                        if pending_reviews == 1 {
+                            view.handle_import_games(
+                                Action::OpenDataPolicy(id.clone()),
+                                window,
+                                cx,
+                            );
+                        } else {
+                            focus.focus(window, cx);
+                            anchor.scroll_to(window, cx);
+                        }
+                        cx.notify();
                     }),
                 )
-                .aria_label(accessible_label)
-                .w_full()
-                .min_w_0()
-                .h_auto()
-                .flex_row_reverse()
-                .gap_3()
-                .child(content.flex_1()),
-            );
-            if selected {
-                rows = rows.children(path.and_then(|path| path.warning.as_ref()).map(|warning| {
-                    note(tr!(language, "common.diagnostic_detail", detail = warning))
-                }));
-                if let [candidate] = candidates.as_slice() {
-                    if candidate.importable {
-                        rows =
-                            rows.child(self.import_data_status(state, candidate, interactive, cx));
-                    }
-                    rows = rows.children(candidate.unsupported_reason.as_ref().map(|reason| {
-                        note(tr!(
-                            language,
-                            "common.diagnostic_detail",
-                            detail = reason.clone()
-                        ))
-                    }));
-                }
-            }
-        }
-        body.child(rows).into_any_element()
+                .text_xs()
+                .text_color(rgb(self.palette.warning))
+                .flex_shrink_0()
+                .aria_label(tr!(
+                    language,
+                    "import.risk.pending_detail",
+                    count = pending_reviews
+                ))
+                .into_any_element()
+            } else {
+                div().into_any_element()
+            })
+            .child(if interactive {
+                self.button_with_variant(
+                    "import-select-all",
+                    selection_label.clone(),
+                    UiAction::ImportGames(Action::All),
+                    ButtonVariant::Ghost,
+                    cx,
+                )
+                .text_xs()
+                .into_any_element()
+            } else {
+                div()
+                    .text_xs()
+                    .min_h(gpui::px(super::design::CONTROL_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .text_color(rgb(self.palette.muted))
+                    .child(selection_label)
+                    .into_any_element()
+            })
     }
 
     fn render_list(
@@ -1157,65 +1436,18 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let candidates = state.candidates(state.source);
-        let eligible = state.eligible_ids();
-        let selected_count = eligible
+        let first_pending = candidates
             .iter()
-            .filter(|id| state.selected.contains(*id))
-            .count();
-        let all_selected = state.all_selected();
+            .find(|candidate| state.risk(candidate).is_some())
+            .map(|candidate| &candidate.id);
+        let pending_anchor = gpui::ScrollAnchor::for_handle(state.list_scroll.clone());
+        let counter = self.import_selection_counter(state, interactive, &pending_anchor, cx);
         let language = self.language();
-        let selection_label = if all_selected {
-            tr!(language, "import.select.clear")
-        } else {
-            tr!(language, "import.select.all")
-        };
-        let mut body = div().flex().flex_col().gap_3().child(
-            div()
-                .flex()
-                .justify_between()
-                .items_center()
-                .gap_2()
-                .child({
-                    let summary = tr!(
-                        language,
-                        "import.selectedCount",
-                        count = selected_count,
-                        total = eligible.len()
-                    );
-                    note(summary.clone())
-                        .id("import-selection-count")
-                        .debug_selector(|| "import-selection-count".into())
-                        .aria_label(summary)
-                        .min_w_0()
-                        .flex_1()
-                        .whitespace_normal()
-                        .test_support()
-                })
-                .child(if interactive {
-                    self.button_with_variant(
-                        "import-select-all",
-                        selection_label.clone(),
-                        UiAction::ImportGames(Action::All),
-                        ButtonVariant::Ghost,
-                        cx,
-                    )
-                    .text_xs()
-                    .into_any_element()
-                } else {
-                    div()
-                        .text_xs()
-                        .min_h(gpui::px(super::design::CONTROL_HEIGHT))
-                        .flex()
-                        .items_center()
-                        .text_color(rgb(self.palette.muted))
-                        .child(selection_label)
-                        .into_any_element()
-                }),
-        );
+        let mut body = div().flex().flex_col().gap_3().child(counter);
         if candidates.is_empty() {
             body = body.child(note(tr!(language, "import.list.empty")));
         }
-        let mut rows = div().flex().flex_col().gap_1();
+        let mut rows = div().flex().flex_col().gap_2();
         for candidate in candidates {
             let saved = matches!(state.outcomes.get(&candidate.id), Some(Outcome::Saved));
             let checked = saved || state.selected.contains(&candidate.id);
@@ -1235,22 +1467,58 @@ impl Block {
                     || tr!(language, "import.status.vanilla"),
                     |loader| format!("{:?}", loader.kind),
                 );
-                tr!(
+                let version = tr!(
                     language,
                     "import.status.version",
                     version = version,
                     loader = loader
-                )
+                );
+                let mode = state.selection(candidate).map_or_else(
+                    || tr!(language, "import.mode.unavailable"),
+                    |selection| {
+                        tr!(
+                            language,
+                            match selection.data_policy {
+                                DataPolicy::Shared => "import.mode.shared",
+                                DataPolicy::Isolated => "import.mode.isolated",
+                            }
+                        )
+                    },
+                );
+                format!("{version} · {mode}")
             };
+            let risk = state.risk(candidate).map(|risk| risk.text(language));
+            let description = risk
+                .as_ref()
+                .map_or_else(|| status.clone(), |risk| format!("{status}. {risk}"));
+            let metadata = div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_h(gpui::px(24.))
+                .child(note(status).min_w_0().flex_1())
+                .child(if state.can_import(candidate) {
+                    self.import_policy_action(state, candidate, interactive, cx)
+                } else {
+                    div()
+                        .w(gpui::px(56.))
+                        .h(gpui::px(24.))
+                        .flex_shrink_0()
+                        .into_any_element()
+                });
             let mut content = div()
                 .min_w_0()
-                .flex_1()
                 .flex()
                 .flex_col()
                 .gap_1()
                 .whitespace_normal()
-                .child(candidate.name.clone())
-                .child(note(status));
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .child(candidate.name.clone()),
+                )
+                .child(metadata);
             if let Some(warning) = &candidate.metadata_warning {
                 content = content.child(note(tr!(
                     language,
@@ -1258,38 +1526,50 @@ impl Block {
                     detail = warning
                 )));
             }
+            let selection = components::checkbox_row(
+                format!("import-game-{}", candidate.id),
+                "",
+                checked,
+                self.palette,
+                ControlState {
+                    disabled,
+                    ..ControlState::default()
+                },
+                cx.listener(move |view, (): &(), window, cx| {
+                    view.handle(
+                        UiAction::ImportGames(Action::Toggle(callback_id.clone())),
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .aria_label(candidate.name.clone())
+            .aria_description(description);
+            let selector = format!("import-card-{}", candidate.id);
             rows = rows.child(
-                components::checkbox_row(
-                    format!("import-game-{}", candidate.id),
-                    "",
-                    checked,
-                    self.palette,
-                    ControlState {
-                        disabled,
-                        ..ControlState::default()
-                    },
-                    cx.listener(move |view, (): &(), window, cx| {
-                        view.handle(
-                            UiAction::ImportGames(Action::Toggle(callback_id.clone())),
-                            window,
-                            cx,
-                        )
-                    }),
+                components::selection_card(
+                    selection,
+                    div()
+                        .text_color(rgb(self.palette.foreground))
+                        .opacity(if disabled { 0.5 } else { 1. })
+                        .child(content)
+                        .child(super::selection_reveal::reveal(
+                            format!("import-risk-{}", candidate.id),
+                            risk,
+                            self.palette.warning,
+                            self.preferences.reduce_motion,
+                        )),
                 )
-                .aria_label(candidate.name.clone())
-                .w_full()
-                .min_w_0()
-                .flex_row_reverse()
-                .gap_3()
-                .child(content),
+                .id(format!("import-card-{}", candidate.id))
+                .anchor_scroll(
+                    (first_pending == Some(&candidate.id)).then(|| pending_anchor.clone()),
+                )
+                .debug_selector(move || selector.clone()),
             );
-            if candidate.importable && !saved {
-                rows = rows.child(self.import_data_status(state, candidate, interactive, cx));
-            }
         }
         body = body.child(rows);
-        if let Some(error) = &state.error {
-            body = body.child(note(error.text(language)));
+        if let Some(error) = state.error_text(language) {
+            body = body.child(note(error));
         }
         body.into_any_element()
     }
@@ -1325,16 +1605,16 @@ impl Block {
                 None => tr!(language, "import.status.waiting"),
             };
             body = body.child(
-                div()
-                    .border_b_1()
-                    .border_color(rgb(self.palette.border))
-                    .py_2()
+                components::card(self.palette)
+                    .gap_1()
+                    .p_3()
+                    .whitespace_normal()
                     .child(label.to_owned())
                     .child(note(status)),
             );
         }
-        if let Some(error) = &state.error {
-            body = body.child(note(error.text(language)));
+        if let Some(error) = state.error_text(language) {
+            body = body.child(note(error));
         }
         body.into_any_element()
     }
@@ -1346,7 +1626,11 @@ impl Block {
     ) -> gpui::AnyElement {
         let state = &self.shell.import_games;
         let language = self.language();
-        let pending = state.pending();
+        let selected_count = state
+            .eligible_ids()
+            .iter()
+            .filter(|id| state.selected.contains(*id))
+            .count();
         // Borrow focus paint room from the surrounding inset. Keep compensation
         // in scroll content so the outer paint remains reachable at its limits.
         let paint_outset = gpui::px(super::design::FOCUS_RING_SPREAD);
@@ -1439,23 +1723,46 @@ impl Block {
                     cx,
                 ))
                 .child(note(tr!(language, "import.footer.completedStay")));
-        } else if matches!(state.page, Page::DataPolicy(_)) {
-            footer = footer.child(self.button(
+        } else if let Page::DataPolicy(id) = &state.page {
+            let policy_id = id.clone();
+            let can_apply = state.candidates(state.source).into_iter().any(|candidate| {
+                candidate.id == *id
+                    && state.can_import(candidate)
+                    && state.selection(candidate).is_some()
+            });
+            footer = footer.child(components::button(
                 "import-policy-done",
                 tr!(language, "common.apply_draft"),
-                UiAction::ImportGames(Action::Back),
-                cx,
+                self.palette,
+                ButtonVariant::Primary,
+                ControlState {
+                    disabled: !can_apply,
+                    ..ControlState::default()
+                },
+                cx.listener(move |view, (): &(), window, cx| {
+                    view.handle(
+                        UiAction::ImportGames(Action::ApplyDataPolicy(policy_id.clone())),
+                        window,
+                        cx,
+                    );
+                }),
             ));
         } else if state.page == Page::Results {
             // At most one Primary answer: finishing leaves the sheet, retrying
             // only picks up the games that did not arrive.
             if !state.pending().is_empty() {
-                footer = footer.child(self.button_with_variant(
+                footer = footer.child(components::button(
                     "import-retry",
                     tr!(language, "import.footer.retry"),
-                    UiAction::ImportGames(Action::Retry),
+                    self.palette,
                     ButtonVariant::Outline,
-                    cx,
+                    ControlState {
+                        disabled: !state.can_submit(),
+                        ..ControlState::default()
+                    },
+                    cx.listener(|view, (): &(), window, cx| {
+                        view.handle(UiAction::ImportGames(Action::Retry), window, cx);
+                    }),
                 ));
             }
             footer = footer.child(self.button_with_variant(
@@ -1466,9 +1773,9 @@ impl Block {
                 cx,
             ));
         } else {
-            let n = pending.len();
+            let n = selected_count;
             if n > 0 || state.page != Page::Sources {
-                footer = footer.child(self.button_with_variant(
+                footer = footer.child(components::button(
                     "import-add",
                     {
                         let import_key = if n == 1 {
@@ -1478,9 +1785,15 @@ impl Block {
                         };
                         tr!(language, import_key, count = n)
                     },
-                    UiAction::ImportGames(Action::Import),
+                    self.palette,
                     ButtonVariant::Primary,
-                    cx,
+                    ControlState {
+                        disabled: !state.can_submit(),
+                        ..ControlState::default()
+                    },
+                    cx.listener(|view, (): &(), window, cx| {
+                        view.handle(UiAction::ImportGames(Action::Import), window, cx);
+                    }),
                 ));
             }
             if state.page == Page::Sources {
@@ -1523,6 +1836,222 @@ impl Block {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn risks_follow_selection_evidence_and_confirmation() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let isolated_root = tempfile::tempdir()?;
+        let mut shared = candidate("shared", SourceKind::AdjacentMinecraft, true);
+        shared.resource_directory = root.path().canonicalize()?;
+        shared.data = GameDataEvidence::Shared {
+            directory: root.path().canonicalize()?,
+        };
+        let mut isolated = candidate("isolated", SourceKind::AdjacentMinecraft, true);
+        isolated.resource_directory = root.path().canonicalize()?;
+        isolated.data = GameDataEvidence::Isolated {
+            directory: isolated_root.path().canonicalize()?,
+        };
+        let mut unknown = candidate("unknown", SourceKind::AdjacentMinecraft, true);
+        unknown.resource_directory = root.path().canonicalize()?;
+        unknown.data = GameDataEvidence::Unknown;
+        let unsupported = candidate("unsupported", SourceKind::AdjacentMinecraft, false);
+        let mut state = State::default();
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![
+                shared.clone(),
+                isolated.clone(),
+                unknown.clone(),
+                unsupported.clone(),
+            ],
+        });
+        assert_eq!(state.risk(&shared), Some(DataRisk::Shared));
+        assert_eq!(state.risk(&unknown), Some(DataRisk::Isolated));
+        assert_eq!(state.risk(&isolated), None);
+        assert_eq!(state.risk(&unsupported), None);
+        state.selected.remove("unknown");
+        assert_eq!(state.risk(&unknown), None);
+        state.selected.insert("unknown".into());
+        state.confirm_data_policy("unknown")?;
+        assert_eq!(state.risk(&unknown), None);
+        state.confirm_data_policy("shared")?;
+        assert_eq!(state.risk(&shared), None);
+        state.confirmed.remove("shared");
+        state.outcomes.insert("shared".into(), Outcome::Saved);
+        assert_eq!(state.risk(&shared), None);
+        Ok(())
+    }
+
+    #[test]
+    fn rescan_keeps_confirmation_for_cosmetic_changes_only() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut game = candidate("one", SourceKind::AdjacentMinecraft, true);
+        game.resource_directory = root.path().canonicalize()?;
+        game.data = GameDataEvidence::Unknown;
+        let mut state = State::default();
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![game.clone()],
+        });
+        state.confirm_data_policy("one")?;
+        game.name = "A changed title".into();
+        game.metadata_warning = Some("A newly discovered diagnostic".into());
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![game.clone()],
+        });
+        assert!(state.is_confirmed("one"));
+        assert_eq!(state.selections["one"].candidate.name, game.name);
+        game.data = GameDataEvidence::Shared {
+            directory: root.path().canonicalize()?,
+        };
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![game.clone()],
+        });
+        assert!(!state.is_confirmed("one"));
+        assert_eq!(state.risk(&game), Some(DataRisk::Isolated));
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_changed_to_a_file_prevents_partial_submission() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut bad = candidate("bad", SourceKind::AdjacentMinecraft, true);
+        bad.resource_directory = root.path().canonicalize()?;
+        bad.data = GameDataEvidence::Unknown;
+        let mut good = bad.clone();
+        good.id = "good".into();
+        good.version_id = Some("1.20.6".into());
+        let directory = bad.data_directory(DataPolicy::Isolated)?;
+        std::fs::create_dir_all(&directory)?;
+        std::fs::remove_dir(&directory)?;
+        std::fs::write(&directory, b"preserved original")?;
+        let mut state = State::default();
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![bad.clone(), good],
+        });
+        assert_eq!(state.eligible_ids().len(), 2);
+        assert_eq!(state.pending().len(), 1);
+        assert!(!state.can_submit());
+        assert_eq!(state.risk(&bad), Some(DataRisk::Unavailable));
+        assert!(state.confirm_data_policy("bad").is_err());
+        assert_eq!(std::fs::read(directory)?, b"preserved original");
+        Ok(())
+    }
+
+    #[gpui::test]
+    fn apply_confirms_untouched_defaults_but_back_and_stale_actions_do_not(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let mut shared = candidate("shared", SourceKind::AdjacentMinecraft, true);
+            shared.resource_directory = root.path().canonicalize()?;
+            shared.data = GameDataEvidence::Shared {
+                directory: root.path().canonicalize()?,
+            };
+            let mut unknown = shared.clone();
+            unknown.id = "unknown".into();
+            unknown.data = GameDataEvidence::Unknown;
+            let mut stale = shared.clone();
+            stale.id = "stale".into();
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    let state = &mut view.shell.import_games;
+                    state.apply_discovery(DiscoveryReport {
+                        sources: Vec::new(),
+                        candidates: vec![shared.clone(), unknown.clone(), stale],
+                    });
+                    state.page = Page::List;
+                    view.handle_import_games(Action::OpenDataPolicy("shared".into()), window, cx);
+                    view.handle_import_games(
+                        Action::SelectDataPolicy("shared".into(), DataPolicy::Isolated),
+                        window,
+                        cx,
+                    );
+                    view.handle_import_games(Action::Back, window, cx);
+                    assert_eq!(view.shell.import_games.page, Page::List);
+                    assert_eq!(
+                        view.shell.import_games.risk(&shared),
+                        Some(DataRisk::Isolated)
+                    );
+                    assert!(!view.shell.import_games.is_confirmed("shared"));
+                    view.handle_import_games(Action::OpenDataPolicy("shared".into()), window, cx);
+                    view.handle_import_games(Action::ApplyDataPolicy("shared".into()), window, cx);
+                    assert!(view.shell.import_games.is_confirmed("shared"));
+                    view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
+                    view.handle_import_games(Action::ApplyDataPolicy("unknown".into()), window, cx);
+                    assert!(view.shell.import_games.is_confirmed("unknown"));
+                    assert_eq!(view.shell.import_games.risk(&unknown), None);
+                    view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
+                    view.handle_import_games(Action::ApplyDataPolicy("stale".into()), window, cx);
+                    assert_eq!(
+                        view.shell.import_games.page,
+                        Page::DataPolicy("unknown".into())
+                    );
+                    assert!(!view.shell.import_games.is_confirmed("stale"));
+                })
+            });
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:#?}");
+    }
+
+    #[test]
+    fn rescan_refreshes_the_selected_directory_and_invalidates_old_confirmation()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut original = candidate("one", SourceKind::OfficialLauncher, true);
+        original.resource_directory = root.path().canonicalize()?;
+        original.data = GameDataEvidence::Unknown;
+        let mut state = State::default();
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![original.clone()],
+        });
+        state.confirm_data_policy("one")?;
+        let mut refreshed = original;
+        refreshed.version_id = Some("1.21.2".into());
+        let expected = refreshed.data_directory(DataPolicy::Isolated)?;
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![refreshed],
+        });
+        assert_eq!(state.selections["one"].game_directory, expected);
+        assert!(!state.is_confirmed("one"));
+        Ok(())
+    }
+
+    #[test]
+    fn import_error_notes_hide_raw_paths_without_discarding_diagnostics() -> anyhow::Result<()> {
+        for detail in [
+            "Cannot read /home/private-worlds/.minecraft/launcher_profiles.json",
+            r"Cannot read C:\Users\private-worlds\.minecraft\launcher_profiles.json",
+        ] {
+            let state = State {
+                error: Some(crate::i18n::UiText::Raw(detail.into())),
+                ..State::default()
+            };
+            for language in Language::ALL {
+                let message = state
+                    .error_text(language)
+                    .ok_or_else(|| anyhow::anyhow!("error remains visible"))?;
+                assert!(!message.is_empty());
+                assert!(!message.contains("private-worlds"));
+                assert!(!message.contains("launcher_profiles.json"));
+            }
+            assert_eq!(
+                state.error,
+                Some(crate::i18n::UiText::Raw(detail.into())),
+                "the original diagnostic remains available"
+            );
+        }
+        assert!(State::default().error_text(Language::English).is_none());
+        Ok(())
+    }
 
     fn candidate(id: &str, source: SourceKind, importable: bool) -> GameCandidate {
         GameCandidate {
@@ -1775,10 +2304,10 @@ mod tests {
                 view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
                 assert!(matches!(view.shell.import_games.page, Page::DataPolicy(ref id) if id == "unknown"));
                 view.handle_import_games(Action::SelectDataPolicy("unknown".into(), DataPolicy::Shared), window, cx);
-                view.handle_import_games(Action::Back, window, cx);
+                view.handle_import_games(Action::ApplyDataPolicy("unknown".into()), window, cx);
                 assert_eq!(view.shell.import_games.page, Page::List);
                 assert!(view.shell.import_games.selected.contains("unknown"));
-                assert!(view.shell.import_games.acknowledged.contains("unknown"));
+                assert!(view.shell.import_games.is_confirmed("unknown"));
                 assert_eq!(view.shell.import_games.list_scroll.offset().y, gpui::px(-84.));
                 let chosen = &view.shell.import_games.selections["unknown"];
                 assert_eq!(chosen.data_policy, DataPolicy::Shared);

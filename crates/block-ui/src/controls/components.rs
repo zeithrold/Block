@@ -641,6 +641,35 @@ pub(super) fn checkbox_row(
     )
 }
 
+/// Keep selection semantics separate from the row's optional action buttons.
+pub(super) fn selection_card(selection: Control, content: Div) -> Div {
+    div()
+        .relative()
+        .w_full()
+        .min_w_0()
+        .flex_shrink_0()
+        .child(
+            selection
+                .absolute()
+                .inset_0()
+                .size_full()
+                .flex_row()
+                .justify_end()
+                .items_center(),
+        )
+        .child(
+            content
+                .relative()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .p_4()
+                .pr(px(44.))
+                .font_weight(FontWeight::NORMAL),
+        )
+}
+
 pub(super) fn radio_row(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
@@ -688,6 +717,19 @@ pub(super) struct RadioGroup<A> {
     scroll: Option<gpui::ScrollHandle>,
 }
 
+pub(super) fn radio_option_focus(
+    cache: &RefCell<HashMap<String, gpui::FocusHandle>>,
+    group: &str,
+    option: &str,
+    cx: &App,
+) -> gpui::FocusHandle {
+    cache
+        .borrow_mut()
+        .entry(format!("{group}:{option}"))
+        .or_insert_with(|| cx.focus_handle())
+        .clone()
+}
+
 impl<A: Clone + 'static> RadioGroup<A> {
     pub(super) fn new<T: 'static>(
         id: impl Into<SharedString>,
@@ -706,11 +748,7 @@ impl<A: Clone + 'static> RadioGroup<A> {
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                cache
-                    .borrow_mut()
-                    .entry(format!("{id}:{}", item.id))
-                    .or_insert_with(|| cx.focus_handle())
-                    .clone()
+                radio_option_focus(cache, &id, &item.id, cx)
                     .tab_stop(Some(index) == active)
                     .tab_index(if Some(index) == active { 0 } else { -1 })
             })

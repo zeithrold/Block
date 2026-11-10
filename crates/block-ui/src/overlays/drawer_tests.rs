@@ -444,6 +444,59 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn pending_import_reviews_focus_the_first_adjustment_or_open_the_only_policy(
+    cx: &mut TestAppContext,
+) {
+    let (view, cx, _system_motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        view.shell.import_games.selected = ["one".into(), "two".into()].into_iter().collect();
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+    let selected = view.read_with(cx, |view, _| view.shell.import_games.selected.clone());
+    click(cx, "import-review-pending");
+    frame(cx, 32);
+    assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.page, Page::List);
+        assert_eq!(view.shell.import_games.selected, selected);
+    });
+    let first = bounds(cx, "import-game-one");
+    assert!(first.top() >= bounds(cx, "import-list-content").top());
+    let second = bounds(cx, "import-game-two");
+    cx.simulate_click(
+        point(second.left() + px(12.), second.top() + px(12.)),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        assert_eq!(
+            view.shell.import_games.selected,
+            ["one".into()].into_iter().collect()
+        );
+        view.shell
+            .import_games
+            .list_scroll
+            .set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click(cx, "import-review-pending");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.page, Page::DataPolicy("one".into()));
+        assert_eq!(
+            view.shell.import_games.selected,
+            ["one".into()].into_iter().collect()
+        );
+    });
+}
+
+#[gpui::test]
 fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     view.update(cx, |view, cx| {
@@ -478,24 +531,28 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         "one selection row must directly precede the cards without a separate count row"
     );
     assert_eq!(
-        card.top() - bounds(cx, "import-data-one").bottom(),
-        px(4.),
-        "the next candidate follows the preceding data warning with a small gap"
+        card.top() - bounds(cx, "import-game-one").bottom(),
+        px(8.),
+        "the next candidate follows the complete preceding card with a uniform gap"
     );
     assert_eq!(
         control_node(cx, "import-game-two").role(),
         Some(gpui::Role::CheckBox)
     );
     for position in [
+        point(card.left() + px(60.), card.top() + px(24.)),
         point(card.left() + px(12.), card.top() + px(52.)),
         point(card.right() - px(20.), card.center().y),
     ] {
         cx.simulate_click(position, Modifiers::none());
         cx.run_until_parked();
         assert_eq!(
-            bounds(cx, "import-game-two"),
-            card,
-            "selection cannot move its hitbox"
+            (
+                bounds(cx, "import-game-two").top(),
+                bounds(cx, "import-game-two").size.width,
+            ),
+            (card.top(), card.size.width),
+            "the inline risk can grow the card without shifting its top or width"
         );
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.import_games.selected.clone()),
@@ -1233,4 +1290,70 @@ fn import_new_returns_first_run_to_its_game_step(cx: &mut TestAppContext) {
         assert!(!view.busy);
     });
     assert!(crate::test_support::control_bounds(cx, "setup-custom").is_some());
+}
+
+#[gpui::test]
+fn data_policy_radios_center_in_the_full_wrapped_card(cx: &mut TestAppContext) {
+    let (view, cx, _motion) = fixture(cx, true);
+    let result = (|| -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let directory = root
+            .path()
+            .join("An existing installation with a longer directory name");
+        let version = directory.join("versions/1.21.1");
+        std::fs::create_dir_all(&version)?;
+        std::fs::write(
+            version.join("1.21.1.json"),
+            br#"{"id":"1.21.1","mainClass":"net.minecraft.client.main.Main"}"#,
+        )?;
+        let discovery =
+            block_launcher::game_import::discover(&block_launcher::game_import::DiscoveryRoots {
+                adjacent_minecraft: Some(directory),
+                official_launcher: None,
+            });
+        let id = discovery
+            .candidates
+            .iter()
+            .find(|candidate| candidate.importable)
+            .map(|candidate| candidate.id.clone())
+            .ok_or_else(|| anyhow::anyhow!("missing discovered fixture"))?;
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.shell.import_games.apply_discovery(discovery);
+                view.open_import_games(window, cx);
+                view.handle_import_games(
+                    crate::import_games::Action::OpenDataPolicy(id),
+                    window,
+                    cx,
+                );
+            });
+        });
+        for appearance in [crate::Appearance::Light, crate::Appearance::Dark] {
+            view.update(cx, |view, cx| {
+                view.preferences.appearance = appearance;
+                cx.notify();
+            });
+            cx.run_until_parked();
+            let scale = cx.update(|window, _| window.scale_factor());
+            for (id, marker) in [
+                ("import-policy-shared", "import-policy-shared-indicator"),
+                ("import-policy-isolated", "import-policy-isolated-indicator"),
+            ] {
+                let card = bounds(cx, id);
+                let indicator = cx.debug_bounds(marker);
+                assert!(card.size.height > px(64.));
+                assert!(
+                    indicator.is_some_and(|indicator| {
+                        indicator.size == size(px(16.), px(16.))
+                            && card.right() - indicator.right() == px(16.)
+                            && (f32::from(card.center().y) - f32::from(indicator.center().y)).abs()
+                                <= 0.5 / scale
+                    }),
+                    "{appearance:?} {id}: card {card:?}, indicator {indicator:?}"
+                );
+            }
+        }
+        Ok(())
+    })();
+    assert!(result.is_ok(), "{result:#?}");
 }

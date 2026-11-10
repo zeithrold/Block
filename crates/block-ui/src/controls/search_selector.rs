@@ -346,7 +346,7 @@ impl Block {
             .min_h_0()
             .flex()
             .flex_col()
-            .gap_1()
+            .gap_2()
             .children(choices.iter().enumerate().map(|(index, choice)| {
                 self.selector_row(drawer, choice, active == Some(index), state, window, cx)
             }));
@@ -416,6 +416,7 @@ impl Block {
         .h_auto()
         .p(px(15.))
         .justify_start()
+        .items_center()
         .gap_3()
         .bg(rgb(if active {
             self.palette.accent
@@ -465,7 +466,12 @@ impl Block {
             .flex_col()
             .items_start()
             .gap_1()
-            .child(div().truncate().child(choice.title.clone()))
+            .child(
+                div()
+                    .truncate()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child(choice.title.clone()),
+            )
             .child(div().flex().flex_wrap().gap_1().children(
                 choice.badges.iter().map(|badge| {
                     components::badge(badge.clone(), self.palette, BadgeVariant::Info)
@@ -748,12 +754,15 @@ mod tests {
                 };
                 let row = crate::test_support::control_bounds(cx, row_id);
                 let indicator = cx.debug_bounds(indicator_id);
+                let scale = cx.update(|window, _| window.scale_factor());
                 assert!(
                     row.zip(indicator).is_some_and(|(row, indicator)| {
                         indicator.size == size(px(16.), px(16.))
                             && row.right() - indicator.right() == px(16.)
+                            && (f32::from(row.center().y) - f32::from(indicator.center().y)).abs()
+                                <= 0.5 / scale
                     }),
-                    "{drawer:?}: every choice reserves the same inset Radio indicator"
+                    "{drawer:?}: every Radio is centered in the whole choice with a 16px inset"
                 );
                 if drawer == Drawer::Instances {
                     let avatar = cx.debug_bounds("selector-avatar-instance-a");

@@ -1357,7 +1357,7 @@ impl Block {
                             .w_full()
                             .flex()
                             .flex_col()
-                            .gap_1()
+                            .gap_2()
                             .children(choices.into_iter().map(|language| {
                                 let selected = language == self.language();
                                 let mut choice = super::components::radio_row(
@@ -1407,6 +1407,7 @@ impl Block {
                                             .child(
                                                 div()
                                                     .text_sm()
+                                                    .font_weight(gpui::FontWeight::BOLD)
                                                     .whitespace_nowrap()
                                                     .child(language.self_name()),
                                             )

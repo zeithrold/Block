@@ -105,6 +105,8 @@ mod search_selector;
 mod select;
 #[path = "controls/selection_motion.rs"]
 mod selection_motion;
+#[path = "controls/selection_reveal.rs"]
+mod selection_reveal;
 #[path = "settings/settings.rs"]
 mod settings;
 #[path = "setup/setup_storage.rs"]
