@@ -134,6 +134,15 @@ pub(super) fn unmounted(id: u64, ending: bool, reduced: bool, window: &Window) {
 pub(super) fn observe_managed_ids(managed_ids: &[u64], reduced: bool, window: &Window) {
     let Some(trace) = trace() else { return };
     let Ok(mut trace) = trace.lock() else { return };
+    let value = json!({
+        "type":"managed", "ids":managed_ids,
+        "effective_reduced":reduced, "active":window.is_window_active(),
+        "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
+        "t_ms":trace.origin.elapsed().as_secs_f64() * 1000.
+    });
+    if serde_json::to_writer(&mut trace.file, &value).is_ok() {
+        let _ = trace.file.write_all(b"\n");
+    }
     let managed_ids = managed_ids.iter().copied().collect::<HashSet<_>>();
     let removed_ids = trace
         .bounds
@@ -203,7 +212,50 @@ pub(crate) fn start(
                 Err(_) => return,
             }
         }
+        // Native recorders may attach after the window maps. Start only once
+        // their first real backing-frame capture exists.
+        if let Some(path) = std::env::var_os("BLOCK_TOAST_CAPTURE_READY") {
+            let path = std::path::PathBuf::from(path);
+            let deadline = cx.background_executor().now() + Duration::from_secs(30);
+            while !path.is_file() {
+                if cx.background_executor().now() >= deadline {
+                    record(json!({"type":"capture_error","reason":"ready_frame_timeout"}));
+                    return;
+                }
+                cx.background_executor().timer(Duration::from_millis(50)).await;
+            }
+            record(json!({"type":"capture_ready"}));
+        }
         cx.background_executor().timer(Duration::from_millis(500)).await;
+        if let Some(value) = std::env::var_os("BLOCK_TOAST_LIFETIME_KIND") {
+            let kind = match value.to_str() {
+                Some("info") => ToastKind::Info,
+                Some("warning") => ToastKind::Warning,
+                Some("success") => ToastKind::Success,
+                Some("error") => ToastKind::Error,
+                _ => {
+                    record(json!({"type":"lifetime_error","reason":"invalid_kind"}));
+                    return;
+                }
+            };
+            let duration = super::lifetime(kind);
+            let toast = Toast::new(format!("{kind:?} native lifetime validation").into(), kind);
+            let id = toast.id;
+            if cx.update(|window, cx| {
+                record(json!({
+                    "type":"lifetime_begin","id":id,"kind":format!("{kind:?}"),
+                    "lifetime_ms":duration.as_millis(),"app_requested_reduced":requested_reduced,
+                    "os":std::env::consts::OS,"arch":std::env::consts::ARCH
+                }));
+                ToastLayer::enqueue(vec![toast], window, cx);
+            }).is_err() { return; }
+            cx.background_executor().timer(duration + Duration::from_secs(1)).await;
+            record(json!({
+                "type":"lifetime_complete","id":id,
+                "last_painted_bounds_remain":latest_bounds(id).is_some()
+            }));
+            return;
+        }
         let first = Toast::new("Toast motion replay: enter and dismiss".into(), ToastKind::Info);
         let first_id = first.id;
         if cx.update(|window, cx| {
@@ -218,7 +270,17 @@ pub(crate) fn start(
             if entered(first_id) { break; }
             cx.background_executor().timer(Duration::from_millis(50)).await;
         }
-        let at = 700;
+        if cx.update(|window, cx| {
+            record_action("enqueue-repeat", first_id, 700, window);
+            ToastLayer::enqueue(
+                vec![Toast::new("Toast motion replay: enter and dismiss".into(), ToastKind::Info)],
+                window,
+                cx,
+            );
+        }).is_err() { return; }
+
+        cx.background_executor().timer(Duration::from_millis(700)).await;
+        let at = 1400;
         if cx.update(|window, cx| {
             record_action("dismiss", first_id, at, window);
             let Some(layer) = window.root::<gpui_base::Root>().flatten()
@@ -226,11 +288,12 @@ pub(crate) fn start(
             layer.update(cx, |layer, cx| layer.dismiss(first_id, cx));
         }).is_err() { return; }
 
-        cx.background_executor().timer(Duration::from_millis(700)).await;
-        let second = Toast::new("Toast motion replay: swipe dismiss".into(), ToastKind::Info);
+        // Replace the card while its real exit transition is still in flight.
+        cx.background_executor().timer(Duration::from_millis(20)).await;
+        let second = Toast::new("Toast motion replay: swipe dismiss".into(), ToastKind::Warning);
         let second_id = second.id;
         if cx.update(|window, cx| {
-            record_action("enqueue-swipe", second_id, 1400, window);
+            record_action("enqueue-swipe", second_id, 1420, window);
             ToastLayer::enqueue(vec![second], window, cx);
         }).is_err() { return; }
 
@@ -254,7 +317,7 @@ pub(crate) fn start(
                 let Some(layer) = window.root::<gpui_base::Root>().flatten()
                     .and_then(|root| root.read(cx).plugin::<ToastLayer>()) else { return false };
                 layer.update(cx, |layer, cx| {
-                    record_action("programmatic-swipe-release", second_id, 2100 + attempt * 50, window);
+                    record_action("programmatic-swipe-release", second_id, 2120 + attempt * 50, window);
                     dismissed.set(layer.trace_swipe(second_id, gpui_bounds, cx));
                 });
                 dismissed.get()

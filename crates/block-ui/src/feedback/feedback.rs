@@ -29,11 +29,11 @@ static NEXT_TOAST_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_TOASTS: usize = 5;
 const TOAST_WIDTH: f32 = 356.0;
 const TOAST_BOTTOM: f32 = 24.0;
-const NORMAL_EXIT_DURATION: Duration = Duration::from_millis(400);
-const COLLAPSED_EXIT_DURATION: Duration = Duration::from_millis(500);
-const SWIPE_EXIT_DURATION: Duration = Duration::from_millis(200);
+const NORMAL_EXIT_DURATION: Duration = Duration::from_millis(160);
+const COLLAPSED_EXIT_DURATION: Duration = Duration::from_millis(160);
+const SWIPE_EXIT_DURATION: Duration = Duration::from_millis(160);
 // A collapsed card fades faster than it leaves: the slide is what reads as motion.
-const COLLAPSED_FADE_DURATION: Duration = Duration::from_millis(200);
+const COLLAPSED_FADE_DURATION: Duration = Duration::from_millis(140);
 
 #[path = "toast_motion.rs"]
 mod toast_motion;
@@ -45,6 +45,7 @@ pub(super) mod toast_trace;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum ToastKind {
     Success,
+    Warning,
     Error,
     Info,
 }
@@ -63,12 +64,7 @@ impl Toast {
             id: NEXT_TOAST_ID.fetch_add(1, Ordering::Relaxed),
             message,
             kind,
-            expires: Instant::now()
-                + Duration::from_secs(if matches!(kind, ToastKind::Error) {
-                    8
-                } else {
-                    4
-                }),
+            expires: Instant::now() + lifetime(kind),
         }
     }
 }
@@ -86,7 +82,7 @@ fn trim_to_limit(manager: &ToastManager<u64, ToastValue>, ending: &mut HashSet<u
 }
 
 fn swipe_dismisses(dx: Pixels, dy: Pixels) -> bool {
-    dx.abs() >= px(72.) || dy >= px(48.)
+    dx.abs() >= px(72.) || dy <= px(-48.)
 }
 
 fn drag_visual(drag: Option<DragState>) -> gpui::Point<Pixels> {
@@ -98,7 +94,7 @@ fn drag_visual(drag: Option<DragState>) -> gpui::Point<Pixels> {
                 Some(Axis::Horizontal) => gpui::point(dx, px(0.)),
                 Some(Axis::Vertical) => gpui::point(
                     px(0.),
-                    if dy >= px(0.) {
+                    if dy <= px(0.) {
                         dy
                     } else {
                         dy / (1.5 + dy.abs() / px(20.))
@@ -110,7 +106,11 @@ fn drag_visual(drag: Option<DragState>) -> gpui::Point<Pixels> {
 }
 
 fn lifetime(kind: ToastKind) -> Duration {
-    Duration::from_secs(if kind == ToastKind::Error { 8 } else { 4 })
+    Duration::from_secs(match kind {
+        ToastKind::Info | ToastKind::Success => 4,
+        ToastKind::Warning => 6,
+        ToastKind::Error => 8,
+    })
 }
 
 fn coalesce_existing(
@@ -152,19 +152,17 @@ fn animation_duration(reduced_motion: bool) -> Duration {
     if reduced_motion {
         Duration::ZERO
     } else {
-        Duration::from_millis(400)
+        Duration::from_millis(220)
     }
 }
 
 fn css_transition(reduced_motion: bool) -> Transition {
-    Transition::new(animation_duration(reduced_motion)).easing(Easing::Ease)
+    Transition::new(animation_duration(reduced_motion)).easing(Easing::EaseOut)
 }
 
 fn manager_motion(reduced_motion: bool) -> ToastMotion {
     let mut motion = ToastMotion::sonner();
-    if reduced_motion {
-        motion.duration = Duration::ZERO;
-    }
+    motion.duration = animation_duration(reduced_motion);
     // Presence owns the visible exit. Only dismiss from the manager after its
     // Absent sample, so a delayed render cannot lose an unfinished transition.
     motion.exit_duration = Duration::ZERO;
@@ -288,8 +286,8 @@ impl ToastLayer {
         });
     }
 
-    /// Reserve the product's action rail so transient feedback never covers a
-    /// retry, Save or Play button, including in the short portrait window.
+    /// Bound the expanded stack above the product's action rail, including in
+    /// the short portrait window.
     pub(super) fn reserve_actions(bottom: Pixels, window: &Window, cx: &mut App) {
         let Some(layer) = window
             .root::<Root>()
@@ -591,6 +589,8 @@ impl ToastLayer {
         let collapsed_exit = status == ToastTransitionStatus::Ending && !expanded && rank > 0;
         let presence_duration = if reduced {
             Duration::ZERO
+        } else if status != ToastTransitionStatus::Ending {
+            animation_duration(false)
         } else if swipe.is_some() {
             SWIPE_EXIT_DURATION
         } else if collapsed_exit {
@@ -602,7 +602,7 @@ impl ToastLayer {
             ElementId::NamedInteger("block-toast-presence".into(), id),
             status != ToastTransitionStatus::Ending,
         )
-        .transition(Transition::new(presence_duration).easing(Easing::Ease))
+        .transition(Transition::new(presence_duration).easing(Easing::EaseOut))
         .sample(window, cx);
         let opacity = Presence::new(
             ElementId::NamedInteger("block-toast-opacity".into(), id),
@@ -614,7 +614,9 @@ impl ToastLayer {
             } else {
                 COLLAPSED_FADE_DURATION
             })
-            .easing(Easing::Ease)
+            .easing(Easing::EaseOut)
+        } else if status == ToastTransitionStatus::Ending && swipe.is_none() {
+            Transition::new(presence_duration).easing(Easing::EaseOut)
         } else {
             policy
         })
@@ -740,10 +742,20 @@ impl ToastLayer {
             .gap(px(12.))
             .w_full()
             .min_w_0()
-            .px(px(20.))
+            .px(px(16.))
             .py(px(14.))
             .opacity(contents)
-            .child(icon.render(18., tone))
+            .child(
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .size(px(28.))
+                    .rounded(px(8.))
+                    .bg(rgb(tint))
+                    .child(icon.render(18., tone)),
+            )
             .child(
                 div()
                     .flex_1()
@@ -758,8 +770,10 @@ impl ToastLayer {
                     .items_center()
                     .justify_center()
                     .size(px(28.))
+                    .flex_shrink_0()
                     .rounded(px(8.))
-                    .bg(rgb(tint))
+                    .hover(|button| button.bg(rgb(palette.secondary)))
+                    .focus_visible(|button| button.border_1().border_color(rgb(palette.primary)))
                     .cursor_pointer()
                     .on_click(close)
                     .track_focus(&close_focus)
@@ -774,12 +788,13 @@ impl ToastLayer {
 fn toast_tone(kind: ToastKind, palette: Palette) -> (Icon, u32, u32) {
     match kind {
         ToastKind::Success => (Icon::Check, palette.success, palette.success_background),
+        ToastKind::Warning => (Icon::Warning, palette.warning, palette.warning_background),
         ToastKind::Error => (
             Icon::Error,
             palette.destructive,
             palette.destructive_background,
         ),
-        ToastKind::Info => (Icon::Info, palette.primary, palette.secondary),
+        ToastKind::Info => (Icon::Info, palette.info, palette.info_background),
     }
 }
 
@@ -834,7 +849,7 @@ impl Render for ToastLayer {
         let content_width = (viewport.width - inset.left - inset.right - px(32.)).max(px(0.));
         let width = content_width.min(px(TOAST_WIDTH));
         let mut stack = ToastStack::new("block-toast-stack", self.stack_state.clone())
-            .placement(Anchor::BottomCenter)
+            .placement(Anchor::TopCenter)
             .focus_handle(self.stack_focus.clone())
             // Keep Base's measurement, focus and hover behavior. Its public
             // stack API only exposes springs, so animate the final measured
@@ -884,7 +899,11 @@ impl Render for ToastLayer {
         }
         div()
             .absolute()
-            .inset_0()
+            .top(px(super::design::CHROME_HEIGHT))
+            .bottom(self.bottom)
+            .left_0()
+            .right_0()
+            .overflow_hidden()
             .child(
                 gpui::canvas(|_, _, _| {}, {
                     let layer = cx.weak_entity();
@@ -923,10 +942,10 @@ impl Render for ToastLayer {
             )
             .flex()
             .justify_center()
-            .items_end()
+            .items_start()
             // Root plugins already live inside WindowBorder's content box.
             // Only the width calculation needs the outer viewport's insets.
-            .pb(self.bottom)
+            .pt(px(12.))
             .child(stack)
     }
 }

@@ -1,6 +1,6 @@
 //! Animate measured toast positions after Base has resolved stack layout.
 //!
-//! Interpolating the final bottom edge avoids composing independent height and
+//! Interpolating the final top edge avoids composing independent height and
 //! offset springs. Prepaint offsets move native hitboxes and accessibility with
 //! the card, including pointer tracking outside its previous bounds.
 
@@ -26,7 +26,7 @@ impl SwipeExit {
         if self.axis == Axis::Horizontal {
             offset.x += bounds.size.width * offset.x.signum() * (1. - progress);
         } else {
-            offset.y += bounds.size.height * (1. - progress);
+            offset.y -= bounds.size.height * (1. - progress);
         }
         offset
     }
@@ -100,12 +100,12 @@ impl Element for ToastPosition {
     ) {
         // Base bootstraps its measured height while the first frame is fully
         // transparent. Initialize position only once that measurement exists.
-        let bottom = if self.presence == 0. {
-            bounds.bottom()
+        let top = if self.presence == 0. {
+            bounds.top()
         } else {
             transition(
-                ElementId::NamedInteger("block-toast-bottom".into(), self.id),
-                bounds.bottom(),
+                ElementId::NamedInteger("block-toast-top".into(), self.id),
+                bounds.top(),
                 super::css_transition(cx.reduce_motion()),
                 window,
                 cx,
@@ -117,11 +117,11 @@ impl Element for ToastPosition {
             self.drag
                 + point(
                     px(0.),
-                    bounds.size.height
+                    -bounds.size.height
                         * (1. - self.presence)
                         * if self.collapsed_exit { 0.4 } else { 1. },
                 )
-        } + point(px(0.), bottom - bounds.bottom());
+        } + point(px(0.), top - bounds.top());
         window.with_element_offset(offset, |window| {
             self.child.prepaint(window, cx);
         });

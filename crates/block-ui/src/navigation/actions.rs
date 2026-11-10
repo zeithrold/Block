@@ -918,7 +918,7 @@ impl Block {
     /// page, settles the frame itself.
     fn navigate(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
         if !self.router.allows(tab, self.setup_incomplete()) {
-            self.push_toast(msg!("runtime.setup_required"), feedback::ToastKind::Info);
+            self.push_toast(msg!("runtime.setup_required"), feedback::ToastKind::Warning);
             cx.notify();
             return false;
         }
