@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Block · 选择卡片设计</title>
+<style>
+:root{color-scheme:light;--background:#fff;--foreground:#0a0a0a;--muted:#737373;--card:#fff;--border:#e5e5e5;--primary:#171717;--on-primary:#fafafa;--accent:#f5f5f5;--warning:#a16207;--info:#1d4ed8;--info-background:#eff6ff;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+:root[data-theme=dark]{color-scheme:dark;--background:#171717;--foreground:#fafafa;--muted:#a3a3a3;--card:#171717;--border:#2e2e2e;--primary:#e5e5e5;--on-primary:#171717;--accent:#262626;--warning:#facc15;--info:#93c5fd;--info-background:#172c4a}
+*{box-sizing:border-box}body{margin:0;background:var(--background);color:var(--foreground);font:14px/1.5 var(--font-sans)}button,select{font:inherit;color:inherit}button,select{cursor:pointer}button{border:1px solid var(--border);background:var(--card);border-radius:8px;min-height:32px;padding:4px 10px}button:hover{background:var(--accent)}button:focus-visible,select:focus-visible{outline:2px solid var(--foreground);outline-offset:3px}button:disabled{cursor:default;opacity:.5}
+.design-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:16px 0 20px;border-bottom:1px solid var(--border);margin-bottom:24px}.design-toolbar h1{font-size:20px;line-height:28px;margin:0 auto 0 0;font-weight:650}.design-toolbar label{display:flex;align-items:center;gap:6px;font-size:12px}.design-toolbar select{border:1px solid var(--border);border-radius:8px;min-height:32px;background:var(--card);max-width:100%;padding:4px 6px}.design-toolbar .caption{width:100%;margin:0;color:var(--muted);font-size:12px}
+.board{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:32px;align-items:start;max-width:960px;margin:auto}.device{width:100%;height:720px;position:relative;overflow:hidden;background:var(--background);border-radius:12px;outline:1px solid var(--border)}.chrome{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--border);font-size:14px}.chrome-icons{display:flex;gap:16px;color:var(--muted)}.icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.backdrop{position:absolute;inset:56px 0 0;background:var(--accent)}.backdrop h2{font-size:20px;margin:16px}.backdrop p{font-size:12px;margin:0 16px}.sheet{position:absolute;inset:100px 0 0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;border-radius:18px 18px 0 0;background:var(--background);overflow:hidden}.handle{width:32px;height:4px;border-radius:4px;background:var(--border);margin:10px auto 16px}.sheet-heading{padding:0 20px 16px}.heading-row{display:flex;align-items:center;gap:8px;min-height:32px}.heading-row h2{font-size:16px;line-height:24px;font-weight:650;margin:0;flex:1}.icon-button{width:32px;height:32px;padding:7px;border:0;background:none}.sheet-heading p{margin:8px 0 0;font-size:14px;line-height:20px}.sheet-body{min-height:0;overflow:auto;padding:0 20px 12px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}.sheet-footer{padding:8px 20px 20px;display:grid;gap:8px;background:var(--background)}.primary{width:100%;border:0;background:var(--primary);color:var(--on-primary);height:32px}.primary:hover{background:var(--primary);opacity:.9}.ghost{border:0;background:transparent}.selection-summary{display:flex;justify-content:space-between;align-items:center;font-size:12px;min-height:32px;margin-bottom:4px}.selection-summary button{min-height:24px;font-size:12px;padding:0 6px;border:0;background:none}.pending-summary{font-size:12px;line-height:18px;color:var(--warning);margin:0 0 12px}.cards{display:grid;gap:8px}
+.choice-card{position:relative;border:1px solid transparent;border-radius:10px;background:var(--card);padding:15px;min-height:72px;transition:background-color 140ms ease;overflow:hidden}.choice-card[data-selected=true]{background:var(--accent)}.choice-card[data-disabled=true]{opacity:.55}.choice-card:has(.native-choice:focus-visible){outline:2px solid var(--foreground);outline-offset:-2px}.native-choice{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;z-index:1;cursor:pointer}.native-choice:disabled{cursor:default}.card-copy{padding-right:28px;min-width:0;pointer-events:none}.card-title{font-size:14px;line-height:20px;font-weight:650;overflow-wrap:anywhere}.meta-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:4px;min-height:24px}.card-meta{font-size:12px;line-height:18px;flex:1;min-width:0;overflow-wrap:anywhere}.mode-action{position:relative;z-index:2;pointer-events:auto;border:0;background:none;padding:0 4px;min-width:32px;min-height:24px;font-size:12px;line-height:18px;color:var(--info);flex-shrink:0}.risk-slot{height:0;overflow:hidden;pointer-events:none}.risk-text{padding-top:8px;color:var(--warning);font-size:12px;line-height:18px;margin:0;will-change:opacity,transform}.mark{position:absolute;right:15px;top:50%;transform:translateY(-50%);width:16px;height:16px;border:1px solid var(--muted);border-radius:4px;pointer-events:none;display:grid;place-items:center;transition:background-color 160ms cubic-bezier(.2,0,0,1),border-color 160ms cubic-bezier(.2,0,0,1)}.mark svg{width:14px;height:14px;stroke:var(--on-primary);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:22;stroke-dashoffset:22;transition:stroke-dashoffset 160ms cubic-bezier(.2,0,0,1)}.native-choice:checked~.mark{background:var(--primary);border-color:var(--primary)}.native-choice:checked~.mark svg{stroke-dashoffset:0}.mark.radio{border-radius:50%}.mark.radio::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--on-primary);transform:scale(0);transition:transform 160ms cubic-bezier(.2,0,0,1)}.native-choice:checked~.mark.radio::before{transform:scale(1)}
+.mark.radio::before{width:8px;height:8px}
+.show-guides .choice-card::after{content:"";position:absolute;left:0;right:0;top:50%;border-top:1px dashed var(--info);opacity:.45;pointer-events:none}.option-description{margin:8px 0;font-size:12px;line-height:18px}.path{font-size:12px;line-height:18px;overflow-wrap:anywhere;margin-top:6px}.source-title{display:flex;align-items:center;gap:4px;flex-wrap:wrap}.source-count{position:relative;z-index:2;pointer-events:auto;min-height:24px;padding:0 6px;border:0;border-radius:12px;background:var(--info-background);color:var(--info);font-size:12px}.identity{display:flex;align-items:center;gap:12px}.avatar{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:var(--border);flex-shrink:0;font-size:14px;font-weight:600}.identity .identity-text{min-width:0}.identity .card-title{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.plain-note{font-size:12px;line-height:18px;margin:12px 0}.design-notes h2{font-size:18px;line-height:26px;margin:0 0 12px}.design-notes h3{font-size:14px;margin:24px 0 8px}.design-notes p{margin:0 0 12px;max-width:48ch}.design-notes ul{padding-left:18px;margin:0;display:grid;gap:8px}.design-notes .small{font-size:12px;line-height:18px;color:var(--muted)}.facts{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:12px;margin:16px 0}.facts dt{font-weight:600}.facts dd{margin:0}.prototype-status{font-size:12px;line-height:18px;min-height:36px;margin:20px 0 0;color:var(--muted)}.pill{font-size:12px;padding:1px 6px;border-radius:10px;background:var(--info-background);color:var(--info);display:inline-block;margin-top:4px}
+@media(max-width:700px){.board{grid-template-columns:minmax(0,360px);justify-content:center;gap:24px}.design-toolbar{padding:12px 0}.design-toolbar h1{width:100%;margin-bottom:4px}.design-notes{padding-bottom:20px}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
+:root[data-reduced=true] *, :root[data-reduced=true] *::before{transition:none!important}
+</style>
+<header class="design-toolbar">
+  <h1>选择卡片</h1>
+  <label>场景 <select id="scene"><option value="list">导入实例</option><option value="sources">导入来源</option><option value="policy">共享 / 隔离</option><option value="language">语言选择</option><option value="instances">主页实例</option><option value="accounts">主页账户</option></select></label>
+  <button id="theme">深色</button>
+  <label><input type="checkbox" id="guides">中心辅助线</label>
+  <label><input type="checkbox" id="reduce">减弱动态效果</label>
+  <button id="reset">重置选择</button>
+  <p class="caption">设计原型 · 勾选实例观察卡片的小幅扩张；点“调整”确认数据模式。产品代码尚未修改。</p>
+</header>
+<main class="board">
+ <section class="device" aria-label="360×720 Block 设计预览">
+  <div class="chrome"><span>Block</span><span class="chrome-icons" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M6 12h12"/></svg><svg class="icon" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></span></div>
+  <div class="backdrop"><h2>设置 Block</h2><p>添加账户并创建或导入游戏。</p></div>
+  <section class="sheet" aria-label="选择 Drawer">
+   <header><div class="handle"></div><div class="sheet-heading"><div class="heading-row"><button id="back" class="icon-button" aria-label="返回" hidden><svg class="icon" viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></svg></button><h2 id="title">导入实例</h2><button id="close" class="icon-button" aria-label="关闭预览"><svg class="icon" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button></div><p id="subtitle">选择要添加的实例。</p></div></header>
+   <div class="sheet-body" id="body">
+    <div class="selection-summary"><span>2 / 3 已选</span><span class="pending-summary" style="margin:0">1 项待确认</span><button>清空</button></div>
+    <div class="cards">
+     <article class="choice-card" data-selected="true"><input class="native-choice" type="checkbox" checked aria-label="Creative"><div class="card-copy"><div class="card-title">Creative</div><div class="meta-row"><span class="card-meta">1.21.1 · Vanilla · 隔离</span><button class="mode-action">调整</button></div><div class="risk-slot" style="height:26px"><p class="risk-text">暂用隔离，原有数据可能不可见。</p></div></div><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></svg></span></article>
+     <article class="choice-card" data-selected="false"><input class="native-choice" type="checkbox" aria-label="Fabric Builder"><div class="card-copy"><div class="card-title">Fabric Builder</div><div class="meta-row"><span class="card-meta">1.21.1 · Fabric · 共享</span><button class="mode-action">调整</button></div></div><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></svg></span></article>
+     <article class="choice-card" data-selected="true"><input class="native-choice" type="checkbox" checked aria-label="Survival"><div class="card-copy"><div class="card-title">Survival</div><div class="meta-row"><span class="card-meta">1.20.6 · Vanilla · 隔离</span><button class="mode-action">调整</button></div></div><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></svg></span></article>
+     <article class="choice-card" data-disabled="true"><input class="native-choice" type="checkbox" disabled aria-label="Archive，不可导入"><div class="card-copy"><div class="card-title">Archive</div><div class="meta-row"><span class="card-meta">版本元数据不完整</span></div></div><span class="mark" aria-hidden="true"></span></article>
+    </div>
+   </div>
+   <footer class="sheet-footer" id="footer"><button class="primary">添加 2 个实例</button></footer>
+  </section>
+ </section>
+ <aside class="design-notes" aria-label="设计说明">
+  <h2>同一个中心，少一层警告。</h2>
+  <p>Indicator 始终对齐整张卡片的可见中心。警告进入卡片后，只增加它需要的高度，文字和卡片宽度保持不变。</p>
+  <dl class="facts"><dt>Indicator</dt><dd>16 × 16 px，距右边界 16 px</dd><dt>风险文案</dt><dd>12 / 18 px，正常字重</dd><dt>卡片扩张</dt><dd>一行约 26 px；非线性、可反向打断</dd><dt>选择方式</dt><dd>单选 Radio，多选 Checkbox</dd></dl>
+  <h3>警告出现的条件</h3>
+  <ul><li>仅勾选且尚未确认的数据风险，在所属卡片里显示。</li><li>明确隔离、已确认、未勾选、不可导入与已导入项没有风险段落。</li><li>“应用到草稿”确认当前模式；只返回会保留草稿但不确认。</li><li>列表至多一条紧凑数量汇总，不再逐项堆叠黄色 Alert。</li></ul>
+  <h3>动效边界</h3>
+  <p>顶边作为锚点，底边轻轻向下展开；Indicator 随实时高度同步居中。快速反向点击保留当前运动，不等待前一次结束。</p>
+  <p class="small">主题色取自项目 Palette；当前是 Web 手感原型，不代表 GPUI 或 Linux ARM64 已实现、已验收。可开启辅助线检查六类选择卡片。</p>
+  <p id="status" class="prototype-status" aria-live="polite"></p>
+ </aside>
+</main>
+<script type="module">
+const $ = (selector) => document.querySelector(selector);
+const params = new URLSearchParams(location.search);
+if(params.get('theme')==='dark')document.documentElement.dataset.theme='dark';
+const models=[
+ {id:'creative',title:'Creative',version:'1.21.1',loader:'Vanilla',source:'launcher',evidence:'unknown',policy:'isolated',confirmed:false,checked:true,enabled:true},
+ {id:'fabric',title:'Fabric Builder',version:'1.21.1',loader:'Fabric',source:'launcher',evidence:'shared',policy:'shared',confirmed:false,checked:false,enabled:true},
+ {id:'survival',title:'Survival',version:'1.20.6',loader:'Vanilla',source:'launcher',evidence:'isolated',policy:'isolated',confirmed:true,checked:true,enabled:true},
+ {id:'archive',title:'Archive',version:'版本元数据不完整',loader:'',source:'launcher',evidence:'unknown',policy:'isolated',confirmed:false,checked:false,enabled:false},
+ {id:'local',title:'Local Minecraft',version:'1.20.6',loader:'Vanilla',source:'local',evidence:'shared',policy:'shared',confirmed:false,checked:true,enabled:true}
+];
+const initial=models.map(m=>({...m}));
+let scene='list',source='launcher',editing='creative',returnScene='list';
+let currentInstance='creative',currentAccount='mojang',currentLanguage='zh';
+let raf=0,lastTime=0,reduced=false;
+const motion=new Map(),samples=[];
+const reducedMedia=matchMedia('(prefers-reduced-motion: reduce)');
+const escapeText=(text)=>String(text).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+const model=(id)=>models.find(m=>m.id===id);
+const needsReview=(m)=>m.enabled&&!m.confirmed&&(m.evidence==='unknown'||m.policy==='shared');
+const riskText=(m)=>m.policy==='shared'?'共享数据可能影响其他版本的维护。':'暂用隔离，原有数据可能不可见。';
+const mark=(radio)=>`<span class="mark${radio?' radio':''}" aria-hidden="true">${radio?'':'<svg viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></svg>'}</span>`;
+function card(id,copy,{checked=false,radio=false,disabled=false,name='',describedby=''}={}){
+ return `<article class="choice-card" data-id="${id}" data-selected="${checked}" data-disabled="${disabled}"><input class="native-choice" id="choice-${id}" type="${radio?'radio':'checkbox'}" ${name?`name="${name}"`:''} ${checked?'checked':''} ${disabled?'disabled':''} aria-labelledby="title-${id}" ${describedby?`aria-describedby="${describedby}"`:''}><div class="card-copy">${copy}</div>${mark(radio)}</article>`;
+}
+function instanceCard(m){
+ return card(m.id,`<div class="card-title" id="title-${m.id}">${escapeText(m.title)}</div><div class="meta-row"><span class="card-meta" id="meta-${m.id}">${escapeText(m.version)}${m.loader?' · '+escapeText(m.loader):''} · ${m.policy==='shared'?'共享':'隔离'}</span>${m.enabled?`<button class="mode-action" data-edit="${m.id}" aria-label="调整 ${escapeText(m.title)} 的数据位置">调整</button>`:''}</div><div class="risk-slot"><p class="risk-text" id="risk-${m.id}">${riskText(m)}</p></div>`,{checked:m.checked,disabled:!m.enabled,describedby:`meta-${m.id}`});
+}
+function reduceNow(){return reduced||reducedMedia.matches;}
+function writeSample(cardNode,state){
+ const bounds=cardNode.getBoundingClientRect(),markBounds=cardNode.querySelector('.mark').getBoundingClientRect();
+ samples.push({t:performance.now(),id:cardNode.dataset.id,height:bounds.height,riskHeight:state.x,target:state.target,centerError:Math.abs(bounds.top+bounds.height/2-markBounds.top-markBounds.height/2),rightInset:bounds.right-markBounds.right});
+ if(samples.length>2400)samples.splice(0,1200);
+}
+function paintMotion(node,state){
+ const slot=node.querySelector('.risk-slot'),text=node.querySelector('.risk-text');
+ slot.style.height=`${Math.max(0,state.x)}px`;
+ const ratio=state.natural?Math.min(1,Math.max(0,state.x/state.natural)):0;
+ text.style.opacity=String(ratio);
+ text.style.transform=`translateY(${(1-ratio)*2}px)`;
+ writeSample(node,state);
+}
+function animate(time){
+ const dt=Math.min(.032,lastTime?(time-lastTime)/1000:1/60);lastTime=time;
+ let moving=false;
+ for(const [node,state]of motion){
+  if(!node.isConnected){motion.delete(node);continue;}
+  if(reduceNow()){state.x=state.target;state.v=0;}
+  else {
+   const steps=Math.max(1,Math.ceil(dt/(1/120))),step=dt/steps;
+   for(let i=0;i<steps;i++){state.v+=(520*(state.target-state.x)-46*state.v)*step;state.x+=state.v*step;}
+   if(Math.abs(state.target-state.x)<.025&&Math.abs(state.v)<.15){state.x=state.target;state.v=0;}
+  }
+  paintMotion(node,state);
+  if(state.x!==state.target||state.v!==0)moving=true;
+ }
+ raf=moving?requestAnimationFrame(animate):0;
+ if(!moving)lastTime=0;
+}
+function updateRisk(node,show,immediate=false){
+ const slot=node.querySelector('.risk-slot');if(!slot)return;
+ const text=node.querySelector('.risk-text'),natural=text.scrollHeight;
+ let state=motion.get(node);
+ if(!state){state={x:0,v:0,target:0,natural};motion.set(node,state);}
+ state.natural=natural;state.target=show?natural:0;
+ slot.setAttribute('aria-hidden',String(!show));
+ const input=node.querySelector('.native-choice');
+ const meta=`meta-${node.dataset.id}`;
+ input.setAttribute('aria-describedby',`${meta}${show?' risk-'+node.dataset.id:''}`);
+ if(immediate||reduceNow()){state.x=state.target;state.v=0;paintMotion(node,state);}
+ if(!raf)raf=requestAnimationFrame(animate);
+}
+function updateList(immediate=false){
+ const rows=models.filter(m=>m.source===source),eligible=rows.filter(m=>m.enabled);
+ const selected=eligible.filter(m=>m.checked),pending=selected.filter(needsReview);
+ $('#selection-count').textContent=`${selected.length} / ${eligible.length} 已选`;
+ const notice=$('#pending-count');notice.textContent=`${pending.length} 项待确认`;notice.setAttribute('aria-label',`${pending.length} 个实例的数据位置待确认`);notice.hidden=pending.length===0;
+ $('#toggle-all').textContent=selected.length===eligible.length?'清空':'全选';
+ $('#add').textContent=`添加 ${selected.length} 个实例`;$('#add').disabled=selected.length===0;
+ for(const node of $('#body').querySelectorAll('.choice-card')){
+  const m=model(node.dataset.id);node.dataset.selected=String(m.checked);
+  node.querySelector('.native-choice').checked=m.checked;
+  const text=node.querySelector('.risk-text');if(text)text.textContent=riskText(m);
+  updateRisk(node,m.checked&&needsReview(m),immediate);
+ }
+}
+function sourceCard(key,title,path){
+ const candidates=models.filter(m=>m.source===key&&m.enabled),selected=candidates.filter(m=>m.checked);
+ const pending=selected.filter(needsReview),single=candidates.length===1?candidates[0]:null;
+ const copy=`<div class="source-title"><span class="card-title" id="title-source-${key}">${title}</span><button class="source-count" data-view="${key}" aria-label="查看 ${title} 中的实例">${candidates.length===1?1:selected.length} 个实例 ›</button></div><div class="meta-row"><span class="card-meta path" id="meta-source-${key}">${path}</span>${single&&key===source?`<button class="mode-action" data-edit="${single.id}" aria-label="调整 ${escapeText(single.title)} 的数据位置">调整</button>`:''}</div>${!single&&pending.length?`<div class="card-meta" style="margin-top:6px">${pending.length} 项数据位置待确认</div>`:''}${single?`<div class="risk-slot"><p class="risk-text" id="risk-source-${key}">${riskText(single)}</p></div>`:''}`;
+ return card('source-'+key,copy,{radio:true,name:'source',checked:key===source});
+}
+function showScene(next,focusId){
+ scene=next;$('.sheet').style.display='grid';$('#scene').value=next;motion.clear();$('#body').innerHTML='';$('#footer').innerHTML='';
+ const back=$('#back');back.hidden=next!=='policy';$('#body').scrollTop=0;
+ const titles={list:'选择实例',sources:'导入游戏',policy:'游戏数据位置',language:'语言',instances:'选择实例',accounts:'选择账户'};
+ const subtitles={list:'选择要添加的实例。',sources:'选择来源。',policy:'选择此实例读取和保存游戏数据的位置。',language:'选择界面使用的语言。',instances:'选择要启动的实例。',accounts:'选择要使用的账户。'};
+ $('#title').textContent=titles[next];$('#subtitle').textContent=subtitles[next];
+ if(next==='list'){
+  $('#body').innerHTML=`<div class="selection-summary"><span id="selection-count"></span><span class="pending-summary" style="margin:0" id="pending-count" aria-live="polite"></span><button id="toggle-all">全选</button></div><div class="cards">${models.filter(m=>m.source===source).map(instanceCard).join('')}</div>`;
+  $('#footer').innerHTML='<button class="primary" id="add">添加实例</button>';
+  updateList(true);
+ }else if(next==='sources'){
+  $('#body').innerHTML=`<p class="plain-note" style="margin-top:0">已发现 4 个可导入实例</p><div class="cards">${sourceCard('local','本地 Minecraft 文件夹','/Games/.minecraft')}${sourceCard('launcher','Minecraft 启动器','/Users/player/Library/Application Support/minecraft')}</div>`;
+  $('#footer').innerHTML='<button class="primary" id="open-list">选择实例</button>';
+  for(const node of $('#body').querySelectorAll('.choice-card')){
+   const key=node.dataset.id.replace('source-',''),single=models.filter(m=>m.source===key&&m.enabled);
+   if(single.length===1)updateRisk(node,key===source&&single[0].checked&&needsReview(single[0]),true);
+  }
+ }else if(next==='policy'){
+  const m=model(editing),root=m.source==='local'?'/Games/.minecraft':'/Users/player/Library/Application Support/minecraft';
+  $('#body').innerHTML=`<p class="plain-note" style="margin-top:0">${escapeText(m.title)}</p><div class="cards" role="radiogroup" aria-label="游戏数据位置">${[['shared','共享','多个版本共用存档、模组和配置，后续维护可能相互影响。',root],['isolated','隔离','此实例独立读取和保存游戏数据。',root+'/versions/'+m.version]].map(([key,title,description,path])=>card('policy-'+key,`<div class="card-title" id="title-policy-${key}">${title}</div><div class="option-description">${description}</div><div class="path">${path}</div>`,{radio:true,name:'policy',checked:m.policy===key})).join('')}</div><p class="plain-note">文件不会移动或复制，原有数据保留在原处。</p>`;
+  $('#footer').innerHTML='<button class="primary" id="apply">应用到草稿</button>';
+ }else if(next==='language'){
+  const languages=[['zh','简体中文','Chinese, Simplified'],['en','English','English'],['ja','日本語','Japanese']];
+  $('#body').innerHTML=`<div class="cards" role="radiogroup" aria-label="界面语言">${languages.map(([id,title,description])=>card('language-'+id,`<div class="card-title" id="title-language-${id}">${title}</div><div class="card-meta" style="margin-top:4px">${description}</div>`,{radio:true,name:'language',checked:currentLanguage===id})).join('')}</div>`;
+  $('#footer').innerHTML='<p class="plain-note" style="margin:0">选择后立即应用。</p>';
+ }else{
+  const isAccount=next==='accounts';
+  const choices=isAccount?[['mojang','Alex','Microsoft 账户','在线账户'],['offline','Builder','离线账户','本地游戏']]:[['creative','Creative','1.21.1 · Vanilla','已就绪'],['fabric','Fabric Builder','1.21.1 · Fabric','已就绪']];
+  $('#body').innerHTML=`<div class="cards" role="radiogroup" aria-label="${isAccount?'账户':'实例'}">${choices.map(([id,title,description,badge])=>card('identity-'+id,`<div class="identity"><div class="avatar" aria-hidden="true">${title[0]}</div><div class="identity-text"><div class="card-title" id="title-identity-${id}">${title}</div><div class="pill">${badge}</div><div class="card-meta" style="margin-top:4px">${description}</div></div></div>`,{radio:true,name:'identity',checked:id===(isAccount?currentAccount:currentInstance)})).join('')}</div>`;
+ }
+ if(focusId)requestAnimationFrame(()=>document.getElementById(focusId)?.focus());
+}
+$('#body').addEventListener('change',event=>{
+ const input=event.target;if(!(input instanceof HTMLInputElement))return;
+ const id=input.closest('.choice-card').dataset.id;
+ if(scene==='list'){model(id).checked=input.checked;updateList();}
+ else if(scene==='sources'){source=id.replace('source-','');const single=models.filter(m=>m.source===source&&m.enabled);if(single.length===1)single[0].checked=true;showScene('sources','choice-source-'+source);}
+ else if(scene==='policy'){const m=model(editing),next=id.replace('policy-','');if(m.policy!==next){m.policy=next;m.confirmed=false;}for(const node of $('#body').querySelectorAll('.choice-card'))node.dataset.selected=String(node.querySelector('input').checked);}
+ else if(scene==='language'){currentLanguage=id.replace('language-','');for(const node of $('#body').querySelectorAll('.choice-card'))node.dataset.selected=String(node.querySelector('input').checked);$('#status').textContent='已演示语言选中状态；原型说明文案保持中文。';}
+ else {const value=id.replace('identity-','');if(scene==='accounts')currentAccount=value;else currentInstance=value;for(const node of $('#body').querySelectorAll('.choice-card'))node.dataset.selected=String(node.querySelector('input').checked);}
+});
+$('#body').addEventListener('click',event=>{
+ const target=event.target;if(!(target instanceof Element))return;
+ const edit=target.closest('[data-edit]'),view=target.closest('[data-view]');
+ if(edit){editing=edit.dataset.edit;returnScene=scene;showScene('policy','choice-policy-'+model(editing).policy);}
+ if(view){source=view.dataset.view;showScene('list');}
+ if(target.closest('#toggle-all')){const eligible=models.filter(m=>m.source===source&&m.enabled);const value=!eligible.every(m=>m.checked);for(const m of eligible)m.checked=value;updateList();}
+});
+$('#footer').addEventListener('click',event=>{
+ const id=event.target.id;
+ if(id==='apply'){model(editing).confirmed=true;showScene(returnScene);requestAnimationFrame(()=>$('#body').querySelector(`[data-edit="${editing}"]`)?.focus());$('#status').textContent='当前数据模式已确认，风险文字收起。';}
+ if(id==='open-list')showScene('list');
+ if(id==='add')$('#status').textContent='原型已演示提交反馈；实际添加流程由现有产品实现承接。';
+});
+$('#scene').addEventListener('change',()=>{if($('#scene').value==='policy'){editing='creative';returnScene='list';}showScene($('#scene').value);});
+$('#back').addEventListener('click',()=>{showScene(returnScene);requestAnimationFrame(()=>$('#body').querySelector(`[data-edit="${editing}"]`)?.focus());});
+$('#close').addEventListener('click',()=>{$('.sheet').style.display='none';motion.clear();if(raf)cancelAnimationFrame(raf);raf=0;lastTime=0;$('#scene').focus();$('#status').textContent='预览已关闭，可通过上方场景菜单重新打开。';});
+$('#theme').addEventListener('click',()=>{const dark=document.documentElement.dataset.theme!=='dark';document.documentElement.dataset.theme=dark?'dark':'light';$('#theme').textContent=dark?'浅色':'深色';});
+$('#guides').addEventListener('change',()=>$('.device').classList.toggle('show-guides',$('#guides').checked));
+$('#reduce').addEventListener('change',()=>{reduced=$('#reduce').checked;document.documentElement.dataset.reduced=String(reduced);if(!raf)raf=requestAnimationFrame(animate);});
+$('#reset').addEventListener('click',()=>{models.splice(0,models.length,...initial.map(m=>({...m})));source='launcher';samples.length=0;showScene('list');$('#status').textContent='已恢复默认选择。';});
+reducedMedia.addEventListener('change',()=>{if(!raf)raf=requestAnimationFrame(animate);});
+new ResizeObserver(()=>{for(const [node,state]of motion){state.natural=node.querySelector('.risk-text').scrollHeight;state.target=state.target>0?state.natural:0;}if(!raf)raf=requestAnimationFrame(animate);}).observe($('.device'));
+window.prototypeQA={samples,models,get scene(){return scene;},get moving(){return raf!==0;},selectScene:showScene};
+if(document.documentElement.dataset.theme==='dark')$('#theme').textContent='浅色';
+showScene('list');
+</script>
+</html>
