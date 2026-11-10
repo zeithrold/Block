@@ -87,6 +87,7 @@ fn compiled(manifest: VersionManifest, target: Target) -> anyhow::Result<Executi
             library_overrides: BTreeMap::new(),
             companion_libraries: Vec::new(),
             classifier_overrides: BTreeMap::new(),
+            existing: None,
             compatibility: None,
         },
     )
@@ -217,7 +218,7 @@ async fn saved_plan_guard_runs_before_instance_files_downloads_or_java_probes() 
     replay
         .command
         .classpath
-        .retain(|path| !path.contains("natives-macos-arm64"));
+        .retain(|path| !matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.contains("natives-macos-arm64")));
     let directory = tempfile::tempdir()?;
     let events = Arc::new(AtomicUsize::new(0));
     let observed = events.clone();

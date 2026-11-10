@@ -233,14 +233,14 @@ impl Block {
     /// is exactly what the center's repair action acts on, so the center never
     /// offers a step that could not run.
     fn first_run_game_state(&self) -> GameState {
-        let Some(profile) = self.profile() else {
+        let Some(profile) = self.instance() else {
             return GameState::None;
         };
         let Some(instance) = self
             .snapshot
             .instances
             .iter()
-            .find(|instance| instance.id == profile.instance_id)
+            .find(|instance| instance.id == profile.id)
         else {
             return GameState::None;
         };
@@ -250,11 +250,17 @@ impl Block {
             .is_some_and(|pack| pack.status == PackStatus::Pending)
         {
             GameState::PendingPack
-        } else if instance
-            .targets
-            .iter()
-            .any(|target| target.id == profile.target_id && target.status == InstallStatus::Ready)
-        {
+        } else if instance.targets.iter().any(|target| {
+            target.id == profile.target_id
+                && (target.status == InstallStatus::Ready
+                    || matches!(
+                        (&target.source, &target.status),
+                        (
+                            block_launcher::catalog::TargetSource::Existing { .. },
+                            InstallStatus::Pending
+                        )
+                    ))
+        }) {
             GameState::Ready
         } else {
             GameState::Unprepared
@@ -447,9 +453,7 @@ impl Block {
             Action::ChooseLibrary(scope) => self.browse_setup_library(scope, cx),
             Action::Prepare => match self.first_run_game_state() {
                 GameState::PendingPack => {
-                    if let Some(instance) =
-                        self.profile().map(|profile| profile.instance_id.clone())
-                    {
+                    if let Some(instance) = self.instance().map(|profile| profile.id.clone()) {
                         self.resume_pack_import(instance, window, cx);
                     }
                 }
@@ -821,7 +825,7 @@ impl Block {
     }
 
     /// How many games are saved, or the step that is still missing. The count is
-    /// of Instances: a game is one Instance, however many Profiles launch it.
+    /// of registered Instances, each with its own launch settings.
     pub(super) fn first_run_game_description(&self, language: Language) -> String {
         match &self.shell.games.load {
             super::browser::CollectionLoad::Loading => {

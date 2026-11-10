@@ -177,36 +177,36 @@ impl From<&str> for UiText {
     }
 }
 
-pub(crate) fn profile_icon_name(
+pub(crate) fn instance_icon_name(
     language: Language,
-    icon: block_launcher::catalog::ProfileIcon,
+    icon: block_launcher::catalog::InstanceIcon,
 ) -> String {
-    use block_launcher::catalog::ProfileIcon;
+    use block_launcher::catalog::InstanceIcon;
     let key = match icon {
-        ProfileIcon::Blocks => "appearance.icon.blocks",
-        ProfileIcon::Layers => "appearance.icon.layers",
-        ProfileIcon::Pickaxe => "appearance.icon.pickaxe",
-        ProfileIcon::Sword => "appearance.icon.sword",
-        ProfileIcon::Compass => "appearance.icon.compass",
-        ProfileIcon::Hammer => "appearance.icon.hammer",
-        ProfileIcon::Leaf => "appearance.icon.leaf",
-        ProfileIcon::FlaskConical => "appearance.icon.experiment",
+        InstanceIcon::Blocks => "appearance.icon.blocks",
+        InstanceIcon::Layers => "appearance.icon.layers",
+        InstanceIcon::Pickaxe => "appearance.icon.pickaxe",
+        InstanceIcon::Sword => "appearance.icon.sword",
+        InstanceIcon::Compass => "appearance.icon.compass",
+        InstanceIcon::Hammer => "appearance.icon.hammer",
+        InstanceIcon::Leaf => "appearance.icon.leaf",
+        InstanceIcon::FlaskConical => "appearance.icon.experiment",
     };
     tr!(language, key)
 }
 
-pub(crate) fn profile_color_name(
+pub(crate) fn instance_color_name(
     language: Language,
-    color: block_launcher::catalog::ProfileColor,
+    color: block_launcher::catalog::InstanceColor,
 ) -> String {
-    use block_launcher::catalog::ProfileColor;
+    use block_launcher::catalog::InstanceColor;
     let key = match color {
-        ProfileColor::Gray => "appearance.color.gray",
-        ProfileColor::Blue => "appearance.color.blue",
-        ProfileColor::Green => "appearance.color.green",
-        ProfileColor::Orange => "appearance.color.orange",
-        ProfileColor::Purple => "appearance.color.purple",
-        ProfileColor::Pink => "appearance.color.pink",
+        InstanceColor::Gray => "appearance.color.gray",
+        InstanceColor::Blue => "appearance.color.blue",
+        InstanceColor::Green => "appearance.color.green",
+        InstanceColor::Orange => "appearance.color.orange",
+        InstanceColor::Purple => "appearance.color.purple",
+        InstanceColor::Pink => "appearance.color.pink",
     };
     tr!(language, key)
 }

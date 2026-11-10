@@ -15,24 +15,40 @@ use crate::{
     session_ipc,
 };
 
-fn starting_record(root: &Path, profile_id: &str) -> anyhow::Result<(Catalog, RunRecord, String)> {
+fn starting_record(root: &Path, instance_id: &str) -> anyhow::Result<(Catalog, RunRecord, String)> {
     let catalog = Catalog::open(root)?;
     let snapshot = catalog.snapshot()?;
-    let (instance, profile, target) = snapshot.selection(profile_id)?;
-    let fingerprint = snapshot.launch_fingerprint(profile_id)?;
+    let (instance, target) = snapshot.selection(instance_id)?;
+    let fingerprint = snapshot
+        .launch_fingerprint(instance_id)
+        .inspect_err(|error| {
+            if let Some(failure) = error.downcast_ref::<crate::catalog::ExistingSourceFailure>()
+                && let Err(_publication) = catalog.record_existing_verification(
+                    instance,
+                    crate::catalog::InstallStatus::Failed {
+                        message: failure.safe_message(&instance.resource_directory),
+                    },
+                )
+            {
+                tracing::warn!(
+                    event = "existing_verification_publication_failed",
+                    instance_id,
+                    "Existing verification status could not be saved"
+                );
+            }
+        })?;
     let id = uuid::Uuid::new_v4().to_string();
     storage::create_directory(catalog.root(), &id)?;
     let record = RunRecord {
-        schema_version: 1,
+        schema_version: 2,
         context: CrashContext {
             run_id: id,
-            profile_id: profile.id.clone(),
-            profile_name: profile.name.clone(),
+            instance_id: instance.id.clone(),
+            instance_name: instance.name.clone(),
             minecraft_version: instance.minecraft_version.clone(),
             loader: target.loader_version.clone(),
         },
-        instance_id: instance.id.clone(),
-        game_directory: profile.game_directory(instance)?,
+        game_directory: instance.game_directory.clone(),
         supervisor_pid: None,
         java_pid: None,
         state: RunState::Starting,
@@ -67,15 +83,15 @@ fn failed_start(root: &Path, mut record: RunRecord, message: &str) -> anyhow::Re
 pub async fn spawn_session(
     root: &Path,
     executable: &Path,
-    profile_id: &str,
+    instance_id: &str,
     game: &GameSession,
     expires_at: SystemTime,
 ) -> anyhow::Result<RunRecord> {
     let _storage = crate::storage::acquire(root)?;
-    let mut bootstrap = wire::Bootstrap::new(profile_id, game, expires_at)?;
+    let mut bootstrap = wire::Bootstrap::new(instance_id, game, expires_at)?;
     bootstrap.session()?;
-    let (catalog, record, fingerprint) = starting_record(root, profile_id)?;
-    bootstrap.profile_fingerprint = fingerprint;
+    let (catalog, record, fingerprint) = starting_record(root, instance_id)?;
+    bootstrap.instance_fingerprint = fingerprint;
     let id = record.context.run_id.clone();
     // Detached owners have no terminal. Keep startup/finalization errors with
     // their run so a lost monitor does not discard the only useful diagnostic.
@@ -152,7 +168,7 @@ async fn request(root: &Path, run_id: &str, stop: bool) -> anyhow::Result<RunRec
         .await?;
         let response: RunRecord = wire::receive(&mut stream).await?;
         ensure!(
-            response.schema_version == 1 && response.context.run_id == run_id,
+            response.schema_version == 2 && response.context.run_id == run_id,
             "session response identity mismatch"
         );
         Ok(response)

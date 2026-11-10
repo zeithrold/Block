@@ -71,6 +71,7 @@ fn zulu_runtime_substitution_is_explicit_and_extracts_into_the_runtime_store() -
         companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
+        existing: None,
     };
     let mut resources = Vec::new();
     let mut actions = Vec::new();
@@ -137,6 +138,7 @@ fn companion_libraries_are_added_to_the_verified_classpath() -> anyhow::Result<(
         companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
+        existing: None,
     };
     // A companion dependency the reviewed replacement needs but the older
     // manifest never listed, for example slf4j-api for text2speech 1.12.4.
@@ -164,7 +166,7 @@ fn companion_libraries_are_added_to_the_verified_classpath() -> anyhow::Result<(
         plan.command
             .classpath
             .iter()
-            .any(|entry| entry == &companion),
+            .any(|entry| matches!(entry, super::ResourcePath::Cache { relative } if relative == &companion)),
         "companion classpath entry missing: {:?}",
         plan.command.classpath
     );

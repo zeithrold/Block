@@ -129,7 +129,7 @@ pub fn read_run(root: &Path, run_id: &str) -> anyhow::Result<RunRecord> {
         MAX_RECORD_BYTES,
     )?;
     ensure!(
-        record.schema_version == 1 && record.context.run_id == run_id,
+        record.schema_version == 2 && record.context.run_id == run_id,
         "session document identity mismatch"
     );
     Ok(record)
@@ -144,7 +144,7 @@ pub fn read_crash(root: &Path, run_id: &str) -> anyhow::Result<CrashReport> {
         MAX_REPORT_BYTES,
     )?;
     ensure!(
-        report.schema_version == 1 && report.context.run_id == run_id,
+        report.schema_version == 2 && report.context.run_id == run_id,
         "crash report identity mismatch"
     );
     Ok(report)
@@ -257,8 +257,8 @@ mod tests {
         let report = CrashReport::new(
             CrashContext {
                 run_id: id.clone(),
-                profile_id: "fixture".into(),
-                profile_name: "Fixture".into(),
+                instance_id: "fixture".into(),
+                instance_name: "Fixture".into(),
                 minecraft_version: "1.20.6".into(),
                 loader: None,
             },

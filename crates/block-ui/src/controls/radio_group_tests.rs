@@ -263,7 +263,7 @@ fn real_wizard_loader_group_changes_only_its_checkpoint_and_skips_unsupported_lo
     ));
 }
 #[gpui::test]
-fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
+fn instance_default_account_and_target_groups_remain_drafts_until_the_main_save(
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
@@ -282,17 +282,17 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
             }
             view.initialize_browsers(cx);
             view.handle(crate::UiAction::Tab(crate::Tab::Instances), window, cx);
-            view.handle(crate::UiAction::Inspect("profile-a".into()), window, cx);
-            view.handle(crate::UiAction::EditProfile, window, cx);
+            view.handle(crate::UiAction::Inspect("instance-a".into()), window, cx);
+            view.handle(crate::UiAction::EditInstance, window, cx);
             view.handle(
-                crate::UiAction::ProfilePage(crate::profile_editor::EditorPage::Data),
+                crate::UiAction::InstancePage(crate::instance_editor::EditorPage::Data),
                 window,
                 cx,
             );
         });
     });
     settle(cx);
-    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    let viewport = crate::test_support::control_bounds(cx, "instance-editor-body");
     assert!(
         viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
             cx,
@@ -303,26 +303,26 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
     focus_radio(cx, "Use current account");
     cx.simulate_keystrokes("down");
     settle(cx);
-    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::Profile(form)) if form.original.default_account.is_some())));
+    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::EditInstance(form)) if form.original.default_account.is_some())));
     assert_eq!(
-        view.read_with(cx, |view, _| view.snapshot.profiles[0]
+        view.read_with(cx, |view, _| view.snapshot.instances[0]
             .default_account
             .clone()),
         None
     );
-    click(cx, "cancel-profile-page");
-    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::Profile(form)) if form.original.default_account.is_none())));
-    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    click(cx, "cancel-instance-page");
+    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::EditInstance(form)) if form.original.default_account.is_none())));
+    let viewport = crate::test_support::control_bounds(cx, "instance-editor-body");
     assert!(
         viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
             cx,
             viewport,
-            "edit-profile-launch"
+            "edit-instance-launch"
         ))
     );
-    click(cx, "edit-profile-launch");
+    click(cx, "edit-instance-launch");
     settle(cx);
-    let viewport = crate::test_support::control_bounds(cx, "profile-editor-body");
+    let viewport = crate::test_support::control_bounds(cx, "instance-editor-body");
     assert!(
         viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
             cx,
@@ -333,9 +333,9 @@ fn profile_default_account_and_target_groups_remain_drafts_until_the_main_save(
     focus_radio(cx, "vanilla");
     cx.simulate_keystrokes("end");
     settle(cx);
-    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::Profile(form)) if form.original.target_id == "second-target")));
+    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(crate::Form::EditInstance(form)) if form.original.target_id == "second-target")));
     assert_eq!(
-        view.read_with(cx, |view, _| view.snapshot.profiles[0].target_id.clone()),
+        view.read_with(cx, |view, _| view.snapshot.instances[0].target_id.clone()),
         "vanilla"
     );
 }

@@ -10,11 +10,6 @@
     "zh-Hans": "游戏库位置已保存，已有游戏未移动。",
     "ja": "ライブラリの場所を保存しました。既存のゲームは移動していません。"
   },
-  "setup.library.import_fallback": {
-    "en": "Copy to: %{path}",
-    "zh-Hans": "复制到：%{path}",
-    "ja": "コピー先：%{path}"
-  },
   "setup.library.choose": {
     "en": "Choose game library folder",
     "zh-Hans": "选择游戏库文件夹",
@@ -55,11 +50,6 @@
     "zh-Hans": "请先检查游戏设置再导入：%{detail}",
     "ja": "読み込み前にゲーム設定を確認してください：%{detail}"
   },
-  "setup.library.import_overlap": {
-    "en": "The import destination or launcher data folder overlaps a selected source. Choose another folder.",
-    "zh-Hans": "导入目的地或启动器数据文件夹与所选源目录重叠，请选择其他文件夹。",
-    "ja": "読み込み先またはランチャーのデータフォルダーが選択した元のフォルダーと重複しています。別の場所を選択してください。"
-  },
   "settings.index.choose": {
     "en": "Choose what to adjust",
     "zh-Hans": "选择要调整的内容",
@@ -74,11 +64,6 @@
     "en": "Memory, Java and game windows",
     "zh-Hans": "内存、Java 与游戏窗口",
     "ja": "メモリ、Java、ゲーム画面"
-  },
-  "settings.index.profiles": {
-    "en": "How instances and profiles work together",
-    "zh-Hans": "实例与配置如何配合",
-    "ja": "インスタンスとプロファイルの連携"
   },
   "settings.index.downloads": {
     "en": "Download limits, retries and proxy",
@@ -165,11 +150,6 @@
     "zh-Hans": "游戏默认设置",
     "ja": "ゲームの既定値"
   },
-  "settings.navigation.profiles": {
-    "en": "Profile mode",
-    "zh-Hans": "配置模式",
-    "ja": "プロファイルモード"
-  },
   "settings.navigation.downloads": {
     "en": "Downloads & network",
     "zh-Hans": "下载与网络",
@@ -219,16 +199,6 @@
     "en": "A comfortable starting point for new game setups.",
     "zh-Hans": "为新游戏设置提供舒适的起点。",
     "ja": "新しいゲーム設定の快適な開始点です。"
-  },
-  "settings.page.profiles.title": {
-    "en": "Profile mode",
-    "zh-Hans": "配置模式",
-    "ja": "プロファイルモード"
-  },
-  "settings.page.profiles.description": {
-    "en": "Choose how Instances and Profiles work together.",
-    "zh-Hans": "选择实例与配置如何协同工作。",
-    "ja": "インスタンスとプロファイルの連携方法を選択します。"
   },
   "settings.page.downloads.title": {
     "en": "Downloads & network",
@@ -331,9 +301,9 @@
     "ja": "0 · 無制限"
   },
   "settings.game.note": {
-    "en": "Defaults apply to new Instances and Profiles. Existing setups keep their current settings.",
-    "zh-Hans": "默认值会应用于新的实例和配置。现有设置保留当前设置。",
-    "ja": "既定値は新しいインスタンスとプロファイルに適用されます。既存の設定は現在の内容を保持します。"
+    "en": "Defaults apply to new instances. Existing instances keep their saved settings.",
+    "zh-Hans": "默认值仅应用于新实例，现有实例保留已保存的设置。",
+    "ja": "既定値は新しいインスタンスに適用されます。既存のインスタンスは保存済みの設定を保持します。"
   },
   "settings.game.memory.label": {
     "en": "Default memory (GB)",
@@ -509,51 +479,6 @@
     "en": "Locations are managed automatically.",
     "zh-Hans": "存储位置由 Block 自动管理。",
     "ja": "保存場所は自動で管理されます。"
-  },
-  "settings.profile_mode.bundled.title": {
-    "en": "Bundled Profile",
-    "zh-Hans": "内置配置",
-    "ja": "同梱プロファイル"
-  },
-  "settings.profile_mode.bundled.description": {
-    "en": "Recommended for beginners. One Instance has one Profile and its own launch preferences.",
-    "zh-Hans": "推荐新手使用。一个实例有一个配置及其独立的启动偏好。",
-    "ja": "初心者におすすめです。1 つのインスタンスに 1 つのプロファイルと独自の起動設定があります。"
-  },
-  "settings.profile_mode.separated.title": {
-    "en": "Separated Profile",
-    "zh-Hans": "分离配置",
-    "ja": "分離プロファイル"
-  },
-  "settings.profile_mode.separated.description": {
-    "en": "Reuse an Instance across several Profiles with independent accounts, memory and JVM arguments.",
-    "zh-Hans": "在多个配置间复用同一个实例，各自拥有独立的账户、内存和 JVM 参数。",
-    "ja": "1 つのインスタンスを複数のプロファイルで再利用し、アカウント、メモリ、JVM 引数を個別に設定できます。"
-  },
-  "settings.profile_mode.current": {
-    "en": "Current",
-    "zh-Hans": "当前",
-    "ja": "現在"
-  },
-  "settings.profile_mode.note_separated": {
-    "en": "Your existing setups are preserved. Returning to Bundled is unavailable, including through Restore defaults.",
-    "zh-Hans": "现有设置会保留。无法返回内置模式，包括通过恢复默认设置。",
-    "ja": "既存の設定は保持されます。既定値の復元を含め、同梱モードには戻せません。"
-  },
-  "settings.profile_mode.note_bundled": {
-    "en": "You can switch to Separated Profile once. Existing Instances, Profiles and files stay in place. This cannot be reversed.",
-    "zh-Hans": "你可以切换到分离配置一次。现有的实例、配置和文件保持不变。此操作无法撤销。",
-    "ja": "分離プロファイルには一度だけ切り替えられます。既存のインスタンス、プロファイル、ファイルはそのまま残ります。この操作は元に戻せません。"
-  },
-  "settings.profile_mode.switch": {
-    "en": "Switch to Separated Profile…",
-    "zh-Hans": "切换到分离配置…",
-    "ja": "分離プロファイルに切り替える…"
-  },
-  "settings.profile_mode.footer": {
-    "en": "Mode changes apply immediately.",
-    "zh-Hans": "模式更改会立即生效。",
-    "ja": "モードの変更はすぐに反映されます。"
   },
   "settings.error.java_path": {
     "en": "Choose an absolute Java executable path, or use Automatic Java",

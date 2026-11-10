@@ -11,8 +11,8 @@
 use block_auth::{Account, AccountProvider, AccountRef};
 use block_launcher::{
     catalog::{
-        DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, ProfileMode,
-        Snapshot,
+        DataPolicy, InstallStatus, Instance, InstanceOwnership, LaunchTarget, LoaderKind, Snapshot,
+        TargetSource,
     },
     recipe::{Compatibility, RuntimeSelection},
 };
@@ -91,28 +91,23 @@ pub(super) fn press(cx: &mut gpui::VisualTestContext, keys: &str) {
 
 pub(super) fn ready_snapshot() -> Snapshot {
     Snapshot {
-        profile_mode: ProfileMode::Bundled,
         instances: vec![Instance {
             id: "instance-a".into(),
             name: "Test game".into(),
             minecraft_version: "1.20.6".into(),
-            directory: std::env::temp_dir().join("block-ui-fixture-only"),
+            resource_directory: std::env::temp_dir().join("block-ui-fixture-only"),
+            game_directory: std::env::temp_dir().join("block-ui-fixture-only"),
+            ownership: InstanceOwnership::Managed,
             targets: vec![LaunchTarget {
                 id: "vanilla".into(),
                 kind: LoaderKind::Vanilla,
                 loader_version: None,
-                manifest: None,
+                source: TargetSource::Managed { manifest: None },
                 status: InstallStatus::Ready,
                 optifine: None,
                 optifine_mod: None,
             }],
-            settings: None,
             pack: None,
-        }],
-        profiles: vec![Profile {
-            id: "profile-a".into(),
-            name: "Test profile".into(),
-            instance_id: "instance-a".into(),
             target_id: "vanilla".into(),
             runtime: RuntimeSelection::Managed,
             memory_mib: 2048,
@@ -121,8 +116,10 @@ pub(super) fn ready_snapshot() -> Snapshot {
             data_policy: DataPolicy::Isolated,
             default_account: None,
             compatibility: Compatibility::Official,
-            appearance: block_launcher::catalog::ProfileAppearance::default(),
-            inheritance: block_launcher::catalog::ProfileInheritance::default(),
+            appearance: block_launcher::catalog::InstanceAppearance::default(),
+            width: 1280,
+            height: 720,
+            fullscreen: false,
             server: block_launcher::catalog::ServerPreferences::default(),
         }],
     }

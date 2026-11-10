@@ -1,7 +1,7 @@
-//! One-time seeding of a pack Profile's game directory from its installed baseline.
+//! One-time seeding of a managed Instance's game directory from its pack baseline.
 //!
-//! Pack content is prepared once inside the installation and is published into each
-//! Profile's own game directory the first time that Profile launches. The caller
+//! Pack content is prepared once inside the installation and is published into its
+//! actual game directory the first time that Instance launches. The caller
 //! already holds the real game directory's [`GameDirectoryGuard`] and keeps holding
 //! it here: the lock inode, the game directory itself and every played file stay
 //! untouched, and the source is always the installation's prepared baseline rather
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use super::archive::validate_pack_path;
 use crate::{
     CancellationToken,
-    catalog::{GameDirectoryGuard, Instance},
+    catalog::{GameDirectoryGuard, Instance, InstanceOwnership},
 };
 
 /// Ownership marker written into the game directory before pack content exists.
@@ -32,12 +32,18 @@ const MARKER_FILE: &str = ".block-pack-init.json";
 /// Private staging directory; the marker names the exact one it owns.
 const STAGE_PREFIX: &str = ".block-pack-stage-";
 /// Names this operation owns and never publishes from pack content.
-const LAUNCHER_ENTRIES: [&str; 3] = [MARKER_FILE, ".block-game.lock", ".block-session.json"];
+const LAUNCHER_ENTRIES: [&str; 5] = [
+    MARKER_FILE,
+    ".block-game.lock",
+    ".block-session.json",
+    ".block-pack",
+    ".block-pack.lock",
+];
 /// A marker never needs to be larger than the entry list it declares.
 const MAX_MARKER_BYTES: u64 = 64 * 1024;
 const SCHEMA_VERSION: u32 = 1;
 
-/// Publish the installation's prepared baseline into this pack Profile's game directory.
+/// Publish the installation's prepared baseline into this Instance's game directory.
 ///
 /// The caller holds `guard` continuously for the whole call. A completed marker makes
 /// the call a no-op; otherwise pack content is staged beside the locked directory and
@@ -68,29 +74,24 @@ pub(crate) fn initialize(
     }
 }
 
-/// Prove the caller's lock covers exactly a location this Instance's Profiles own.
-///
-/// Only `<instance>/game` and `<instance>/profiles/<id>/game` are accepted, so no
-/// caller-supplied path can point this operation at unrelated data. The installation
-/// root is canonicalized here because every Profile location is derived from it.
+/// Prove that a managed pack owns the baseline and the guard covers its exact gameDir.
 fn controlled_root(instance: &Instance, guard: &GameDirectoryGuard) -> anyhow::Result<PathBuf> {
+    ensure!(
+        instance.ownership == InstanceOwnership::Managed,
+        "registered source installations cannot initialize a pack baseline"
+    );
+    let pack = instance.pack.as_ref().context("instance has no pack")?;
+    ensure!(
+        instance.target_id == pack.target_id,
+        "selected target does not match the pack"
+    );
     let root = instance
-        .directory
+        .resource_directory
         .canonicalize()
         .context("installation directory is unavailable; reselect its location before playing")?;
-    let locked = guard.directory().strip_prefix(&root).with_context(|| {
-        format!(
-            "the locked game directory is outside its installation; it was preserved: {}",
-            guard.directory().display()
-        )
-    })?;
-    let controlled = locked == Path::new("game")
-        || (locked.components().count() == 3
-            && locked.starts_with("profiles")
-            && locked.ends_with("game"));
     ensure!(
-        controlled,
-        "the locked directory is not a Profile game directory; it was preserved: {}",
+        root == instance.resource_directory && guard.directory() == instance.game_directory,
+        "the locked directory does not match the Instance; it was preserved: {}",
         guard.directory().display()
     );
     Ok(root)
@@ -192,7 +193,7 @@ fn publish_entry(staged: &Path, destination: &Path, name: &str) -> anyhow::Resul
 /// Recursively copy the prepared baseline, refusing links and special files.
 fn copy_baseline(baseline: &Path, stage: &Path, cancel: &CancellationToken) -> anyhow::Result<()> {
     let metadata = fs::symlink_metadata(baseline)
-        .context("the prepared pack baseline is missing for this Profile")?;
+        .context("the prepared pack baseline is missing for this Instance")?;
     ensure!(
         metadata.is_dir() && !metadata.file_type().is_symlink(),
         "the prepared pack baseline is not a plain directory; it was preserved: {}",
@@ -265,7 +266,8 @@ fn ensure_publishable_destination(game: &Path) -> anyhow::Result<()> {
         let allowed = name
             .to_str()
             .is_some_and(|name| LAUNCHER_ENTRIES.contains(&name));
-        if !allowed {
+        let valid_metadata_lock = name != ".block-pack.lock" || entry.file_type()?.is_file();
+        if !allowed || !valid_metadata_lock {
             unexpected.push(PathBuf::from(name));
         }
     }
@@ -511,7 +513,7 @@ mod tests {
     use super::{MARKER_FILE, STAGE_PREFIX, initialize};
     use crate::{
         CancellationToken,
-        catalog::{Catalog, DataPolicy, GameDirectoryGuard, Instance, Profile},
+        catalog::{Catalog, DataPolicy, GameDirectoryGuard, Instance, PackAttachment, PackStatus},
     };
 
     const OPTIONS: &[u8] = b"baseline-options";
@@ -519,25 +521,33 @@ mod tests {
     const CONFIG: &[u8] = b"baseline-config";
 
     /// Prepare a real installation whose prepared baseline matches what the parent writes.
-    fn instance_with_baseline(root: &Path) -> anyhow::Result<(Instance, Profile)> {
+    fn instance_with_baseline(root: &Path) -> anyhow::Result<Instance> {
         let catalog = Catalog::open(root)?;
-        let (instance, profile) = catalog.create_instance(
+        let mut instance = catalog.create_instance(
             "Pack".into(),
             "1.20.6".into(),
             Some(root.join("pack")),
             None,
         )?;
+        instance.pack = Some(PackAttachment {
+            target_id: instance.target_id.clone(),
+            status: PackStatus::Ready,
+        });
+        instance.game_directory = instance.resource_directory.join("isolated-game");
         let baseline = baseline(&instance);
         fs::create_dir_all(baseline.join("mods"))?;
         fs::create_dir_all(baseline.join("config"))?;
         fs::write(baseline.join("options.txt"), OPTIONS)?;
         fs::write(baseline.join("mods").join("example.jar"), MOD)?;
         fs::write(baseline.join("config").join("pack.toml"), CONFIG)?;
-        Ok((instance, profile))
+        Ok(instance)
     }
 
     fn baseline(instance: &Instance) -> PathBuf {
-        instance.directory.join(".block-pack").join("baseline")
+        instance
+            .resource_directory
+            .join(".block-pack")
+            .join("baseline")
     }
 
     fn stage_name() -> String {
@@ -617,11 +627,10 @@ mod tests {
     #[test]
     fn a_fresh_game_directory_is_seeded_from_the_baseline() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, mut profile) = instance_with_baseline(root.path())?;
-        profile.data_policy = DataPolicy::Shared;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         assert!(!game.exists());
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         initialize(&instance, &guard, &CancellationToken::new())?;
         assert_eq!(read(&game.join("options.txt"))?, OPTIONS);
         assert_eq!(read(&game.join("mods").join("example.jar"))?, MOD);
@@ -634,10 +643,10 @@ mod tests {
     #[test]
     fn an_existing_empty_game_directory_is_seeded() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         // Launcher-owned names are not user data.
         fs::write(game.join(".block-session.json"), b"{}")?;
         initialize(&instance, &guard, &CancellationToken::new())?;
@@ -649,11 +658,11 @@ mod tests {
     #[test]
     fn existing_user_data_is_rejected_and_preserved() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(game.join("saves"))?;
         fs::write(game.join("saves").join("level.dat"), b"world")?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
         assert!(message.contains("already contains data"), "{message}");
         assert_eq!(read(&game.join("saves").join("level.dat"))?, b"world");
@@ -665,16 +674,17 @@ mod tests {
     #[test]
     fn a_completed_initialization_never_rewrites_played_data() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, mut profile) = instance_with_baseline(root.path())?;
-        profile.data_policy = DataPolicy::Shared;
-        let game = profile.game_directory(&instance)?;
+        let mut instance = instance_with_baseline(root.path())?;
+        instance.data_policy = DataPolicy::Shared;
+        instance.game_directory = instance.resource_directory.clone();
+        let game = instance.game_directory.clone();
         {
-            let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
             initialize(&instance, &guard, &CancellationToken::new())?;
         }
         fs::write(game.join("options.txt"), b"played-options")?;
         fs::remove_file(game.join("mods").join("example.jar"))?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         initialize(&instance, &guard, &CancellationToken::new())?;
         assert_eq!(read(&game.join("options.txt"))?, b"played-options");
         assert!(!game.join("mods").join("example.jar").exists());
@@ -685,8 +695,8 @@ mod tests {
     #[test]
     fn an_interrupted_staging_step_stays_incomplete_and_resumes() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
         let stage = stage_name();
         write_staging_marker(&game, &stage)?;
@@ -694,7 +704,7 @@ mod tests {
         fs::create_dir_all(partial.join("mods"))?;
         fs::write(partial.join("mods").join("partial.jar"), b"partial")?;
 
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         let cancelled = CancellationToken::new();
         cancelled.cancel();
         let message = rejection(initialize(&instance, &guard, &cancelled))?;
@@ -715,8 +725,8 @@ mod tests {
     fn an_interrupted_publication_resumes_without_overwriting_published_entries()
     -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
         // options.txt was published before the interruption; mods was still staged.
         fs::write(game.join("options.txt"), OPTIONS)?;
@@ -726,7 +736,7 @@ mod tests {
         fs::write(staged.join("mods").join("example.jar"), MOD)?;
         write_publishing_marker(&game, &stage, &["mods", "options.txt"])?;
 
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         initialize(&instance, &guard, &CancellationToken::new())?;
         assert_eq!(marker_phase(&game)?, "complete");
         assert_eq!(read(&game.join("options.txt"))?, OPTIONS);
@@ -738,8 +748,8 @@ mod tests {
     #[test]
     fn a_conflicting_publication_stays_blocked_and_preserved() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
         fs::write(game.join("options.txt"), b"user-options")?;
         let stage = stage_name();
@@ -747,7 +757,7 @@ mod tests {
         fs::create_dir_all(&staged)?;
         fs::write(staged.join("options.txt"), OPTIONS)?;
         write_publishing_marker(&game, &stage, &["options.txt"])?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         for _ in 0..2 {
             let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
             assert!(message.contains("already exists"), "{message}");
@@ -758,21 +768,23 @@ mod tests {
     }
 
     #[test]
-    fn an_isolated_profile_seeds_from_the_baseline_rather_than_the_played_shared_game()
+    fn an_isolated_directory_seeds_from_the_baseline_rather_than_the_played_shared_game()
     -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, mut profile) = instance_with_baseline(root.path())?;
-        profile.data_policy = DataPolicy::Shared;
-        let shared = profile.game_directory(&instance)?;
+        let mut instance = instance_with_baseline(root.path())?;
+        instance.data_policy = DataPolicy::Shared;
+        instance.game_directory = instance.resource_directory.clone();
+        let shared = instance.game_directory.clone();
         {
-            let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
             initialize(&instance, &guard, &CancellationToken::new())?;
         }
         fs::write(shared.join("options.txt"), b"played-options")?;
 
-        profile.data_policy = DataPolicy::Isolated;
-        let isolated = profile.game_directory(&instance)?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        instance.data_policy = DataPolicy::Isolated;
+        instance.game_directory = instance.resource_directory.join("isolated-game");
+        let isolated = instance.game_directory.clone();
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         initialize(&instance, &guard, &CancellationToken::new())?;
         assert_eq!(read(&isolated.join("options.txt"))?, OPTIONS);
         assert_eq!(read(&shared.join("options.txt"))?, b"played-options");
@@ -782,25 +794,31 @@ mod tests {
     #[test]
     fn switching_data_policy_keeps_the_other_directory_game_data() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, mut profile) = instance_with_baseline(root.path())?;
-        let isolated = profile.game_directory(&instance)?;
+        let mut instance = instance_with_baseline(root.path())?;
+        let isolated = instance.game_directory.clone();
         {
-            let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
             initialize(&instance, &guard, &CancellationToken::new())?;
         }
         fs::write(isolated.join("options.txt"), b"isolated-options")?;
 
-        profile.data_policy = DataPolicy::Shared;
-        let shared = profile.game_directory(&instance)?;
+        instance.data_policy = DataPolicy::Shared;
+        instance.game_directory = instance
+            .resource_directory
+            .parent()
+            .context("Resource parent")?
+            .join("shared-game");
+        let shared = instance.game_directory.clone();
         {
-            let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
             initialize(&instance, &guard, &CancellationToken::new())?;
         }
         assert_eq!(read(&shared.join("options.txt"))?, OPTIONS);
 
-        profile.data_policy = DataPolicy::Isolated;
+        instance.data_policy = DataPolicy::Isolated;
+        instance.game_directory = instance.resource_directory.join("isolated-game");
         {
-            let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
             initialize(&instance, &guard, &CancellationToken::new())?;
         }
         assert_eq!(read(&isolated.join("options.txt"))?, b"isolated-options");
@@ -809,25 +827,63 @@ mod tests {
     }
 
     #[test]
+    fn selecting_an_uninitialized_ancestor_preserves_the_existing_child_game() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let mut instance = instance_with_baseline(root.path())?;
+        let isolated = instance.game_directory.clone();
+        {
+            let guard = GameDirectoryGuard::for_instance(&instance)?;
+            initialize(&instance, &guard, &CancellationToken::new())?;
+        }
+        fs::write(isolated.join("options.txt"), b"played-options")?;
+        instance.data_policy = DataPolicy::Shared;
+        instance.game_directory = instance.resource_directory.clone();
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
+        let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
+        assert!(message.contains("already contains data"), "{message}");
+        assert_eq!(read(&isolated.join("options.txt"))?, b"played-options");
+        assert!(!instance.game_directory.join("options.txt").exists());
+        assert!(!instance.game_directory.join(MARKER_FILE).exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_metadata_lock_does_not_authorize_baseline_publication() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let instance = instance_with_baseline(root.path())?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
+        let outside = root.path().join("external-lock");
+        fs::write(&outside, b"outside")?;
+        std::os::unix::fs::symlink(&outside, guard.directory().join(".block-pack.lock"))?;
+        let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
+        assert!(message.contains("already contains data"), "{message}");
+        assert_eq!(read(&outside)?, b"outside");
+        assert!(!guard.directory().join("options.txt").exists());
+        Ok(())
+    }
+
+    #[test]
     fn initialization_reuses_the_callers_game_directory_lock() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let instance = instance_with_baseline(root.path())?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         initialize(&instance, &guard, &CancellationToken::new())?;
-        assert!(GameDirectoryGuard::for_profile(&instance, &profile).is_err());
+        assert!(GameDirectoryGuard::for_instance(&instance).is_err());
         drop(guard);
-        assert!(GameDirectoryGuard::for_profile(&instance, &profile).is_ok());
+        assert!(GameDirectoryGuard::for_instance(&instance).is_ok());
         Ok(())
     }
 
     #[test]
     fn a_malformed_marker_is_rejected_and_preserved() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
         fs::write(game.join(MARKER_FILE), b"{ not a marker")?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
         assert!(
             message.contains("invalid pack initialization marker"),
@@ -841,16 +897,16 @@ mod tests {
     #[test]
     fn declared_entries_cannot_escape_the_game_directory() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
-        let game = profile.game_directory(&instance)?;
+        let instance = instance_with_baseline(root.path())?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(&game)?;
         let stage = stage_name();
         write_publishing_marker(&game, &stage, &["../escape"])?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
         assert!(message.contains("unsafe component"), "{message}");
         assert!(!parent_of(&game)?.join("escape").exists());
-        assert!(!instance.directory.join("escape").exists());
+        assert!(!instance.resource_directory.join("escape").exists());
         Ok(())
     }
 
@@ -860,11 +916,11 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let root = tempfile::tempdir()?;
-        let (instance, profile) = instance_with_baseline(root.path())?;
+        let instance = instance_with_baseline(root.path())?;
         let baseline = baseline(&instance);
         symlink(baseline.join("options.txt"), baseline.join("linked.jar"))?;
-        let game = profile.game_directory(&instance)?;
-        let guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
+        let game = instance.game_directory.clone();
+        let guard = GameDirectoryGuard::for_instance(&instance)?;
         let message = rejection(initialize(&instance, &guard, &CancellationToken::new()))?;
         assert!(message.contains("symlink"), "{message}");
         assert_eq!(marker_phase(&game)?, "staging");

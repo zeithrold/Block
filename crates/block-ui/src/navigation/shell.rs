@@ -31,14 +31,13 @@ pub(super) enum Drawer {
     Language,
     Menu,
     Accounts,
-    Profiles,
+    Instances,
     Downloads,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EditorKind {
     Instance,
-    Profile,
     Provider,
 }
 
@@ -60,10 +59,9 @@ pub(super) struct PendingEditorExit {
 pub(super) enum Surface {
     Drawer(Drawer),
     DownloadFiles(super::downloads::DownloadGroup),
-    DeleteProfile(String),
+    DeleteInstance(String),
     RemoveAccount(String),
     RemoveProvider(String),
-    SeparateProfiles,
     StopPackImport {
         request: uuid::Uuid,
         exit: Box<UiAction>,
@@ -105,10 +103,8 @@ pub(super) struct ShellState {
     pub toast: Option<super::feedback::Toast>,
     pub pending_toasts: Vec<super::feedback::Toast>,
     pub auth: Option<super::authentication::AuthWizard>,
-    pub editor: super::profile_editor::EditorState,
-    pub instance_editor: Option<super::instance_editor::InstanceEditor>,
+    pub editor: super::instance_editor::EditorState,
     pub games: super::browser::CollectionState,
-    pub profiles: super::browser::CollectionState,
     pub accounts: super::browser::CollectionState,
     pub providers: super::providers::State,
     pub selector: Option<super::search_selector::SearchSelectorState>,
@@ -198,10 +194,9 @@ impl ShellState {
                 Some(Drawer::Menu)
             }
             Surface::DownloadFiles(_)
-            | Surface::DeleteProfile(_)
+            | Surface::DeleteInstance(_)
             | Surface::RemoveAccount(_)
             | Surface::RemoveProvider(_)
-            | Surface::SeparateProfiles
             | Surface::StopPackImport { .. }
             | Surface::DiscardGameDraft { .. }
             | Surface::SettingsExit(_)
@@ -254,9 +249,7 @@ impl Block {
                         if view.shell.auth.is_some() {
                             view.handle(UiAction::AuthCancel, window, cx);
                             cx.stop_propagation();
-                        } else if view.shell.instance_editor.is_some()
-                            || matches!(view.form, Some(Form::Profile(_)))
-                        {
+                        } else if matches!(view.form, Some(Form::EditInstance(_))) {
                             view.handle(UiAction::NavigationBack, window, cx);
                             cx.stop_propagation();
                         } else if view.form.is_some() {
@@ -299,18 +292,15 @@ impl Block {
         if page == super::navigation::Page::Providers {
             return tr!(language, "nav.authlib_providers");
         }
-        if self.shell.instance_editor.is_some() {
-            return tr!(language, "nav.instance_settings");
-        }
         match &self.form {
-            Some(Form::Profile(_)) => match self.shell.editor.page {
-                Some(super::profile_editor::EditorPage::Appearance) => {
-                    tr!(language, "nav.profile_appearance")
+            Some(Form::EditInstance(_)) => match self.shell.editor.page {
+                Some(super::instance_editor::EditorPage::Appearance) => {
+                    tr!(language, "nav.instance_appearance")
                 }
-                Some(super::profile_editor::EditorPage::Data) => {
+                Some(super::instance_editor::EditorPage::Data) => {
                     tr!(language, "nav.data_and_account")
                 }
-                Some(super::profile_editor::EditorPage::Launch) | None => {
+                Some(super::instance_editor::EditorPage::Launch) | None => {
                     tr!(language, "nav.launch_settings")
                 }
             },
@@ -331,7 +321,7 @@ impl Block {
                     super::first_run::Stage::GameWizard => tr!(language, "nav.create_game"),
                 },
                 Tab::Onboarding => tr!(language, "nav.setup_block"),
-                Tab::Instances | Tab::Profiles => tr!(language, "nav.games"),
+                Tab::Instances => tr!(language, "nav.games"),
                 Tab::Accounts => tr!(language, "nav.accounts"),
                 Tab::Settings => self.settings_title(),
                 Tab::About => tr!(language, "nav.about"),
@@ -344,7 +334,6 @@ impl Block {
         match self.shell.settings_page {
             Some(0) => tr!(language, "settings.navigation.general"),
             Some(1) => tr!(language, "settings.navigation.game"),
-            Some(2) => tr!(language, "settings.navigation.profiles"),
             Some(3) => tr!(language, "settings.navigation.downloads"),
             Some(4) => tr!(language, "settings.navigation.storage"),
             _ => tr!(language, "nav.settings"),
@@ -558,6 +547,8 @@ impl Block {
     }
 
     pub(super) fn home(&self, window: &Window, cx: &Context<'_, Self>) -> impl IntoElement + use<> {
+        use block_launcher::catalog::{InstallStatus, TargetSource};
+
         let account = self
             .accounts
             .iter()
@@ -589,15 +580,10 @@ impl Block {
         if self.busy && !queue_play {
             return content.into_any_element();
         }
-        let profile = self.profile();
-        let pending_pack = profile.is_some_and(|profile| {
-            self.snapshot
-                .instances
-                .iter()
-                .find(|instance| instance.id == profile.instance_id)
-                .and_then(|instance| instance.pack.as_ref())
-                .is_some_and(|pack| pack.status == block_launcher::catalog::PackStatus::Pending)
-        });
+        let instance = self.instance();
+        let pending_pack = instance
+            .and_then(|instance| instance.pack.as_ref())
+            .is_some_and(|pack| pack.status == block_launcher::catalog::PackStatus::Pending);
         let (label, action) = if queue_play {
             (
                 if self.pending_play {
@@ -610,23 +596,26 @@ impl Block {
         } else if pending_pack {
             (tr!(language, "home.continue_pack"), UiAction::Repair)
         } else {
-            match profile.and_then(|profile| self.snapshot.selection(&profile.id).ok()) {
-                Some((_, _, target)) => match &target.status {
-                    block_launcher::catalog::InstallStatus::Ready if account.is_none() => {
+            match instance.and_then(|instance| self.snapshot.selection(&instance.id).ok()) {
+                Some((_, target)) => match (&target.status, &target.source) {
+                    (InstallStatus::Ready, _)
+                    | (InstallStatus::Pending, TargetSource::Existing { .. })
+                        if account.is_none() =>
+                    {
                         (tr!(language, "home.sign_in_to_play"), UiAction::SignIn)
                     }
-                    block_launcher::catalog::InstallStatus::Ready => {
+                    (InstallStatus::Ready, _)
+                    | (InstallStatus::Pending, TargetSource::Existing { .. }) => {
                         (tr!(language, "home.launch"), UiAction::Play)
                     }
-                    block_launcher::catalog::InstallStatus::Failed { .. } => {
+                    (InstallStatus::Failed { .. }, _) => {
                         (tr!(language, "home.retry_download"), UiAction::Repair)
                     }
-                    block_launcher::catalog::InstallStatus::Pending
-                    | block_launcher::catalog::InstallStatus::Installing => {
+                    (InstallStatus::Pending | InstallStatus::Installing, _) => {
                         (tr!(language, "home.download"), UiAction::Repair)
                     }
                 },
-                None if profile.is_some() => (tr!(language, "home.repair_game"), UiAction::Repair),
+                None if instance.is_some() => (tr!(language, "home.repair_game"), UiAction::Repair),
                 None => (tr!(language, "home.create_game"), UiAction::CreateInstance),
             }
         };
@@ -640,9 +629,9 @@ impl Block {
                 tr!(language, "home.queue_waiting")
             }
         } else {
-            profile.map_or_else(
+            instance.map_or_else(
                 || tr!(language, "home.start_adventure"),
-                |profile| profile.name.clone(),
+                |instance| instance.name.clone(),
             )
         };
         let icon = match &action {
@@ -707,9 +696,9 @@ impl Block {
                 .child(super::tooltip::trigger(primary, tooltip, cx))
                 .child(
                     self.button(
-                        "home-profiles",
+                        "home-instances",
                         "",
-                        UiAction::Drawer(Some(Drawer::Profiles)),
+                        UiAction::Drawer(Some(Drawer::Instances)),
                         cx,
                     )
                     .aria_label(tr!(language, "action.switch_game"))
@@ -913,8 +902,8 @@ impl Block {
     }
 
     fn home_version(&self) -> Option<String> {
-        let profile = self.profile()?;
-        let (instance, _, target) = self.snapshot.selection(&profile.id).ok()?;
+        let profile = self.instance()?;
+        let (instance, target) = self.snapshot.selection(&profile.id).ok()?;
         let language = self.language();
         let kind = self
             .version_catalog
@@ -1274,9 +1263,9 @@ impl Block {
                 tr!(language, "setup.language.description"),
                 540.,
             ),
-            Surface::Drawer(Drawer::Profiles) => (
-                tr!(language, "sheet.profiles_title"),
-                tr!(language, "sheet.profiles_description"),
+            Surface::Drawer(Drawer::Instances) => (
+                tr!(language, "sheet.instances_title"),
+                tr!(language, "sheet.instances_description"),
                 540.,
             ),
             Surface::Drawer(Drawer::Accounts) => (
@@ -1444,7 +1433,7 @@ impl Block {
                     }))
                     .into_any_element()
             }
-            Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Profiles)) => div()
+            Surface::Drawer(drawer @ (Drawer::Accounts | Drawer::Instances)) => div()
                 .size_full()
                 .min_h_0()
                 .flex()
@@ -1467,17 +1456,17 @@ impl Block {
     pub(super) fn surface_dialog_title(&self, kind: &Surface) -> String {
         let language = self.language();
         match kind {
-            Surface::DeleteProfile(id) => self
+            Surface::DeleteInstance(id) => self
                 .snapshot
-                .profiles
+                .instances
                 .iter()
                 .find(|profile| &profile.id == id)
                 .map_or_else(
-                    || tr!(language, "dialog.delete_profile.title"),
+                    || tr!(language, "dialog.delete_instance.title"),
                     |profile| {
                         tr!(
                             language,
-                            "dialog.delete_profile.title_named",
+                            "dialog.delete_instance.title_named",
                             name = profile.name,
                         )
                     },
@@ -1497,7 +1486,6 @@ impl Block {
                     },
                 ),
             Surface::RemoveProvider(_) => tr!(language, "dialog.remove_provider.title"),
-            Surface::SeparateProfiles => tr!(language, "dialog.separate_profiles.title"),
             Surface::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
             Surface::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
             Surface::SettingsExit(exit) => match exit.as_ref() {
@@ -1513,20 +1501,13 @@ impl Block {
     fn surface_dialog_notes(&self, kind: &Surface) -> Vec<String> {
         let language = self.language();
         match kind {
-            Surface::DeleteProfile(_) => vec![if self.snapshot.profile_mode
-                == block_launcher::catalog::ProfileMode::Bundled
-            {
-                tr!(language, "dialog.delete_profile.bundled")
-            } else {
-                tr!(language, "dialog.delete_profile.separated")
-            }],
+            Surface::DeleteInstance(_) => vec![tr!(language, "dialog.delete_instance.note")],
             Surface::RemoveAccount(_) => vec![tr!(language, "dialog.remove_account.note")],
             Surface::RemoveProvider(id) => vec![if self.provider_links(id) > 0 {
                 tr!(language, "dialog.remove_provider.used")
             } else {
                 tr!(language, "dialog.remove_provider.note")
             }],
-            Surface::SeparateProfiles => vec![tr!(language, "dialog.separate_profiles.note")],
             Surface::StopPackImport { .. } => vec![tr!(language, "modpack.leave.note")],
             Surface::DiscardGameDraft { .. } => vec![tr!(language, "wizard.discard.note")],
             Surface::SettingsExit(_) => vec![tr!(language, "settings.exit.note")],
@@ -1602,31 +1583,22 @@ impl Block {
     ) -> Vec<super::components::Control> {
         let language = self.language();
         if matches!(kind, Surface::GamesHelp) {
-            return vec![
-                self.surface_dialog_button(
-                    "games-help-settings",
-                    tr!(language, "action.profile_mode"),
-                    Some(UiAction::ProfileModeSettings),
-                    SurfaceDialogTone::Outline,
-                    cx,
-                ),
-                self.surface_dialog_button(
-                    "close-drawer",
-                    tr!(language, "common.close"),
-                    None,
-                    SurfaceDialogTone::Outline,
-                    cx,
-                ),
-            ];
+            return vec![self.surface_dialog_button(
+                "close-drawer",
+                tr!(language, "common.close"),
+                None,
+                SurfaceDialogTone::Outline,
+                cx,
+            )];
         }
         let (cancel_id, cancel_label, cancel_action, primary) = match kind {
-            Surface::DeleteProfile(_) => (
+            Surface::DeleteInstance(_) => (
                 "close-drawer",
                 tr!(language, "common.cancel"),
                 None,
                 Some((
                     "confirm-delete",
-                    tr!(language, "action.delete_profile"),
+                    tr!(language, "action.delete_instance"),
                     UiAction::ConfirmDelete,
                     SurfaceDialogTone::Destructive,
                 )),
@@ -1662,17 +1634,6 @@ impl Block {
                     }),
                 )
             }
-            Surface::SeparateProfiles => (
-                "cancel-separate",
-                tr!(language, "action.keep_bundled"),
-                Some(UiAction::ConfirmSeparate(false)),
-                Some((
-                    "confirm-separate",
-                    tr!(language, "action.enable_separated"),
-                    UiAction::SeparateProfiles,
-                    SurfaceDialogTone::Primary,
-                )),
-            ),
             Surface::StopPackImport { .. } => (
                 "pack-leave-cancel",
                 tr!(language, "modpack.leave.stay"),

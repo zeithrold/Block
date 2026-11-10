@@ -31,7 +31,6 @@ pub enum RunState {
 pub struct RunRecord {
     pub schema_version: u32,
     pub context: CrashContext,
-    pub instance_id: String,
     pub game_directory: PathBuf,
     pub supervisor_pid: Option<u32>,
     pub java_pid: Option<u32>,

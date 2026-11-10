@@ -5,7 +5,7 @@
     reason = "Transitions are private product plumbing."
 )]
 use super::{
-    Block, Form, InstanceForm, ProfileForm, frozen_input,
+    Block, Form, InstanceEditForm, InstanceForm, frozen_input,
     motion::{self, Direction, Layer, MotionStyle, Preferences, Scope, Transition},
     navigation::{DetailKey, Page, PageKey, WizardKey},
     shell::ShellState,
@@ -423,7 +423,7 @@ impl Block {
                 loader_version: form.loader_version.clone(),
                 optifine: form.optifine.clone(),
             }),
-            Form::Profile(form) => Form::Profile(Box::new(ProfileForm {
+            Form::EditInstance(form) => Form::EditInstance(Box::new(InstanceEditForm {
                 original: form.original.clone(),
                 name: frozen_input(&form.name, cx),
                 memory: frozen_input(&form.memory, cx),
@@ -431,7 +431,13 @@ impl Block {
                 jvm: frozen_input(&form.jvm, cx),
                 game: frozen_input(&form.game, cx),
                 server: frozen_input(&form.server, cx),
+                width: frozen_input(&form.width, cx),
+                height: frozen_input(&form.height, cx),
+                game_directory: frozen_input(&form.game_directory, cx),
                 managed: form.managed,
+                window_custom: form.window_custom,
+                optifine: form.optifine.clone(),
+                optifine_request: None,
             })),
         });
         let downloads = self.downloads.as_ref().map(|tracker| {
@@ -466,8 +472,7 @@ impl Block {
             version_load: self.version_load.clone(),
             version_catalog: self.version_catalog.clone(),
             selected_instance: self.selected_instance.clone(),
-            selected_profile: self.selected_profile.clone(),
-            pending_profile: None,
+            pending_instance: None,
             selected_account: self.selected_account.clone(),
             router: self.router.clone(),
             form,
@@ -527,12 +532,7 @@ impl ShellState {
             pending_toasts: Vec::new(),
             auth: self.auth.as_ref().map(|auth| auth.snapshot(cx)),
             editor: self.editor.snapshot(),
-            instance_editor: self
-                .instance_editor
-                .as_ref()
-                .map(|editor| editor.snapshot(cx)),
             games: self.games.snapshot(cx),
-            profiles: self.profiles.snapshot(cx),
             accounts: self.accounts.snapshot(cx),
             providers: self.providers.snapshot(cx),
             selector: self.selector.as_ref().map(|selector| selector.snapshot(cx)),

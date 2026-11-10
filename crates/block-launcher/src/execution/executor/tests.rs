@@ -17,18 +17,18 @@ use std::os::unix::fs::symlink as symlink_dir;
 use std::os::windows::fs::symlink_dir;
 
 use super::{
-    MAX_ARCHIVE_ENTRIES, MAX_UNPACKED_BYTES, UnpackBudget, copy_immutable, extract,
+    MAX_ARCHIVE_ENTRIES, MAX_UNPACKED_BYTES, Preparation, UnpackBudget, copy_immutable, extract,
     install_archive, materialize, relative_runtime_path, runtime_link,
 };
 use crate::{
     azul::ArchiveKind,
-    plan::{CommandTemplate, ExecutionPlan, JavaExecutable, PrepareAction},
+    plan::{CommandTemplate, ExecutionPlan, JavaExecutable, PrepareAction, ResourcePath},
     platform::{Architecture, OperatingSystem, Target},
 };
 
 fn plan(actions: Vec<PrepareAction>) -> ExecutionPlan {
     ExecutionPlan {
-        schema_version: 1,
+        schema_version: 2,
         instance: "executor-test".into(),
         version: "test".into(),
         manifest_sha1: String::new(),
@@ -38,6 +38,8 @@ fn plan(actions: Vec<PrepareAction>) -> ExecutionPlan {
             os_version: String::new(),
         },
         resources: Vec::new(),
+        existing_resources: Vec::new(),
+        existing_asset_root: None,
         actions,
         compatibility: None,
         runtime_substitution: None,
@@ -407,8 +409,22 @@ fn runtime_aliases_can_precede_their_targets_in_the_manifest() -> anyhow::Result
     });
     let plan = plan(actions.to_vec());
     let store = Store::new(root.clone(), true, Arc::new(|_| {}))?;
-    materialize(&plan, &root, "run", &store, &CancellationToken::new())?;
-    materialize(&plan, &root, "run", &store, &CancellationToken::new())?;
+    materialize(
+        &plan,
+        &root,
+        "run",
+        &store,
+        &CancellationToken::new(),
+        Preparation::Install { repair: false },
+    )?;
+    materialize(
+        &plan,
+        &root,
+        "run",
+        &store,
+        &CancellationToken::new(),
+        Preparation::Install { repair: false },
+    )?;
     assert_eq!(fs::read(root.join("runtime/java"))?, b"runtime binary");
     Ok(())
 }
@@ -425,9 +441,16 @@ fn cyclic_or_missing_runtime_aliases_fail_without_hanging() -> anyhow::Result<()
             target: target.into(),
             scope: "runtime".into(),
         }]);
-        let error = materialize(&plan, &root, "run", &store, &CancellationToken::new())
-            .err()
-            .context("invalid runtime alias was accepted")?;
+        let error = materialize(
+            &plan,
+            &root,
+            "run",
+            &store,
+            &CancellationToken::new(),
+            Preparation::Install { repair: false },
+        )
+        .err()
+        .context("invalid runtime alias was accepted")?;
         assert!(error.to_string().contains("cyclic or have missing targets"));
     }
     Ok(())
@@ -472,8 +495,8 @@ async fn preparation_rejects_instance_symlinks_before_creating_a_lock() -> anyho
     let directory = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
-    fs::create_dir(root.join("instances"))?;
-    symlink_dir(outside.path(), root.join("instances/executor-test"))?;
+    fs::create_dir(root.join("preparations"))?;
+    symlink_dir(outside.path(), root.join("preparations/executor-test"))?;
     let store = Store::new(root, true, Arc::new(|_| {}))?;
     let executor = super::Executor::new(store, Arc::new(|_| {}));
     let mut plan = plan(Vec::new());
@@ -494,7 +517,7 @@ async fn cancelled_download_phase_preserves_the_prepared_marker() -> anyhow::Res
 
     let directory = tempfile::tempdir()?;
     let root = directory.path().canonicalize()?;
-    let instance = root.join("instances/executor-test");
+    let instance = root.join("preparations/executor-test");
     fs::create_dir_all(&instance)?;
     let marker = instance.join("prepared.lock.json");
     fs::write(&marker, b"previous preparation")?;
@@ -510,7 +533,9 @@ async fn cancelled_download_phase_preserves_the_prepared_marker() -> anyhow::Res
         "lwjgl-glfw-3.3.3-natives-macos-arm64.jar",
     ]
     .into_iter()
-    .map(str::to_owned)
+    .map(|relative| ResourcePath::Cache {
+        relative: relative.to_owned(),
+    })
     .collect();
     let stages = Arc::new(Mutex::new(Vec::new()));
     let captured = stages.clone();
@@ -580,6 +605,7 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
         root: root.clone(),
         run_id: "cancel-test".into(),
         _lock: fs::File::create(root.join("lock"))?,
+        _resources: Arc::new(super::ResourceLease::shared(&root)?),
     };
     let cancel = CancellationToken::new();
     let cancellation = cancel.clone();
@@ -607,7 +633,7 @@ async fn launcher_drains_both_pipes_and_reaps_a_cancelled_process() -> anyhow::R
     )
     .await??;
     assert_ne!(code, Some(0));
-    let logs = root.join("instances/executor-test/runs/cancel-test/logs");
+    let logs = root.join("preparations/executor-test/runs/cancel-test/logs");
     assert_eq!(
         fs::read_to_string(logs.join("stdout.log"))?,
         "test.Main\none argument with spaces\n"
@@ -673,6 +699,7 @@ async fn resolved_launch_owns_directory_until_exit_and_redacts_actual_process_lo
         root: root.clone(),
         run_id: "resolved-test".into(),
         _lock: fs::File::create(root.join("lock"))?,
+        _resources: Arc::new(super::ResourceLease::shared(&root)?),
     };
     let session = GameSession {
         username: "Player".into(),

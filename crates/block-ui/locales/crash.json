@@ -60,7 +60,7 @@
   "crash.windows_status": {"en": "Windows status: %{status}", "zh-Hans": "Windows 状态：%{status}", "ja": "Windows ステータス: %{status}"},
   "crash.no_exit_status": {"en": "No native exit status was available.", "zh-Hans": "没有可用的系统退出状态。", "ja": "ネイティブの終了ステータスはありません。"},
   "crash.heap_title": {"en": "Java heap memory may have been exhausted", "zh-Hans": "Java 堆内存可能已耗尽", "ja": "Java ヒープメモリが不足した可能性があります"},
-  "crash.heap_action": {"en": "Review the profile's memory limit and available system memory. Reduce demanding mods or resource packs before increasing the heap limit.", "zh-Hans": "检查配置档案的内存限制和可用系统内存。提高堆内存限制之前，请先减少占用较大的模组或资源包。", "ja": "プロファイルのメモリ制限と利用可能なシステムメモリを確認してください。ヒープ制限を増やす前に、負荷の高い Mod やリソースパックを減らしてください。"},
+  "crash.heap_action": {"en": "Review this instance’s memory limit and available system memory. Reduce demanding mods or resource packs before increasing the heap limit.", "zh-Hans": "检查此实例的内存限制和可用系统内存。提高堆内存限制之前，请先减少占用较大的模组或资源包。", "ja": "このインスタンスのメモリ制限と利用可能なシステムメモリを確認してください。ヒープ制限を増やす前に、負荷の高い MOD やリソースパックを減らしてください。"},
   "crash.native_title": {"en": "The Java process may have exhausted native memory", "zh-Hans": "Java 进程可能已耗尽本机内存", "ja": "Java プロセスのネイティブメモリが不足した可能性があります"},
   "crash.native_action": {"en": "Close other memory-heavy applications and review available system memory. A larger Java heap can leave less memory for the operating system and native libraries.", "zh-Hans": "关闭其他占用大量内存的应用并检查可用系统内存。增大 Java 堆可能会减少操作系统和本机库可用的内存。", "ja": "メモリを多く使う他のアプリを閉じ、利用可能なシステムメモリを確認してください。Java ヒープを大きくすると、OS やネイティブライブラリに使えるメモリが減ることがあります。"},
   "crash.java_title": {"en": "The selected Java version may be incompatible", "zh-Hans": "所选 Java 版本可能不兼容", "ja": "選択した Java バージョンに互換性がない可能性があります"},

@@ -125,15 +125,14 @@ fn late_session_then_catalog_keeps_first_run_and_game_wizard_drafts(cx: &mut Tes
                 };
                 view.session_updated(
                     block_launcher::session_host::RunRecord {
-                        schema_version: 1,
+                        schema_version: 2,
                         context: block_launcher::crash::CrashContext {
                             run_id: "synthetic-observed-run".into(),
-                            profile_id: "profile-a".into(),
-                            profile_name: "Observed profile".into(),
+                            instance_id: "instance-a".into(),
+                            instance_name: "Observed instance".into(),
                             minecraft_version: "1.20.6".into(),
                             loader: None,
                         },
-                        instance_id: "instance-a".into(),
                         game_directory: std::env::temp_dir().join("block-ui-observer-fixture-only"),
                         supervisor_pid: None,
                         java_pid: None,
@@ -150,7 +149,7 @@ fn late_session_then_catalog_keeps_first_run_and_game_wizard_drafts(cx: &mut Tes
                 );
                 assert_eq!(view.router.tab(), tab);
                 assert!(view.busy && view.active_run.is_some());
-                assert!(view.pending_profile.is_some());
+                assert!(view.pending_instance.is_some());
                 let (sender, receiver) = tokio::sync::mpsc::channel(1);
                 assert!(
                     sender
@@ -168,8 +167,8 @@ fn late_session_then_catalog_keeps_first_run_and_game_wizard_drafts(cx: &mut Tes
                 };
                 assert_eq!(current_draft, draft);
                 assert_eq!(view.shell.auth.is_some(), context == 2);
-                assert!(view.pending_profile.is_none());
-                assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+                assert!(view.pending_instance.is_none());
+                assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
                 assert!(view.busy && view.active_run.is_some());
                 assert!(
                     view.logs

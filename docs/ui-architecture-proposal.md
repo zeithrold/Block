@@ -43,6 +43,31 @@ Keep these existing divisions:
 - `block-ui`: native presentation and UI orchestration.
 - `block-app` / `block-cli`: application entry points, not parallel core rules.
 
+### Instance ownership
+
+The persistent catalog contains one flat Instance per game, with launch settings
+directly on it. `InstanceConfiguration` is a transient create/edit value, not
+another persistent settings identity. Accounts and transient token-bearing
+LaunchPlans remain separate. There is one Instance browser, detail/editor and
+launch selection; no product Profile, bundled/separated mode or inheritance
+layer remains.
+
+The core owns direct source registration and evidence-based Shared/Isolated
+path selection. Ordinary registration saves references without copying or
+rewriting source Minecraft data. The import Drawer owns its candidate selection
+and local policy-choice page, displaying both actual paths; Shared and Unknown
+warnings open that choice inside the same Drawer. Unknown defaults to Isolated
+without claiming that existing data was moved or prior launch behavior detected.
+Authentication player profiles and vendor launcher/installer profile schemas
+retain their original meanings.
+
+Resource roots, actual mutable game directories and cache preparation state are
+distinct. The core locks the canonical actual game directory and retains the
+cache resource lease through the accepted supervisor session. Managed roots
+default to `<library>/<instance-id>`; per-instance preparation locks, receipts
+and run-private natives belong under `preparations/<instance-id>`. See
+[storage boundaries](config-storage.md) and [supervision](session-supervisor.md).
+
 ### Migration and acceptance
 
 1. Move the decoder/models/resources and parser tests into launcher, preserving
@@ -137,7 +162,7 @@ separate product decisions, not implied by reorganizing code.
 
 ## Reachability and adjacent polish
 
-Keep Home, Games, separated Instances/Profiles, Accounts, providers, Settings,
+Keep Home, Games, Instances, Accounts, providers, Settings,
 About, modern first run, contextual editors, download details and crash help.
 Loading/error/verification states are conditional, not dead pages.
 
@@ -148,5 +173,5 @@ ordinary Settings/About navigation is not a new setup preview feature.
 
 OptiFine's management entry opens the existing Instance draft and reveals its
 editing context; the general settings entry still focuses Instance Name.
-Profile editor headings use the shared title hierarchy and consistent
+Instance editor headings use the shared title hierarchy and consistent
 “Launch settings” naming.

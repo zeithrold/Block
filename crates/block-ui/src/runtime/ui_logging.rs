@@ -10,14 +10,10 @@ use block_launcher::{crash::ExitKind, session_host::RunState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Operation {
-    CreateProfile,
     SaveSetup,
     CreateGame,
     SaveInstance,
-    SaveProfile,
-    SeparateProfiles,
-    CopyProfile,
-    DeleteProfile,
+    DeleteInstance,
     RemoveAccount,
     Repair,
     Launch,
@@ -34,14 +30,10 @@ pub(super) enum Operation {
 impl Operation {
     const fn label(self) -> &'static str {
         match self {
-            Self::CreateProfile => "create_profile",
             Self::SaveSetup => "save_setup",
             Self::CreateGame => "create_game",
             Self::SaveInstance => "save_instance",
-            Self::SaveProfile => "save_profile",
-            Self::SeparateProfiles => "separate_profiles",
-            Self::CopyProfile => "copy_profile",
-            Self::DeleteProfile => "delete_profile",
+            Self::DeleteInstance => "delete_instance",
             Self::RemoveAccount => "remove_account",
             Self::Repair => "repair",
             Self::Launch => "launch",

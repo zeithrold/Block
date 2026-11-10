@@ -30,11 +30,11 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 
 use super::Library;
 #[cfg(unix)]
-use crate::catalog::{DataPolicy, Profile};
+use crate::catalog::DataPolicy;
 #[cfg(unix)]
 use crate::recipe::RuntimeSelection;
 use crate::{
-    catalog::{InstallStatus, Instance, PackStatus, ProfileConfiguration},
+    catalog::{InstallStatus, Instance, InstanceConfiguration, PackStatus, TargetSource},
     modpack::{self, PackSelection},
     session::OfflineSession,
 };
@@ -152,16 +152,16 @@ fn seed_object(store: &Store, bytes: &[u8]) -> anyhow::Result<String> {
     Ok(digest)
 }
 
-fn configuration(name: &str) -> ProfileConfiguration {
-    ProfileConfiguration {
+fn configuration(name: &str) -> InstanceConfiguration {
+    InstanceConfiguration {
         name: name.to_owned(),
-        ..ProfileConfiguration::default()
+        ..InstanceConfiguration::default()
     }
 }
 
 #[cfg(unix)]
-fn configuration_with_java(name: &str, java: &Path) -> ProfileConfiguration {
-    ProfileConfiguration {
+fn configuration_with_java(name: &str, java: &Path) -> InstanceConfiguration {
+    InstanceConfiguration {
         runtime: RuntimeSelection::Local {
             java: java.to_owned(),
         },
@@ -316,7 +316,7 @@ fn version_manifest() -> anyhow::Result<Vec<u8>> {
 
 /// Fixture: publish the `Ready` state a verified installation reaches.
 fn mark_pack_ready(library: &Library, instance: &Instance) -> anyhow::Result<()> {
-    fs::create_dir_all(instance.directory.join(".block-pack/baseline"))?;
+    fs::create_dir_all(instance.resource_directory.join(".block-pack/baseline"))?;
     let pack = instance.pack.as_ref().context("instance has no pack")?;
     let mut target = instance
         .targets
@@ -404,7 +404,7 @@ fn create_pack_publishes_one_instance_and_resumes_the_same_operation() -> anyhow
     let inspected = modpack::inspect(&source)?;
     let selection = optional_selection();
     let operation = uuid::Uuid::new_v4().to_string();
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -415,10 +415,8 @@ fn create_pack_publishes_one_instance_and_resumes_the_same_operation() -> anyhow
 
     assert_eq!(instance.id, operation);
     assert_eq!(instance.name, PACK_NAME);
-    assert_eq!(profile.instance_id, instance.id);
-    assert_eq!(profile.target_id, "vanilla");
-    assert_eq!(profile.name, PACK_NAME);
-    assert!(instance.directory.ends_with(&operation));
+    assert_eq!(instance.target_id, "vanilla");
+    assert!(instance.resource_directory.ends_with(&operation));
     let pack = instance
         .pack
         .as_ref()
@@ -426,8 +424,8 @@ fn create_pack_publishes_one_instance_and_resumes_the_same_operation() -> anyhow
     assert_eq!(pack.target_id, "vanilla");
     assert_eq!(pack.status, PackStatus::Pending);
 
-    let metadata = instance.directory.join(".block-pack");
-    let descriptor = modpack::descriptor::load(&instance.directory)?;
+    let metadata = instance.resource_directory.join(".block-pack");
+    let descriptor = modpack::descriptor::load(&instance.resource_directory)?;
     assert_eq!(descriptor.name, PACK_NAME);
     let required = descriptor
         .files
@@ -467,8 +465,8 @@ fn create_pack_publishes_one_instance_and_resumes_the_same_operation() -> anyhow
         );
     }
 
-    // Reusing the operation ID resumes the same instance and profile.
-    let (resumed_instance, resumed_profile) = library.create_pack(
+    // Reusing the operation ID resumes the same instance.
+    let resumed_instance = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -477,10 +475,8 @@ fn create_pack_publishes_one_instance_and_resumes_the_same_operation() -> anyhow
         &CancellationToken::new(),
     )?;
     assert_eq!(resumed_instance.id, instance.id);
-    assert_eq!(resumed_profile.id, profile.id);
     let state = library.catalog().snapshot()?;
     assert_eq!(state.instances.len(), 1, "exactly one catalog entry");
-    assert_eq!(state.profiles.len(), 1);
     assert_eq!(fs::read(metadata.join("pack.json"))?, published);
 
     // A different selection is a different import and never rewrites this one.
@@ -540,7 +536,7 @@ fn long_pack_name_can_be_replaced_without_changing_the_original_descriptor() -> 
         );
         assert!(library.catalog().snapshot()?.instances.is_empty());
     }
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -549,12 +545,12 @@ fn long_pack_name_can_be_replaced_without_changing_the_original_descriptor() -> 
         &CancellationToken::new(),
     )?;
     assert_eq!(instance.name, "短名称");
-    assert_eq!(profile.name, "短名称");
+    assert_eq!(instance.name, "短名称");
     assert_eq!(
-        modpack::descriptor::load(&instance.directory)?.name,
+        modpack::descriptor::load(&instance.resource_directory)?.name,
         original_name
     );
-    let (again, same_profile) = library.create_pack(
+    let again = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -563,7 +559,6 @@ fn long_pack_name_can_be_replaced_without_changing_the_original_descriptor() -> 
         &CancellationToken::new(),
     )?;
     assert_eq!(again.id, instance.id);
-    assert_eq!(same_profile.id, profile.id);
     assert_eq!(library.catalog().snapshot()?.instances.len(), 1);
     assert_eq!(fs::read(source)?, before);
     Ok(())
@@ -591,11 +586,11 @@ fn completed_pack_import_releases_inherited_lock_descriptions() -> anyhow::Resul
 fn create_pack_preserves_unrelated_data_and_a_foreign_destination() -> anyhow::Result<()> {
     let temporary = tempfile::tempdir()?;
     let library = library_at(temporary.path())?;
-    let (existing, existing_profile) =
+    let existing =
         library
             .catalog()
             .create_instance("Existing world".into(), "1.20.6".into(), None, None)?;
-    let world = existing.directory.join("saves").join("level.dat");
+    let world = existing.resource_directory.join("saves").join("level.dat");
     fs::create_dir_all(world.parent().context("world has no parent")?)?;
     fs::write(&world, b"played world")?;
 
@@ -607,7 +602,7 @@ fn create_pack_preserves_unrelated_data_and_a_foreign_destination() -> anyhow::R
     )?;
     let inspected = modpack::inspect(&source)?;
     let selection = optional_selection();
-    let (packed, _) = library.create_pack(
+    let packed = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -616,21 +611,21 @@ fn create_pack_preserves_unrelated_data_and_a_foreign_destination() -> anyhow::R
         &CancellationToken::new(),
     )?;
     let library_directory = packed
-        .directory
+        .resource_directory
         .parent()
         .context("pack destination has no parent")?
         .to_owned();
     assert_eq!(
         Some(library_directory.as_path()),
-        existing.directory.parent(),
+        existing.resource_directory.parent(),
         "both installations share the library folder"
     );
     assert_eq!(fs::read(&world)?, b"played world");
     let state = library.catalog().snapshot()?;
     assert_eq!(state.instances.len(), 2);
     assert_eq!(
-        state.selection(&existing_profile.id)?.0.directory,
-        existing.directory,
+        state.selection(&existing.id)?.0.resource_directory,
+        existing.resource_directory,
         "an unrelated installation keeps its directory"
     );
 
@@ -671,7 +666,7 @@ fn create_pack_publishes_nothing_on_cancel_or_a_changed_archive() -> anyhow::Res
     )?;
     let inspected = modpack::inspect(&source)?;
     let selection = optional_selection();
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -680,7 +675,7 @@ fn create_pack_publishes_nothing_on_cancel_or_a_changed_archive() -> anyhow::Res
         &CancellationToken::new(),
     )?;
     let library_directory: PathBuf = instance
-        .directory
+        .resource_directory
         .parent()
         .context("pack destination has no parent")?
         .to_owned();
@@ -727,8 +722,7 @@ fn create_pack_publishes_nothing_on_cancel_or_a_changed_archive() -> anyhow::Res
 
     let state = library.catalog().snapshot()?;
     assert_eq!(state.instances.len(), 1);
-    assert_eq!(state.profiles.len(), 1);
-    assert_eq!(state.selection(&profile.id)?.0.id, instance.id);
+    assert_eq!(state.selection(&instance.id)?.0.id, instance.id);
     assert_eq!(
         directory_names(&library_directory)?,
         vec![instance.id.clone()],
@@ -744,7 +738,7 @@ async fn a_pending_pack_blocks_launch_even_when_its_target_is_ready() -> anyhow:
     let source = temporary.path().join("curse.zip");
     write_curseforge_pack(&source, None, &[(238_222, 2_917_633)], &[])?;
     let inspected = modpack::inspect(&source)?;
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -766,15 +760,23 @@ async fn a_pending_pack_blocks_launch_even_when_its_target_is_ready() -> anyhow:
         username: "PackPlayer".into(),
     };
     let launch = library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await;
     let error = launch.err().context("a pending pack prepared a launch")?;
     assert!(
         format!("{error:#}").contains("pack installation is not ready"),
         "{error:#}"
     );
-    // The refusal happens before any game directory or run is created for Java.
-    assert!(!profile.game_directory(&instance)?.exists());
+    // Pack metadata already exists at the game root; refusal publishes no
+    // mutable game data or prepared Java run.
+    assert!(!instance.game_directory.join("options.txt").exists());
+    assert!(!instance.resource_directory.join("runs").exists());
 
     // The archive is not a verifiable substitute for the ID-only entry.
     let install = library
@@ -788,7 +790,7 @@ async fn a_pending_pack_blocks_launch_even_when_its_target_is_ready() -> anyhow:
         "{error:#}"
     );
     let state = library.catalog().snapshot()?;
-    let (current, _, target) = state.selection(&profile.id)?;
+    let (current, target) = state.selection(&instance.id)?;
     assert_eq!(
         current.pack.as_ref().context("pack is missing")?.status,
         PackStatus::Pending,
@@ -814,7 +816,7 @@ async fn only_a_selected_optional_curse_entry_blocks_completion() -> anyhow::Res
     };
 
     // An unselected optional ID-only entry is not a missing requirement.
-    let (unselected, unselected_profile) = library.create_pack(
+    let unselected = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -823,13 +825,13 @@ async fn only_a_selected_optional_curse_entry_blocks_completion() -> anyhow::Res
         &CancellationToken::new(),
     )?;
     assert!(
-        !modpack::descriptor::load(&unselected.directory)?.has_missing_selected(),
+        !modpack::descriptor::load(&unselected.resource_directory)?.has_missing_selected(),
         "an unselected optional entry cannot block"
     );
     mark_pack_ready(&library, &unselected)?;
     let error = library
         .prepare_launch(
-            &unselected_profile.id,
+            &unselected.id,
             &session,
             &CancellationToken::new(),
             None,
@@ -849,7 +851,7 @@ async fn only_a_selected_optional_curse_entry_blocks_completion() -> anyhow::Res
         optional_files: BTreeSet::new(),
         optional_curse_files: BTreeSet::from([(306_612, 3_489_031)]),
     };
-    let (selected, selected_profile) = library.create_pack(
+    let selected = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -858,13 +860,13 @@ async fn only_a_selected_optional_curse_entry_blocks_completion() -> anyhow::Res
         &CancellationToken::new(),
     )?;
     assert!(
-        modpack::descriptor::load(&selected.directory)?.has_missing_selected(),
+        modpack::descriptor::load(&selected.resource_directory)?.has_missing_selected(),
         "a selected ID-only entry must block"
     );
     mark_pack_ready(&library, &selected)?;
     let error = library
         .prepare_launch(
-            &selected_profile.id,
+            &selected.id,
             &session,
             &CancellationToken::new(),
             None,
@@ -887,7 +889,7 @@ async fn an_incompatible_target_cannot_bypass_the_declared_pack_target() -> anyh
     let source = temporary.path().join("curse.zip");
     write_curseforge_pack(&source, Some("fabric-0.16.10"), &[], &[])?;
     let inspected = modpack::inspect(&source)?;
-    let (instance, declared) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -899,15 +901,13 @@ async fn an_incompatible_target_cannot_bypass_the_declared_pack_target() -> anyh
         instance.pack.as_ref().context("pack is missing")?.target_id,
         "fabric-0.16.10"
     );
-    assert_eq!(declared.target_id, "fabric-0.16.10");
+    assert_eq!(instance.target_id, "fabric-0.16.10");
 
-    // Fixture: a Separated catalog with a Profile bound to the vanilla target.
-    library.catalog().separate_profiles()?;
-    let other = library.catalog().create_profile_configured(
+    library.catalog().save_instance(
         &instance.id,
-        ProfileConfiguration {
+        InstanceConfiguration {
             target_id: "vanilla".into(),
-            ..configuration("Vanilla Profile")
+            ..InstanceConfiguration::from(&instance)
         },
     )?;
 
@@ -928,7 +928,13 @@ async fn an_incompatible_target_cannot_bypass_the_declared_pack_target() -> anyh
         username: "PackPlayer".into(),
     };
     let error = library
-        .prepare_launch(&other.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await
         .err()
         .context("an incompatible target launched a completed pack")?;
@@ -939,9 +945,12 @@ async fn an_incompatible_target_cannot_bypass_the_declared_pack_target() -> anyh
 
     // The declared target itself reaches installation metadata, so only the
     // mismatch refuses the other target.
+    library
+        .catalog()
+        .save_instance(&instance.id, InstanceConfiguration::from(&instance))?;
     let error = library
         .prepare_launch(
-            &declared.id,
+            &instance.id,
             &session,
             &CancellationToken::new(),
             None,
@@ -1029,7 +1038,7 @@ async fn curseforge_without_selected_ids_completes_the_real_install_offline() ->
     let source = temporary.path().join("curse.zip");
     write_curseforge_pack(&source, None, &[], &[(101, 202)])?;
     let inspected = modpack::inspect(&source)?;
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -1043,7 +1052,7 @@ async fn curseforge_without_selected_ids_completes_the_real_install_offline() ->
         .install_pack(&instance.id, &source, &CancellationToken::new())
         .await?;
     let snapshot = library.catalog().snapshot()?;
-    let (current, _, target) = snapshot.selection(&profile.id)?;
+    let (current, target) = snapshot.selection(&instance.id)?;
     assert_eq!(
         current.pack.as_ref().map(|pack| pack.status),
         Some(PackStatus::Ready)
@@ -1053,7 +1062,13 @@ async fn curseforge_without_selected_ids_completes_the_real_install_offline() ->
         username: "PackPlayer".into(),
     };
     let plan = library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
     assert_eq!(
         fs::read(plan.game_directory().join("config/example.toml"))?,
@@ -1076,7 +1091,7 @@ async fn modrinth_completes_real_install_and_launch_preparation_from_verified_ca
         &[OPTIONAL_URL.to_owned()],
     )?;
     let inspected = modpack::inspect(&source)?;
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -1091,7 +1106,7 @@ async fn modrinth_completes_real_install_and_launch_preparation_from_verified_ca
         .install_pack(&instance.id, &source, &CancellationToken::new())
         .await?;
     let snapshot = library.catalog().snapshot()?;
-    let (current, _, target) = snapshot.selection(&profile.id)?;
+    let (current, target) = snapshot.selection(&instance.id)?;
     assert_eq!(
         current.pack.as_ref().map(|pack| pack.status),
         Some(PackStatus::Ready)
@@ -1101,7 +1116,13 @@ async fn modrinth_completes_real_install_and_launch_preparation_from_verified_ca
         username: "PackPlayer".into(),
     };
     let plan = library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
     let game = plan.game_directory();
     assert_eq!(fs::read(game.join(REQUIRED_PATH))?, REQUIRED_BYTES);
@@ -1117,7 +1138,6 @@ struct LaunchFixture {
     _temporary: tempfile::TempDir,
     library: Library,
     instance: Instance,
-    profile: Profile,
     java: PathBuf,
 }
 
@@ -1160,7 +1180,7 @@ async fn launch_fixture(plain: bool) -> anyhow::Result<LaunchFixture> {
     } else {
         optional_selection()
     };
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -1169,9 +1189,12 @@ async fn launch_fixture(plain: bool) -> anyhow::Result<LaunchFixture> {
         &CancellationToken::new(),
     )?;
 
-    let baseline = instance.directory.join(".block-pack").join("baseline");
+    let baseline = instance
+        .resource_directory
+        .join(".block-pack")
+        .join("baseline");
     if plain {
-        let descriptor = modpack::descriptor::load(&instance.directory)?;
+        let descriptor = modpack::descriptor::load(&instance.resource_directory)?;
         let source_inspection = modpack::inspect(&source)?;
         modpack::prepare::prepare(
             &download_store(&library)?,
@@ -1207,7 +1230,29 @@ async fn launch_fixture(plain: bool) -> anyhow::Result<LaunchFixture> {
     seed_object(&store, ASSET_INDEX)?;
 
     let mut target = instance.targets[0].clone();
-    target.manifest = Some(installed);
+    target.source = TargetSource::Managed {
+        manifest: Some(installed.clone()),
+    };
+    let mut recipe = super::recipe(
+        &instance,
+        crate::recipe::RecipeSource::LocalManifest { path: installed },
+    );
+    let cancel = CancellationToken::new();
+    let context = crate::resolver::ResolveContext {
+        store: Store::with_options(
+            library.catalog().root().to_owned(),
+            true,
+            Arc::new(|_| {}),
+            options(),
+        )?,
+        cancel: cancel.clone(),
+    };
+    let metadata = super::resolve_for_host(&mut recipe, &context).await?;
+    let prepared = library
+        .executor
+        .prepare_repair(crate::plan::compile_catalog(&recipe, &metadata)?, &cancel)
+        .await?;
+    drop(prepared);
     target.status = InstallStatus::Ready;
     library.catalog().set_target(&instance.id, &target)?;
     library
@@ -1217,7 +1262,6 @@ async fn launch_fixture(plain: bool) -> anyhow::Result<LaunchFixture> {
         _temporary: temporary,
         library,
         instance,
-        profile,
         java,
     })
 }
@@ -1238,7 +1282,8 @@ fn assert_is_baseline(game: &Path) -> anyhow::Result<()> {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn launch_preparation_seeds_each_new_profile_from_the_pack_baseline() -> anyhow::Result<()> {
+async fn launch_preparation_seeds_each_new_game_directory_from_the_pack_baseline()
+-> anyhow::Result<()> {
     let fixture = launch_fixture(false).await?;
     let session = OfflineSession::Offline {
         username: "PackPlayer".into(),
@@ -1246,7 +1291,7 @@ async fn launch_preparation_seeds_each_new_profile_from_the_pack_baseline() -> a
     let plan = fixture
         .library
         .prepare_launch(
-            &fixture.profile.id,
+            &fixture.instance.id,
             &session,
             &CancellationToken::new(),
             None,
@@ -1254,7 +1299,23 @@ async fn launch_preparation_seeds_each_new_profile_from_the_pack_baseline() -> a
         )
         .await?;
     let game = plan.game_directory().to_owned();
-    assert_eq!(game, fixture.profile.game_directory(&fixture.instance)?);
+    assert_eq!(game, fixture.instance.game_directory.clone());
+    assert!(
+        fixture
+            .library
+            .catalog()
+            .root()
+            .join("preparations")
+            .join(&fixture.instance.id)
+            .join("prepared.lock.json")
+            .is_file()
+    );
+    for name in ["game", "runs", "instance.lock", "prepared.lock.json"] {
+        assert!(
+            !game.join(name).exists(),
+            "preparation leaked into game data: {name}"
+        );
+    }
     assert_is_baseline(&game)?;
     let preview = plan.preview();
     assert_eq!(preview.program, fixture.java.canonicalize()?);
@@ -1268,19 +1329,27 @@ async fn launch_preparation_seeds_each_new_profile_from_the_pack_baseline() -> a
     );
     drop(plan);
 
-    // Played data is not a source: a second Profile starts from the baseline.
+    // Played data is not a source: a fresh selected directory uses the baseline.
     fs::write(game.join("options.txt"), b"played-options")?;
-    fixture.library.catalog().separate_profiles()?;
-    let second = fixture.library.catalog().create_profile_configured(
+    let second_game = fixture.instance.resource_directory.join("another-game");
+    fixture.library.catalog().save_instance(
         &fixture.instance.id,
-        configuration_with_java("Second", &fixture.java),
+        InstanceConfiguration {
+            game_directory: second_game.clone(),
+            ..InstanceConfiguration::from(&fixture.instance)
+        },
     )?;
-    assert_eq!(second.data_policy, DataPolicy::Isolated);
     let plan = fixture
         .library
-        .prepare_launch(&second.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &fixture.instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
-    let second_game = plan.game_directory().to_owned();
+    assert_eq!(plan.game_directory(), second_game);
     assert_ne!(second_game, game);
     assert_is_baseline(&second_game)?;
     assert_eq!(fs::read(game.join("options.txt"))?, b"played-options");
@@ -1289,7 +1358,7 @@ async fn launch_preparation_seeds_each_new_profile_from_the_pack_baseline() -> a
 
 #[cfg(unix)]
 #[tokio::test]
-async fn plain_archive_reaches_the_actual_profile_game_directory() -> anyhow::Result<()> {
+async fn plain_archive_reaches_the_actual_instance_game_directory() -> anyhow::Result<()> {
     let fixture = launch_fixture(true).await?;
     let session = OfflineSession::Offline {
         username: "PackPlayer".into(),
@@ -1297,7 +1366,7 @@ async fn plain_archive_reaches_the_actual_profile_game_directory() -> anyhow::Re
     let plan = fixture
         .library
         .prepare_launch(
-            &fixture.profile.id,
+            &fixture.instance.id,
             &session,
             &CancellationToken::new(),
             None,
@@ -1305,7 +1374,7 @@ async fn plain_archive_reaches_the_actual_profile_game_directory() -> anyhow::Re
         )
         .await?;
     let game = plan.game_directory();
-    assert_eq!(game, fixture.profile.game_directory(&fixture.instance)?);
+    assert_eq!(game, fixture.instance.game_directory.clone());
     assert_is_baseline(game)?;
     assert!(!game.join("logs").exists());
     assert!(!game.join("launcher_accounts.json").exists());
@@ -1314,37 +1383,65 @@ async fn plain_archive_reaches_the_actual_profile_game_directory() -> anyhow::Re
 
 #[cfg(unix)]
 #[tokio::test]
-async fn switching_an_installed_pack_profile_keeps_each_game_directory() -> anyhow::Result<()> {
+async fn switching_an_installed_pack_directory_keeps_each_game_directory() -> anyhow::Result<()> {
     let fixture = launch_fixture(false).await?;
     let session = OfflineSession::Offline {
         username: "PackPlayer".into(),
     };
-    let mut profile = fixture.profile.clone();
+    let mut configuration = InstanceConfiguration::from(&fixture.instance);
     let plan = fixture
         .library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &fixture.instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
     let isolated = plan.game_directory().to_owned();
     drop(plan);
     fs::write(isolated.join("options.txt"), b"isolated-played")?;
 
-    profile.data_policy = DataPolicy::Shared;
-    fixture.library.catalog().save_profile(profile.clone())?;
+    let shared_directory = fixture.instance.resource_directory.join("shared-game");
+    fs::create_dir(&shared_directory)?;
+    configuration.data_policy = DataPolicy::Shared;
+    configuration.game_directory = shared_directory.clone();
+    fixture
+        .library
+        .catalog()
+        .save_instance(&fixture.instance.id, configuration.clone())?;
     let plan = fixture
         .library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &fixture.instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
     let shared = plan.game_directory().to_owned();
     drop(plan);
-    assert_eq!(shared, fixture.instance.directory.join("game"));
+    assert_eq!(shared, shared_directory);
     assert_is_baseline(&shared)?;
     assert_eq!(fs::read(isolated.join("options.txt"))?, b"isolated-played");
 
-    profile.data_policy = DataPolicy::Isolated;
-    fixture.library.catalog().save_profile(profile.clone())?;
+    configuration.data_policy = DataPolicy::Isolated;
+    configuration.game_directory = isolated.clone();
+    fixture
+        .library
+        .catalog()
+        .save_instance(&fixture.instance.id, configuration)?;
     let plan = fixture
         .library
-        .prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None)
+        .prepare_launch(
+            &fixture.instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        )
         .await?;
     assert_eq!(plan.game_directory(), isolated.as_path());
     assert_eq!(
@@ -1374,7 +1471,7 @@ async fn prepare_materializes_verified_files_with_overlay_precedence_and_alterna
         &[format!("{}/optional.toml", server.url)],
     )?;
     let inspected = modpack::inspect(&source)?;
-    let (instance, _) = library.create_pack(
+    let instance = library.create_pack(
         &uuid::Uuid::new_v4().to_string(),
         &source,
         &inspected,
@@ -1382,7 +1479,7 @@ async fn prepare_materializes_verified_files_with_overlay_precedence_and_alterna
         configuration("Pack"),
         &CancellationToken::new(),
     )?;
-    let descriptor = modpack::descriptor::load(&instance.directory)?;
+    let descriptor = modpack::descriptor::load(&instance.resource_directory)?;
     let store = download_store(&library)?;
     modpack::prepare::prepare(
         &store,
@@ -1394,7 +1491,10 @@ async fn prepare_materializes_verified_files_with_overlay_precedence_and_alterna
     .await?;
 
     // Selected files are verified by SHA-1, SHA-512 and size, then layered.
-    let baseline = instance.directory.join(".block-pack").join("baseline");
+    let baseline = instance
+        .resource_directory
+        .join(".block-pack")
+        .join("baseline");
     assert_eq!(fs::read(baseline.join(REQUIRED_PATH))?, REQUIRED_BYTES);
     assert_eq!(fs::read(baseline.join(OPTIONAL_PATH))?, OPTIONAL_BYTES);
     assert_eq!(
@@ -1438,7 +1538,7 @@ async fn prepare_blocks_the_baseline_on_cancellation_or_a_wrong_hash_and_resumes
     let inspected = modpack::inspect(&source)?;
     let selection = optional_selection();
     let operation = uuid::Uuid::new_v4().to_string();
-    let (instance, profile) = library.create_pack(
+    let instance = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -1446,9 +1546,12 @@ async fn prepare_blocks_the_baseline_on_cancellation_or_a_wrong_hash_and_resumes
         configuration("Pack"),
         &CancellationToken::new(),
     )?;
-    let descriptor = modpack::descriptor::load(&instance.directory)?;
+    let descriptor = modpack::descriptor::load(&instance.resource_directory)?;
     let store = download_store(&library)?;
-    let baseline = instance.directory.join(".block-pack").join("baseline");
+    let baseline = instance
+        .resource_directory
+        .join(".block-pack")
+        .join("baseline");
 
     let cancelled = CancellationToken::new();
     cancelled.cancel();
@@ -1479,7 +1582,7 @@ async fn prepare_blocks_the_baseline_on_cancellation_or_a_wrong_hash_and_resumes
     assert!(!baseline.exists());
 
     // The failed install leaves one catalog entry, and the import resumes it.
-    let (resumed, _) = library.create_pack(
+    let resumed = library.create_pack(
         &operation,
         &source,
         &inspected,
@@ -1490,10 +1593,10 @@ async fn prepare_blocks_the_baseline_on_cancellation_or_a_wrong_hash_and_resumes
     assert_eq!(resumed.id, instance.id);
     let state = library.catalog().snapshot()?;
     assert_eq!(state.instances.len(), 1);
-    assert_eq!(state.selection(&profile.id)?.0.id, instance.id);
+    assert_eq!(state.selection(&instance.id)?.0.id, instance.id);
     assert_eq!(
         state
-            .selection(&profile.id)?
+            .selection(&instance.id)?
             .0
             .pack
             .as_ref()

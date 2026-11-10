@@ -103,16 +103,6 @@ pub(super) fn application_directory(executable: &Path) -> PathBuf {
         .map_or_else(|| parent.to_owned(), Path::to_owned)
 }
 
-/// Choose a safe parent for an import. If the preferred destination overlaps
-/// its detected source, use the stable fallback library instead.
-pub(super) fn import_parent(preferred: &Path, source: &Path, fallback: &Path) -> PathBuf {
-    if paths_overlap(preferred, source) {
-        fallback.to_owned()
-    } else {
-        preferred.to_owned()
-    }
-}
-
 /// Persist a library choice while preserving cache and generation settings.
 /// Existing game directories are not moved or rewritten.
 /// Return the validated library path written to storage.
@@ -224,12 +214,6 @@ fn protected_location(path: &Path) -> bool {
                 | "program files (x86)"
         )
     })
-}
-
-pub(super) fn paths_overlap(left: &Path, right: &Path) -> bool {
-    let left = comparable_path(left);
-    let right = comparable_path(right);
-    left.starts_with(&right) || right.starts_with(&left)
 }
 
 pub(super) fn comparable_path(path: &Path) -> PathBuf {
@@ -461,21 +445,6 @@ mod tests {
             classify_install_state(true, true, true),
             InstallLocation::Protected
         );
-        Ok(())
-    }
-
-    #[test]
-    fn import_parent_uses_fallback_when_destination_overlaps_source() -> anyhow::Result<()> {
-        let temp = tempfile::tempdir()?;
-        let source = temp.path().join("source");
-        fs::create_dir_all(source.join(".minecraft"))?;
-        let fallback = temp.path().join("Block/library");
-        assert_eq!(
-            import_parent(&source, &source.join(".minecraft"), &fallback),
-            fallback
-        );
-        let preferred = temp.path().join("portable/.minecraft");
-        assert_eq!(import_parent(&preferred, &source, &fallback), preferred);
         Ok(())
     }
 

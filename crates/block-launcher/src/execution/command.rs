@@ -12,12 +12,15 @@ use sha2::{Digest as _, Sha256};
 const RUN_ID_TOKEN: &str = "${run_id}";
 
 #[cfg(test)]
+#[path = "command/source_tests.rs"]
+mod source_tests;
+#[cfg(test)]
 #[path = "command/tests.rs"]
 mod tests;
 
 use crate::{
     executor::confined_path,
-    plan::{ExecutionPlan, JavaExecutable},
+    plan::{ExecutionPlan, JavaExecutable, ResourcePath},
     platform::OperatingSystem,
     session::SessionProvider,
 };
@@ -75,6 +78,10 @@ impl JavaCommand {
         provider: &dyn SessionProvider,
         game_directory: Option<&Path>,
     ) -> anyhow::Result<Self> {
+        ensure!(
+            plan.existing_resources.is_empty() || game_directory.is_some(),
+            "Existing installation requires the locked actual game directory"
+        );
         let session = provider.session()?;
         session.validate()?;
         let injection = if let Some(authlib) = &session.authlib {
@@ -120,6 +127,7 @@ impl JavaCommand {
             secrets.push(session.user_properties.clone());
         }
         let template = &plan.command;
+        plan.verify_existing_resources()?;
         let mut variables = template.variables.clone();
         variables.extend([
             ("auth_player_name".into(), session.username),
@@ -141,13 +149,15 @@ impl JavaCommand {
             ("user_properties".into(), session.user_properties),
         ]);
         for (name, path) in &template.path_variables {
-            let path = path.replace(RUN_ID_TOKEN, run_id);
             variables.insert(
                 name.clone(),
-                java_path(confined_path(root, &path)?, plan.target.os)?
-                    .to_str()
-                    .context("Java requires UTF-8 argument paths")?
-                    .into(),
+                java_path(
+                    resolve_resource_path(plan, root, run_id, path)?,
+                    plan.target.os,
+                )?
+                .to_str()
+                .context("Java requires UTF-8 argument paths")?
+                .into(),
             );
         }
         if let Some(directory) = game_directory {
@@ -159,6 +169,17 @@ impl JavaCommand {
                     .context("game directory must be UTF-8")?
                     .into(),
             );
+            if matches!(template.path_variables.get("game_assets"), Some(ResourcePath::Cache { relative }) if *relative == format!("{}/resources", template.cwd))
+            {
+                variables.insert(
+                    "game_assets".into(),
+                    directory
+                        .join("resources")
+                        .to_str()
+                        .context("game resources must be UTF-8")?
+                        .into(),
+                );
+            }
         }
         let separator = if plan.target.os == OperatingSystem::Windows {
             ";"
@@ -169,10 +190,13 @@ impl JavaCommand {
             .classpath
             .iter()
             .map(|path| {
-                Ok(java_path(confined_path(root, path)?, plan.target.os)?
-                    .to_str()
-                    .context("classpath is not UTF-8")?
-                    .to_owned())
+                Ok(java_path(
+                    resolve_resource_path(plan, root, run_id, path)?,
+                    plan.target.os,
+                )?
+                .to_str()
+                .context("classpath is not UTF-8")?
+                .to_owned())
             })
             .collect::<anyhow::Result<Vec<_>>>()?
             .join(separator);
@@ -281,6 +305,43 @@ impl JavaCommand {
             }
         }
         line
+    }
+}
+
+fn resolve_resource_path(
+    plan: &ExecutionPlan,
+    root: &Path,
+    run_id: &str,
+    path: &ResourcePath,
+) -> anyhow::Result<PathBuf> {
+    match path {
+        ResourcePath::Cache { relative } => {
+            confined_path(root, &relative.replace(RUN_ID_TOKEN, run_id))
+        }
+        ResourcePath::Existing { path } => {
+            let declared_file = plan
+                .existing_resources
+                .iter()
+                .any(|resource| resource.path == *path);
+            let declared_assets = plan.existing_asset_root.as_ref().is_some_and(|root| {
+                *path == *root
+                    || plan
+                        .command
+                        .variables
+                        .get("assets_index_name")
+                        .is_some_and(|id| *path == root.join("virtual").join(id))
+            });
+            ensure!(
+                declared_file || declared_assets,
+                "Undeclared existing command path: {}",
+                path.display()
+            );
+            ensure!(
+                path.canonicalize()? == *path,
+                "Existing command path changed"
+            );
+            Ok(path.clone())
+        }
     }
 }
 

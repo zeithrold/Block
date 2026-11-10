@@ -103,6 +103,7 @@ fn all_919_versions_compile_for_the_three_x64_os_families() -> anyhow::Result<()
                 library_overrides: BTreeMap::new(),
                 companion_libraries: Vec::new(),
                 classifier_overrides: BTreeMap::new(),
+                existing: None,
                 compatibility: None,
             };
             let plan = compile(&recipe, &metadata)
@@ -169,6 +170,7 @@ fn saved_plans_bind_identity_late_and_preserve_argument_boundaries() -> anyhow::
         library_overrides: BTreeMap::new(),
         companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
+        existing: None,
         compatibility: None,
     };
     let plan = compile(&recipe, &metadata)?;
@@ -274,6 +276,7 @@ fn provider_secrets_are_redacted_even_when_logs_only_print_the_raw_token() -> an
         library_overrides: BTreeMap::new(),
         companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
+        existing: None,
         compatibility: None,
     };
     let mut plan = compile(&recipe()?, &metadata)?;

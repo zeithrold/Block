@@ -18,6 +18,11 @@ use crate::{
     },
 };
 
+#[path = "existing.rs"]
+mod existing;
+pub use existing::{ExistingInstallation, ExistingReceipt, ExistingReceiptEntry};
+pub(crate) use existing::{existing_recipe, repair_existing, resolve_existing};
+
 const VERSION_INDEX: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const JAVA_INDEX: &str = "https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
 
@@ -112,6 +117,8 @@ pub struct ResolvedMetadata {
     /// Explicit description of an applied compatibility substitution, carried
     /// into the saved plan and the launch log so it is never silent.
     pub compatibility: Option<String>,
+    /// Verified local inputs and source receipt, absent for managed recipes.
+    pub existing: Option<ExistingInstallation>,
 }
 
 /// Managed runtime selected during resolution.
@@ -194,6 +201,7 @@ async fn resolve_inner(
         companion_libraries,
         classifier_overrides,
         compatibility,
+        existing: None,
     })
 }
 

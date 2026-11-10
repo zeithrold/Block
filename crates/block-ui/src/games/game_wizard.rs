@@ -64,7 +64,6 @@ pub(super) enum WizardStep {
 pub(super) enum CreationKind {
     #[default]
     NewInstance,
-    ExistingInstance,
     ImportPack,
 }
 
@@ -135,11 +134,8 @@ pub(super) struct WizardState {
     /// A retained product message or verbatim diagnostic.
     pub error: Option<WizardText>,
     version_notice: Option<WizardText>,
-    pub separated: bool,
     pub kind: CreationKind,
-    pub existing_instance: Option<String>,
-    pub context_instance: bool,
-    pub profile: Option<ProfileDraft>,
+    pub draft: Option<InstanceDraft>,
     pub body_scroll: ScrollHandle,
     pub section_scroll: ScrollHandle,
     pub rail_scroll: ScrollHandle,
@@ -153,7 +149,7 @@ pub(super) enum WizardField {
     Version,
     Loader,
     Directory,
-    ProfileName,
+    InstanceName,
     Server,
     Memory,
     Java,
@@ -167,7 +163,7 @@ pub(super) enum WizardField {
     clippy::struct_excessive_bools,
     reason = "Runtime, window, disclosure and server preferences are independent draft values."
 )]
-pub(super) struct ProfileDraft {
+pub(super) struct InstanceDraft {
     pub name: Entity<TextInput>,
     pub server: Entity<TextInput>,
     pub connect_on_launch: bool,
@@ -180,11 +176,11 @@ pub(super) struct ProfileDraft {
     pub fullscreen: bool,
     pub window_custom: bool,
     pub options: bool,
-    pub appearance: block_launcher::catalog::ProfileAppearance,
+    pub appearance: block_launcher::catalog::InstanceAppearance,
     pub target_id: String,
 }
 
-impl ProfileDraft {
+impl InstanceDraft {
     pub(super) fn snapshot(&self, cx: &mut Context<'_, Block>) -> Self {
         Self {
             name: cx.new(|cx| self.name.read(cx).frozen(cx)),
@@ -211,8 +207,8 @@ impl ProfileDraft {
     ) -> Self {
         Self {
             name: input(
-                &tr!(language, "wizard.profile.defaultName"),
-                &tr!(language, "wizard.profile.namePlaceholder"),
+                &tr!(language, "wizard.instance_settings.defaultName"),
+                &tr!(language, "wizard.instance_settings.namePlaceholder"),
                 cx,
             ),
             server: input("", "play.example.com:25565", cx),
@@ -220,12 +216,12 @@ impl ProfileDraft {
             memory: input(&components::memory_gb_text(defaults.memory_mib), "2", cx),
             java: input(
                 &defaults.java,
-                &tr!(language, "wizard.profile.javaPlaceholder"),
+                &tr!(language, "wizard.instance_settings.javaPlaceholder"),
                 cx,
             ),
             jvm: input(
                 &defaults.jvm_arguments,
-                &tr!(language, "wizard.profile.jvmPlaceholder"),
+                &tr!(language, "wizard.instance_settings.jvmPlaceholder"),
                 cx,
             ),
             width: input(&defaults.width.to_string(), "1280", cx),
@@ -237,7 +233,7 @@ impl ProfileDraft {
                 (854, 480) | (1280, 720) | (1920, 1080)
             ),
             options: false,
-            appearance: block_launcher::catalog::ProfileAppearance::default(),
+            appearance: block_launcher::catalog::InstanceAppearance::default(),
             target_id: String::new(),
         }
     }
@@ -253,7 +249,7 @@ impl ProfileDraft {
                 .is_ok_and(|value| (minimum..=maximum).contains(&value))
         };
         if block_launcher::catalog::validate_name(name.trim()).is_err() {
-            Some(WizardField::ProfileName)
+            Some(WizardField::InstanceName)
         } else if self.server_preferences(cx).validate().is_err() {
             Some(WizardField::Server)
         } else if components::parse_memory_gb(&self.memory.read(cx).value()).is_err() {
@@ -275,7 +271,7 @@ impl ProfileDraft {
 
     pub(super) const fn input(&self, field: WizardField) -> Option<&Entity<TextInput>> {
         match field {
-            WizardField::ProfileName => Some(&self.name),
+            WizardField::InstanceName => Some(&self.name),
             WizardField::Server => Some(&self.server),
             WizardField::Memory => Some(&self.memory),
             WizardField::Java => Some(&self.java),
@@ -299,10 +295,10 @@ impl ProfileDraft {
     pub(super) fn values(
         &self,
         cx: &gpui::App,
-    ) -> Result<super::engine::ProfileDraftValues, WizardText> {
+    ) -> Result<super::engine::InstanceDraftValues, WizardText> {
         let name = self.name.read(cx).value().trim().to_owned();
         if block_launcher::catalog::validate_name(&name).is_err() {
-            return Err(msg!("wizard.profile.defaultError"));
+            return Err(msg!("wizard.instance_settings.defaultError"));
         }
         let defaults = super::settings::GameDefaults {
             memory_mib: components::parse_memory_gb(&self.memory.read(cx).value())
@@ -319,19 +315,19 @@ impl ProfileDraft {
                 .value()
                 .trim()
                 .parse()
-                .map_err(|_| msg!("wizard.profile.widthError"))?,
+                .map_err(|_| msg!("wizard.instance_settings.widthError"))?,
             height: self
                 .height
                 .read(cx)
                 .value()
                 .trim()
                 .parse()
-                .map_err(|_| msg!("wizard.profile.heightError"))?,
+                .map_err(|_| msg!("wizard.instance_settings.heightError"))?,
             fullscreen: self.fullscreen,
             show_snapshots: false,
         };
         if !self.managed && defaults.java.is_empty() {
-            return Err(msg!("wizard.profile.javaError"));
+            return Err(msg!("wizard.instance_settings.javaError"));
         }
         for (value, minimum, key) in [
             (defaults.width, 320, "wizard.error.widthRange"),
@@ -345,17 +341,21 @@ impl ProfileDraft {
             .map_err(|_| msg!("common.arguments_unclosed_quote"))?;
         defaults
             .validate()
-            .map_err(|error| msg!("wizard.profile.validationDetail", detail = error))?;
+            .map_err(|error| msg!("wizard.instance_settings.validationDetail", detail = error))?;
         let server = self.server_preferences(cx);
         server
             .validate()
-            .map_err(|error| msg!("wizard.profile.validationDetail", detail = error))?;
-        Ok(super::engine::ProfileDraftValues {
+            .map_err(|error| msg!("wizard.instance_settings.validationDetail", detail = error))?;
+        Ok(super::engine::InstanceDraftValues {
             server,
             name,
             defaults,
             appearance: self.appearance,
             target_id: (!self.target_id.is_empty()).then(|| self.target_id.clone()),
+            data_policy: block_launcher::catalog::DataPolicy::Isolated,
+            game_directory: std::path::PathBuf::new(),
+            game_args: Vec::new(),
+            default_account: None,
         })
     }
 }
@@ -365,20 +365,20 @@ impl ProfileDraft {
     clippy::struct_excessive_bools,
     reason = "A checkpoint preserves each independent draft preference for section cancellation."
 )]
-struct ProfileCheckpoint {
+struct InstanceCheckpoint {
     values: [String; 7],
     managed: bool,
     fullscreen: bool,
     window_custom: bool,
     options: bool,
     connect_on_launch: bool,
-    appearance: block_launcher::catalog::ProfileAppearance,
+    appearance: block_launcher::catalog::InstanceAppearance,
     target_id: String,
 }
 
-impl ProfileDraft {
-    fn checkpoint(&self, cx: &gpui::App) -> ProfileCheckpoint {
-        ProfileCheckpoint {
+impl InstanceDraft {
+    fn checkpoint(&self, cx: &gpui::App) -> InstanceCheckpoint {
+        InstanceCheckpoint {
             values: [
                 &self.name,
                 &self.server,
@@ -398,7 +398,7 @@ impl ProfileDraft {
             target_id: self.target_id.clone(),
         }
     }
-    fn restore_checkpoint(&mut self, checkpoint: ProfileCheckpoint, cx: &mut Context<'_, Block>) {
+    fn restore_checkpoint(&mut self, checkpoint: InstanceCheckpoint, cx: &mut Context<'_, Block>) {
         for (input, value) in [
             &self.name,
             &self.server,
@@ -436,7 +436,7 @@ struct ComponentDraft {
     loader_catalog: Option<LoaderCatalog>,
     optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
     version_notice: Option<WizardText>,
-    profile: Option<ProfileCheckpoint>,
+    draft: Option<InstanceCheckpoint>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -447,7 +447,7 @@ struct InitialDraft {
     loader: LoaderKind,
     loader_version: Option<String>,
     optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
-    profile: Option<ProfileCheckpoint>,
+    draft: Option<InstanceCheckpoint>,
 }
 
 impl WizardState {
@@ -475,11 +475,11 @@ impl WizardState {
                 input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
             }
         }
-        if let Some(profile) = &self.profile {
+        if let Some(profile) = &self.draft {
             for (input, key) in [
-                (&profile.name, "wizard.profile.namePlaceholder"),
-                (&profile.java, "wizard.profile.javaPlaceholder"),
-                (&profile.jvm, "wizard.profile.jvmPlaceholder"),
+                (&profile.name, "wizard.instance_settings.namePlaceholder"),
+                (&profile.java, "wizard.instance_settings.javaPlaceholder"),
+                (&profile.jvm, "wizard.instance_settings.jvmPlaceholder"),
             ] {
                 let placeholder = tr!(language, key);
                 input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
@@ -537,11 +537,8 @@ impl WizardState {
             discard_confirmed: None,
             error: self.error.clone(),
             version_notice: self.version_notice.clone(),
-            separated: self.separated,
             kind: self.kind,
-            existing_instance: self.existing_instance.clone(),
-            context_instance: self.context_instance,
-            profile: self.profile.as_ref().map(|profile| profile.snapshot(cx)),
+            draft: self.draft.as_ref().map(|profile| profile.snapshot(cx)),
             body_scroll,
             section_scroll,
             rail_scroll,
@@ -619,8 +616,8 @@ impl WizardState {
     /// The instance draft is a parameter because a pack shortcut can hold the
     /// parent draft while the view's own form belongs to the shortcut.
     fn draft_values(&self, form: &InstanceForm, cx: &gpui::App) -> InitialDraft {
-        let profile = self.profile.as_ref().map(|profile| {
-            let mut values = profile.checkpoint(cx);
+        let draft = self.draft.as_ref().map(|draft| {
+            let mut values = draft.checkpoint(cx);
             // Expanding a group is presentation, not a change to the draft.
             values.options = false;
             values
@@ -632,7 +629,7 @@ impl WizardState {
             loader: form.loader.clone(),
             loader_version: form.loader_version.clone(),
             optifine: form.optifine.clone(),
-            profile,
+            draft,
         }
     }
 
@@ -928,7 +925,7 @@ impl Block {
         let mut field = self
             .shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .and_then(|profile| profile.invalid_field(cx));
         if self.shell.wizard.kind == CreationKind::NewInstance
@@ -970,20 +967,19 @@ impl Block {
             self.shell.wizard.open_page(Some(WizardPage::Location));
         }
         if matches!(field, Some(WizardField::Width | WizardField::Height))
-            && let Some(profile) = &mut self.shell.wizard.profile
+            && let Some(profile) = &mut self.shell.wizard.draft
         {
             profile.window_custom = true;
         }
         self.shell.wizard.error = Some(message.into());
         self.shell.wizard.error_field = field;
         self.shell.wizard.reveal.set(field);
-        if let Some(profile) = &mut self.shell.wizard.profile
+        if let Some(profile) = &mut self.shell.wizard.draft
             && field.is_some_and(|field| {
                 !matches!(
                     field,
                     WizardField::GameName | WizardField::Version | WizardField::Directory
-                ) || field == WizardField::ProfileName
-                    && self.shell.wizard.separated
+                ) || field == WizardField::InstanceName
                     && self.shell.wizard.kind == CreationKind::NewInstance
             })
         {
@@ -1032,7 +1028,7 @@ impl Block {
         let input = instance_input.or_else(|| {
             self.shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .and_then(|profile| profile.input(field))
         });
@@ -1056,7 +1052,7 @@ impl Block {
                 self.palette,
                 FieldOptions {
                     hint: hint.map(Into::into),
-                    required: matches!(field, WizardField::GameName | WizardField::ProfileName),
+                    required: matches!(field, WizardField::GameName | WizardField::InstanceName),
                     error: self
                         .shell
                         .wizard
@@ -1079,18 +1075,7 @@ impl Block {
         self.shell.pack_import = modpack_import::State::default();
         self.shell.wizard = WizardState::new(language, cx);
         self.shell.wizard.include_snapshots = self.saved_preferences.game.show_snapshots;
-        self.shell.wizard.separated =
-            self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Separated;
-        if self.shell.wizard.separated {
-            self.shell.wizard.step = WizardStep::GetStarted;
-        }
-        self.shell.wizard.existing_instance = self.selected_instance.clone().or_else(|| {
-            self.snapshot
-                .instances
-                .first()
-                .map(|instance| instance.id.clone())
-        });
-        self.shell.wizard.profile = Some(ProfileDraft::new(
+        self.shell.wizard.draft = Some(InstanceDraft::new(
             &self.saved_preferences.game.clone(),
             language,
             cx,
@@ -1137,103 +1122,58 @@ impl Block {
     }
 
     pub(super) fn wizard_kind(&mut self, kind: CreationKind, cx: &mut Context<'_, Self>) {
-        let unchanged = !self.game_wizard_changed(cx);
-        if self.shell.wizard.step == WizardStep::GetStarted
-            && (kind != CreationKind::ExistingInstance
-                || self.shell.wizard.separated && !self.snapshot.instances.is_empty())
-        {
+        if self.shell.wizard.step == WizardStep::GetStarted {
+            let unchanged = !self.game_wizard_changed(cx);
             self.shell.wizard.kind = kind;
             self.shell.wizard.clear_error();
-            if kind == CreationKind::ExistingInstance {
-                self.normalize_wizard_target();
-            }
             if unchanged {
                 self.mark_game_wizard_clean(cx);
             }
         }
     }
 
-    pub(super) fn wizard_instance(&mut self, id: String) {
-        if self
-            .snapshot
-            .instances
-            .iter()
-            .any(|instance| instance.id == id)
-        {
-            self.shell.wizard.existing_instance = Some(id);
-            self.shell.wizard.clear_error();
-            self.normalize_wizard_target();
-        }
-    }
-
-    fn normalize_wizard_target(&mut self) {
-        if let Some(instance) = self
-            .snapshot
-            .instances
-            .iter()
-            .find(|instance| Some(&instance.id) == self.shell.wizard.existing_instance.as_ref())
-            && let Some(profile) = &mut self.shell.wizard.profile
-            && !instance
-                .targets
-                .iter()
-                .any(|target| target.id == profile.target_id)
-        {
-            profile.target_id = instance
-                .targets
-                .first()
-                .map_or_else(String::new, |target| target.id.clone());
-        }
-    }
-
-    pub(super) fn wizard_profile_target(&mut self, id: String) {
-        if self.snapshot.instances.iter().any(|instance| {
-            Some(&instance.id) == self.shell.wizard.existing_instance.as_ref()
-                && instance.targets.iter().any(|target| target.id == id)
-        }) && let Some(profile) = &mut self.shell.wizard.profile
-        {
-            profile.target_id = id;
-        }
-    }
-
-    pub(super) const fn wizard_profile_icon(&mut self, icon: block_launcher::catalog::ProfileIcon) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+    pub(super) const fn wizard_instance_icon(
+        &mut self,
+        icon: block_launcher::catalog::InstanceIcon,
+    ) {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.appearance.icon = icon;
         }
     }
-    pub(super) fn wizard_appearance(&self) -> block_launcher::catalog::ProfileAppearance {
+    pub(super) fn wizard_appearance(&self) -> block_launcher::catalog::InstanceAppearance {
         self.shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .map_or_else(Default::default, |profile| profile.appearance)
     }
-    pub(super) const fn wizard_profile_color(
+    pub(super) const fn wizard_instance_color(
         &mut self,
-        color: block_launcher::catalog::ProfileColor,
+        color: block_launcher::catalog::InstanceColor,
     ) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.appearance.color = color;
         }
     }
-    pub(super) const fn wizard_profile_connect(&mut self) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+    pub(super) const fn wizard_instance_connect(&mut self) {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.connect_on_launch = !profile.connect_on_launch;
         }
     }
 
-    pub(super) const fn wizard_profile_fullscreen(&mut self) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+    pub(super) const fn wizard_instance_fullscreen(&mut self) {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.fullscreen = !profile.fullscreen;
         }
     }
     pub(super) const fn wizard_runtime(&mut self, managed: bool) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.managed = managed;
         }
     }
 
     pub(super) fn wizard_window(&mut self, width: u32, height: u32, cx: &mut Context<'_, Self>) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile
                 .width
                 .update(cx, |field, cx| field.set_value(&width.to_string(), cx));
@@ -1245,12 +1185,12 @@ impl Block {
     }
 
     pub(super) const fn wizard_custom_window(&mut self) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.window_custom = true;
         }
     }
-    pub(super) const fn wizard_profile_options(&mut self) {
-        if let Some(profile) = &mut self.shell.wizard.profile {
+    pub(super) const fn wizard_instance_options(&mut self) {
+        if let Some(profile) = &mut self.shell.wizard.draft {
             profile.options = !profile.options;
         }
     }
@@ -1275,10 +1215,10 @@ impl Block {
                 loader_catalog: self.shell.wizard.loader_catalog.clone(),
                 optifine: form.optifine.clone(),
                 version_notice: self.shell.wizard.version_notice.clone(),
-                profile: self
+                draft: self
                     .shell
                     .wizard
-                    .profile
+                    .draft
                     .as_ref()
                     .map(|profile| profile.checkpoint(cx)),
             });
@@ -1680,7 +1620,7 @@ impl Block {
                 WizardText::message("wizard.error.absoluteFolder"),
             ));
         }
-        let Some(profile) = &self.shell.wizard.profile else {
+        let Some(profile) = &self.shell.wizard.draft else {
             return Some((
                 WizardField::Java,
                 WizardText::message("wizard.error.draftUnavailable"),
@@ -1787,7 +1727,7 @@ impl Block {
             self.set_wizard_error(self.status.clone(), cx);
             return;
         }
-        let Some(profile) = &self.shell.wizard.profile else {
+        let Some(profile) = &self.shell.wizard.draft else {
             return;
         };
         let values = profile.values(cx);
@@ -1798,31 +1738,11 @@ impl Block {
                 return;
             }
         };
-        if !self.shell.wizard.separated {
-            values.name.clone_from(&name);
-        }
+        values.name.clone_from(&name);
         if kind == CreationKind::NewInstance {
             values.target_id = None;
         }
-        if kind == CreationKind::ExistingInstance {
-            let Some(instance) = self.shell.wizard.existing_instance.clone().filter(|id| {
-                self.snapshot
-                    .instances
-                    .iter()
-                    .any(|instance| &instance.id == id)
-            }) else {
-                self.shell.wizard.error = Some(WizardText::message("wizard.error.instanceGone"));
-                return;
-            };
-            self.begin(
-                msg!("wizard.status.savingProfile"),
-                super::ui_logging::Operation::CreateProfile,
-            );
-            self.mark_creation();
-            if let Some(engine) = &self.engine {
-                engine.create_profile_draft(instance, values);
-            }
-        } else {
+        {
             if let Some(scope) = self.setup_game_library_scope()
                 && !self.commit_setup_library(&scope, cx)
             {
@@ -1864,7 +1784,7 @@ impl Block {
                         self.cancel.clone(),
                     );
                 } else {
-                    engine.create_instance_with_profile(
+                    engine.create_instance_configured(
                         None,
                         name,
                         version,
@@ -1922,7 +1842,7 @@ impl Block {
             });
             self.shell.wizard.version_notice = snapshot.version_notice;
             if let (Some(profile), Some(checkpoint)) =
-                (&mut self.shell.wizard.profile, snapshot.profile)
+                (&mut self.shell.wizard.draft, snapshot.draft)
             {
                 profile.restore_checkpoint(checkpoint, cx);
             }
@@ -1973,14 +1893,11 @@ impl Block {
         let state = &self.shell.wizard;
         let page = self.wizard_outer_page();
         let source = state.step == WizardStep::GetStarted;
-        let show_back = page.is_some()
-            || !source && !state.context_instance && self.router.tab() != Tab::Onboarding;
+        let show_back = page.is_some() || !source && self.router.tab() != Tab::Onboarding;
         let next_label = if page.is_some() {
             tr!(language, "common.apply_draft")
         } else {
-            if state.kind == CreationKind::ExistingInstance {
-                tr!(language, "wizard.footer.createProfile")
-            } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+            if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
                 tr!(language, "wizard.footer.saveGame")
             } else {
                 tr!(language, "wizard.footer.createGame")
@@ -2012,9 +1929,7 @@ impl Block {
         let consequence = page.is_none().then(|| {
             note(tr!(
                 language,
-                if state.kind == CreationKind::ExistingInstance {
-                    "wizard.footer.effectProfile"
-                } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
+                if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
                     "wizard.footer.effectSave"
                 } else {
                     "wizard.footer.effectCreate"
@@ -2084,7 +1999,7 @@ impl Block {
         if state.kind == CreationKind::ImportPack {
             return self.pack_wizard_rail_progress(language);
         }
-        let has_start = self.router.tab() != Tab::Onboarding && !state.context_instance;
+        let has_start = self.router.tab() != Tab::Onboarding;
         let mut steps = Vec::new();
         if has_start {
             steps.push((
@@ -2176,13 +2091,6 @@ impl Block {
             None if state.step == WizardStep::GetStarted => {
                 self.wizard_start(cx).into_any_element()
             }
-            None if state.kind == CreationKind::ExistingInstance => div()
-                .flex()
-                .flex_col()
-                .gap_4()
-                .children((!state.context_instance).then(|| self.wizard_instance_picker(cx)))
-                .child(self.wizard_profile(window, cx, true))
-                .into_any_element(),
             None => self.wizard_setup(form, window, cx).into_any_element(),
         }
     }
@@ -2242,22 +2150,8 @@ impl Block {
             .gap_4()
             .child(patterns::wizard_heading(
                 tr!(language, "wizard.start.heading"),
-                tr!(
-                    language,
-                    if state.separated {
-                        "wizard.start.subtitle"
-                    } else {
-                        "wizard.start.subtitleBundled"
-                    }
-                ),
+                tr!(language, "wizard.start.subtitleBundled"),
             ))
-            .children(state.separated.then(|| {
-                components::badge(
-                    tr!(language, "wizard.start.badge"),
-                    self.palette,
-                    BadgeVariant::Outline,
-                )
-            }))
             .child(
                 self.button_with_variant(
                     "wizard-kind-instance",
@@ -2293,105 +2187,16 @@ impl Block {
                     view.open_import_games(window, cx);
                 }),
             ))
-            .children(
-                (state.separated && !self.snapshot.instances.is_empty()).then(|| {
-                    self.button_with_variant(
-                        "wizard-kind-profile",
-                        tr!(language, "wizard.start.newProfile"),
-                        UiAction::WizardKind(CreationKind::ExistingInstance),
-                        ButtonVariant::Outline,
-                        cx,
-                    )
-                    .track_focus(&state.creation_focus("profile", cx))
-                }),
-            )
     }
 
-    fn wizard_instance_picker(&self, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        let group = self.wizard_radio_group(
-            "wizard-instance-group",
-            &tr!(language, "wizard.instance.group"),
-            self.snapshot
-                .instances
-                .iter()
-                .map(|instance| components::RadioOption {
-                    id: instance.id.clone(),
-                    checked: Some(&instance.id) == self.shell.wizard.existing_instance.as_ref(),
-                    disabled: self.busy,
-                    action: UiAction::WizardInstance(instance.id.clone()),
-                })
-                .collect(),
-            cx,
-        );
-        div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(patterns::wizard_heading(
-                tr!(language, "wizard.instance.heading"),
-                tr!(language, "wizard.instance.subtitle"),
-            ))
-            .child(group.container().flex().flex_col().gap_4().children(
-                self.snapshot.instances.iter().map(|instance| {
-                    let id = instance.id.clone();
-                    let count = self
-                        .snapshot
-                        .profiles
-                        .iter()
-                        .filter(|profile| profile.instance_id == id)
-                        .count();
-                    let count_text = count.to_string();
-                    group.item(
-                        &instance.id,
-                        components::radio(
-                            format!("wizard-instance-{id}"),
-                            instance.name.clone(),
-                            Some(&id) == self.shell.wizard.existing_instance.as_ref(),
-                            self.palette,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx.listener(move |view, &(): &(), window, cx| {
-                                view.handle(UiAction::WizardInstance(id.clone()), window, cx);
-                            }),
-                        )
-                        .w_full()
-                        .rounded(px(super::design::CARD_RADIUS))
-                        .border_color(rgb(self.palette.border))
-                        .p_4()
-                        .child(div().flex_1())
-                        .child(components::badge(
-                            instance.minecraft_version.clone(),
-                            self.palette,
-                            BadgeVariant::Secondary,
-                        ))
-                        .child(note(text(
-                            language,
-                            "wizard.instance.profiles",
-                            &[("count", count_text.as_str())],
-                        ))),
-                    )
-                }),
-            ))
-            .children(self.snapshot.instances.is_empty().then(|| {
-                patterns::empty_state(
-                    tr!(language, "wizard.instance.emptyTitle"),
-                    tr!(language, "wizard.instance.emptyDetail"),
-                    self.palette,
-                )
-            }))
-    }
-
-    fn wizard_profile(
+    fn wizard_instance(
         &self,
-        window: &Window,
+        _window: &Window,
         cx: &Context<'_, Self>,
         show_name: bool,
     ) -> gpui::Div {
         self.reconcile_wizard_disclosure(cx);
-        let Some(profile) = &self.shell.wizard.profile else {
+        let Some(profile) = &self.shell.wizard.draft else {
             return div();
         };
         let language = self.language();
@@ -2399,14 +2204,13 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .children(
-                show_name
-                    .then(|| patterns::wizard_heading(tr!(language, "wizard.profile.title"), "")),
-            )
+            .children(show_name.then(|| {
+                patterns::wizard_heading(tr!(language, "wizard.instance_settings.title"), "")
+            }))
             .children(show_name.then(|| {
                 self.wizard_field(
-                    WizardField::ProfileName,
-                    &tr!(language, "wizard.profile.name"),
+                    WizardField::InstanceName,
+                    &tr!(language, "wizard.instance_settings.name"),
                     &profile.name,
                     None,
                 )
@@ -2417,67 +2221,35 @@ impl Block {
                     .flex_col()
                     .items_stretch()
                     .gap_3()
-                    .child(components::profile_avatar(
+                    .child(components::instance_avatar(
                         profile.appearance,
                         self.palette,
                         40.,
                     ))
                     .child(self.wizard_appearance_field(
-                        "wizard-profile-icon",
-                        &tr!(language, "wizard.profile.icon"),
-                        crate::i18n::profile_icon_name(language, profile.appearance.icon),
+                        "wizard-instance-icon",
+                        &tr!(language, "wizard.instance_settings.icon"),
+                        crate::i18n::instance_icon_name(language, profile.appearance.icon),
                         false,
                         cx,
                     ))
                     .child(self.wizard_appearance_field(
-                        "wizard-profile-color",
-                        &tr!(language, "wizard.profile.color"),
-                        crate::i18n::profile_color_name(language, profile.appearance.color),
+                        "wizard-instance-color",
+                        &tr!(language, "wizard.instance_settings.color"),
+                        crate::i18n::instance_color_name(language, profile.appearance.color),
                         true,
                         cx,
                     )),
             )
             .child(self.wizard_server_preferences(profile, cx))
-            .children(
-                (self.shell.wizard.kind == CreationKind::ExistingInstance)
-                    .then(|| self.wizard_profile_targets(profile, cx)),
-            )
-            .children(
-                (show_name && self.shell.wizard.kind == CreationKind::ExistingInstance).then(
-                    || {
-                        self.wizard_profile_options_trigger(
-                            "wizard-profile-options",
-                            &tr!(language, "wizard.profile.advanced"),
-                            cx,
-                        )
-                    },
-                ),
-            )
-            .children(
-                (show_name && self.shell.wizard.kind == CreationKind::ExistingInstance).then(
-                    || {
-                        super::motion::disclosure(
-                            "wizard-advanced",
-                            &self.shell.wizard.advanced.borrow(),
-                            self.motion_preferences(),
-                            self.wizard_profile_advanced(profile, cx).into_any_element(),
-                            window,
-                            cx,
-                        )
-                    },
-                ),
-            )
-            .children(
-                (!show_name || self.shell.wizard.kind == CreationKind::NewInstance)
-                    .then(|| self.wizard_profile_advanced(profile, cx)),
-            )
+            .child(self.wizard_instance_advanced(profile, cx))
     }
 
     fn reconcile_wizard_disclosure(&self, cx: &Context<'_, Self>) {
         let open = self
             .shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .is_some_and(|profile| profile.options);
         self.shell.wizard.advanced.borrow_mut().set_open(
@@ -2487,7 +2259,7 @@ impl Block {
         );
     }
 
-    fn wizard_profile_options_trigger(
+    fn wizard_instance_options_trigger(
         &self,
         id: &'static str,
         label: &str,
@@ -2501,7 +2273,7 @@ impl Block {
             self.motion_preferences(),
             cx,
             cx.listener(|view, (): &(), window, cx| {
-                view.handle(UiAction::WizardProfileOptions, window, cx);
+                view.handle(UiAction::WizardInstanceOptions, window, cx);
             }),
         )
     }
@@ -2512,13 +2284,7 @@ impl Block {
         &self,
         cx: &gpui::App,
     ) -> Option<block_launcher::catalog::AutomaticConnection> {
-        let version = if self.shell.wizard.kind == CreationKind::ExistingInstance {
-            self.snapshot
-                .instances
-                .iter()
-                .find(|instance| Some(&instance.id) == self.shell.wizard.existing_instance.as_ref())
-                .map(|instance| instance.minecraft_version.clone())
-        } else if let Some(Form::Instance(form)) = &self.form {
+        let version = if let Some(Form::Instance(form)) = &self.form {
             Some(form.version.read(cx).value())
         } else {
             None
@@ -2535,7 +2301,7 @@ impl Block {
 
     fn wizard_server_preferences(
         &self,
-        profile: &ProfileDraft,
+        profile: &InstanceDraft,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         let connection = self.wizard_automatic_connection(cx);
@@ -2548,13 +2314,13 @@ impl Block {
             .gap_3()
             .child(self.wizard_field(
                 WizardField::Server,
-                &tr!(language, "wizard.profile.server"),
+                &tr!(language, "wizard.instance_settings.server"),
                 &profile.server,
-                Some(&tr!(language, "wizard.profile.serverHint")),
+                Some(&tr!(language, "wizard.instance_settings.serverHint")),
             ))
             .child(components::checkbox(
-                "wizard-profile-connect",
-                tr!(language, "wizard.profile.connect"),
+                "wizard-instance-connect",
+                tr!(language, "wizard.instance_settings.connect"),
                 profile.connect_on_launch,
                 self.palette,
                 ControlState {
@@ -2563,15 +2329,15 @@ impl Block {
                     ..Default::default()
                 },
                 cx.listener(|view, (): &(), window, cx| {
-                    view.handle(UiAction::WizardProfileConnect, window, cx);
+                    view.handle(UiAction::WizardInstanceConnect, window, cx);
                 }),
             ));
         if !supported {
             fields = fields.child(note(match connection {
                 Some(block_launcher::catalog::AutomaticConnection::Unsupported) => {
-                    tr!(language, "wizard.profile.connectionUnsupported")
+                    tr!(language, "wizard.instance_settings.connectionUnsupported")
                 }
-                _ => tr!(language, "wizard.profile.connectionUnknown"),
+                _ => tr!(language, "wizard.instance_settings.connectionUnknown"),
             }));
         }
         fields
@@ -2581,7 +2347,7 @@ impl Block {
         if self
             .shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .is_some_and(|profile| profile.connect_on_launch)
             && !self.wizard_automatic_connection_supported(cx)
@@ -2631,83 +2397,11 @@ impl Block {
             )
     }
 
-    fn wizard_profile_targets(&self, profile: &ProfileDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let instance =
-            self.snapshot.instances.iter().find(|instance| {
-                Some(&instance.id) == self.shell.wizard.existing_instance.as_ref()
-            });
-        let targets = instance
-            .into_iter()
-            .flat_map(|instance| instance.targets.iter())
-            .collect::<Vec<_>>();
-        let language = self.language();
-        let group = self.wizard_radio_group(
-            "wizard-target-group",
-            &tr!(language, "wizard.profile.launchTarget"),
-            targets
-                .iter()
-                .map(|target| components::RadioOption {
-                    id: target.id.clone(),
-                    checked: profile.target_id == target.id,
-                    disabled: self.busy,
-                    action: UiAction::WizardProfileTarget(target.id.clone()),
-                })
-                .collect(),
-            cx,
-        );
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(note(tr!(language, "wizard.profile.launchTarget")))
-            .child(
-                group
-                    .container()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(targets.into_iter().map(|target| {
-                        let id = target.id.clone();
-                        let name = target.display_name();
-                        group.item(
-                            &target.id,
-                            components::radio(
-                                format!("wizard-target-{id}"),
-                                name,
-                                profile.target_id == id,
-                                self.palette,
-                                ControlState {
-                                    disabled: self.busy,
-                                    ..ControlState::default()
-                                },
-                                cx.listener(move |view, &(): &(), window, cx| {
-                                    view.handle(
-                                        UiAction::WizardProfileTarget(id.clone()),
-                                        window,
-                                        cx,
-                                    );
-                                }),
-                            )
-                            .child(note(match &target.status {
-                                block_launcher::catalog::InstallStatus::Ready => {
-                                    tr!(language, "wizard.profile.installReady")
-                                }
-                                block_launcher::catalog::InstallStatus::Pending => {
-                                    tr!(language, "wizard.profile.installPending")
-                                }
-                                block_launcher::catalog::InstallStatus::Installing => {
-                                    tr!(language, "wizard.profile.installInstalling")
-                                }
-                                block_launcher::catalog::InstallStatus::Failed { .. } => {
-                                    tr!(language, "wizard.profile.installFailed")
-                                }
-                            })),
-                        )
-                    })),
-            )
-    }
-
-    fn wizard_profile_advanced(&self, profile: &ProfileDraft, cx: &Context<'_, Self>) -> gpui::Div {
+    fn wizard_instance_advanced(
+        &self,
+        profile: &InstanceDraft,
+        _cx: &Context<'_, Self>,
+    ) -> gpui::Div {
         let language = self.language();
         div()
             .flex()
@@ -2715,39 +2409,35 @@ impl Block {
             .gap_4()
             .child(self.wizard_field(
                 WizardField::Memory,
-                &tr!(language, "wizard.profile.memory"),
+                &tr!(language, "wizard.instance_settings.memory"),
                 &profile.memory,
-                Some(&tr!(language, "wizard.profile.memoryHint")),
+                Some(&tr!(language, "wizard.instance_settings.memoryHint")),
             ))
             .child(self.wizard_field(
                 WizardField::Jvm,
-                &tr!(language, "wizard.profile.jvm"),
+                &tr!(language, "wizard.instance_settings.jvm"),
                 &profile.jvm,
                 None,
             ))
-            .children(
-                (self.shell.wizard.kind == CreationKind::ExistingInstance)
-                    .then(|| self.wizard_runtime_window(profile, cx)),
-            )
     }
 
-    fn wizard_runtime_window(&self, profile: &ProfileDraft, cx: &Context<'_, Self>) -> gpui::Div {
+    fn wizard_runtime_window(&self, profile: &InstanceDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
         let width = profile.width.read(cx).value();
         let height = profile.height.read(cx).value();
         let size = text(
             language,
             if profile.window_custom {
-                "wizard.profile.windowSizeCustom"
+                "wizard.instance_settings.windowSizeCustom"
             } else {
-                "wizard.profile.windowSizeValue"
+                "wizard.instance_settings.windowSizeValue"
             },
             &[("width", &width), ("height", &height)],
         );
         let runtime = if profile.managed {
-            tr!(language, "wizard.profile.automaticJava")
+            tr!(language, "wizard.instance_settings.automaticJava")
         } else {
-            tr!(language, "wizard.profile.customExecutable")
+            tr!(language, "wizard.instance_settings.customExecutable")
         };
         div()
             .flex()
@@ -2766,7 +2456,7 @@ impl Block {
             .children((!profile.managed).then(|| {
                 self.wizard_field(
                     WizardField::Java,
-                    &tr!(language, "wizard.profile.javaExecutable"),
+                    &tr!(language, "wizard.instance_settings.javaExecutable"),
                     &profile.java,
                     None,
                 )
@@ -2786,7 +2476,7 @@ impl Block {
                     .child(
                         self.wizard_field(
                             WizardField::Width,
-                            &tr!(language, "wizard.profile.windowWidth"),
+                            &tr!(language, "wizard.instance_settings.windowWidth"),
                             &profile.width,
                             None,
                         )
@@ -2795,7 +2485,7 @@ impl Block {
                     .child(
                         self.wizard_field(
                             WizardField::Height,
-                            &tr!(language, "wizard.profile.windowHeight"),
+                            &tr!(language, "wizard.instance_settings.windowHeight"),
                             &profile.height,
                             None,
                         )
@@ -2804,7 +2494,7 @@ impl Block {
             }))
             .child(components::checkbox(
                 "wizard-fullscreen",
-                tr!(language, "wizard.profile.fullscreen"),
+                tr!(language, "wizard.instance_settings.fullscreen"),
                 profile.fullscreen,
                 self.palette,
                 ControlState {
@@ -2812,7 +2502,7 @@ impl Block {
                     ..ControlState::default()
                 },
                 cx.listener(|view, &(): &(), window, cx| {
-                    view.handle(UiAction::WizardProfileFullscreen, window, cx);
+                    view.handle(UiAction::WizardInstanceFullscreen, window, cx);
                 }),
             ))
     }
@@ -2918,8 +2608,8 @@ impl Block {
                     .as_ref()
                     .map(|notice| self.wizard_version_notice(notice, language)),
             )
-            .child(self.wizard_profile_options_trigger(
-                "wizard-profile-options",
+            .child(self.wizard_instance_options_trigger(
+                "wizard-instance-settings-options",
                 &tr!(language, "wizard.setup.appearanceLaunch"),
                 cx,
             ))
@@ -2929,7 +2619,7 @@ impl Block {
                     .flex_col()
                     .gap_4()
                     .child(self.wizard_optifine_card(form, cx))
-                    .child(self.wizard_profile(window, cx, self.shell.wizard.separated))
+                    .child(self.wizard_instance(window, cx, false))
                     .into_any_element();
                 super::motion::disclosure(
                     "wizard-appearance-launch",
@@ -2944,10 +2634,10 @@ impl Block {
 
     pub(super) fn wizard_configuration_summary(&self, cx: &gpui::App) -> (String, String) {
         let language = self.language();
-        self.shell.wizard.profile.as_ref().map_or_else(
+        self.shell.wizard.draft.as_ref().map_or_else(
             || {
                 (
-                    tr!(language, "wizard.profile.automaticJava"),
+                    tr!(language, "wizard.instance_settings.automaticJava"),
                     tr!(language, "wizard.config.defaultWindow"),
                 )
             },
@@ -2956,7 +2646,7 @@ impl Block {
                     format!(
                         "{} · {}",
                         if profile.managed {
-                            tr!(language, "wizard.profile.automaticJava")
+                            tr!(language, "wizard.instance_settings.automaticJava")
                         } else {
                             tr!(language, "wizard.config.customJava")
                         },
@@ -2970,7 +2660,7 @@ impl Block {
                     } else {
                         text(
                             language,
-                            "wizard.profile.windowSizeValue",
+                            "wizard.instance_settings.windowSizeValue",
                             &[
                                 ("width", &profile.width.read(cx).value()),
                                 ("height", &profile.height.read(cx).value()),
@@ -4025,10 +3715,10 @@ impl Block {
                     .id("wizard-location-error")
                     .debug_selector(|| "wizard-location-error".into())
             }));
-        if let Some(profile) = &self.shell.wizard.profile {
+        if let Some(profile) = &self.shell.wizard.draft {
             fields = fields.child(self.wizard_runtime_window(profile, cx));
             if self.shell.wizard.kind == CreationKind::NewInstance {
-                fields = fields.child(self.wizard_profile_advanced(profile, cx));
+                fields = fields.child(self.wizard_instance_advanced(profile, cx));
             }
         }
         fields.child(note(tr!(language, "wizard.config.draftNote")))

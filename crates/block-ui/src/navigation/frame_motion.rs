@@ -127,7 +127,6 @@ mod tests {
                 Tab::Accounts,
                 Tab::About,
                 Tab::Instances,
-                Tab::Profiles,
                 Tab::Settings,
                 Tab::Home,
             ] {

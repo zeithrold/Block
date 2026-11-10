@@ -10,34 +10,25 @@ fn browsing_and_cancelling_an_editor_preserve_the_home_selection(cx: &mut gpui::
         let mut second = view.snapshot.instances[0].clone();
         second.id = "second-instance".into();
         second.name = "Second".into();
-        let mut profile = view.snapshot.profiles[0].clone();
-        profile.id = "second-profile".into();
-        profile.instance_id.clone_from(&second.id);
         view.snapshot.instances.push(second);
-        view.snapshot.profiles.push(profile);
         view.selected_instance = Some("instance-a".into());
-        view.selected_profile = Some("profile-a".into());
         view.initialize_browsers(cx);
     });
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.handle(UiAction::Inspect("second-instance".into()), window, cx);
-            view.handle(UiAction::EditProfile, window, cx);
-            if let Some(super::Form::Profile(form)) = &view.form {
+            view.handle(UiAction::EditInstance, window, cx);
+            if let Some(super::Form::EditInstance(form)) = &view.form {
                 form.name
                     .update(cx, |field, cx| field.set_value("Uncommitted 世界", cx));
             }
             view.handle(UiAction::CancelForm, window, cx);
-            assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
             assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
             assert_eq!(
                 view.shell.games.inspected.as_deref(),
                 Some("second-instance")
             );
-            assert_eq!(
-                view.snapshot.profiles[1].name,
-                view.snapshot.profiles[0].name
-            );
+            assert_eq!(view.snapshot.instances[1].name, "Second");
         });
     });
 }
@@ -96,7 +87,7 @@ fn completion_and_toast_keep_their_identity_across_language_changes(cx: &mut gpu
         sender
             .try_send(Message::ForOperation {
                 operation: 1,
-                message: Box::new(Message::Finished(Ok(msg!("completion.profile_deleted")))),
+                message: Box::new(Message::Finished(Ok(msg!("completion.instance_deleted")))),
             })
             .is_ok()
     );

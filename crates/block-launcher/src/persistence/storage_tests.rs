@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
-    catalog::{Catalog, InstallStatus},
+    catalog::{Catalog, DataPolicy, InstallStatus, Instance, InstanceConfiguration, TargetSource},
+    game_import::{DiscoveryRoots, discover},
     library::Library,
 };
 
@@ -54,6 +55,30 @@ fn finish_retained(root: &Path, remove: bool) -> anyhow::Result<()> {
     finish_cleanup(root, state.id, remove)
 }
 
+fn existing_source(catalog: &Catalog, directory: &Path, name: &str) -> anyhow::Result<Instance> {
+    put(
+        &directory.join("versions/1.20.6/1.20.6.json"),
+        br#"{"id":"1.20.6","mainClass":"net.minecraft.client.main.Main","libraries":[]}"#,
+    )?;
+    let report = discover(&DiscoveryRoots {
+        adjacent_minecraft: Some(directory.to_owned()),
+        official_launcher: None,
+    });
+    let candidate = report
+        .candidates
+        .first()
+        .context("Existing source candidate")?;
+    catalog.register_existing(
+        candidate,
+        InstanceConfiguration {
+            name: name.into(),
+            data_policy: DataPolicy::Shared,
+            game_directory: candidate.data_directory(DataPolicy::Shared)?,
+            ..Default::default()
+        },
+    )
+}
+
 #[test]
 fn changing_default_library_preserves_existing_games_and_only_affects_new_instances()
 -> anyhow::Result<()> {
@@ -61,9 +86,9 @@ fn changing_default_library_preserves_existing_games_and_only_affects_new_instan
     let temp_path = temp.path().canonicalize()?;
     let root = temp_path.join("control");
     let catalog = Catalog::open(&root)?;
-    let (old, _) = catalog.create_instance("Old".into(), "1.20.6".into(), None, None)?;
+    let old = catalog.create_instance("Old".into(), "1.20.6".into(), None, None)?;
     put(
-        &old.directory.join("profiles/synthetic-data.txt"),
+        &old.resource_directory.join("saves/synthetic-data.txt"),
         b"existing synthetic game data",
     )?;
     let target = temp_path.join("new-games");
@@ -77,10 +102,17 @@ fn changing_default_library_preserves_existing_games_and_only_affects_new_instan
         )?
         .is_none()
     );
-    let (new, _) = catalog.create_instance("New".into(), "1.20.6".into(), None, None)?;
-    assert_eq!(old.directory, catalog.snapshot()?.instances[0].directory);
-    assert!(new.directory.starts_with(target));
-    assert!(old.directory.join("profiles/synthetic-data.txt").is_file());
+    let new = catalog.create_instance("New".into(), "1.20.6".into(), None, None)?;
+    assert_eq!(
+        old.resource_directory,
+        catalog.snapshot()?.instances[0].resource_directory
+    );
+    assert!(new.resource_directory.starts_with(target));
+    assert!(
+        old.resource_directory
+            .join("saves/synthetic-data.txt")
+            .is_file()
+    );
     Ok(())
 }
 
@@ -91,7 +123,7 @@ fn cache_move_rebases_installed_targets_retains_accounts_and_requires_explicit_c
     let temp_path = temp.path().canonicalize()?;
     let root = temp_path.join("control");
     let catalog = Catalog::open(&root)?;
-    let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+    let instance = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     let root = catalog.root().to_owned();
     let new = temp_path.join("cache");
     put(&root.join("objects/ab/payload"), b"verified cache fixture")?;
@@ -107,7 +139,9 @@ fn cache_move_rebases_installed_targets_retains_accounts_and_requires_explicit_c
         b"public synthetic account metadata",
     )?;
     let mut target = instance.targets[0].clone();
-    target.manifest = Some(root.join("loaders/forge/test/manifest.json"));
+    target.source = TargetSource::Managed {
+        manifest: Some(root.join("loaders/forge/test/manifest.json")),
+    };
     target.status = InstallStatus::Ready;
     catalog.set_target(&instance.id, &target)?;
     let mut phases = std::collections::BTreeSet::new();
@@ -134,8 +168,10 @@ fn cache_move_rebases_installed_targets_retains_accounts_and_requires_explicit_c
     assert!(phases.contains("Copying") && phases.contains("Verifying"));
     let state = catalog.snapshot()?;
     assert_eq!(
-        state.instances[0].targets[0].manifest,
-        Some(new.join("loaders/forge/test/manifest.json"))
+        state.instances[0].targets[0].source,
+        TargetSource::Managed {
+            manifest: Some(new.join("loaders/forge/test/manifest.json"))
+        }
     );
     let descriptor: serde_json::Value =
         serde_json::from_slice(&fs::read(new.join("loaders/forge/test/installed.json"))?)?;
@@ -154,7 +190,7 @@ fn cache_move_rebases_installed_targets_retains_accounts_and_requires_explicit_c
     finish_retained(&root, true)?;
     assert!(!root.join("objects").exists());
     assert!(new.join("objects/ab/payload").exists());
-    assert!(instance.directory.exists());
+    assert!(instance.resource_directory.exists());
     assert!(config::load(&root)?.contains_key(config::CATALOG_SECTION));
     Ok(())
 }
@@ -166,17 +202,15 @@ fn game_move_preserves_custom_locations_and_keeps_preparation_files_separate() -
     let temp_path = temp.path().canonicalize()?;
     let root = temp_path.join("control");
     let catalog = Catalog::open(&root)?;
-    let (managed, profile) =
-        catalog.create_instance("Managed".into(), "1.20.6".into(), None, None)?;
+    let managed = catalog.create_instance("Managed".into(), "1.20.6".into(), None, None)?;
     let custom = temp_path.join("custom-game");
-    let (custom_instance, _) =
-        catalog.create_instance("Custom".into(), "1.20.6".into(), Some(custom.clone()), None)?;
+    let custom_instance = existing_source(&catalog, &custom, "Custom")?;
     put(
-        &managed.directory.join("profiles/synthetic-save.dat"),
+        &managed.resource_directory.join("saves/synthetic-save.dat"),
         b"synthetic save fixture",
     )?;
     put(
-        &managed.directory.join("prepared.lock.json"),
+        &managed.resource_directory.join("prepared.lock.json"),
         b"cache preparation fixture",
     )?;
     let target = temp_path.join("moved-games");
@@ -193,28 +227,87 @@ fn game_move_preserves_custom_locations_and_keeps_preparation_files_separate() -
         .iter()
         .find(|item| item.id == managed.id)
         .context("Managed instance")?;
-    assert_eq!(updated.directory, target.join(&managed.id));
+    assert_eq!(updated.resource_directory, target.join(&managed.id));
     assert_eq!(
         state
             .instances
             .iter()
             .find(|item| item.id == custom_instance.id)
             .context("Custom instance")?
-            .directory,
+            .resource_directory,
         custom.canonicalize()?
     );
     assert!(
         updated
-            .directory
-            .join("profiles/synthetic-save.dat")
+            .resource_directory
+            .join("saves/synthetic-save.dat")
             .is_file()
     );
-    assert!(!updated.directory.join("prepared.lock.json").exists());
-    assert_eq!(state.profiles[0].id, profile.id);
+    assert_eq!(
+        fs::read(updated.resource_directory.join("prepared.lock.json"))?,
+        b"cache preparation fixture"
+    );
+    assert_eq!(updated.game_directory, target.join(&managed.id));
     finish_retained(&root, true)?;
-    assert!(!managed.directory.join("profiles").exists());
-    assert!(managed.directory.join("prepared.lock.json").exists());
+    assert!(!managed.resource_directory.join("saves").exists());
+    assert!(!managed.resource_directory.exists());
     assert!(custom.exists());
+    Ok(())
+}
+
+#[test]
+fn managed_custom_directory_moves_by_ownership_instead_of_its_basename() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let parent = temp.path().canonicalize()?;
+    let root = parent.join("control");
+    let catalog = Catalog::open(&root)?;
+    let managed = catalog.create_instance(
+        "Managed".into(),
+        "1.20.6".into(),
+        Some(parent.join("named-managed-game")),
+        None,
+    )?;
+    put(
+        &managed.game_directory.join("saves/world.dat"),
+        b"managed world",
+    )?;
+    let destination = parent.join("moved-games");
+    apply_retry(&root, requested(Some(destination.clone()), None), true)?;
+    let updated = catalog.snapshot()?.instances.remove(0);
+    assert_eq!(updated.resource_directory, destination.join(&managed.id));
+    assert_eq!(updated.game_directory, updated.resource_directory);
+    assert_eq!(
+        fs::read(updated.game_directory.join("saves/world.dat"))?,
+        b"managed world"
+    );
+    finish_retained(&root, true)?;
+    assert!(!managed.game_directory.exists());
+    Ok(())
+}
+
+#[test]
+fn relocation_rejects_a_managed_tree_containing_registered_source_data() -> anyhow::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let parent = temp.path().canonicalize()?;
+    let root = parent.join("control");
+    let catalog = Catalog::open(&root)?;
+    let managed = catalog.create_instance("Managed".into(), "1.20.6".into(), None, None)?;
+    let source = managed.resource_directory.join("foreign-minecraft");
+    let registered = existing_source(&catalog, &source, "Registered")?;
+    put(
+        &registered.game_directory.join("saves/world.dat"),
+        b"registered world",
+    )?;
+    let before = fs::read(root.join(config::FILE))?;
+    let destination = parent.join("moved-games");
+    assert!(apply_retry(&root, requested(Some(destination.clone()), None), true).is_err());
+    assert_eq!(fs::read(root.join(config::FILE))?, before);
+    assert_eq!(
+        fs::read(source.join("saves/world.dat"))?,
+        b"registered world"
+    );
+    assert!(!destination.exists());
+    assert!(!root.join(JOURNAL).exists());
     Ok(())
 }
 
@@ -343,10 +436,12 @@ fn metadata_rewrite_failure_and_interrupted_cleanup_preserve_a_recoverable_state
     let temp_path = temp.path().canonicalize()?;
     let root = temp_path.join("control");
     let catalog = Catalog::open(&root)?;
-    let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+    let instance = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
     put(&root.join("objects/data"), b"cache")?;
     let mut target = instance.targets[0].clone();
-    target.manifest = Some(root.canonicalize()?.join("objects/data"));
+    target.source = TargetSource::Managed {
+        manifest: Some(root.canonicalize()?.join("objects/data")),
+    };
     target.status = InstallStatus::Ready;
     catalog.set_target(&instance.id, &target)?;
     // A malformed session document fails after the catalog section was
@@ -371,8 +466,8 @@ fn metadata_rewrite_failure_and_interrupted_cleanup_preserve_a_recoverable_state
         original
     );
     assert_eq!(
-        catalog.snapshot()?.instances[0].directory,
-        instance.directory
+        catalog.snapshot()?.instances[0].resource_directory,
+        instance.resource_directory
     );
     assert!(recover(&root)?.is_some_and(|state| state.interrupted));
     finish_retained(&root, true)?;
@@ -504,7 +599,7 @@ fn block_toml_holds_storage_and_preserves_foreign_sections() -> anyhow::Result<(
     fs::create_dir(&root)?;
     put(
         &root.join(config::FILE),
-        b"[foreign]\nkept = \"value\"\n\n[catalog]\nschema_version = 1\n\n[catalog.snapshot]\nprofile_mode = \"bundled\"\ninstances = []\nprofiles = []\n",
+        b"[foreign]\nkept = \"value\"\n\n[catalog]\nschema_version = 2\n\n[catalog.snapshot]\ninstances = []\n",
     )?;
     let locations = Locations {
         cache: Some(temp.path().canonicalize()?.join("cache")),
@@ -568,8 +663,7 @@ fn catalog_document_round_trips_inside_block_toml_without_null_values() -> anyho
     fs::create_dir(&root)?;
     put(&root.join(config::FILE), b"[foreign]\nkept = true\n")?;
     let catalog = Catalog::open(&root)?;
-    let (instance, profile) =
-        catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
+    let instance = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
 
     let text = fs::read_to_string(root.join(config::FILE))?;
     assert!(text.contains("[catalog]"));
@@ -577,7 +671,10 @@ fn catalog_document_round_trips_inside_block_toml_without_null_values() -> anyho
     assert!(!root.join("catalog.json").exists());
     let reopened = Catalog::open(&root)?.snapshot()?;
     assert_eq!(reopened.instances[0].id, instance.id);
-    assert_eq!(reopened.profiles[0].id, profile.id);
+    assert_eq!(
+        reopened.instances[0].game_directory,
+        instance.game_directory
+    );
     let table = config::load(&root)?;
     assert_eq!(
         table

@@ -3,9 +3,9 @@ use super::{
     Block, Form,
     authentication::AuthStep,
     game_wizard::{WizardPage, WizardStep},
+    instance_editor::EditorPage,
     modpack_import::Phase as PackPhase,
     motion::MotionStyle,
-    profile_editor::EditorPage,
     providers::ProviderKey,
 };
 
@@ -15,7 +15,6 @@ pub(super) enum Tab {
     Home,
     Onboarding,
     Instances,
-    Profiles,
     Accounts,
     Settings,
     About,
@@ -31,14 +30,13 @@ enum Task {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RecordRef {
     Instance(String),
-    Profile(String),
     Account(String),
 }
 
 impl RecordRef {
     pub(super) fn id(&self) -> &str {
         match self {
-            Self::Instance(id) | Self::Profile(id) | Self::Account(id) => id,
+            Self::Instance(id) | Self::Account(id) => id,
         }
     }
 }
@@ -49,7 +47,6 @@ pub(super) enum Screen {
     List,
     Record(RecordRef),
     InstanceEditor(String),
-    ProfileEditor(String),
     Providers,
     Provider(uuid::Uuid),
     NewProvider,
@@ -267,8 +264,7 @@ pub(super) enum DetailKey {
         screen: Screen,
         inspected: Option<String>,
         editor_page: Option<EditorPage>,
-        profile_form: bool,
-        instance_editor: Option<String>,
+        instance_form: bool,
     },
 }
 
@@ -310,7 +306,6 @@ impl PageSpec {
             Tab::Home => "home",
             Tab::Onboarding => "onboarding",
             Tab::Instances => "instances",
-            Tab::Profiles => "profiles",
             Tab::Accounts => "accounts",
             Tab::Settings => "settings",
             Tab::About => "about",
@@ -329,12 +324,9 @@ impl PageSpec {
             DetailKey::Provider(ProviderKey::New) => "provider_new",
             DetailKey::Provider(ProviderKey::Existing(_)) => "provider_existing",
             DetailKey::Browser {
-                instance_editor: Some(_),
+                instance_form: true,
                 ..
             } => "instance_editor",
-            DetailKey::Browser {
-                profile_form: true, ..
-            } => "profile_editor",
             DetailKey::Browser { .. } => "browser",
         }
     }
@@ -383,7 +375,7 @@ impl Block {
                 {
                     Page::Providers
                 }
-                Tab::Instances | Tab::Profiles | Tab::Accounts => Page::Browser,
+                Tab::Instances | Tab::Accounts => Page::Browser,
                 Tab::Settings => Page::Settings,
                 Tab::About => Page::About,
             },
@@ -409,17 +401,11 @@ impl Block {
                     Screen::Record(record) => Some(record.id().to_owned()),
                     _ => None,
                 },
-                editor_page: matches!(self.router.screen(), Screen::ProfileEditor(_))
+                editor_page: matches!(self.router.screen(), Screen::InstanceEditor(_))
                     .then_some(self.shell.editor.page)
                     .flatten(),
-                profile_form: matches!(self.router.screen(), Screen::ProfileEditor(_))
-                    && matches!(self.form, Some(Form::Profile(_))),
-                instance_editor: self
-                    .shell
-                    .instance_editor
-                    .as_ref()
-                    .filter(|_| matches!(self.router.screen(), Screen::InstanceEditor(_)))
-                    .map(|editor| editor.identity().to_owned()),
+                instance_form: matches!(self.router.screen(), Screen::InstanceEditor(_))
+                    && matches!(self.form, Some(Form::EditInstance(_))),
             },
         };
         let wizard = if page == Page::Authentication
@@ -471,16 +457,19 @@ mod tests {
             super::RecordRef::Instance("instance-a".into()),
         );
         let instance = router.entry_id();
-        router.open_record(Tab::Profiles, super::RecordRef::Profile("profile-b".into()));
+        router.open_record(
+            Tab::Instances,
+            super::RecordRef::Instance("profile-b".into()),
+        );
         let profile = router.entry_id();
         router.open_screen(
-            Tab::Profiles,
-            super::Screen::ProfileEditor("profile-b".into()),
+            Tab::Instances,
+            super::Screen::InstanceEditor("profile-b".into()),
         );
         assert!(router.back());
         assert_eq!(router.entry_id(), profile);
         assert!(
-            matches!(router.screen(), super::Screen::Record(super::RecordRef::Profile(id)) if id == "profile-b")
+            matches!(router.screen(), super::Screen::Record(super::RecordRef::Instance(id)) if id == "profile-b")
         );
         assert!(router.back());
         assert_eq!(router.entry_id(), instance);
@@ -509,8 +498,11 @@ mod tests {
 
     #[test]
     fn authentication_restores_the_same_detail_and_its_parent_stack() {
-        let mut router = Router::new(Tab::Profiles);
-        router.open_record(Tab::Profiles, super::RecordRef::Profile("profile-a".into()));
+        let mut router = Router::new(Tab::Instances);
+        router.open_record(
+            Tab::Instances,
+            super::RecordRef::Instance("profile-a".into()),
+        );
         let detail = router.entry_id();
         router.begin_auth();
         router.end_auth();
@@ -563,7 +555,7 @@ mod tests {
 
     #[test]
     fn leaving_auth_returns_to_whatever_destination_opened_it() {
-        for tab in [Tab::Home, Tab::Onboarding, Tab::Accounts, Tab::Profiles] {
+        for tab in [Tab::Home, Tab::Onboarding, Tab::Accounts, Tab::Instances] {
             let mut router = Router::new(tab);
             router.begin_auth();
             assert_eq!(router.tab(), Tab::Accounts);
@@ -578,19 +570,18 @@ mod tests {
         let mut spec = PageSpec {
             page: Page::Browser,
             key: PageKey {
-                tab: Tab::Profiles,
+                tab: Tab::Instances,
                 auth: false,
                 task: false,
                 providers: false,
                 first_run: None,
             },
             detail: DetailKey::Browser {
-                tab: Tab::Profiles,
+                tab: Tab::Instances,
                 screen: super::Screen::InstanceEditor("private-instance".into()),
                 inspected: Some("private-profile".into()),
                 editor_page: None,
-                profile_form: false,
-                instance_editor: Some("private-instance".into()),
+                instance_form: true,
             },
             wizard: None,
             layout: LayoutKind::Management,
@@ -598,7 +589,7 @@ mod tests {
             task: false,
         };
         assert_eq!(spec.page_label(), "browser");
-        assert_eq!(spec.tab_label(), "profiles");
+        assert_eq!(spec.tab_label(), "instances");
         assert_eq!(spec.detail_label(), "instance_editor");
         assert_eq!(spec.wizard_label(), "none");
         spec.detail = DetailKey::Provider(super::ProviderKey::Existing(uuid::Uuid::from_u128(42)));

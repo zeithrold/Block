@@ -108,8 +108,8 @@ impl ExitOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrashContext {
     pub run_id: String,
-    pub profile_id: String,
-    pub profile_name: String,
+    pub instance_id: String,
+    pub instance_name: String,
     pub minecraft_version: String,
     pub loader: Option<String>,
 }
@@ -209,7 +209,7 @@ impl CrashReport {
         }
         .into();
         Self {
-            schema_version: 1,
+            schema_version: 2,
             context,
             outcome,
             summary,
@@ -375,7 +375,7 @@ const RULES: &[Rule] = &[
     (
         DiagnosisKind::JavaHeapMemory,
         "Java heap memory may have been exhausted",
-        "Review the profile's memory limit and available system memory. Reduce demanding mods or resource packs before increasing the heap limit.",
+        "Review the instance's memory limit and available system memory. Reduce demanding mods or resource packs before increasing the heap limit.",
         &[
             "outofmemoryerror: java heap space",
             "outofmemoryerror: gc overhead limit exceeded",

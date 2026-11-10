@@ -8,7 +8,7 @@ use crate::{
 use gpui::{Focusable as _, TestAppContext};
 
 #[gpui::test]
-fn untouched_legacy_instance_defaults_are_clean_and_raw_edits_are_dirty(cx: &mut TestAppContext) {
+fn untouched_instance_defaults_are_clean_and_raw_edits_are_dirty(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     let result = cx.update(|window, cx| {
         view.update(cx, |view, cx| -> anyhow::Result<()> {
@@ -17,19 +17,28 @@ fn untouched_legacy_instance_defaults_are_clean_and_raw_edits_are_dirty(cx: &mut
                 .open_record(Tab::Instances, RecordRef::Instance("instance-a".into()));
             view.handle(UiAction::EditInstance, window, cx);
             let editor = view
-                .shell
-                .instance_editor
+                .form
                 .as_ref()
+                .and_then(|form| match form {
+                    crate::Form::EditInstance(form) => Some(form.as_ref()),
+                    _ => None,
+                })
                 .ok_or_else(|| anyhow::anyhow!("missing Instance draft"))?;
-            assert!(!editor.dirty(cx));
+            assert!(!view.instance_editor_dirty(cx));
             for field in [&editor.name, &editor.java, &editor.width, &editor.height] {
                 let initial = field.read(cx).value();
                 field.update(cx, |field, cx| field.set_value(" invalid ", cx));
-                assert!(editor.dirty(cx));
+                assert!(view.instance_editor_dirty(cx));
                 field.update(cx, |field, cx| field.set_value(&initial, cx));
-                assert!(!editor.dirty(cx));
+                assert!(!view.instance_editor_dirty(cx));
             }
-            assert!(view.snapshot.instances[0].settings.is_none());
+            assert_eq!(
+                (
+                    view.snapshot.instances[0].width,
+                    view.snapshot.instances[0].height
+                ),
+                (1280, 720)
+            );
             Ok(())
         })
     });
@@ -56,9 +65,12 @@ fn dirty_editor_prompt_escape_restores_the_actual_text_input_focus(cx: &mut Test
         let opener = cx.update(|window, cx| {
             view.update(cx, |view, cx| -> anyhow::Result<_> {
                 let editor = view
-                    .shell
-                    .instance_editor
+                    .form
                     .as_ref()
+                    .and_then(|form| match form {
+                        crate::Form::EditInstance(form) => Some(form.as_ref()),
+                        _ => None,
+                    })
                     .ok_or_else(|| anyhow::anyhow!("missing Instance draft"))?;
                 editor
                     .name
@@ -117,9 +129,12 @@ fn dirty_editor_prompt_escape_restores_the_actual_text_input_focus(cx: &mut Test
                 )
             });
             assert!(view.read_with(cx, |view, cx| {
-                view.shell
-                    .instance_editor
+                view.form
                     .as_ref()
+                    .and_then(|form| match form {
+                        crate::Form::EditInstance(form) => Some(form.as_ref()),
+                        _ => None,
+                    })
                     .is_some_and(|editor| editor.name.read(cx).value() == "Native QA draft")
             }));
         }
@@ -135,7 +150,7 @@ fn cancelling_an_instance_editor_returns_to_its_actual_linked_parent(cx: &mut Te
         view.update(cx, |view, cx| {
             view.snapshot = ready_snapshot();
             view.router
-                .open_record(Tab::Profiles, RecordRef::Profile("profile-a".into()));
+                .open_record(Tab::Instances, RecordRef::Instance("instance-b".into()));
             view.router
                 .open_record(Tab::Instances, RecordRef::Instance("instance-a".into()));
             view.handle(UiAction::EditInstance, window, cx);
@@ -151,7 +166,7 @@ fn cancelling_an_instance_editor_returns_to_its_actual_linked_parent(cx: &mut Te
             view.handle(UiAction::NavigationBack, window, cx);
             assert_eq!(
                 view.router.screen(),
-                &Screen::Record(RecordRef::Profile("profile-a".into()))
+                &Screen::Record(RecordRef::Instance("instance-b".into()))
             );
             assert_eq!(view.snapshot.instances[0].name, "Test game");
         });

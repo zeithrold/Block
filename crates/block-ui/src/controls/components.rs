@@ -477,7 +477,6 @@ pub(super) enum BadgeVariant {
     #[default]
     Secondary,
     Outline,
-    Destructive,
     Info,
     Success,
     Warning,
@@ -550,11 +549,6 @@ pub(super) fn badge(
     let (background, foreground, border) = match variant {
         BadgeVariant::Secondary => (palette.secondary, palette.foreground, palette.secondary),
         BadgeVariant::Outline => (palette.background, palette.foreground, palette.border),
-        BadgeVariant::Destructive => (
-            palette.destructive_background,
-            palette.destructive,
-            palette.destructive_background,
-        ),
         BadgeVariant::Info => (
             palette.info_background,
             palette.info,
@@ -1088,54 +1082,54 @@ pub(super) fn provider_icon(
     }
 }
 
-pub(super) fn profile_avatar(
-    appearance: block_launcher::catalog::ProfileAppearance,
+pub(super) fn instance_avatar(
+    appearance: block_launcher::catalog::InstanceAppearance,
     palette: Palette,
     size: f32,
 ) -> Div {
-    use block_launcher::catalog::{ProfileColor, ProfileIcon};
+    use block_launcher::catalog::{InstanceColor, InstanceIcon};
     let icon = match appearance.icon {
-        ProfileIcon::Blocks => Icon::Blocks,
-        ProfileIcon::Layers => Icon::Layers,
-        ProfileIcon::Pickaxe => Icon::Pickaxe,
-        ProfileIcon::Sword => Icon::Sword,
-        ProfileIcon::Compass => Icon::Compass,
-        ProfileIcon::Hammer => Icon::Hammer,
-        ProfileIcon::Leaf => Icon::Leaf,
-        ProfileIcon::FlaskConical => Icon::Experiment,
+        InstanceIcon::Blocks => Icon::Blocks,
+        InstanceIcon::Layers => Icon::Layers,
+        InstanceIcon::Pickaxe => Icon::Pickaxe,
+        InstanceIcon::Sword => Icon::Sword,
+        InstanceIcon::Compass => Icon::Compass,
+        InstanceIcon::Hammer => Icon::Hammer,
+        InstanceIcon::Leaf => Icon::Leaf,
+        InstanceIcon::FlaskConical => Icon::Experiment,
     };
     let dark = palette.background == Palette::DARK.background;
     let color = match appearance.color {
-        ProfileColor::Gray => palette.muted,
-        ProfileColor::Blue => {
+        InstanceColor::Gray => palette.muted,
+        InstanceColor::Blue => {
             if dark {
                 0x0060_a5fa
             } else {
                 0x0025_63eb
             }
         }
-        ProfileColor::Green => {
+        InstanceColor::Green => {
             if dark {
                 0x004a_de80
             } else {
                 0x0016_a34a
             }
         }
-        ProfileColor::Orange => {
+        InstanceColor::Orange => {
             if dark {
                 0x00fb_923c
             } else {
                 0x00ea_580c
             }
         }
-        ProfileColor::Purple => {
+        InstanceColor::Purple => {
             if dark {
                 0x00c0_84fc
             } else {
                 0x0093_33ea
             }
         }
-        ProfileColor::Pink => {
+        InstanceColor::Pink => {
             if dark {
                 0x00f4_72b6
             } else {

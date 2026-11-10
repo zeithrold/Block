@@ -11,11 +11,11 @@ use block_launcher::catalog::DataPolicy;
 use gpui::{Context, Window};
 
 use crate::{
-    Block, Form, OperationKind, ProfileForm, Tab, account_id,
+    Block, Form, InstanceEditForm, OperationKind, Tab, account_id,
     appearance::Appearance,
     authentication, browser, downloads, feedback, first_run,
     game_wizard::{CreationKind, WizardPage, WizardStep},
-    import_games, modpack_import, motion, profile_editor, select,
+    import_games, instance_editor, modpack_import, motion, select,
     settings::SettingsDraft,
     shell::{Drawer, EditorExit, EditorKind, PendingEditorExit, Surface},
 };
@@ -51,8 +51,6 @@ pub(super) enum UiAction {
     SettingsExitSave,
     SettingsExitDiscard,
     ResetPreferences,
-    ConfirmSeparate(bool),
-    SeparateProfiles,
     WizardNext,
     WizardBack,
     WizardSnapshots,
@@ -61,29 +59,26 @@ pub(super) enum UiAction {
     WizardKind(CreationKind),
     ConfirmPackLeave,
     ConfirmDiscardGame,
-    WizardInstance(String),
-    WizardProfileIcon(block_launcher::catalog::ProfileIcon),
-    WizardProfileColor(block_launcher::catalog::ProfileColor),
-    WizardProfileFullscreen,
+    WizardInstanceIcon(block_launcher::catalog::InstanceIcon),
+    WizardInstanceColor(block_launcher::catalog::InstanceColor),
+    WizardInstanceFullscreen,
     WizardRuntime(bool),
     WizardWindow { width: u32, height: u32 },
     WizardCustomWindow,
-    WizardProfileOptions,
-    WizardProfileTarget(String),
+    WizardInstanceOptions,
     ChooseAppearance { wizard: bool, color: bool },
     OpenProductSelect(select::ProductChoice),
     DefaultJavaAutomatic(bool),
     DefaultWindow { width: u32, height: u32 },
     CustomDefaultWindow,
-    ProfileRuntimeAutomatic(bool),
-    ProfileDataPolicy(DataPolicy),
     InstanceRuntimeAutomatic(bool),
+    InstanceDataPolicy(DataPolicy),
     InstanceWindow { width: u32, height: u32 },
     CustomInstanceWindow,
-    ProfileConnect,
-    WizardProfileConnect,
-    ProfileIcon(block_launcher::catalog::ProfileIcon),
-    ProfileColor(block_launcher::catalog::ProfileColor),
+    InstanceConnect,
+    WizardInstanceConnect,
+    InstanceIcon(block_launcher::catalog::InstanceIcon),
+    InstanceColor(block_launcher::catalog::InstanceColor),
     SelectValue(Box<Self>),
     MinimizeWindow,
     CloseWindow,
@@ -94,20 +89,15 @@ pub(super) enum UiAction {
     ProxyMode(u8),
     SettingsPage(u8),
     Inspect(String),
-    InspectLinked { profiles: bool, id: String },
     GamesHelp,
-    ProfileModeSettings,
     ReloadLibrary,
     ReloadVersions,
     EditInstance,
     EditInstanceOptiFine,
-    SaveInstanceSettings,
     InstanceFullscreen,
     InstanceOptiFineFile,
     InstanceOptiFineRemove,
-    ProfileInheritRuntime,
-    ProfileInheritWindow,
-    SelectProfile(String),
+    SelectInstance(String),
     SelectAccount(String),
     CreateInstance,
     SaveInstance,
@@ -116,18 +106,13 @@ pub(super) enum UiAction {
     ReloadLoaderVersions,
     BrowseInstall,
     SelectVersion(String),
-    EditProfile,
-    SaveProfile,
-    ProfilePage(profile_editor::EditorPage),
-    ProfilePageDone,
-    ProfilePageCancel,
+    InstancePage(instance_editor::EditorPage),
+    InstancePageDone,
+    InstancePageCancel,
     CancelForm,
-    NewProfile,
-    CopyProfileId(String),
-    DeleteProfileId(String),
-    ProfileActions,
+    DeleteInstanceId(String),
     ConfirmDelete,
-    ProfileTarget(String),
+    InstanceTarget(String),
     DefaultAccount(Option<String>),
     SignIn,
     Authenticate,
@@ -151,7 +136,7 @@ pub(super) enum UiAction {
     SignOut(String),
     Play,
     Repair,
-    RepairProfile(String),
+    RepairInstance(String),
     Stop,
     ToggleOutput,
     ToggleCommand,
@@ -174,8 +159,8 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
             | UiAction::AuthCancel
             | UiAction::AuthBack
             | UiAction::AuthFinish
-            | UiAction::ProfilePageCancel
-            | UiAction::ProfilePageDone
+            | UiAction::InstancePageCancel
+            | UiAction::InstancePageDone
             | UiAction::Tab(Tab::Home)
             | UiAction::FirstRun(first_run::Action::Back)
     ) {
@@ -201,7 +186,7 @@ impl Block {
             return;
         }
         self.capture_motion_origin(cx);
-        let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditProfile);
+        let focus_first = matches!(action, UiAction::CreateInstance | UiAction::EditInstance);
         let previous_page = (self.router.tab(), self.form.is_some());
         let previous_entry = self.router.entry_id();
         let previous_focus = window.focused(cx);
@@ -249,38 +234,25 @@ impl Block {
             UiAction::ShowSnapshots => self.toggle_settings_snapshots(),
             UiAction::SettingsPage(page) => self.select_settings_page(page, window, cx),
             UiAction::ProxyMode(mode) => self.edit_settings_draft(|form| form.proxy_mode = mode),
-            UiAction::ConfirmSeparate(confirm) => self.confirm_separate(confirm, window, cx),
-            UiAction::SeparateProfiles => self.separate_profiles(window, cx),
-            UiAction::Inspect(id) => self.inspect(id, None, cx),
-            UiAction::InspectLinked { profiles, id } => self.inspect(id, Some(profiles), cx),
+            UiAction::Inspect(id) => self.inspect(id, cx),
             UiAction::GamesHelp => {
                 self.shell.surfaces.open(Surface::GamesHelp, window, cx);
             }
-            UiAction::ProfileModeSettings => self.open_profile_mode_settings(window, cx),
             UiAction::ReloadVersions => self.reload_versions(),
             UiAction::ReloadLibrary => self.reload_library(),
             UiAction::EditInstance => self.open_instance_editor(window, cx),
             UiAction::EditInstanceOptiFine => self.open_instance_optifine_editor(window, cx),
-            UiAction::SaveInstanceSettings => self.save_instance_draft(window, cx),
             UiAction::InstanceFullscreen => self.toggle_instance_fullscreen(),
             UiAction::InstanceOptiFineFile => self.browse_instance_optifine(cx),
             UiAction::InstanceOptiFineRemove => self.remove_instance_optifine(cx),
-            UiAction::ProfileInheritRuntime => self.edit_profile_draft(|form| {
-                form.original.inheritance.runtime = !form.original.inheritance.runtime;
-            }),
-            UiAction::ProfileInheritWindow => self.edit_profile_draft(|form| {
-                form.original.inheritance.window = !form.original.inheritance.window;
-            }),
-            UiAction::SelectProfile(id) => self.select_profile(id, window, cx),
+            UiAction::SelectInstance(id) => self.select_instance(id, window, cx),
             UiAction::SelectAccount(id) => self.select_account(id, window, cx),
             UiAction::CreateInstance => self.start_creation(window, cx),
             UiAction::WizardKind(kind) => self.start_creation_kind(kind, window, cx),
-            UiAction::WizardInstance(id) => self.wizard_instance(id),
-            UiAction::WizardProfileIcon(icon) => self.wizard_profile_icon(icon),
-            UiAction::WizardProfileColor(color) => self.wizard_profile_color(color),
-            UiAction::WizardProfileFullscreen => self.wizard_profile_fullscreen(),
-            UiAction::WizardProfileOptions => self.wizard_profile_options(),
-            UiAction::WizardProfileTarget(id) => self.wizard_profile_target(id),
+            UiAction::WizardInstanceIcon(icon) => self.wizard_instance_icon(icon),
+            UiAction::WizardInstanceColor(color) => self.wizard_instance_color(color),
+            UiAction::WizardInstanceFullscreen => self.wizard_instance_fullscreen(),
+            UiAction::WizardInstanceOptions => self.wizard_instance_options(),
             UiAction::ChooseAppearance { wizard, color } => {
                 self.open_appearance_select(wizard, color, window, cx);
             }
@@ -290,10 +262,7 @@ impl Block {
             }
             UiAction::DefaultWindow { width, height } => self.set_default_window(width, height, cx),
             UiAction::CustomDefaultWindow => self.custom_default_window(window, cx),
-            UiAction::ProfileRuntimeAutomatic(value) => {
-                self.set_profile_runtime_automatic(value, window, cx);
-            }
-            UiAction::ProfileDataPolicy(value) => self.set_profile_data_policy(value),
+            UiAction::InstanceDataPolicy(value) => self.set_instance_data_policy(value),
             UiAction::InstanceRuntimeAutomatic(value) => {
                 self.set_instance_runtime_automatic(value, window, cx);
             }
@@ -301,19 +270,19 @@ impl Block {
                 self.set_instance_window(width, height, cx);
             }
             UiAction::CustomInstanceWindow => self.custom_instance_window(window, cx),
-            UiAction::ProfileConnect => self.toggle_profile_connect(),
+            UiAction::InstanceConnect => self.toggle_instance_connect(),
             UiAction::WizardRuntime(value) => self.wizard_runtime(value),
             UiAction::WizardWindow { width, height } => self.wizard_window(width, height, cx),
             UiAction::WizardCustomWindow => self.wizard_custom_window(),
-            UiAction::WizardProfileConnect => self.wizard_profile_connect(),
+            UiAction::WizardInstanceConnect => self.wizard_instance_connect(),
             UiAction::MinimizeWindow => window.minimize_window(),
             UiAction::CloseWindow => self.close_launcher_window(window),
             UiAction::QuitApplication => Self::defer_application_quit(cx),
             UiAction::SelectValue(action) => self.select_value(*action, window, cx),
-            UiAction::ProfileIcon(icon) => self.edit_profile_draft(|form| {
+            UiAction::InstanceIcon(icon) => self.edit_instance_draft(|form| {
                 form.original.appearance.icon = icon;
             }),
-            UiAction::ProfileColor(color) => self.edit_profile_draft(|form| {
+            UiAction::InstanceColor(color) => self.edit_instance_draft(|form| {
                 form.original.appearance.color = color;
             }),
             UiAction::WizardSnapshots => self.toggle_wizard_snapshots(),
@@ -329,22 +298,31 @@ impl Block {
             UiAction::ReloadLoaderVersions => self.load_wizard_loader_versions(true, cx),
             UiAction::SelectVersion(version) => self.set_wizard_version(version, cx),
             UiAction::BrowseInstall => self.browse_install(cx),
-            UiAction::SaveInstance => self.submit_game_and_focus(window, cx),
-            UiAction::EditProfile => self.edit_profile(window, cx),
-            UiAction::SaveProfile => self.save_profile_draft(window, cx),
-            UiAction::ProfilePage(page) => self.open_profile_page(page, window, cx),
-            UiAction::ProfilePageDone => self.finish_profile_page(false, window, cx),
-            UiAction::ProfilePageCancel => self.finish_profile_page(true, window, cx),
+            UiAction::SaveInstance => {
+                if matches!(self.form, Some(Form::EditInstance(_))) {
+                    self.save_instance_draft(window, cx);
+                } else {
+                    self.submit_game_and_focus(window, cx);
+                }
+            }
+            UiAction::InstancePage(page) => self.open_instance_page(page, window, cx),
+            UiAction::InstancePageDone => self.finish_instance_page(false, window, cx),
+            UiAction::InstancePageCancel => self.finish_instance_page(true, window, cx),
             UiAction::CancelForm => self.cancel_or_finish_form(window, cx),
-            UiAction::NewProfile => self.new_profile(cx),
-            UiAction::ProfileActions => self.open_profile_actions_at(None, window, cx),
-            UiAction::CopyProfileId(id) => self.copy_profile(id),
-            UiAction::DeleteProfileId(id) => self.request_profile_delete(id, window, cx),
-            UiAction::ConfirmDelete => self.confirm_profile_delete(window, cx),
-            UiAction::ProfileTarget(target) => self.edit_profile_draft(|form| {
+            UiAction::DeleteInstanceId(id) => self.request_instance_delete(id, window, cx),
+            UiAction::ConfirmDelete => self.confirm_instance_delete(window, cx),
+            UiAction::InstanceTarget(target) => self.edit_instance_draft(|form| {
+                form.optifine = form
+                    .original
+                    .targets
+                    .iter()
+                    .find(|entry| entry.id == target)
+                    .and_then(|entry| entry.optifine.clone())
+                    .map(Box::new);
+                form.optifine_request = None;
                 form.original.target_id = target;
             }),
-            UiAction::DefaultAccount(account) => self.edit_profile_draft(|form| {
+            UiAction::DefaultAccount(account) => self.edit_instance_draft(|form| {
                 form.original.default_account = account;
             }),
             UiAction::SignIn => self.open_auth_wizard(window, cx),
@@ -382,7 +360,7 @@ impl Block {
             UiAction::SignOut(id) => self.sign_out(id, window, cx),
             UiAction::Play => self.play(cx),
             UiAction::Repair => self.repair_selected(window, cx),
-            UiAction::RepairProfile(id) => self.repair(&id, window, cx),
+            UiAction::RepairInstance(id) => self.repair(&id, window, cx),
             UiAction::Stop => self.stop(),
             UiAction::ToggleOutput => self.show_output = !self.show_output,
             UiAction::ToggleCommand => self.show_command = !self.show_command,
@@ -439,7 +417,6 @@ impl Block {
             && (matches!(
                 self.router.screen(),
                 super::navigation::Screen::InstanceEditor(_)
-                    | super::navigation::Screen::ProfileEditor(_)
                     | super::navigation::Screen::NewProvider
                     | super::navigation::Screen::EditProvider(_)
             ) || self.page_spec().task)
@@ -645,7 +622,6 @@ impl Block {
         (matches!(
             action,
             UiAction::SaveInstance
-                | UiAction::SaveProfile
                 | UiAction::WizardNext
                 | UiAction::NavigationBack
                 | UiAction::CancelForm
@@ -874,7 +850,7 @@ impl Block {
         self.busy
             && self.operation_kind == OperationKind::Install
             && self.active_run.is_none()
-            && self.profile().is_some()
+            && self.instance().is_some()
     }
 
     pub(super) fn available_while_busy(action: &UiAction) -> bool {
@@ -926,9 +902,7 @@ impl Block {
                 | UiAction::ShowSnapshots
                 | UiAction::ProxyMode(_)
                 | UiAction::Inspect(_)
-                | UiAction::InspectLinked { .. }
                 | UiAction::GamesHelp
-                | UiAction::ProfileModeSettings
                 | UiAction::ReloadVersions
                 | UiAction::ReloadLibrary
                 | UiAction::ToggleOutput
@@ -967,7 +941,6 @@ impl Block {
         self.initialize_browsers(cx);
         self.router.navigate(tab);
         self.form = None;
-        self.shell.instance_editor = None;
         self.shell.surfaces.clear(window, &self.focus, cx);
         if tab == Tab::Settings {
             self.focus_settings_heading(window, cx);
@@ -980,11 +953,9 @@ impl Block {
             self.auth_back(window, cx);
         } else if self.router.tab() == Tab::Settings {
             self.settings_back(window, cx);
-        } else if self.shell.instance_editor.is_some() {
-            self.cancel_instance_editor(window, cx);
-        } else if matches!(self.form, Some(Form::Profile(_))) {
+        } else if matches!(self.form, Some(Form::EditInstance(_))) {
             if self.shell.editor.page.is_some() {
-                self.finish_profile_page(false, window, cx);
+                self.finish_instance_page(false, window, cx);
             } else {
                 self.cancel_or_finish_form(window, cx);
             }
@@ -1033,17 +1004,12 @@ impl Block {
             return true;
         }
         let kind = match self.router.screen() {
-            super::navigation::Screen::InstanceEditor(_) => self
-                .shell
-                .instance_editor
-                .as_ref()
-                .is_some_and(|editor| editor.dirty(cx))
-                .then_some(EditorKind::Instance),
-            super::navigation::Screen::ProfileEditor(_)
+            super::navigation::Screen::InstanceEditor(_)
                 if !matches!(action, UiAction::NavigationBack)
                     || self.shell.editor.page.is_none() =>
             {
-                self.profile_editor_dirty(cx).then_some(EditorKind::Profile)
+                self.instance_editor_dirty(cx)
+                    .then_some(EditorKind::Instance)
             }
             super::navigation::Screen::NewProvider | super::navigation::Screen::EditProvider(_) => {
                 self.shell
@@ -1098,7 +1064,6 @@ impl Block {
             let operation = self.operation_revision;
             match exit.kind {
                 EditorKind::Instance => self.save_instance_draft(window, cx),
-                EditorKind::Profile => self.save_profile_draft(window, cx),
                 EditorKind::Provider => self.save_provider(cx),
             }
             if self.busy && self.operation_revision != operation {
@@ -1111,7 +1076,6 @@ impl Block {
         } else {
             match exit.kind {
                 EditorKind::Instance => self.cancel_instance_editor(window, cx),
-                EditorKind::Profile => self.cancel_profile_editor(window, cx),
                 EditorKind::Provider => self.cancel_provider_editor(cx),
             }
             if !matches!(exit.exit.as_ref(), UiAction::NavigationBack) {
@@ -1275,10 +1239,12 @@ impl Block {
             }
         } else if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
             self.first_run_overview(window, cx);
-        } else if self.shell.editor.page.is_some() && matches!(self.form, Some(Form::Profile(_))) {
-            self.finish_profile_page(true, window, cx);
-        } else if matches!(self.form, Some(Form::Profile(_))) {
-            self.cancel_profile_editor(window, cx);
+        } else if self.shell.editor.page.is_some()
+            && matches!(self.form, Some(Form::EditInstance(_)))
+        {
+            self.finish_instance_page(true, window, cx);
+        } else if matches!(self.form, Some(Form::EditInstance(_))) {
+            self.cancel_instance_editor(window, cx);
         } else if self.router.tab() != Tab::Onboarding {
             self.form = None;
             self.router.leave_task();
@@ -1288,23 +1254,10 @@ impl Block {
 
     /// Show an inspected item in the browser that owns it. A linked inspection
     /// moves the page to the other collection first.
-    fn inspect(&mut self, id: String, linked_tab: Option<bool>, cx: &mut Context<'_, Self>) {
-        self.shell.instance_editor = None;
-        let tab = if let Some(profiles) = linked_tab {
-            if profiles {
-                Tab::Profiles
-            } else {
-                Tab::Instances
-            }
-        } else {
-            self.router.tab()
-        };
+    fn inspect(&mut self, id: String, cx: &mut Context<'_, Self>) {
+        let tab = self.router.tab();
         let record = if tab == Tab::Accounts {
             super::navigation::RecordRef::Account(id.clone())
-        } else if tab == Tab::Profiles
-            || self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled
-        {
-            super::navigation::RecordRef::Profile(id.clone())
         } else {
             super::navigation::RecordRef::Instance(id.clone())
         };
@@ -1312,34 +1265,6 @@ impl Block {
         self.initialize_browsers(cx);
         self.collection_mut().inspected = Some(id);
         self.form = None;
-    }
-
-    fn open_profile_mode_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.shell.surfaces.clear(window, &self.focus, cx);
-        self.open_settings(cx);
-        self.router.navigate(Tab::Settings);
-        self.select_settings_page(2, window, cx);
-    }
-
-    fn confirm_separate(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if confirm {
-            self.shell
-                .surfaces
-                .open(Surface::SeparateProfiles, window, cx);
-        } else {
-            self.shell.surfaces.close(window, &self.focus, cx);
-        }
-    }
-
-    fn separate_profiles(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.shell.surfaces.close(window, &self.focus, cx);
-        self.begin(
-            msg!("runtime.enabling_separated"),
-            crate::ui_logging::Operation::SeparateProfiles,
-        );
-        if let Some(engine) = &self.engine {
-            engine.separate_profiles();
-        }
     }
 
     fn reload_versions(&mut self) {
@@ -1354,27 +1279,25 @@ impl Block {
     fn reload_library(&mut self) {
         if let Some(engine) = &self.engine {
             self.shell.games.load = browser::CollectionLoad::Loading;
-            self.shell.profiles.load = browser::CollectionLoad::Loading;
             self.shell.accounts.load = browser::CollectionLoad::Loading;
             engine.load_catalog();
         }
     }
 
-    fn select_profile(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if let Some(profile) = self
+    fn select_instance(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self
             .snapshot
-            .profiles
+            .instances
             .iter()
-            .find(|profile| profile.id == id)
+            .any(|instance| instance.id == id)
         {
-            self.selected_instance = Some(profile.instance_id.clone());
-            self.selected_profile = Some(id);
+            self.selected_instance = Some(id);
         }
         self.push_toast(msg!("runtime.game_selected"), feedback::ToastKind::Info);
         self.shell.surfaces.clear(window, &self.focus, cx);
         self.form = None;
         self.router.leave_task();
-        self.apply_profile_account();
+        self.apply_instance_account();
     }
 
     fn select_account(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1415,41 +1338,8 @@ impl Block {
         }
     }
 
-    /// Start a Profile directly for the inspected Instance.
-    fn new_profile(&mut self, cx: &mut Context<'_, Self>) {
-        let id = self
-            .inspected_instance()
-            .map(|instance| instance.id.clone());
-        self.begin_game_wizard(cx);
-        self.wizard_kind(CreationKind::ExistingInstance, cx);
-        if let Some(id) = id {
-            self.wizard_instance(id);
-            self.shell.wizard.context_instance = true;
-            self.shell.wizard.step = WizardStep::Setup;
-            self.mark_game_wizard_clean(cx);
-        }
-    }
-
-    fn copy_profile(&mut self, id: String) {
-        if let Some(profile) = self
-            .snapshot
-            .profiles
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        {
-            self.begin(
-                msg!("runtime.copying_profile"),
-                crate::ui_logging::Operation::CopyProfile,
-            );
-            if let Some(engine) = &self.engine {
-                engine.copy_profile(profile.id, format!("{} copy", profile.name));
-            }
-        }
-    }
-
-    /// Ask before deleting, unless the profile already left the catalog.
-    fn request_profile_delete(
+    /// Ask before deleting Instance metadata, unless it already left the catalog.
+    fn request_instance_delete(
         &mut self,
         id: String,
         window: &mut Window,
@@ -1457,35 +1347,35 @@ impl Block {
     ) {
         if self
             .snapshot
-            .profiles
+            .instances
             .iter()
-            .any(|profile| profile.id == id)
+            .any(|instance| instance.id == id)
         {
             self.shell
                 .surfaces
-                .open(Surface::DeleteProfile(id), window, cx);
+                .open(Surface::DeleteInstance(id), window, cx);
         } else {
-            self.report(msg!("runtime.profile_unavailable"));
+            self.report(msg!("runtime.instance_unavailable"));
         }
     }
 
-    fn confirm_profile_delete(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    fn confirm_instance_delete(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let id = self
             .shell
             .surfaces
             .top()
             .and_then(|layer| match &layer.kind {
-                Surface::DeleteProfile(id) => Some(id.clone()),
+                Surface::DeleteInstance(id) => Some(id.clone()),
                 _ => None,
             });
         if let Some(id) = id {
             self.shell.surfaces.close(window, &self.focus, cx);
             self.begin(
-                msg!("runtime.deleting_profile"),
-                crate::ui_logging::Operation::DeleteProfile,
+                msg!("runtime.deleting_instance"),
+                crate::ui_logging::Operation::DeleteInstance,
             );
             if let Some(engine) = &self.engine {
-                engine.delete_profile(id);
+                engine.delete_instance(id);
             }
         }
     }
@@ -1505,7 +1395,7 @@ impl Block {
     }
 
     fn repair_selected(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if let Some(id) = self.selected_profile.clone() {
+        if let Some(id) = self.selected_instance.clone() {
             self.repair(&id, window, cx);
         }
     }
@@ -1516,7 +1406,7 @@ impl Block {
     fn repair(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if let Some(profile) = self
             .snapshot
-            .profiles
+            .instances
             .iter()
             .find(|profile| profile.id == id)
             .cloned()
@@ -1525,7 +1415,7 @@ impl Block {
                 .snapshot
                 .instances
                 .iter()
-                .find(|instance| instance.id == profile.instance_id)
+                .find(|instance| instance.id == profile.id)
                 .filter(|instance| {
                     instance.pack.as_ref().is_some_and(|pack| {
                         pack.status == block_launcher::catalog::PackStatus::Pending
@@ -1541,7 +1431,7 @@ impl Block {
             );
             self.operation_kind = OperationKind::Install;
             if let Some(engine) = &self.engine {
-                engine.install(profile.instance_id, profile.target_id, self.cancel.clone());
+                engine.install(profile.id, profile.target_id, self.cancel.clone());
             }
         }
     }
@@ -1565,14 +1455,14 @@ impl Block {
     }
 
     /// Apply an edit to the open profile draft, if one is open.
-    fn edit_profile_draft(&mut self, apply: impl FnOnce(&mut ProfileForm)) {
-        if let Some(Form::Profile(form)) = &mut self.form {
+    fn edit_instance_draft(&mut self, apply: impl FnOnce(&mut InstanceEditForm)) {
+        if let Some(Form::EditInstance(form)) = &mut self.form {
             apply(form);
         }
     }
 
-    fn toggle_profile_connect(&mut self) {
-        self.edit_profile_draft(|form| {
+    fn toggle_instance_connect(&mut self) {
+        self.edit_instance_draft(|form| {
             form.original.server.connect_on_launch = !form.original.server.connect_on_launch;
         });
     }

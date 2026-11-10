@@ -17,7 +17,6 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Block>, &mut VisualTestContext) {
         view.saved_preferences.reduce_motion = true;
         view.snapshot = crate::test_support::ready_snapshot();
         view.selected_instance = Some("instance-a".into());
-        view.selected_profile = Some("profile-a".into());
         view
     });
     (view, cx)
@@ -29,8 +28,8 @@ fn crash_message(root: &std::path::Path) -> anyhow::Result<crate::engine::Messag
     let report = block_launcher::crash::CrashReport::new(
         block_launcher::crash::CrashContext {
             run_id: CRASH_RUN.into(),
-            profile_id: "profile-a".into(),
-            profile_name: "Test profile".into(),
+            instance_id: "instance-a".into(),
+            instance_name: "Test game".into(),
             minecraft_version: "1.20.6".into(),
             loader: None,
         },
@@ -80,10 +79,10 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
 }
 
-fn open_delete_profile(view: &Entity<Block>, cx: &mut VisualTestContext) {
+fn open_delete_instance(view: &Entity<Block>, cx: &mut VisualTestContext) {
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.handle(UiAction::DeleteProfileId("profile-a".into()), window, cx);
+            view.handle(UiAction::DeleteInstanceId("instance-a".into()), window, cx);
         });
     });
     cx.run_until_parked();
@@ -98,7 +97,13 @@ fn compact_long_dialog_keeps_title_and_close_fixed_while_body_scrolls(cx: &mut T
     let (view, cx) = fixture(cx);
     cx.simulate_resize(size(px(360.), px(540.)));
     cx.update(|window, cx| {
-        view.update(cx, |view, cx| view.handle(UiAction::GamesHelp, window, cx));
+        view.update(cx, |view, cx| {
+            view.handle(
+                UiAction::DownloadFiles(crate::downloads::DownloadGroup::Active),
+                window,
+                cx,
+            )
+        });
     });
     cx.run_until_parked();
     let (content, insets) = cx.update(|window, _| {
@@ -143,9 +148,9 @@ fn compact_long_dialog_keeps_title_and_close_fixed_while_body_scrolls(cx: &mut T
         crate::test_support::control_bounds(cx, "surface-dialog-footer"),
         Some(footer)
     );
-    let close = crate::test_support::control_bounds(cx, "close-drawer").expect("Close painted");
+    let close = crate::test_support::control_bounds(cx, "downloads-back").expect("Close painted");
     assert!(close.top() >= footer.top() && close.bottom() <= footer.bottom());
-    click(cx, "close-drawer");
+    click(cx, "downloads-back");
     view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
 }
@@ -158,7 +163,7 @@ fn compact_long_dialog_keeps_title_and_close_fixed_while_body_scrolls(cx: &mut T
 fn editor_exit_actions_fit_compact_content_and_stay_restores_focus(cx: &mut TestAppContext) {
     for kind in [
         EditorKind::Instance,
-        EditorKind::Profile,
+        EditorKind::Instance,
         EditorKind::Provider,
     ] {
         let (view, cx) = fixture(cx);
@@ -239,7 +244,7 @@ fn late_editor_exit_dismissal_cannot_close_a_covering_dialog(cx: &mut TestAppCon
     let revision = view.read_with(cx, |view, _| {
         view.shell.surfaces.top().map(|layer| layer.revision)
     });
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
 
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -252,7 +257,7 @@ fn late_editor_exit_dismissal_cannot_close_a_covering_dialog(cx: &mut TestAppCon
         assert_eq!(view.shell.surfaces.layers().count(), 2);
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::DeleteProfile(_))
+            Some(Surface::DeleteInstance(_))
         ));
     });
     crate::test_support::press(cx, "escape");
@@ -273,11 +278,11 @@ fn late_editor_exit_dismissal_cannot_close_a_covering_dialog(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn delete_profile_confirmation_renders_in_window_and_restores_focus(cx: &mut TestAppContext) {
+fn delete_instance_confirmation_renders_in_window_and_restores_focus(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
     let trigger_focus = cx.update(|window, cx| window.focused(cx));
     assert!(trigger_focus.is_some());
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     assert_eq!(
         cx.windows().len(),
         1,
@@ -289,7 +294,7 @@ fn delete_profile_confirmation_renders_in_window_and_restores_focus(cx: &mut Tes
     view.read_with(cx, |view, _| {
         assert!(view.shell.surfaces.top().is_some_and(|layer| matches!(
             &layer.kind,
-            Surface::DeleteProfile(id) if id == "profile-a"
+            Surface::DeleteInstance(id) if id == "instance-a"
         )));
     });
     assert!(crate::test_support::control_bounds(cx, "dialog-layer").is_some());
@@ -316,7 +321,7 @@ fn delete_profile_confirmation_renders_in_window_and_restores_focus(cx: &mut Tes
 #[gpui::test]
 fn escape_closes_only_the_topmost_overlay(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.handle(
@@ -340,7 +345,7 @@ fn escape_closes_only_the_topmost_overlay(cx: &mut TestAppContext) {
     view.read_with(cx, |view, _| {
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::DeleteProfile(_))
+            Some(Surface::DeleteInstance(_))
         ));
         assert_eq!(view.shell.surfaces.layers().count(), 1);
     });
@@ -357,11 +362,11 @@ fn escape_closes_only_the_topmost_overlay(cx: &mut TestAppContext) {
 #[gpui::test]
 fn confirming_closes_the_overlay_once_and_keeps_the_catalog(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     click(cx, "confirm-delete");
     view.read_with(cx, |view, _| {
         assert_eq!(view.shell.surfaces.layers().count(), 0);
-        assert_eq!(view.snapshot.profiles.len(), 1);
+        assert_eq!(view.snapshot.instances.len(), 1);
     });
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
 }
@@ -373,14 +378,14 @@ fn enter_dismisses_a_confirmation_without_running_its_destructive_action(cx: &mu
         let (engine, _messages) = crate::Engine::with_root(root.path().to_path_buf())?;
         let (view, cx) = fixture(cx);
         view.update(cx, |view, _| view.engine = Some(engine));
-        open_delete_profile(&view, cx);
+        open_delete_instance(&view, cx);
         let revision = view.read_with(cx, |view, _| view.operation_revision);
         crate::test_support::press(cx, "enter");
         cx.run_until_parked();
         view.read_with(cx, |view, _| {
             assert!(!view.shell.surfaces.is_open());
-            assert_eq!(view.snapshot.profiles.len(), 1);
-            assert_eq!(view.snapshot.profiles[0].id, "profile-a");
+            assert_eq!(view.snapshot.instances.len(), 1);
+            assert_eq!(view.snapshot.instances[0].id, "instance-a");
             assert_eq!(view.operation_revision, revision);
             assert!(!view.busy);
         });
@@ -393,7 +398,7 @@ fn enter_dismisses_a_confirmation_without_running_its_destructive_action(cx: &mu
 #[gpui::test]
 fn non_cancellable_work_blocks_both_dialog_dismissal_keys(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     view.update(cx, |view, cx| {
         view.busy = true;
         view.operation_cancellable = false;
@@ -407,9 +412,9 @@ fn non_cancellable_work_blocks_both_dialog_dismissal_keys(cx: &mut TestAppContex
         view.read_with(cx, |view, _| {
             assert!(matches!(
                 view.shell.surfaces.top().map(|layer| &layer.kind),
-                Some(Surface::DeleteProfile(_))
+                Some(Surface::DeleteInstance(_))
             ));
-            assert_eq!(view.snapshot.profiles.len(), 1);
+            assert_eq!(view.snapshot.instances.len(), 1);
         });
     }
     view.update(cx, |view, cx| {
@@ -420,7 +425,7 @@ fn non_cancellable_work_blocks_both_dialog_dismissal_keys(cx: &mut TestAppContex
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
-        assert_eq!(view.snapshot.profiles.len(), 1);
+        assert_eq!(view.snapshot.instances.len(), 1);
     });
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
 }
@@ -428,12 +433,12 @@ fn non_cancellable_work_blocks_both_dialog_dismissal_keys(cx: &mut TestAppContex
 #[gpui::test]
 fn a_late_dismissal_never_closes_a_newer_overlay(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     let stale = view.read_with(cx, |view, _| {
         view.shell
             .surfaces
             .top()
-            .filter(|layer| matches!(layer.kind, Surface::DeleteProfile(_)))
+            .filter(|layer| matches!(layer.kind, Surface::DeleteInstance(_)))
             .map_or(0, |layer| layer.revision)
     });
     assert_ne!(stale, 0);
@@ -489,7 +494,7 @@ fn the_scrim_blocks_pointer_input_to_the_background(cx: &mut TestAppContext) {
     let Some(menu) = menu else {
         return;
     };
-    open_delete_profile(&view, cx);
+    open_delete_instance(&view, cx);
     cx.simulate_click(menu.origin + point(px(6.), px(6.)), Modifiers::none());
     crate::test_support::ensure_live_window(cx);
     cx.run_until_parked();
@@ -502,14 +507,14 @@ fn the_scrim_blocks_pointer_input_to_the_background(cx: &mut TestAppContext) {
         );
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::DeleteProfile(_))
+            Some(Surface::DeleteInstance(_))
         ));
     });
     cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
 }
 
 #[gpui::test]
-fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestAppContext) {
+fn home_instance_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestAppContext) {
     let (view, cx) = fixture(cx);
     cx.simulate_resize(size(px(432.), px(768.)));
     cx.run_until_parked();
@@ -517,7 +522,7 @@ fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestApp
     assert!(trigger_focus.is_some());
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+            view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
         });
     });
     cx.run_until_parked();
@@ -526,7 +531,7 @@ fn home_profile_sheet_opens_in_window_and_escape_restores_focus(cx: &mut TestApp
     view.read_with(cx, |view, _| {
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::Drawer(Drawer::Profiles))
+            Some(Surface::Drawer(Drawer::Instances))
         ));
     });
     assert!(crate::test_support::control_bounds(cx, "manage-games").is_some());
@@ -553,15 +558,15 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
     cx.run_until_parked();
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
-            view.handle(UiAction::DeleteProfileId("profile-a".into()), window, cx);
+            view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
+            view.handle(UiAction::DeleteInstanceId("instance-a".into()), window, cx);
         });
     });
     cx.run_until_parked();
     view.read_with(cx, |view, _| {
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::DeleteProfile(_))
+            Some(Surface::DeleteInstance(_))
         ));
         assert_eq!(view.shell.surfaces.layers().count(), 2);
     });
@@ -575,7 +580,7 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
     view.read_with(cx, |view, _| {
         assert!(matches!(
             view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::Drawer(Drawer::Profiles))
+            Some(Surface::Drawer(Drawer::Instances))
         ));
         assert_eq!(view.shell.surfaces.layers().count(), 1);
     });
@@ -609,23 +614,13 @@ fn games_help_opens_as_a_dialog_inside_the_product_window(cx: &mut TestAppContex
             Some(Surface::GamesHelp)
         ));
     });
-    assert!(crate::test_support::control_bounds(cx, "games-help-settings").is_some());
-    let viewport = view.read_with(cx, |view, _| view.shell.help_scroll.bounds());
+    let viewport = crate::test_support::control_bounds(cx, "surface-dialog-scroll");
+    let body = crate::test_support::control_bounds(cx, "surface-dialog-body");
     assert!(
-        view.read_with(cx, |view, _| view.shell.help_scroll.max_offset().y) > px(0.),
-        "help cards must retain their full text height rather than shrink and clip"
-    );
-    cx.simulate_event(gpui::ScrollWheelEvent {
-        position: viewport.center(),
-        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
-        ..gpui::ScrollWheelEvent::default()
-    });
-    cx.run_until_parked();
-    assert!(
-        cx.debug_bounds("games-help-mode").is_some_and(|mode| {
-            mode.top() >= viewport.top() && mode.bottom() <= viewport.bottom()
+        body.zip(viewport).is_some_and(|(body, viewport)| {
+            body.top() >= viewport.top() && body.bottom() <= viewport.bottom()
         }),
-        "the final help text must be reachable inside the bounded card viewport"
+        "the concise Instance help stays fully visible inside its dialog"
     );
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
@@ -680,10 +675,10 @@ fn crash_waits_for_games_help_before_taking_focus_and_marking_seen(cx: &mut Test
         let (engine, _messages) = crate::Engine::with_root(root.path().to_path_buf())?;
         let (view, cx) = fixture(cx);
         view.update(cx, |view, _| {
-            let mut other = view.snapshot.profiles[0].clone();
-            other.id = "profile-b".into();
-            view.snapshot.profiles.push(other);
-            view.selected_profile = Some("profile-b".into());
+            let mut other = view.snapshot.instances[0].clone();
+            other.id = "instance-b".into();
+            view.snapshot.instances.push(other);
+            view.selected_instance = Some("instance-b".into());
             view.engine = Some(engine);
         });
         click(cx, "games-help");
@@ -701,7 +696,7 @@ fn crash_waits_for_games_help_before_taking_focus_and_marking_seen(cx: &mut Test
             assert!(view.crash_guard.is_none());
         });
         assert_eq!(cx.update(|window, cx| window.focused(cx)), dialog_focus);
-        assert!(crate::test_support::control_bounds(cx, "games-help-settings").is_some());
+        assert!(crate::test_support::control_bounds(cx, "surface-dialog-body").is_some());
         assert!(crate::test_support::control_bounds(cx, "crash-return").is_none());
 
         crate::test_support::press(cx, "escape");
@@ -730,7 +725,7 @@ fn crash_waits_for_games_help_before_taking_focus_and_marking_seen(cx: &mut Test
         view.read_with(cx, |view, _| {
             assert!(view.crash_help.is_none());
             assert!(view.crash_guard.is_none());
-            assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+            assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
             assert_eq!(view.operation_revision, revision);
             assert!(!view.busy);
             assert!(view.active_run.is_none());
@@ -800,7 +795,7 @@ fn crash_waits_for_nested_dialog_and_the_drawer_exit(cx: &mut TestAppContext) {
         cx.simulate_resize(size(px(432.), px(768.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+                view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
             });
         });
         cx.run_until_parked();
@@ -810,7 +805,7 @@ fn crash_waits_for_nested_dialog_and_the_drawer_exit(cx: &mut TestAppContext) {
         cx.run_until_parked();
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle(UiAction::DeleteProfileId("profile-a".into()), window, cx);
+                view.handle(UiAction::DeleteInstanceId("instance-a".into()), window, cx);
             });
         });
         cx.run_until_parked();
@@ -821,7 +816,7 @@ fn crash_waits_for_nested_dialog_and_the_drawer_exit(cx: &mut TestAppContext) {
         view.read_with(cx, |view, _| {
             assert!(matches!(
                 view.shell.surfaces.top().map(|layer| &layer.kind),
-                Some(Surface::Drawer(Drawer::Profiles))
+                Some(Surface::Drawer(Drawer::Instances))
             ));
             assert_eq!(view.pending_crashes.len(), 1);
             assert!(view.crash_help.is_none());
@@ -885,7 +880,7 @@ fn crash_waits_for_a_drawer_reopened_during_exit(cx: &mut TestAppContext) {
         cx.simulate_resize(size(px(432.), px(768.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+                view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
             });
         });
         cx.run_until_parked();
@@ -1432,12 +1427,12 @@ fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext
             view.begin_game_wizard(cx);
             view.router.navigate(crate::Tab::Onboarding);
             view.router.enter_game_wizard();
-            if let Some(profile) = &mut view.shell.wizard.profile {
-                profile.options = true;
-                profile
+            if let Some(instance) = &mut view.shell.wizard.draft {
+                instance.options = true;
+                instance
                     .memory
                     .update(cx, |input, cx| input.set_value("invalid", cx));
-                profile
+                instance
                     .jvm
                     .update(cx, |input, cx| input.set_value("-Xms1G", cx));
             }
@@ -1465,21 +1460,21 @@ fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext
     });
     cx.update(|window, cx| {
         view.read_with(cx, |view, cx| {
-            assert!(view.shell.wizard.profile.as_ref().is_some_and(|profile| {
-                profile.options
-                    && profile.memory.read(cx).value() == "invalid"
-                    && profile.jvm.read(cx).value() == "-Xms1G"
-                    && profile.memory.read(cx).focus_handle(cx).is_focused(window)
+            assert!(view.shell.wizard.draft.as_ref().is_some_and(|instance| {
+                instance.options
+                    && instance.memory.read(cx).value() == "invalid"
+                    && instance.jvm.read(cx).value() == "-Xms1G"
+                    && instance.memory.read(cx).focus_handle(cx).is_focused(window)
             }));
         });
     });
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
     view.read_with(cx, |view, cx| {
-        assert!(view.shell.wizard.profile.as_ref().is_some_and(|profile| {
-            profile.options
-                && profile.memory.read(cx).value() == "invalid"
-                && profile.jvm.read(cx).value() == "-Xms1G"
+        assert!(view.shell.wizard.draft.as_ref().is_some_and(|instance| {
+            instance.options
+                && instance.memory.read(cx).value() == "invalid"
+                && instance.jvm.read(cx).value() == "-Xms1G"
         }));
     });
 }
@@ -1591,26 +1586,26 @@ fn surface_names_resolve_in_the_view_language(cx: &mut TestAppContext) {
         view.snapshot = crate::test_support::ready_snapshot();
         view
     });
-    for (language, sheet_title, sheet_description, profile_title, provider_title) in [
+    for (language, sheet_title, sheet_description, instance_title, provider_title) in [
         (
             crate::Language::English,
             "Switch Account",
             "Choose the account you want to use.",
-            "Delete Test profile?",
+            "Delete Test game?",
             "Remove this provider?",
         ),
         (
             crate::Language::SimplifiedChinese,
             "切换账户",
             "选择要使用的账户。",
-            "删除 Test profile？",
+            "删除 Test game？",
             "移除此提供者？",
         ),
         (
             crate::Language::Japanese,
             "アカウントを切り替え",
             "使用するアカウントを選択してください。",
-            "Test profile を削除しますか？",
+            "Test game を削除しますか？",
             "このプロバイダーを削除しますか？",
         ),
     ] {
@@ -1618,18 +1613,18 @@ fn surface_names_resolve_in_the_view_language(cx: &mut TestAppContext) {
         let (chrome, named, unnamed, provider) = view.read_with(cx, |view, _| {
             (
                 view.surface_sheet_chrome(&Surface::Drawer(Drawer::Accounts)),
-                view.surface_dialog_title(&Surface::DeleteProfile("profile-a".into())),
-                view.surface_dialog_title(&Surface::DeleteProfile("missing".into())),
+                view.surface_dialog_title(&Surface::DeleteInstance("instance-a".into())),
+                view.surface_dialog_title(&Surface::DeleteInstance("missing".into())),
                 view.surface_dialog_title(&Surface::RemoveProvider("missing".into())),
             )
         });
         assert_eq!(chrome.0, sheet_title, "{}", language.code());
         assert_eq!(chrome.1, sheet_description, "{}", language.code());
-        assert_eq!(named, profile_title, "{}", language.code());
+        assert_eq!(named, instance_title, "{}", language.code());
         assert_eq!(provider, provider_title, "{}", language.code());
         assert!(
-            !unnamed.contains("Test profile"),
-            "{} must not name an absent profile: {unnamed}",
+            !unnamed.contains("Test game"),
+            "{} must not name an absent instance: {unnamed}",
             language.code()
         );
     }

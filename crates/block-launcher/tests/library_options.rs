@@ -1,8 +1,11 @@
 use std::{fs, path::Path, sync::Arc, time::Duration};
 
 use block_launcher::{
-    CancellationToken, DownloadOptions, ProxyMode, catalog::InstallStatus, library::Library,
-    recipe::RuntimeSelection, session::OfflineSession,
+    CancellationToken, DownloadOptions, ProxyMode,
+    catalog::{InstallStatus, InstanceConfiguration, TargetSource},
+    library::Library,
+    recipe::RuntimeSelection,
+    session::OfflineSession,
 };
 
 #[test]
@@ -11,7 +14,7 @@ fn custom_download_policy_preserves_existing_catalog_and_default_constructor() -
     let root = tempfile::tempdir()?;
     let original = Library::new(root.path().to_owned(), Arc::new(|_| {}), Arc::new(|_| {}))?;
     assert_eq!(original.download_options(), &DownloadOptions::default());
-    let (instance, profile) =
+    let instance =
         original
             .catalog()
             .create_instance("Existing world".into(), "1.20.6".into(), None, None)?;
@@ -29,8 +32,8 @@ fn custom_download_policy_preserves_existing_catalog_and_default_constructor() -
     )?;
     assert_eq!(configured.download_options(), &options);
     let state = configured.catalog().snapshot()?;
-    assert_eq!(state.selection(&profile.id)?.0.id, instance.id);
-    assert_eq!(state.selection(&profile.id)?.1.name, profile.name);
+    assert_eq!(state.selection(&instance.id)?.0.id, instance.id);
+    assert_eq!(state.selection(&instance.id)?.0.name, instance.name);
     Ok(())
 }
 
@@ -67,23 +70,28 @@ async fn launch_preparation_keeps_missing_resources_offline_with_an_explicit_pro
         Arc::new(|_| {}),
         options,
     )?;
-    let (instance, mut profile) = library.catalog().create_instance(
+    let instance = library.catalog().create_instance(
         "Offline integrity check".into(),
         "26.3".into(),
         None,
         None,
     )?;
-    profile.runtime = RuntimeSelection::Local {
+    let mut configuration = InstanceConfiguration::from(&instance);
+    configuration.runtime = RuntimeSelection::Local {
         java: std::env::current_exe()?,
     };
-    library.catalog().save_profile(profile.clone())?;
+    library
+        .catalog()
+        .save_instance(&instance.id, configuration)?;
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/26.3.json");
     let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(fixture)?)?;
     manifest["assetIndex"]["url"] = serde_json::json!(format!("{proxy}/missing-asset-index"));
     let manifest_path = root.path().join("installed.json");
     fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
     let mut target = instance.targets[0].clone();
-    target.manifest = Some(manifest_path);
+    target.source = TargetSource::Managed {
+        manifest: Some(manifest_path),
+    };
     target.status = InstallStatus::Ready;
     library.catalog().set_target(&instance.id, &target)?;
     let session = OfflineSession::Offline {
@@ -91,7 +99,13 @@ async fn launch_preparation_keeps_missing_resources_offline_with_an_explicit_pro
     };
     let result = tokio::time::timeout(
         Duration::from_secs(1),
-        library.prepare_launch(&profile.id, &session, &CancellationToken::new(), None, None),
+        library.prepare_launch(
+            &instance.id,
+            &session,
+            &CancellationToken::new(),
+            None,
+            None,
+        ),
     )
     .await?;
     let Err(error) = result else {

@@ -1,14 +1,14 @@
-//! Concrete installation/profile orchestration above the process-only executor.
+//! Instance orchestration above the process-only executor.
 use crate::{
     catalog::{
-        Catalog, GameDirectoryGuard, InstallStatus, Instance, LaunchTarget, LoaderKind, PackStatus,
-        Profile, ProfileConfiguration,
+        Catalog, GameDirectoryGuard, InstallStatus, Instance, InstanceConfiguration,
+        InstanceOwnership, LaunchTarget, LoaderKind, PackStatus, TargetSource,
     },
-    executor::{ExecutionSink, Executor},
+    executor::{ExecutionSink, Executor, ResourceLease},
     install::neoforge::{self, InstalledLoader},
     launch::{LaunchExecutor, LaunchPlan},
     manifest::model::VersionManifest,
-    plan::{ExecutionPlan, JavaExecutable, compile},
+    plan::{ExecutionPlan, JavaExecutable, compile_catalog as compile},
     recipe::{LaunchRecipe, RecipeSource},
     resolver::{ResolveContext, resolve},
     session::{OfflineSession, SessionProvider},
@@ -18,6 +18,7 @@ use block_download::{DownloadOptions, EventSink, Store};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -120,7 +121,7 @@ impl Library {
             .find(|item| item.id == instance_id)
             .context("installation no longer exists")?;
         ensure!(instance.pack.is_some(), "instance has no pack");
-        let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+        let descriptor = crate::modpack::descriptor::load(&instance.resource_directory)?;
         ensure!(
             descriptor.matches_inspection(&inspection),
             "the selected archive does not match this pack; select the original pack"
@@ -162,9 +163,9 @@ impl Library {
         source: &Path,
         inspected: &crate::modpack::PackInspection,
         selection: &crate::modpack::PackSelection,
-        mut configuration: ProfileConfiguration,
+        mut configuration: InstanceConfiguration,
         cancel: &CancellationToken,
-    ) -> anyhow::Result<(Instance, Profile)> {
+    ) -> anyhow::Result<Instance> {
         let id = uuid::Uuid::parse_str(operation_id)?;
         ensure!(id.to_string() == operation_id, "invalid pack operation ID");
         ensure!(!cancel.is_cancelled(), "pack import cancelled");
@@ -221,10 +222,8 @@ impl Library {
             || "vanilla".to_owned(),
             |(kind, version)| format!("{}-{version}", kind.name().to_lowercase()),
         );
-        let name = configuration.name.clone();
         self.catalog.create_pack_instance(
             operation_id.to_owned(),
-            name,
             minecraft_version,
             destination,
             inspected.loader.clone(),
@@ -243,6 +242,7 @@ impl Library {
         source: &Path,
         cancel: &CancellationToken,
     ) -> anyhow::Result<()> {
+        let resources = Arc::new(ResourceLease::exclusive(self.store.root())?);
         let state = self.catalog.snapshot()?;
         let instance = state
             .instances
@@ -259,7 +259,7 @@ impl Library {
         target.status = InstallStatus::Installing;
         self.catalog.set_target(instance_id, &target)?;
         let result = async {
-            let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+            let descriptor = crate::modpack::descriptor::load(&instance.resource_directory)?;
             ensure!(
                 !descriptor.has_missing_selected(),
                 "pack files cannot be verified from their CurseForge IDs"
@@ -284,12 +284,15 @@ impl Library {
                 cancel,
             )
             .await?;
-            self.install_target(instance, &target, cancel).await
+            self.install_target(instance, &target, cancel, resources)
+                .await
         }
         .await;
         match result {
             Ok((path, optifine_mod)) => {
-                target.manifest = Some(path);
+                target.source = TargetSource::Managed {
+                    manifest: Some(path),
+                };
                 target.optifine_mod = optifine_mod;
                 target.status = InstallStatus::Ready;
                 self.catalog.finish_pack_install(instance_id, &target)
@@ -313,6 +316,7 @@ impl Library {
         target_id: &str,
         cancel: &CancellationToken,
     ) -> anyhow::Result<()> {
+        let resources = Arc::new(ResourceLease::exclusive(self.store.root())?);
         let state = self.catalog.snapshot()?;
         let instance = state
             .instances
@@ -335,10 +339,16 @@ impl Library {
         }
         target.status = InstallStatus::Installing;
         self.catalog.set_target(instance_id, &target)?;
-        let result = self.install_target(instance, &target, cancel).await;
+        let result = self
+            .install_target(instance, &target, cancel, resources)
+            .await;
         match result {
             Ok((path, optifine_mod)) => {
-                target.manifest = Some(path);
+                if matches!(target.source, TargetSource::Managed { .. }) {
+                    target.source = TargetSource::Managed {
+                        manifest: Some(path),
+                    };
+                }
                 target.optifine_mod = optifine_mod;
                 target.status = InstallStatus::Ready;
                 self.catalog.set_target(instance_id, &target)
@@ -358,16 +368,46 @@ impl Library {
         instance: &Instance,
         target: &LaunchTarget,
         cancel: &CancellationToken,
+        resources: Arc<ResourceLease>,
     ) -> anyhow::Result<(PathBuf, Option<block_download::Resource>)> {
-        let state = self.catalog.snapshot()?;
-        let profile = state
-            .profiles
-            .iter()
-            .find(|p| p.instance_id == instance.id)
-            .context("create a profile before installing")?;
+        if let TargetSource::Existing { version_id } = &target.source {
+            ensure!(
+                instance.ownership == InstanceOwnership::Registered,
+                "existing targets require a registered installation"
+            );
+            let context = ResolveContext {
+                store: self.store.clone(),
+                cancel: cancel.clone(),
+            };
+            let metadata = crate::resolver::repair_existing(instance, target, &context).await?;
+            let mut plan = crate::plan::compile_existing(instance, &metadata)?;
+            apply_instance_arguments(&mut plan, instance, &metadata.parsed.manifest)?;
+            self.announce_compatibility(&plan);
+            self.executor
+                .prepare_repair_with_resources(plan, cancel, resources)
+                .await?;
+            let existing = metadata
+                .existing
+                .as_ref()
+                .context("source resolution did not produce an installation receipt")?;
+            let receipt = crate::executor::confined_path(
+                self.store.root(),
+                &format!("installations/{}/{}/existing.json", instance.id, target.id),
+            )?;
+            crate::executor::ensure_write_path(self.store.root(), &receipt)?;
+            std::fs::create_dir_all(receipt.parent().context("receipt has no parent")?)?;
+            write_metadata(&receipt, &serde_json::to_vec_pretty(&existing.receipt)?)?;
+            return Ok((
+                instance
+                    .resource_directory
+                    .join("versions")
+                    .join(version_id)
+                    .join(format!("{version_id}.json")),
+                None,
+            ));
+        }
         let mut recipe = recipe(
             instance,
-            profile,
             RecipeSource::Mojang {
                 version: instance.minecraft_version.clone(),
             },
@@ -379,7 +419,11 @@ impl Library {
         let metadata = resolve_for_host(&mut recipe, &context).await?;
         let prepared = self
             .executor
-            .prepare_repair(compile(&recipe, &metadata)?, cancel)
+            .prepare_repair_with_resources(
+                compile(&recipe, &metadata)?,
+                cancel,
+                Arc::clone(&resources),
+            )
             .await?;
         let mut optifine_mod = None;
         if target.kind != LoaderKind::Vanilla {
@@ -472,7 +516,9 @@ impl Library {
         let mut plan = compile(&recipe, &metadata)?;
         self.announce_compatibility(&plan);
         adapt(&mut plan, &metadata.parsed.manifest, target, &manifest)?;
-        self.executor.prepare_repair(plan, cancel).await?;
+        self.executor
+            .prepare_repair_with_resources(plan, cancel, resources)
+            .await?;
         Ok((manifest, optifine_mod))
     }
 
@@ -481,12 +527,12 @@ impl Library {
     /// Missing/corrupt install resources have an explicit Repair path; game-directory conflicts fail before Java.
     pub async fn launch(
         &self,
-        profile_id: &str,
+        instance_id: &str,
         session: &dyn SessionProvider,
         cancel: &CancellationToken,
     ) -> anyhow::Result<Option<i32>> {
         let launch = self
-            .prepare_launch(profile_id, session, cancel, None, None)
+            .prepare_launch(instance_id, session, cancel, None, None)
             .await?;
         LaunchExecutor::run(launch, self.events.clone(), cancel).await
     }
@@ -496,22 +542,25 @@ impl Library {
     /// Refuses stale session reservations, unavailable targets and corrupt installed resources.
     pub async fn prepare_launch(
         &self,
-        profile_id: &str,
+        instance_id: &str,
         session: &dyn SessionProvider,
         cancel: &CancellationToken,
         run_id: Option<&str>,
-        profile_fingerprint: Option<&str>,
+        instance_fingerprint: Option<&str>,
     ) -> anyhow::Result<LaunchPlan> {
         let state = self.catalog.snapshot()?;
-        let (instance, profile, target) = state.selection(profile_id)?;
-        if let Some(expected) = profile_fingerprint {
+        let (instance, target) = state.selection(instance_id)?;
+        let result = async {
+        if let Some(expected) = instance_fingerprint {
             ensure!(
-                state.launch_fingerprint(profile_id)? == expected,
-                "Launch settings changed while starting. Select the profile and click Play again."
+                state.launch_fingerprint(instance_id)? == expected,
+                "Launch settings changed while starting. Select the instance and click Play again."
             );
         }
         ensure!(
-            target.status == InstallStatus::Ready,
+            target.status == InstallStatus::Ready
+                || (matches!(target.source, TargetSource::Existing { .. })
+                    && target.status == InstallStatus::Pending),
             "installation is not ready; choose Repair before playing"
         );
         if let Some(pack) = &instance.pack {
@@ -523,7 +572,7 @@ impl Library {
                 target.id == pack.target_id,
                 "this target does not match the pack's declared loader"
             );
-            let descriptor = crate::modpack::descriptor::load(&instance.directory)?;
+            let descriptor = crate::modpack::descriptor::load(&instance.resource_directory)?;
             ensure!(
                 !descriptor.has_missing_selected()
                     && descriptor.minecraft_version == instance.minecraft_version
@@ -536,7 +585,10 @@ impl Library {
                     ),
                 "the installed pack metadata does not match its launch target"
             );
-            let baseline = instance.directory.join(".block-pack").join("baseline");
+            let baseline = instance
+                .resource_directory
+                .join(".block-pack")
+                .join("baseline");
             let metadata = std::fs::symlink_metadata(&baseline)
                 .context("the installed pack baseline is missing")?;
             ensure!(
@@ -544,47 +596,64 @@ impl Library {
                 "the installed pack baseline is not a plain directory"
             );
         }
-        let manifest = target
-            .manifest
-            .as_ref()
-            .context("installed metadata missing; choose Repair")?;
+        if matches!(target.source, TargetSource::Existing { .. }) {
+            (|| {
+                ensure!(
+                    instance.resource_directory.is_dir()
+                        && instance.resource_directory.canonicalize()? == instance.resource_directory,
+                    "Existing resource directory changed"
+                );
+                Ok(())
+            })().map_err(|error| crate::catalog::ExistingSourceFailure::mark(&instance.resource_directory, error))?;
+        }
+        let resources = Arc::new(ResourceLease::shared(self.store.root())?);
         let directory = match run_id {
-            Some(id) => GameDirectoryGuard::for_session(instance, profile, id)?,
-            None => GameDirectoryGuard::for_profile(instance, profile)?,
+            Some(id) => GameDirectoryGuard::for_session(instance, id)?,
+            None => GameDirectoryGuard::for_instance(instance)?,
         };
         if instance.pack.is_some() {
             crate::modpack::initialize::initialize(instance, &directory, cancel)?;
         }
-        let mut recipe = recipe(
-            instance,
-            profile,
-            RecipeSource::LocalManifest {
-                path: manifest.clone(),
-            },
-        );
         let offline = Store::with_options(
             self.store.root().to_owned(),
             true,
-            std::sync::Arc::new(|_| {}),
+            Arc::new(|_| {}),
             self.store.options().clone(),
         )?;
         let context = ResolveContext {
             store: offline.clone(),
             cancel: cancel.clone(),
         };
-        let metadata = resolve_for_host(&mut recipe, &context)
-            .await
-            .context("installation metadata unavailable; choose Repair")?;
-        let mut plan = compile(&recipe, &metadata)?;
+        let (metadata, mut plan) = match &target.source {
+            TargetSource::Managed { .. } => {
+                let manifest = managed_manifest(target)?;
+                let mut recipe = recipe(
+                    instance,
+                    RecipeSource::LocalManifest {
+                        path: manifest.to_owned(),
+                    },
+                );
+                let metadata = resolve_for_host(&mut recipe, &context)
+                    .await
+                    .context("installation metadata unavailable; choose Repair")?;
+                let mut plan = compile(&recipe, &metadata)?;
+                adapt(&mut plan, &metadata.parsed.manifest, target, manifest)?;
+                (metadata, plan)
+            }
+            TargetSource::Existing { .. } => {
+                let metadata =
+                    crate::resolver::resolve_existing(instance, target, &context).await?;
+                let plan = crate::plan::compile_existing(instance, &metadata)?;
+                (metadata, plan)
+            }
+        };
         self.announce_compatibility(&plan);
-        apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;
-        adapt(&mut plan, &metadata.parsed.manifest, target, manifest)?;
+        apply_instance_arguments(&mut plan, instance, &metadata.parsed.manifest)?;
         let executor = Executor::new(offline, self.events.clone());
-        let prepared = match run_id {
-            Some(id) => executor.prepare_session(plan, cancel, id).await,
-            None => executor.prepare(plan, cancel).await,
-        }
-        .context("installation integrity check failed; choose Repair")?;
+        let prepared = executor
+            .prepare_installed(plan, cancel, run_id.map(str::to_owned), resources)
+            .await
+            .context("installation integrity check failed; choose Repair")?;
         if target.kind == LoaderKind::Forge
             && let Some(selected) = &target.optifine
         {
@@ -603,6 +672,29 @@ impl Library {
         let mut launch = LaunchPlan::resolve(prepared, session, directory, host_overrides())?;
         launch.storage = Some(self.storage.lease.clone());
         Ok(launch)
+        }.await;
+        if matches!(target.source, TargetSource::Existing { .. }) && !cancel.is_cancelled() {
+            let status = match &result {
+                Ok(_) => Some(InstallStatus::Ready),
+                Err(error) => error
+                    .downcast_ref::<crate::catalog::ExistingSourceFailure>()
+                    .filter(|failure| failure.path.starts_with(&instance.resource_directory))
+                    .map(|failure| InstallStatus::Failed {
+                        message: failure.safe_message(&instance.resource_directory),
+                    }),
+            };
+            if let Some(status) = status
+                && let Err(_error) = self.catalog.record_existing_verification(instance, status)
+            {
+                // Publication is advisory to this captured plan. In particular,
+                // deleting an Instance never revokes its accepted game lock.
+                (self.events)(crate::executor::ExecutionEvent::Log {
+                    line: "Existing verification status could not be saved; catalog metadata changed or is unavailable.".into(),
+                    stderr: true,
+                });
+            }
+        }
+        result
     }
 
     /// Announce applied substitutions so launches never hide them.
@@ -622,7 +714,7 @@ impl Library {
     }
 }
 
-fn recipe(instance: &Instance, profile: &Profile, source: RecipeSource) -> LaunchRecipe {
+fn recipe(instance: &Instance, source: RecipeSource) -> LaunchRecipe {
     LaunchRecipe {
         schema_version: 1,
         instance: instance.id.clone(),
@@ -630,27 +722,33 @@ fn recipe(instance: &Instance, profile: &Profile, source: RecipeSource) -> Launc
         session: OfflineSession::Offline {
             username: "Preparation".into(),
         },
-        runtime: profile.effective_runtime(instance),
+        runtime: instance.runtime.clone(),
         target: None,
-        compatibility: profile.compatibility,
-        memory_mib: profile.memory_mib,
-        jvm_args: profile.jvm_args.clone(),
+        compatibility: instance.compatibility,
+        memory_mib: instance.memory_mib,
+        jvm_args: instance.jvm_args.clone(),
         features: BTreeMap::new(),
     }
 }
 
-fn apply_profile_arguments(
+fn apply_instance_arguments(
     plan: &mut ExecutionPlan,
     instance: &Instance,
-    profile: &Profile,
     manifest: &VersionManifest,
 ) -> anyhow::Result<()> {
-    let server = profile.server.launch_arguments(manifest)?;
-    plan.command
-        .game_args
-        .extend(profile.effective_game_args(instance));
+    let server = instance.server.launch_arguments(manifest)?;
+    plan.command.game_args.extend(instance.launch_game_args());
     plan.command.game_args.extend(server);
     Ok(())
+}
+
+fn managed_manifest(target: &LaunchTarget) -> anyhow::Result<&Path> {
+    let TargetSource::Managed { manifest } = &target.source else {
+        anyhow::bail!("existing targets must resolve their source installation");
+    };
+    manifest
+        .as_deref()
+        .context("installed metadata missing; choose Repair")
 }
 
 fn adapt(
@@ -724,7 +822,7 @@ async fn resolve_for_host(
 #[cfg(test)]
 mod instance_defaults_tests {
     use crate::{
-        catalog::{Catalog, InstanceConfiguration, InstanceSettings},
+        catalog::{Catalog, InstanceConfiguration},
         manifest::{
             decode,
             model::{VersionIndex, VersionType},
@@ -741,30 +839,22 @@ mod instance_defaults_tests {
     {
         let root = tempfile::tempdir()?;
         let catalog = Catalog::open(root.path())?;
-        let (instance, mut profile) =
-            catalog.create_instance("Plan".into(), "1.20.6".into(), None, None)?;
+        let instance = catalog.create_instance("Plan".into(), "1.20.6".into(), None, None)?;
         let java = std::env::current_exe()?;
-        catalog.save_instance(
-            &instance.id,
-            InstanceConfiguration {
-                name: instance.name.clone(),
-                settings: InstanceSettings {
-                    runtime: RuntimeSelection::Local { java: java.clone() },
-                    width: 1410,
-                    height: 810,
-                    fullscreen: true,
-                },
-            },
-        )?;
-        profile.game_args = vec![
+        let mut configuration = InstanceConfiguration::from(&instance);
+        configuration.runtime = RuntimeSelection::Local { java: java.clone() };
+        configuration.width = 1410;
+        configuration.height = 810;
+        configuration.fullscreen = true;
+        configuration.game_args = vec![
             "--width".into(),
             "999".into(),
             "--server".into(),
             "example.invalid".into(),
         ];
-        catalog.save_profile(profile.clone())?;
+        catalog.save_instance(&instance.id, configuration)?;
         let state = catalog.snapshot()?;
-        let (instance, profile, _) = state.selection(&profile.id)?;
+        let (instance, _) = state.selection(&instance.id)?;
         let fixtures =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manifests/official");
         let index: VersionIndex =
@@ -779,7 +869,6 @@ mod instance_defaults_tests {
             .join(format!("{}.json", entry.sha1));
         let recipe = super::recipe(
             instance,
-            profile,
             RecipeSource::LocalManifest {
                 path: fixture.clone(),
             },
@@ -807,9 +896,10 @@ mod instance_defaults_tests {
             companion_libraries: Vec::new(),
             classifier_overrides: BTreeMap::new(),
             compatibility: None,
+            existing: None,
         };
         let mut plan = crate::plan::compile(&recipe, &metadata)?;
-        super::apply_profile_arguments(&mut plan, instance, profile, &metadata.parsed.manifest)?;
+        super::apply_instance_arguments(&mut plan, instance, &metadata.parsed.manifest)?;
         assert_eq!(
             plan.command
                 .game_args
@@ -837,7 +927,7 @@ mod instance_defaults_tests {
         // Persisted typed server preferences reach the same production argument
         // boundary after compilation; legacy raw arguments are kept only when
         // automatic Quick Play is disabled.
-        let mut quick_play = profile.clone();
+        let mut quick_play = InstanceConfiguration::from(instance);
         quick_play
             .game_args
             .retain(|argument| argument != "--server" && argument != "example.invalid");
@@ -845,11 +935,11 @@ mod instance_defaults_tests {
             address: "play.example.com:25566".into(),
             connect_on_launch: true,
         };
-        catalog.save_profile(quick_play.clone())?;
+        catalog.save_instance(&instance.id, quick_play)?;
         let restored = catalog.snapshot()?;
-        let (instance, quick_play, _) = restored.selection(&quick_play.id)?;
+        let (instance, _) = restored.selection(&instance.id)?;
         let mut plan = crate::plan::compile(&recipe, &metadata)?;
-        super::apply_profile_arguments(&mut plan, instance, quick_play, &metadata.parsed.manifest)?;
+        super::apply_instance_arguments(&mut plan, instance, &metadata.parsed.manifest)?;
         assert!(plan.command.game_args.ends_with(&[
             "--quickPlayMultiplayer".into(),
             "play.example.com:25566".into()
@@ -865,7 +955,7 @@ mod instance_defaults_tests {
         // Versions that predate Quick Play receive the legacy server arguments.
         let legacy = decode(&std::fs::read(fixtures.join("../1.12.2.json"))?)?;
         let mut legacy_plan = crate::plan::compile(&recipe, &metadata)?;
-        super::apply_profile_arguments(&mut legacy_plan, instance, quick_play, &legacy)?;
+        super::apply_instance_arguments(&mut legacy_plan, instance, &legacy)?;
         assert!(legacy_plan.command.game_args.ends_with(&[
             "--server".into(),
             "play.example.com".into(),
@@ -878,9 +968,7 @@ mod instance_defaults_tests {
         beta.kind = VersionType::OldBeta;
         let mut beta_plan = crate::plan::compile(&recipe, &metadata)?;
         let before = beta_plan.command.game_args.clone();
-        assert!(
-            super::apply_profile_arguments(&mut beta_plan, instance, quick_play, &beta).is_err()
-        );
+        assert!(super::apply_instance_arguments(&mut beta_plan, instance, &beta).is_err());
         assert_eq!(
             beta_plan.command.game_args, before,
             "unsupported automatic connection leaves the compiled plan untouched"

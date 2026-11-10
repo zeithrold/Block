@@ -52,14 +52,46 @@ pub(crate) fn first_instance_mut(document: &mut toml::Table) -> anyhow::Result<&
         .context("first instance missing")
 }
 
-/// First stored Profile as a mutable table.
-pub(crate) fn first_profile_mut(document: &mut toml::Table) -> anyhow::Result<&mut toml::Table> {
-    snapshot_mut(document)?
-        .get_mut("profiles")
-        .and_then(toml::Value::as_array_mut)
-        .and_then(|profiles| profiles.first_mut())
-        .and_then(toml::Value::as_table_mut)
-        .context("first profile missing")
+/// A single managed Instance with the catalog's normal creation defaults.
+pub(crate) fn instance(
+    catalog: &block_launcher::catalog::Catalog,
+) -> anyhow::Result<block_launcher::catalog::Instance> {
+    catalog.create_instance("Game".into(), "1.20.6".into(), None, None)
+}
+
+/// An importable local Vanilla installation with explicit launch-data evidence.
+pub(crate) fn candidate(
+    resource_directory: &Path,
+    version: &str,
+    data: block_launcher::game_import::GameDataEvidence,
+) -> anyhow::Result<block_launcher::game_import::GameCandidate> {
+    use block_launcher::game_import::{DetectedLoader, GameCandidate, LoaderKind, SourceKind};
+    let directory = resource_directory.join("versions").join(version);
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        directory.join(format!("{version}.json")),
+        serde_json::to_vec(&serde_json::json!({"id": version}))?,
+    )?;
+    Ok(GameCandidate {
+        id: version.into(),
+        source: SourceKind::OfficialLauncher,
+        source_root: resource_directory.into(),
+        resource_directory: resource_directory.into(),
+        name: version.into(),
+        version_id: Some(version.into()),
+        data,
+        configured_version: Some(version.into()),
+        minecraft_version: Some(version.into()),
+        loader: Some(DetectedLoader {
+            kind: LoaderKind::Vanilla,
+            version: None,
+        }),
+        latest_release: None,
+        latest_snapshot: None,
+        importable: true,
+        unsupported_reason: None,
+        metadata_warning: None,
+    })
 }
 
 /// Build a TOML table from literal key/value pairs.

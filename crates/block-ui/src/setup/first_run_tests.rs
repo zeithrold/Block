@@ -32,7 +32,9 @@ fn candidate(id: &str, source: SourceKind, importable: bool) -> GameCandidate {
         source,
         source_root: std::path::PathBuf::from(format!("/synthetic/{source:?}")),
         name: format!("Game {id}"),
-        game_directory: std::path::PathBuf::from(format!("/synthetic/{id}")),
+        resource_directory: std::path::PathBuf::from(format!("/synthetic/{id}")),
+        version_id: Some("1.20.6".into()),
+        data: block_launcher::game_import::GameDataEvidence::Unknown,
         configured_version: Some("release".into()),
         minecraft_version: Some("1.20.6".into()),
         loader: Some(block_launcher::game_import::DetectedLoader {
@@ -113,8 +115,6 @@ fn library_picker_cancel_and_stale_revision_do_not_change_the_default(
                     id,
                     scope: scope.clone(),
                     wizard_revision: view.shell.wizard.revision,
-                    imports: Vec::new(),
-                    import_source: None,
                 });
                 let selection = if stale {
                     view.shell.wizard.revision += 1;
@@ -173,8 +173,6 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
                 id,
                 scope: scope.clone(),
                 wizard_revision: view.shell.wizard.revision,
-                imports: Vec::new(),
-                import_source: None,
             });
             view.finish_setup_library_browse(id, Ok(Some(parent.clone())), cx);
             assert_eq!(view.first_run_game_parent(), old);
@@ -197,8 +195,6 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
                 id,
                 scope: scope.clone(),
                 wizard_revision: view.shell.wizard.revision,
-                imports: Vec::new(),
-                import_source: None,
             });
             view.finish_setup_library_browse(id, Ok(Some(final_parent.clone())), cx);
             if let Some(crate::Form::Instance(form)) = &view.form {
@@ -242,44 +238,52 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
 }
 
 #[gpui::test]
-fn library_picker_from_an_old_import_source_is_ignored(cx: &mut gpui::TestAppContext) {
+fn import_policy_choice_survives_switching_sources(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            let mut view = crate::tests::test_view(window, cx);
-            view.begin_first_run(cx);
-            view.shell.import_games.report = Some(discovery_report());
-            view.shell.import_games.error = None;
-            view.shell.import_games.selected = [
-                "adjacent-one".into(),
-                "launcher-one".into(),
-                "launcher-two".into(),
-            ]
-            .into_iter()
-            .collect();
-            view
-        });
+        let source = root.path().canonicalize()?;
+        let mut report = discovery_report();
+        for candidate in &mut report.candidates {
+            candidate.resource_directory = root.path().to_path_buf();
+        }
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         view.update_in(cx, |view, window, cx| {
-            view.handle(UiAction::FirstRun(FirstRunAction::Game), window, cx);
-            view.handle(UiAction::FirstRun(FirstRunAction::Import), window, cx);
+            view.shell.import_games.apply_discovery(report);
             view.shell.import_games.page = crate::import_games::Page::List;
-            let scope = view.setup_import_library_scope().context("import scope")?;
-            let id = uuid::Uuid::new_v4();
-            view.shell.first_run.library_picker = Some(crate::library_location::Picker {
-                id,
-                scope,
-                wizard_revision: view.shell.wizard.revision,
-                imports: view.shell.import_games.selected.iter().cloned().collect(),
-                import_source: Some(view.shell.import_games.source),
-            });
-            view.shell.import_games.source = SourceKind::OfficialLauncher;
-            view.finish_setup_library_browse(id, Ok(Some(root.path().to_owned())), cx);
-            assert!(
-                view.shell.first_run.library_draft.is_none(),
-                "a picker opened for another source cannot change the active import"
+            view.handle_import_games(
+                ImportAction::OpenDataPolicy("adjacent-one".into()),
+                window,
+                cx,
             );
-            Ok::<(), anyhow::Error>(())
-        })?;
+            view.handle_import_games(
+                ImportAction::SelectDataPolicy(
+                    "adjacent-one".into(),
+                    block_launcher::catalog::DataPolicy::Shared,
+                ),
+                window,
+                cx,
+            );
+            view.handle_import_games(ImportAction::Back, window, cx);
+            view.handle_import_games(ImportAction::Sources, window, cx);
+            view.handle_import_games(
+                ImportAction::Source(SourceKind::OfficialLauncher),
+                window,
+                cx,
+            );
+            view.handle_import_games(
+                ImportAction::Source(SourceKind::AdjacentMinecraft),
+                window,
+                cx,
+            );
+            let chosen = &view.shell.import_games.selections["adjacent-one"];
+            assert_eq!(
+                chosen.data_policy,
+                block_launcher::catalog::DataPolicy::Shared
+            );
+            assert_eq!(chosen.game_directory, source);
+            assert!(view.shell.import_games.selected.contains("adjacent-one"));
+        });
+        assert!(!root.path().join("versions").exists());
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -306,8 +310,6 @@ fn library_chooser_failure_preserves_unrelated_version_validation(cx: &mut gpui:
                 id,
                 scope,
                 wizard_revision: view.shell.wizard.revision,
-                imports: Vec::new(),
-                import_source: None,
             });
             view.finish_setup_library_browse(id, Err(()), cx);
             assert_eq!(
@@ -327,66 +329,58 @@ fn library_chooser_failure_preserves_unrelated_version_validation(cx: &mut gpui:
 }
 
 #[gpui::test]
-fn a_single_source_can_confirm_its_pending_library_without_opening_the_list(
-    cx: &mut gpui::TestAppContext,
-) {
+fn direct_registration_keeps_the_new_game_library_default(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let data = root.path().join("data");
-        let parent = root.path().join("chosen-library");
-        fs::create_dir_all(&parent)?;
-        let (engine, _messages) = Engine::with_root(data.clone())?;
-        let old =
-            crate::setup_storage::save_game_parent(&data, &root.path().join("initial-library"))?;
-        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+        let data = root.path().join("block");
+        let source = root.path().join("minecraft");
+        let version = source.join("versions/1.20.6");
+        fs::create_dir_all(&version)?;
+        fs::write(
+            version.join("1.20.6.json"),
+            br#"{"id":"1.20.6","type":"release","mainClass":"net.minecraft.client.main.Main"}"#,
+        )?;
+        let old = crate::setup_storage::save_game_parent(&data, &root.path().join("new-games"))?;
+        let (engine, messages) = Engine::with_root(data.clone())?;
+        let mut detected = candidate("local", SourceKind::AdjacentMinecraft, true);
+        detected.resource_directory = source.canonicalize()?;
+        detected.version_id = Some("1.20.6".into());
+        detected.configured_version = Some("1.20.6".into());
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.engine = Some(engine);
-            view.begin_first_run(cx);
+            view.messages = Some(messages);
+            view.shell.first_run.enabled = true;
+            view.router.navigate(Tab::Onboarding);
+            view.shell.import_games.apply_discovery(DiscoveryReport {
+                sources: Vec::new(),
+                candidates: vec![detected],
+            });
             view
         });
         view.update_in(cx, |view, window, cx| {
-            view.handle(UiAction::FirstRun(FirstRunAction::Game), window, cx);
-            view.handle(UiAction::FirstRun(FirstRunAction::Import), window, cx);
-            let request = view
-                .shell
-                .import_games
-                .discovery
-                .context("discovery request")?;
-            view.receive_game_discovery(request, discovery_report());
-            assert_eq!(
-                view.shell.import_games.page,
-                crate::import_games::Page::Sources
-            );
-            let scope = view
-                .setup_import_library_scope()
-                .context("source confirmation")?;
-            let id = uuid::Uuid::new_v4();
-            view.shell.first_run.library_picker = Some(crate::library_location::Picker {
-                id,
-                scope: scope.clone(),
-                wizard_revision: view.shell.wizard.revision,
-                imports: view.shell.import_games.selected.iter().cloned().collect(),
-                import_source: Some(view.shell.import_games.source),
-            });
-            view.finish_setup_library_browse(id, Ok(Some(parent.clone())), cx);
-            assert!(
-                view.shell.first_run.library_draft.is_some(),
-                "the source page also exposes a final import confirmation"
-            );
-            assert_eq!(
-                block_launcher::storage::Locations::load(&data)?.library(&data),
-                old
-            );
-            assert!(view.commit_setup_library(&scope, cx));
-            assert_eq!(
-                view.shell.import_games.page,
-                crate::import_games::Page::Sources
-            );
-            Ok::<(), anyhow::Error>(())
-        })?;
+            view.handle_import_games(ImportAction::Import, window, cx)
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while view.read_with(cx, |view, _| view.shell.import_games.running)
+            && std::time::Instant::now() < deadline
+        {
+            view.update(cx, crate::Block::poll);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(view.read_with(cx, |view, _| matches!(
+            view.shell.import_games.outcomes.get("local"),
+            Some(crate::import_games::Outcome::Saved)
+        )));
+        let saved = block_launcher::catalog::Catalog::open(&data)?.snapshot()?;
+        assert_eq!(saved.instances.len(), 1);
+        assert_eq!(
+            saved.instances[0].resource_directory,
+            source.canonicalize()?
+        );
         assert_eq!(
             block_launcher::storage::Locations::load(&data)?.library(&data),
-            crate::setup_storage::comparable_path(&parent)
+            old
         );
         Ok(())
     })();
@@ -580,21 +574,13 @@ fn late_discovery_keeps_choice_order_and_saved_imports_stop_reminding(
         view.update(cx, |view, cx| {
             let batch = uuid::Uuid::new_v4();
             view.shell.import_games.batch = Some(batch);
-            view.receive_game_import(
-                batch,
-                "adjacent-one".into(),
-                Ok(("copied-adjacent".into(), "profile-adjacent".into())),
-            );
+            view.receive_game_import(batch, "adjacent-one".into(), Ok("instance-adjacent".into()));
             assert_eq!(
                 view.first_run_scan(crate::Language::English),
                 Some(Scan::Found(2))
             );
             for id in ["launcher-one", "launcher-two"] {
-                view.receive_game_import(
-                    batch,
-                    id.into(),
-                    Ok((format!("copied-{id}"), format!("profile-{id}"))),
-                );
+                view.receive_game_import(batch, id.into(), Ok(format!("instance-{id}")));
             }
             assert_eq!(
                 view.first_run_scan(crate::Language::English),
@@ -995,7 +981,7 @@ fn compact_setup_keeps_accounts_first_with_equal_cards_and_both_exit_actions_vis
                 status: block_launcher::catalog::PackStatus::Pending,
             });
             view.selected_instance = Some("instance-a".into());
-            view.selected_profile = Some("profile-a".into());
+            view.selected_instance = Some("instance-a".into());
             view.router.navigate(Tab::Onboarding);
             view.shell.first_run.enabled = true;
             view.shell.first_run.stage = Stage::Overview;
@@ -1034,9 +1020,9 @@ fn overview_single_action_footer_has_symmetric_vertical_space(cx: &mut gpui::Tes
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot.instances.clear();
-        view.snapshot.profiles.clear();
+        view.snapshot.instances.clear();
         view.selected_instance = None;
-        view.selected_profile = None;
+        view.selected_instance = None;
         view.router.navigate(Tab::Onboarding);
         view.shell.first_run.enabled = true;
         view.shell.first_run.stage = Stage::Overview;
@@ -1117,7 +1103,7 @@ fn pending_pack_offers_resume_or_home_without_opening_the_picker(cx: &mut gpui::
                     status: block_launcher::catalog::PackStatus::Pending,
                 });
                 view.selected_instance = Some("instance-a".into());
-                view.selected_profile = Some("profile-a".into());
+                view.selected_instance = Some("instance-a".into());
                 view.begin_first_run(cx);
                 view
             });
@@ -1241,7 +1227,7 @@ fn setup_navigation_stays_inside_first_run_even_while_auth_uses_accounts_tab(
                 for drawer in [
                     crate::shell::Drawer::Menu,
                     crate::shell::Drawer::Accounts,
-                    crate::shell::Drawer::Profiles,
+                    crate::shell::Drawer::Instances,
                     crate::shell::Drawer::Downloads,
                 ] {
                     view.handle(UiAction::Drawer(Some(drawer)), window, cx);
@@ -1493,7 +1479,7 @@ fn overview_footer_offers_one_exit_beside_the_later_choice(cx: &mut gpui::TestAp
     view.update(cx, |view, cx| {
         view.snapshot = crate::test_support::ready_snapshot();
         view.selected_instance = Some("instance-a".into());
-        view.selected_profile = Some("profile-a".into());
+        view.selected_instance = Some("instance-a".into());
         view.accounts = vec![account];
         view.selected_account = Some(account_id.clone());
         view.shell.onboarding.account = Some(account_id);
@@ -1674,17 +1660,10 @@ fn recommended_setup_prefills_without_replacing_an_open_draft(cx: &mut gpui::Tes
 }
 
 #[gpui::test]
-fn the_game_card_counts_instances_not_profiles(cx: &mut gpui::TestAppContext) {
+fn the_game_card_counts_registered_instances(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     view.update(cx, |view, _| {
         let mut snapshot = crate::test_support::ready_snapshot();
-        let mut second_profile = snapshot.profiles[0].clone();
-        second_profile.id = "profile-b".into();
-        second_profile.name = "Second profile".into();
-        snapshot.profiles.push(second_profile.clone());
-        second_profile.id = "profile-c".into();
-        second_profile.name = "Third profile".into();
-        snapshot.profiles.push(second_profile);
         let mut second_instance = snapshot.instances[0].clone();
         second_instance.id = "instance-b".into();
         second_instance.name = "Second game".into();
@@ -1695,7 +1674,7 @@ fn the_game_card_counts_instances_not_profiles(cx: &mut gpui::TestAppContext) {
         view.read_with(cx, |view, _| view.first_run_game_ready()
             && view.first_run_game_description(crate::Language::English)
                 == "2 games saved"),
-        "a game is one Instance, however many Profiles launch it"
+        "each registered Instance is counted once"
     );
     assert_eq!(
         view.read_with(cx, |view, _| view
@@ -1757,7 +1736,7 @@ fn center_tasks_open_independently_and_a_ready_game_leaves_for_home(cx: &mut gpu
         view.update(cx, |view, cx| {
             view.snapshot = crate::test_support::ready_snapshot();
             view.selected_instance = Some("instance-a".into());
-            view.selected_profile = Some("profile-a".into());
+            view.selected_instance = Some("instance-a".into());
             cx.notify();
         });
         cx.run_until_parked();
@@ -1799,13 +1778,13 @@ fn skip_persists_completion_without_fabricating_account_or_game(cx: &mut gpui::T
                 && view.accounts.is_empty()
                 && view.selected_account.is_none()
                 && view.shell.onboarding.account.is_none()
-                && view.snapshot.profiles.is_empty()
+                && view.snapshot.instances.is_empty()
         }));
         assert!(crate::Preferences::load(root.path())?.onboarding_complete);
         assert!(
             block_launcher::catalog::Catalog::open(root.path())?
                 .snapshot()?
-                .profiles
+                .instances
                 .is_empty()
         );
         Ok(())
@@ -1961,11 +1940,7 @@ fn late_import_results_cannot_replace_a_new_batch(cx: &mut gpui::TestAppContext)
             "launcher-one".into(),
             super::import_games::Outcome::Failed("keep this result".into()),
         );
-        view.receive_game_import(
-            old,
-            "launcher-one".into(),
-            Ok(("late".into(), "late".into())),
-        );
+        view.receive_game_import(old, "launcher-one".into(), Ok("late".into()));
         view.finish_game_import(old);
     });
     assert!(view.read_with(cx, |view, _| {

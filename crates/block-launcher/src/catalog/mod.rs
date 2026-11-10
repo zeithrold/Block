@@ -1,47 +1,40 @@
-//! Persistent installation and launch settings. No account credentials or resolved commands.
+//! Persistent Instance metadata. No account credentials or resolved commands.
 
 mod appearance;
+mod creation;
+mod directory_path;
+mod fingerprint;
+mod game_directory;
 mod instance_settings;
+mod registration;
 mod server;
 mod storage;
-
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context as _, ensure};
-use serde::{Deserialize, Serialize};
+mod validation;
+#[cfg(test)]
+mod verification_tests;
 
 use crate::recipe::{Compatibility, RuntimeSelection};
+use anyhow::Context as _;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-pub use appearance::{ProfileAppearance, ProfileColor, ProfileIcon};
-pub use instance_settings::{InstanceConfiguration, InstanceSettings, ProfileInheritance};
+pub use appearance::{InstanceAppearance, InstanceColor, InstanceIcon};
+pub(crate) use directory_path::normalize_directory;
+pub(crate) use fingerprint::ExistingSourceFailure;
+pub use game_directory::GameDirectoryGuard;
+pub use instance_settings::InstanceConfiguration;
 pub use server::{
     AutomaticConnection, ServerAddress, ServerPreferences, automatic_connection,
     supports_quick_play,
 };
-pub use storage::{Catalog, GameDirectoryGuard};
+pub use storage::Catalog;
+pub use validation::validate_name;
+use validation::{validate_directory, validate_id, validate_version_id};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
-    /// New catalogs bundle one Profile with each Instance. Existing catalogs
-    /// without a mode retain their original ability to share Instances.
-    #[serde(default = "legacy_profile_mode")]
-    pub profile_mode: ProfileMode,
     pub instances: Vec<Instance>,
-    pub profiles: Vec<Profile>,
-}
-
-/// Product-level relationship between installations and their launch settings.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProfileMode {
-    #[default]
-    Bundled,
-    Separated,
-}
-
-const fn legacy_profile_mode() -> ProfileMode {
-    ProfileMode::Separated
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,13 +43,31 @@ pub struct Instance {
     pub id: String,
     pub name: String,
     pub minecraft_version: String,
-    /// User-selected installation directory; mutable game data stays below it.
-    pub directory: PathBuf,
+    pub resource_directory: PathBuf,
+    pub ownership: InstanceOwnership,
+    pub game_directory: PathBuf,
+    pub data_policy: DataPolicy,
     pub targets: Vec<LaunchTarget>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<InstanceSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: String,
+    pub runtime: RuntimeSelection,
+    pub memory_mib: u32,
+    pub jvm_args: Vec<String>,
+    pub game_args: Vec<String>,
+    pub default_account: Option<String>,
+    pub compatibility: Compatibility,
+    pub appearance: InstanceAppearance,
+    pub server: ServerPreferences,
+    pub width: u32,
+    pub height: u32,
+    pub fullscreen: bool,
     pub pack: Option<PackAttachment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceOwnership {
+    Managed,
+    Registered,
 }
 
 /// Pack installation state applies to the entire Instance, independently of
@@ -113,8 +124,7 @@ pub struct LaunchTarget {
     pub id: String,
     pub kind: LoaderKind,
     pub loader_version: Option<String>,
-    /// Durable installed metadata, not a resolved launch plan.
-    pub manifest: Option<PathBuf>,
+    pub source: TargetSource,
     pub status: InstallStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optifine: Option<crate::install::optifine::OptiFineJar>,
@@ -148,236 +158,37 @@ pub enum DataPolicy {
     Isolated,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Profile {
-    pub id: String,
-    pub name: String,
-    pub instance_id: String,
-    pub target_id: String,
-    pub runtime: RuntimeSelection,
-    pub memory_mib: u32,
-    pub jvm_args: Vec<String>,
-    pub game_args: Vec<String>,
-    pub data_policy: DataPolicy,
-    pub default_account: Option<String>,
-    #[serde(default)]
-    pub compatibility: Compatibility,
-    #[serde(default)]
-    pub appearance: ProfileAppearance,
-    #[serde(default, skip_serializing_if = "ProfileInheritance::is_legacy")]
-    pub inheritance: ProfileInheritance,
-    #[serde(default)]
-    pub server: ServerPreferences,
-}
-
-/// Settings supplied before a new Profile is committed to an existing Instance.
-/// Installation identity, data ownership and compatibility stay catalog-managed.
-#[derive(Debug, Clone)]
-pub struct ProfileConfiguration {
-    pub name: String,
-    pub target_id: String,
-    pub runtime: RuntimeSelection,
-    pub memory_mib: u32,
-    pub jvm_args: Vec<String>,
-    pub game_args: Vec<String>,
-    pub appearance: ProfileAppearance,
-    pub inheritance: ProfileInheritance,
-    pub server: ServerPreferences,
-}
-
-impl Default for ProfileConfiguration {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            target_id: "vanilla".into(),
-            runtime: RuntimeSelection::Managed,
-            memory_mib: 2048,
-            jvm_args: Vec::new(),
-            game_args: Vec::new(),
-            appearance: ProfileAppearance::default(),
-            inheritance: ProfileInheritance::default(),
-            server: ServerPreferences::default(),
-        }
-    }
-}
-
-impl From<&Profile> for ProfileConfiguration {
-    fn from(profile: &Profile) -> Self {
-        Self {
-            name: profile.name.clone(),
-            target_id: profile.target_id.clone(),
-            runtime: profile.runtime.clone(),
-            memory_mib: profile.memory_mib,
-            jvm_args: profile.jvm_args.clone(),
-            game_args: profile.game_args.clone(),
-            appearance: profile.appearance,
-            inheritance: profile.inheritance,
-            server: profile.server.clone(),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TargetSource {
+    Managed { manifest: Option<PathBuf> },
+    Existing { version_id: String },
 }
 
 impl Snapshot {
-    /// Include Instance defaults in the existing startup consistency guard.
     /// # Errors
-    /// Rejects missing selection references and invalid serialization.
-    pub fn launch_fingerprint(&self, profile_id: &str) -> anyhow::Result<String> {
-        use sha1::Digest as _;
-        let (instance, profile, _) = self.selection(profile_id)?;
-        Ok(format!(
-            "{:x}",
-            sha1::Sha1::digest(serde_json::to_vec(&(profile, &instance.settings))?)
-        ))
-    }
-
-    /// # Errors
-    /// Missing or dangling profile/instance/target references are rejected.
-    pub fn selection(
-        &self,
-        profile_id: &str,
-    ) -> anyhow::Result<(&Instance, &Profile, &LaunchTarget)> {
-        let profile = self
-            .profiles
-            .iter()
-            .find(|p| p.id == profile_id)
-            .context("profile no longer exists")?;
+    /// Rejects missing Instance and selected target references.
+    pub fn selection(&self, instance_id: &str) -> anyhow::Result<(&Instance, &LaunchTarget)> {
         let instance = self
             .instances
             .iter()
-            .find(|i| i.id == profile.instance_id)
-            .context("profile installation is missing")?;
+            .find(|instance| instance.id == instance_id)
+            .context("instance no longer exists")?;
         let target = instance
             .targets
             .iter()
-            .find(|t| t.id == profile.target_id)
-            .context("profile launch target is missing")?;
-        Ok((instance, profile, target))
+            .find(|target| target.id == instance.target_id)
+            .context("instance launch target is missing")?;
+        Ok((instance, target))
     }
 }
 
-impl Profile {
-    /// Resolve predictable mutable data ownership without per-directory mapping.
-    /// # Errors
-    /// Rejects a profile attached to another installation or unsafe IDs.
-    pub fn game_directory(&self, instance: &Instance) -> anyhow::Result<PathBuf> {
-        ensure!(
-            self.instance_id == instance.id,
-            "profile belongs to another instance"
-        );
-        validate_id(&self.id)?;
-        Ok(match self.data_policy {
-            DataPolicy::Shared => instance.directory.join("game"),
-            DataPolicy::Isolated => instance
-                .directory
-                .join("profiles")
-                .join(&self.id)
-                .join("game"),
-        })
+fn default_compatibility() -> Compatibility {
+    if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Compatibility::LinuxArm64Lwjgl3
+    } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
+        Compatibility::WindowsArm64Lwjgl3
+    } else {
+        Compatibility::Official
     }
-
-    /// # Errors
-    /// Invalid names, Java paths, memory bounds or process arguments are rejected.
-    pub fn validate(&self) -> anyhow::Result<()> {
-        validate_id(&self.id)?;
-        validate_id(&self.instance_id)?;
-        self.server.validate()?;
-        if self.server.connect_on_launch {
-            ensure!(
-                !self.game_args.iter().any(|argument| [
-                    "--quickPlayMultiplayer",
-                    "--quickPlaySingleplayer",
-                    "--quickPlayRealms",
-                    "--server",
-                    "--port"
-                ]
-                .iter()
-                .any(|flag| argument == flag || argument.starts_with(&format!("{flag}=")))),
-                "Automatic connection manages server launch arguments; remove conflicting extra game arguments"
-            );
-        }
-        validate_name(&self.name)?;
-        ensure!(
-            (crate::MIN_MEMORY_MIB..=crate::MAX_MEMORY_MIB).contains(&self.memory_mib),
-            "Memory must be between 1 and 32 GB"
-        );
-        ensure!(
-            self.jvm_args
-                .iter()
-                .chain(&self.game_args)
-                .all(|a| !a.contains('\0')),
-            "arguments cannot contain NUL bytes"
-        );
-        let reserved = [
-            "--accessToken",
-            "--uuid",
-            "--username",
-            "--userType",
-            "--xuid",
-            "--clientId",
-            "--gameDir",
-            "--assetsDir",
-            "--assetIndex",
-            "--version",
-            "--versionType",
-        ];
-        ensure!(
-            !self.game_args.iter().any(|arg| reserved
-                .iter()
-                .any(|flag| arg == flag || arg.starts_with(&format!("{flag}=")))),
-            "identity and installation arguments are managed by Block"
-        );
-        ensure!(
-            !self.jvm_args.iter().any(|arg| matches!(
-                arg.as_str(),
-                "-cp" | "-classpath" | "--class-path"
-            ) || ["-Xmx", "-Xms", "--class-path="]
-                .iter()
-                .any(|prefix| arg.starts_with(prefix))),
-            "classpath and memory are managed by Block"
-        );
-        if let RuntimeSelection::Local { java } = &self.runtime {
-            ensure!(java.is_absolute(), "custom Java path must be absolute");
-        }
-        Ok(())
-    }
-}
-
-fn validate_id(value: &str) -> anyhow::Result<()> {
-    ensure!(
-        !value.is_empty()
-            && value.len() <= 64
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
-        "invalid catalog identifier"
-    );
-    Ok(())
-}
-
-/// Validate a display name used by an Instance or Profile.
-///
-/// # Errors
-/// Rejects empty names, control characters and names over 160 UTF-8 bytes.
-pub fn validate_name(value: &str) -> anyhow::Result<()> {
-    ensure!(
-        !value.trim().is_empty() && value.len() <= 160 && !value.chars().any(char::is_control),
-        "name must not be empty, exceed 160 UTF-8 bytes, or contain control characters"
-    );
-    Ok(())
-}
-
-/// Installation-root validation does not silently reinterpret relative UI input.
-fn validate_directory(path: &Path) -> anyhow::Result<()> {
-    ensure!(
-        path.is_absolute(),
-        "installation directory must be absolute"
-    );
-    ensure!(
-        !path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir)),
-        "installation directory contains parent traversal"
-    );
-    Ok(())
 }

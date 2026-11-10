@@ -692,13 +692,12 @@ impl Block {
             Screen::Providers => self.provider_list(cx),
             Screen::Provider(id) => self.provider_detail(*id, cx),
             Screen::NewProvider | Screen::EditProvider(_) => self.provider_editor_slots(cx),
-            Screen::List
-            | Screen::Record(_)
-            | Screen::InstanceEditor(_)
-            | Screen::ProfileEditor(_) => super::page_host::ContentSlots {
-                body: div().into_any_element(),
-                footer: div().into_any_element(),
-            },
+            Screen::List | Screen::Record(_) | Screen::InstanceEditor(_) => {
+                super::page_host::ContentSlots {
+                    body: div().into_any_element(),
+                    footer: div().into_any_element(),
+                }
+            }
         }
     }
 

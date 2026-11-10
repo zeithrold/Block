@@ -48,7 +48,7 @@ fn home_retries_a_failed_download_without_an_account_or_a_second_instance(
         preferences.downloads.max_retries = 0;
         preferences.save(root.path())?;
         let catalog = Catalog::open(root.path())?;
-        let (instance, profile) =
+        let instance =
             catalog.create_instance("Download failed".into(), "1.20.6".into(), None, None)?;
         let mut target = instance.targets[0].clone();
         target.status = InstallStatus::Failed {
@@ -64,7 +64,6 @@ fn home_retries_a_failed_download_without_an_account_or_a_second_instance(
             view.messages = Some(messages);
             view.snapshot = snapshot;
             view.selected_instance = Some(instance.id.clone());
-            view.selected_profile = Some(profile.id.clone());
             view.router.navigate(crate::Tab::Home);
             cx.notify();
         });
@@ -100,11 +99,13 @@ fn home_retries_a_failed_download_without_an_account_or_a_second_instance(
         assert!(request.starts_with("CONNECT piston-meta.mojang.com:443 "));
         let state = catalog.snapshot()?;
         assert_eq!(state.instances.len(), 1);
-        assert_eq!(state.profiles.len(), 1);
-        let (saved_instance, saved_profile, saved_target) = state.selection(&profile.id)?;
+        let (saved_instance, saved_target) = state.selection(&instance.id)?;
         assert_eq!(saved_instance.id, instance.id);
-        assert_eq!(saved_instance.directory, instance.directory);
-        assert_eq!(saved_profile.id, profile.id);
+        assert_eq!(
+            saved_instance.resource_directory,
+            instance.resource_directory
+        );
+        assert_eq!(saved_instance.game_directory, instance.game_directory);
         assert!(
             matches!(&saved_target.status, InstallStatus::Failed { message } if message != "Initial download failure")
         );
@@ -132,7 +133,6 @@ fn configured_home(view: &gpui::Entity<crate::Block>, cx: &mut gpui::VisualTestC
         }
         view.snapshot = crate::test_support::ready_snapshot();
         view.selected_instance = Some("instance-a".into());
-        view.selected_profile = Some("profile-a".into());
         view.router.navigate(crate::Tab::Home);
         view.preferences.reduce_motion = true;
         cx.notify();
@@ -337,11 +337,9 @@ fn home_primary_action_keeps_readable_hover_and_pressed_colors_for_every_action(
                 if let Some(status) = status {
                     view.snapshot = crate::test_support::ready_snapshot();
                     view.snapshot.instances[0].targets[0].status = status;
-                    view.selected_profile = Some("profile-a".into());
                     view.selected_instance = Some("instance-a".into());
                 } else {
                     view.snapshot = Default::default();
-                    view.selected_profile = None;
                     view.selected_instance = None;
                 }
                 cx.notify();

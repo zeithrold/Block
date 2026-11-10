@@ -1,4 +1,4 @@
-//! One searchable selection contract for Home's real accounts and profiles.
+//! One searchable selection contract for Home's real accounts and instances.
 //! Keyboard inspection never changes Home's current selection until activation.
 
 #![expect(
@@ -7,7 +7,7 @@
 )]
 
 use super::scroll_area::ScrollAreaExt as _;
-use block_launcher::catalog::ProfileAppearance;
+use block_launcher::catalog::InstanceAppearance;
 use gpui::{
     Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
     KeyDownEvent, ParentElement as _, ScrollHandle, Styled as _, Window, div, point, px, rgb,
@@ -39,7 +39,7 @@ impl SearchSelectorState {
         let key = if self.drawer == Drawer::Accounts {
             "search.accounts_placeholder"
         } else {
-            "search.profiles_placeholder"
+            "search.instances_placeholder"
         };
         let placeholder = tr!(language, key);
         self.query
@@ -70,7 +70,7 @@ struct Choice {
     description: String,
     current: bool,
     enabled: bool,
-    appearance: Option<ProfileAppearance>,
+    appearance: Option<InstanceAppearance>,
     badges: Vec<String>,
 }
 
@@ -81,7 +81,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !matches!(drawer, Drawer::Accounts | Drawer::Profiles) {
+        if !matches!(drawer, Drawer::Accounts | Drawer::Instances) {
             self.shell.selector = None;
             return;
         }
@@ -91,7 +91,7 @@ impl Block {
             &if drawer == Drawer::Accounts {
                 tr!(language, "search.accounts_placeholder")
             } else {
-                tr!(language, "search.profiles_placeholder")
+                tr!(language, "search.instances_placeholder")
             },
             cx,
         );
@@ -399,7 +399,7 @@ impl Block {
         let mut primary = components::button(
             format!(
                 "switch-{}-{id}",
-                if accounts { "account" } else { "profile" }
+                if accounts { "account" } else { "instance" }
             ),
             "",
             self.palette,
@@ -435,7 +435,7 @@ impl Block {
                             AvatarState::Fallback,
                         )
                     },
-                    |appearance| components::profile_avatar(appearance, self.palette, 36.),
+                    |appearance| components::instance_avatar(appearance, self.palette, 36.),
                 )
                 .debug_selector({
                     let selector = format!("selector-avatar-{id}");
@@ -520,62 +520,42 @@ impl Block {
                         })
                 })
                 .collect()
-        } else if drawer == Drawer::Profiles {
+        } else if drawer == Drawer::Instances {
             self.snapshot
-                .profiles
+                .instances
                 .iter()
-                .filter_map(|profile| {
-                    let instance = self
-                        .snapshot
-                        .instances
+                .filter_map(|instance| {
+                    let target = instance
+                        .targets
                         .iter()
-                        .find(|instance| instance.id == profile.instance_id);
-                    let valid = instance.is_some_and(|instance| {
-                        instance
-                            .targets
-                            .iter()
-                            .any(|target| target.id == profile.target_id)
-                    });
-                    let description = instance.map_or_else(
-                        || tr!(language, "profile.instance_unavailable"),
-                        |instance| {
-                            if valid {
-                                tr!(
-                                    language,
-                                    "profile.summary",
-                                    instance = instance.name,
-                                    version = instance.minecraft_version,
-                                )
-                            } else {
-                                tr!(language, "profile.target_unavailable")
-                            }
-                        },
-                    );
-                    format!("{} {description}", profile.name)
+                        .find(|target| target.id == instance.target_id);
+                    let valid = target.is_some();
+                    let description = if valid {
+                        instance.game_directory.display().to_string()
+                    } else {
+                        tr!(language, "instance.target_unavailable")
+                    };
+                    format!("{} {description}", instance.name)
                         .to_lowercase()
                         .contains(query)
                         .then(|| Choice {
-                            id: profile.id.clone(),
-                            title: profile.name.clone(),
+                            id: instance.id.clone(),
+                            title: instance.name.clone(),
                             description,
-                            current: self.selected_profile.as_ref() == Some(&profile.id),
+                            current: self.selected_instance.as_ref() == Some(&instance.id),
                             enabled: valid && !self.busy,
-                            appearance: Some(profile.appearance),
-                            badges: instance.map_or_else(Vec::new, |instance| {
+                            appearance: Some(instance.appearance),
+                            badges: {
                                 let mut badges = vec![tr!(
                                     language,
                                     "badge.minecraft_version",
                                     version = instance.minecraft_version,
                                 )];
-                                if let Some(target) = instance
-                                    .targets
-                                    .iter()
-                                    .find(|target| target.id == profile.target_id)
-                                {
+                                if let Some(target) = target {
                                     badges.push(target.display_name());
                                 }
                                 badges
-                            }),
+                            },
                         })
                 })
                 .collect()
@@ -592,7 +572,7 @@ fn choice_action(drawer: Drawer, id: String) -> UiAction {
     if drawer == Drawer::Accounts {
         UiAction::SelectAccount(id)
     } else {
-        UiAction::SelectProfile(id)
+        UiAction::SelectInstance(id)
     }
 }
 
@@ -690,15 +670,15 @@ mod tests {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         view.update(cx, |view, _| {
             view.snapshot = ready_snapshot();
-            let mut second = view.snapshot.profiles[0].clone();
-            second.id = "profile-z".into();
+            let mut second = view.snapshot.instances[0].clone();
+            second.id = "instance-z".into();
             second.name = "Current last in catalog".into();
-            view.snapshot.profiles.push(second);
-            view.selected_profile = Some("profile-z".into());
-            let profiles = view.selector_choices(Drawer::Profiles, "");
-            assert_eq!(profiles[0].id, "profile-z");
-            assert_eq!(profiles[1].id, "profile-a");
-            assert_eq!(profiles[0].badges, ["Minecraft 1.20.6", "Vanilla"]);
+            view.snapshot.instances.push(second);
+            view.selected_instance = Some("instance-z".into());
+            let instances = view.selector_choices(Drawer::Instances, "");
+            assert_eq!(instances[0].id, "instance-z");
+            assert_eq!(instances[1].id, "instance-a");
+            assert_eq!(instances[0].badges, ["Minecraft 1.20.6", "Vanilla"]);
             let result = test_account();
             assert!(result.is_ok());
             if let Ok(first) = result {
@@ -725,7 +705,7 @@ mod tests {
             (crate::Appearance::Light, crate::Palette::LIGHT),
             (crate::Appearance::Dark, crate::Palette::DARK),
         ] {
-            for drawer in [Drawer::Accounts, Drawer::Profiles] {
+            for drawer in [Drawer::Accounts, Drawer::Instances] {
                 cx.update(|window, cx| {
                     view.update(cx, |view, cx| {
                         view.preferences.appearance = appearance;
@@ -762,8 +742,8 @@ mod tests {
                     )
                 } else {
                     (
-                        "switch-profile-profile-a",
-                        "selector-current-profile-a-indicator",
+                        "switch-instance-instance-a",
+                        "selector-current-instance-a-indicator",
                     )
                 };
                 let row = crate::test_support::control_bounds(cx, row_id);
@@ -775,9 +755,9 @@ mod tests {
                     }),
                     "{drawer:?}: every choice reserves the same inset Radio indicator"
                 );
-                if drawer == Drawer::Profiles {
-                    let avatar = cx.debug_bounds("selector-avatar-profile-a");
-                    let text = cx.debug_bounds("selector-text-profile-a");
+                if drawer == Drawer::Instances {
+                    let avatar = cx.debug_bounds("selector-avatar-instance-a");
+                    let text = cx.debug_bounds("selector-text-instance-a");
                     assert!(
                         row.zip(avatar)
                             .zip(text)
@@ -786,7 +766,7 @@ mod tests {
                                     && avatar.left() - row.left() == px(16.)
                                     && text.left() - avatar.right() == px(12.)
                             }),
-                        "Profile avatar keeps its inset and gap before the text"
+                        "Instance avatar keeps its inset and gap before the text"
                     );
                 }
             }
@@ -794,7 +774,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn arrow_inspection_skips_unavailable_profiles_and_only_enter_changes_home(
+    fn arrow_inspection_skips_unavailable_instances_and_only_enter_changes_home(
         cx: &mut TestAppContext,
     ) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
@@ -803,31 +783,30 @@ mod tests {
                 view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Home);
                 view.snapshot = ready_snapshot();
-                view.selected_profile = Some("profile-a".into());
-                let mut missing = view.snapshot.profiles[0].clone();
+                view.selected_instance = Some("instance-a".into());
+                let mut missing = view.snapshot.instances[0].clone();
                 missing.id = "unavailable".into();
-                missing.instance_id = "missing".into();
-                let mut second = view.snapshot.profiles[0].clone();
-                second.id = "profile-b".into();
+                missing.target_id = "missing".into();
+                let mut second = view.snapshot.instances[0].clone();
+                second.id = "instance-b".into();
                 second.name = "世界 Gamma".into();
-                view.snapshot.profiles.extend([missing, second]);
-                view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+                view.snapshot.instances.extend([missing, second]);
+                view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
             });
         });
         crate::test_support::press(cx, "down");
         assert!(view.read_with(cx, |view, _| {
-            view.selected_profile.as_deref() == Some("profile-a")
+            view.selected_instance.as_deref() == Some("instance-a")
                 && view
                     .shell
                     .selector
                     .as_ref()
-                    .is_some_and(|state| state.active.as_deref() == Some("profile-b"))
+                    .is_some_and(|state| state.active.as_deref() == Some("instance-b"))
         }));
         crate::test_support::press(cx, "enter");
         assert!(
-            view.read_with(cx, |view, _| view.selected_profile.as_deref()
-                == Some("profile-b")
-                && view.selected_instance.as_deref() == Some("instance-a")
+            view.read_with(cx, |view, _| view.selected_instance.as_deref()
+                == Some("instance-b")
                 && !view.shell.surfaces.is_open())
         );
     }
@@ -839,12 +818,12 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.snapshot = ready_snapshot();
-                view.selected_profile = Some("profile-a".into());
-                view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+                view.selected_instance = Some("instance-a".into());
+                view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
             });
         });
         crate::test_support::control_bounds(cx, "selector-results");
-        cx.simulate_input("no matching profile");
+        cx.simulate_input("no matching instance");
         crate::test_support::press(cx, "enter");
         assert!(view.read_with(cx, |view, _| {
             view.shell.surfaces.is_open()
@@ -860,7 +839,7 @@ mod tests {
             view.shell
                 .selector
                 .as_ref()
-                .is_some_and(|state| state.query.read(cx).value() == "前no matching profile")
+                .is_some_and(|state| state.query.read(cx).value() == "前no matching instance")
         }));
         click(cx, "selector-clear");
         cx.update(|window, cx| {
@@ -875,7 +854,7 @@ mod tests {
         });
         crate::test_support::press(cx, "down enter escape");
         assert!(view.read_with(cx, |view, cx| {
-            view.selected_profile.as_deref() == Some("profile-a")
+            view.selected_instance.as_deref() == Some("instance-a")
                 && view.shell.surfaces.is_open()
                 && view
                     .shell
@@ -1021,36 +1000,36 @@ mod tests {
             view.update(cx, |view, cx| {
                 view.preferences.reduce_motion = true;
                 view.snapshot = ready_snapshot();
-                let original = view.snapshot.profiles[0].clone();
-                view.snapshot.profiles = (0..40)
+                let original = view.snapshot.instances[0].clone();
+                view.snapshot.instances = (0..40)
                     .map(|index| {
-                        let mut profile = original.clone();
-                        profile.id = format!("profile-{index}");
-                        profile.name = format!("Game {index}");
-                        profile
+                        let mut instance = original.clone();
+                        instance.id = format!("instance-{index}");
+                        instance.name = format!("Game {index}");
+                        instance
                     })
                     .collect();
-                view.selected_profile = Some("profile-39".into());
-                view.handle(UiAction::Drawer(Some(Drawer::Profiles)), window, cx);
+                view.selected_instance = Some("instance-39".into());
+                view.handle(UiAction::Drawer(Some(Drawer::Instances)), window, cx);
             });
         });
         crate::test_support::press(cx, "tab home");
         cx.run_until_parked();
         let viewport = cx.debug_bounds("selector-results");
-        // The current profile is deliberately promoted ahead of catalog order.
-        let first = cx.debug_bounds("switch-profile-profile-39");
+        // The current instance is deliberately promoted ahead of catalog order.
+        let first = cx.debug_bounds("switch-instance-instance-39");
         assert!(viewport.zip(first).is_some_and(
             |(viewport, row)| row.top() >= viewport.top() && row.bottom() <= viewport.bottom()
         ));
         crate::test_support::press(cx, "end");
         cx.run_until_parked();
-        let last = cx.debug_bounds("switch-profile-profile-38");
+        let last = cx.debug_bounds("switch-instance-instance-38");
         assert!(viewport.zip(last).is_some_and(
             |(viewport, row)| row.top() >= viewport.top() && row.bottom() <= viewport.bottom()
         ));
         assert_eq!(
-            view.read_with(cx, |view, _| view.selected_profile.clone()),
-            Some("profile-39".into())
+            view.read_with(cx, |view, _| view.selected_instance.clone()),
+            Some("instance-39".into())
         );
     }
 }

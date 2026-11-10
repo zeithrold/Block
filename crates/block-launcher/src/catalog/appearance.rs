@@ -2,17 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A Profile's decorative identity, independent of its installation and data.
+/// A Instance's decorative identity, independent of its installation and data.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct ProfileAppearance {
-    pub icon: ProfileIcon,
-    pub color: ProfileColor,
+pub struct InstanceAppearance {
+    pub icon: InstanceIcon,
+    pub color: InstanceColor,
 }
 
 /// Supported product icons. Unknown serialized values are rejected.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProfileIcon {
+pub enum InstanceIcon {
     #[default]
     Blocks,
     Layers,
@@ -24,7 +24,7 @@ pub enum ProfileIcon {
     FlaskConical,
 }
 
-impl ProfileIcon {
+impl InstanceIcon {
     pub const ALL: [Self; 8] = [
         Self::Blocks,
         Self::Layers,
@@ -53,7 +53,7 @@ impl ProfileIcon {
 
 /// Semantic color choices resolved by the UI's current light/dark palette.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProfileColor {
+pub enum InstanceColor {
     #[default]
     Gray,
     Blue,
@@ -63,7 +63,7 @@ pub enum ProfileColor {
     Pink,
 }
 
-impl ProfileColor {
+impl InstanceColor {
     pub const ALL: [Self; 6] = [
         Self::Gray,
         Self::Blue,

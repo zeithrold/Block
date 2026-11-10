@@ -1,146 +1,116 @@
-//! Instance defaults and explicit Profile inheritance, preserving legacy launches.
-
-use anyhow::{Context as _, ensure};
-use serde::{Deserialize, Serialize};
-
-use super::{Instance, Profile};
+//! Ephemeral Instance editing values and the owned window argument contract.
+use super::{DataPolicy, Instance, InstanceAppearance, ServerPreferences};
 use crate::recipe::RuntimeSelection;
+use anyhow::ensure;
+use std::path::PathBuf;
 
-/// Persisted defaults belong to an Instance; its data directory never moves here.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct InstanceSettings {
-    pub runtime: RuntimeSelection,
-    pub width: u32,
-    pub height: u32,
-    pub fullscreen: bool,
-}
-
-impl Default for InstanceSettings {
-    fn default() -> Self {
-        Self {
-            runtime: RuntimeSelection::Managed,
-            width: 1280,
-            height: 720,
-            fullscreen: false,
-        }
-    }
-}
-
-impl InstanceSettings {
-    /// # Errors
-    /// Rejects invalid window bounds and relative or NUL-containing Java paths.
-    pub fn validate(&self) -> anyhow::Result<()> {
-        ensure!(
-            (320..=16384).contains(&self.width),
-            "Window width must be between 320 and 16384 pixels"
-        );
-        ensure!(
-            (240..=16384).contains(&self.height),
-            "Window height must be between 240 and 16384 pixels"
-        );
-        if let RuntimeSelection::Local { java } = &self.runtime {
-            ensure!(java.is_absolute(), "Custom Java path must be absolute");
-            ensure!(
-                !java.to_string_lossy().contains('\0'),
-                "Java path cannot contain NUL bytes"
-            );
-        }
-        Ok(())
-    }
-
-    /// Seed a new Instance from the actual configured initial Profile.
-    /// # Errors
-    /// Invalid owned window arguments are rejected before creating directories.
-    pub fn from_profile(profile: &Profile) -> anyhow::Result<Self> {
-        let mut settings = Self {
-            runtime: profile.runtime.clone(),
-            ..Self::default()
-        };
-        let mut arguments = profile.game_args.iter();
-        while let Some(argument) = arguments.next() {
-            match argument.as_str() {
-                "--width" => {
-                    settings.width = arguments
-                        .next()
-                        .context("Window width argument is missing")?
-                        .parse()?;
-                }
-                "--height" => {
-                    settings.height = arguments
-                        .next()
-                        .context("Window height argument is missing")?
-                        .parse()?;
-                }
-                "--fullscreen" => settings.fullscreen = true,
-                _ if argument.starts_with("--width=") => settings.width = argument[8..].parse()?,
-                _ if argument.starts_with("--height=") => {
-                    settings.height = argument[9..].parse()?;
-                }
-                _ if argument.starts_with("--fullscreen=") => {
-                    settings.fullscreen = argument[13..].parse()?;
-                }
-                _ => {}
-            }
-        }
-        settings.validate()?;
-        Ok(settings)
-    }
-}
-
-/// Explicit switches avoid changing the meaning of a legacy managed Profile.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ProfileInheritance {
-    pub runtime: bool,
-    pub window: bool,
-}
-
-impl ProfileInheritance {
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "Serde skip_serializing_if requires a borrowed value."
-    )]
-    pub(super) const fn is_legacy(&self) -> bool {
-        !self.runtime && !self.window
-    }
-}
-
-/// Validated metadata submitted by the Instance editor in one catalog commit.
+/// Editable values committed directly onto an Instance.
+/// An empty game_directory is a create-only request for the managed root.
 #[derive(Debug, Clone)]
 pub struct InstanceConfiguration {
     pub name: String,
-    pub settings: InstanceSettings,
+    pub target_id: String,
+    pub runtime: RuntimeSelection,
+    pub memory_mib: u32,
+    pub jvm_args: Vec<String>,
+    pub game_args: Vec<String>,
+    pub default_account: Option<String>,
+    pub appearance: InstanceAppearance,
+    pub server: ServerPreferences,
+    pub width: u32,
+    pub height: u32,
+    pub fullscreen: bool,
+    pub data_policy: DataPolicy,
+    pub game_directory: PathBuf,
 }
 
-impl Profile {
-    /// A Profile's explicit custom Java always wins, including migrated catalogs.
-    #[must_use]
-    pub fn effective_runtime(&self, instance: &Instance) -> RuntimeSelection {
-        if self.inheritance.runtime
-            && matches!(self.runtime, RuntimeSelection::Managed)
-            && let Some(settings) = &instance.settings
-        {
-            return settings.runtime.clone();
+impl Default for InstanceConfiguration {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            target_id: "vanilla".into(),
+            runtime: RuntimeSelection::Managed,
+            memory_mib: 2048,
+            jvm_args: Vec::new(),
+            game_args: Vec::new(),
+            default_account: None,
+            appearance: InstanceAppearance::default(),
+            server: ServerPreferences::default(),
+            width: 1280,
+            height: 720,
+            fullscreen: false,
+            data_policy: DataPolicy::Isolated,
+            game_directory: PathBuf::new(),
         }
-        self.runtime.clone()
     }
+}
 
-    /// Resolve only the owned window flags; preserve every unrelated argument.
+impl From<&Instance> for InstanceConfiguration {
+    fn from(instance: &Instance) -> Self {
+        Self {
+            name: instance.name.clone(),
+            target_id: instance.target_id.clone(),
+            runtime: instance.runtime.clone(),
+            memory_mib: instance.memory_mib,
+            jvm_args: instance.jvm_args.clone(),
+            game_args: instance.game_args.clone(),
+            default_account: instance.default_account.clone(),
+            appearance: instance.appearance,
+            server: instance.server.clone(),
+            width: instance.width,
+            height: instance.height,
+            fullscreen: instance.fullscreen,
+            data_policy: instance.data_policy,
+            game_directory: instance.game_directory.clone(),
+        }
+    }
+}
+
+impl InstanceConfiguration {
+    pub(super) fn apply(self, instance: &mut Instance) {
+        instance.name = self.name;
+        instance.target_id = self.target_id;
+        instance.runtime = self.runtime;
+        instance.memory_mib = self.memory_mib;
+        instance.jvm_args = self.jvm_args;
+        instance.game_args = self.game_args;
+        instance.default_account = self.default_account;
+        instance.appearance = self.appearance;
+        instance.server = self.server;
+        instance.width = self.width;
+        instance.height = self.height;
+        instance.fullscreen = self.fullscreen;
+        instance.data_policy = self.data_policy;
+        instance.game_directory = self.game_directory;
+    }
+}
+
+pub(super) fn validate_window(width: u32, height: u32) -> anyhow::Result<()> {
+    ensure!(
+        (320..=16384).contains(&width),
+        "Window width must be between 320 and 16384 pixels"
+    );
+    ensure!(
+        (240..=16384).contains(&height),
+        "Window height must be between 240 and 16384 pixels"
+    );
+    Ok(())
+}
+
+impl Instance {
+    /// Normalize owned window flags while preserving unrelated extra arguments.
     #[must_use]
-    pub fn effective_game_args(&self, instance: &Instance) -> Vec<String> {
-        let Some(settings) = instance
-            .settings
-            .as_ref()
-            .filter(|_| self.inheritance.window)
-        else {
-            return self.game_args.clone();
-        };
-        let mut arguments = self.game_args.iter();
+    pub fn launch_game_args(&self) -> Vec<String> {
+        let mut arguments = self.game_args.iter().peekable();
         let mut result = Vec::new();
         while let Some(argument) = arguments.next() {
             if matches!(argument.as_str(), "--width" | "--height") {
-                arguments.next();
+                if arguments
+                    .peek()
+                    .is_some_and(|value| !value.starts_with("--"))
+                {
+                    arguments.next();
+                }
             } else if argument != "--fullscreen"
                 && !["--width=", "--height=", "--fullscreen="]
                     .iter()
@@ -151,11 +121,11 @@ impl Profile {
         }
         result.extend([
             "--width".into(),
-            settings.width.to_string(),
+            self.width.to_string(),
             "--height".into(),
-            settings.height.to_string(),
+            self.height.to_string(),
         ]);
-        if settings.fullscreen {
+        if self.fullscreen {
             result.push("--fullscreen".into());
         }
         result

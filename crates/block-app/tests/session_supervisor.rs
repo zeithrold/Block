@@ -12,10 +12,17 @@ use std::{
 use anyhow::{Context as _, ensure};
 use block_download::Store;
 use block_launcher::{
-    catalog::{Catalog, GameDirectoryGuard, InstallStatus, Instance, Profile},
+    CancellationToken,
+    catalog::{
+        Catalog, GameDirectoryGuard, InstallStatus, Instance, InstanceConfiguration, TargetSource,
+    },
     crash::{DiagnosisKind, ExitKind},
-    recipe::{Compatibility, RuntimeSelection},
+    executor::Executor,
+    plan::compile,
+    recipe::{LaunchRecipe, RecipeSource, RuntimeSelection},
+    resolver::{ResolveContext, resolve},
     session::GameSession,
+    session::OfflineSession,
     session_host::{self, RunRecord, RunState},
 };
 use serde_json::json;
@@ -29,12 +36,11 @@ struct Fixture {
     root: PathBuf,
     tools: PathBuf,
     instance: Instance,
-    profile: Profile,
     game: PathBuf,
 }
 
 impl Fixture {
-    fn new(mode: &str) -> anyhow::Result<Self> {
+    async fn new(mode: &str) -> anyhow::Result<Self> {
         let temporary = tempfile::tempdir()?;
         let root = temporary.path().canonicalize()?;
         let tools = root.join("fixture");
@@ -52,16 +58,12 @@ impl Fixture {
             String::from_utf8_lossy(&output.stderr)
         );
         fs::write(tools.join("mode"), mode)?;
-        if mode == "probe-fail" {
-            fs::write(tools.join("probe-hold"), b"wait")?;
-        }
         let catalog = Catalog::open(&root)?;
-        let (instance, mut profile) =
+        let mut instance =
             catalog.create_instance("Supervisor fixture".into(), "1.20.6".into(), None, None)?;
-        profile.runtime = RuntimeSelection::Local { java: executable };
+        instance.runtime = RuntimeSelection::Local { java: executable };
         // The synthetic child loads no native code. Real ARM64 policy is tested separately.
-        profile.compatibility = Compatibility::Official;
-        catalog.save_profile(profile.clone())?;
+        catalog.save_instance(&instance.id, InstanceConfiguration::from(&instance))?;
         let store = Store::new(root.clone(), true, Arc::new(|_| {}))?;
         let assets = object(&store, br#"{"objects":{}}"#)?;
         let client = object(&store, b"fixture client bytes, not a real jar")?;
@@ -130,11 +132,49 @@ impl Fixture {
                 "arguments":{"game":["--accessToken","${auth_access_token}","--username","${auth_player_name}"],"jvm":[]}
             }))?,
         )?;
+        // Explicit installation prepares shared immutable views before catalog Play.
+        // The supervisor must only validate them while holding its shared lease.
+        let cancel = CancellationToken::new();
+        let recipe = LaunchRecipe {
+            schema_version: 1,
+            instance: instance.id.clone(),
+            source: RecipeSource::LocalManifest {
+                path: manifest.clone(),
+            },
+            session: OfflineSession::Offline {
+                username: "Preparation".into(),
+            },
+            runtime: instance.runtime.clone(),
+            target: None,
+            compatibility: instance.compatibility,
+            memory_mib: instance.memory_mib,
+            jvm_args: instance.jvm_args.clone(),
+            features: Default::default(),
+        };
+        let metadata = resolve(
+            &recipe,
+            &ResolveContext {
+                store: store.clone(),
+                cancel: cancel.clone(),
+            },
+        )
+        .await?;
+        let plan = compile(&recipe, &metadata)?;
+        drop(
+            Executor::new(store, Arc::new(|_| {}))
+                .prepare(plan, &cancel)
+                .await?,
+        );
+        if mode == "probe-fail" {
+            fs::write(tools.join("probe-hold"), b"wait")?;
+        }
         let mut target = instance.targets[0].clone();
-        target.manifest = Some(manifest);
+        target.source = TargetSource::Managed {
+            manifest: Some(manifest),
+        };
         target.status = InstallStatus::Ready;
         catalog.set_target(&instance.id, &target)?;
-        let game = profile.game_directory(&instance)?;
+        let game = instance.game_directory.clone();
         fs::create_dir_all(game.join("crash-reports"))?;
         fs::write(
             game.join("crash-reports/crash-fixture-old-client.txt"),
@@ -145,7 +185,6 @@ impl Fixture {
             root,
             tools,
             instance,
-            profile,
             game,
         })
     }
@@ -158,7 +197,7 @@ impl Fixture {
         session_host::spawn_session(
             &self.root,
             executable,
-            &self.profile.id,
+            &self.instance.id,
             &GameSession {
                 username: "FixturePlayer".into(),
                 uuid: "0123456789abcdef0123456789abcdef".into(),
@@ -204,6 +243,9 @@ impl Drop for Fixture {
             // Do not delete its executable, gate or diagnostics while it is still alive.
             let _ = fs::write(self.tools.join("mode"), "normal");
             let _ = fs::write(self.tools.join("release"), b"test cleanup");
+            if let Err(error) = fs::write(self.tools.join("probe-release"), b"test cleanup") {
+                eprintln!("fixture probe gate cleanup failed: {error}");
+            }
             let _ = temporary.keep();
         }
     }
@@ -282,12 +324,12 @@ async fn wait_host_exit(root: &Path, run_id: &str) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn detached_game_reconnects_stops_and_can_restart_normally() -> anyhow::Result<()> {
-    let fixture = Fixture::new("normal")?;
+    let fixture = Fixture::new("normal").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id.clone();
     let running = wait_for(&fixture.root, &id, RunState::Running).await?;
     let pid = running.java_pid.context("fixture Java PID missing")?;
-    let prepared_directory = fixture.root.join("instances").join(&fixture.instance.id);
+    let prepared_directory = fixture.root.join("preparations").join(&fixture.instance.id);
     let prepared_marker = fs::read_to_string(prepared_directory.join("prepared.lock.json"))?;
     let prepared_plan: serde_json::Value = serde_json::from_str(&prepared_marker)?;
     assert_eq!(prepared_plan["instance"], fixture.instance.id);
@@ -308,7 +350,7 @@ async fn detached_game_reconnects_stops_and_can_restart_normally() -> anyhow::Re
         fs::read_to_string(fixture.tools.join("java.pid"))?,
         pid.to_string()
     );
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_err());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_err());
     session_host::stop(&fixture.root, &id).await?;
     let stopped = wait_for(&fixture.root, &id, RunState::Finished).await?;
     assert_eq!(
@@ -331,15 +373,96 @@ async fn detached_game_reconnects_stops_and_can_restart_normally() -> anyhow::Re
     assert_eq!(outcome.code, Some(0));
     assert!(session_host::read_crash(&fixture.root, &id).is_err());
     wait_host_exit(&fixture.root, &id).await?;
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_ok());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_ok());
     fixture.complete();
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn accepted_session_survives_catalog_deletion_before_and_after_java_starts()
+-> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    for before_java in [true, false] {
+        for stop in [true, false] {
+            let mut fixture = Fixture::new("normal").await?;
+            if before_java {
+                let RuntimeSelection::Local { java } = &fixture.instance.runtime else {
+                    anyhow::bail!("fixture requires local Java");
+                };
+                let wrapper = fixture.tools.join("gated-java");
+                fs::write(
+                    &wrapper,
+                    format!(
+                        "#!/bin/sh\ncase \" $* \" in *' -version '*) touch '{}/probe-ready'; while [ ! -f '{}/probe-release' ]; do sleep 0.02; done;; esac\nexec '{}' \"$@\"\n",
+                        fixture.tools.display(),
+                        fixture.tools.display(),
+                        java.display(),
+                    ),
+                )?;
+                fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755))?;
+                fixture.instance.runtime = RuntimeSelection::Local { java: wrapper };
+                Catalog::open(&fixture.root)?.save_instance(
+                    &fixture.instance.id,
+                    InstanceConfiguration::from(&fixture.instance),
+                )?;
+            }
+            let id = fixture.start().await?.context.run_id;
+            if before_java {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !fixture.tools.join("probe-ready").exists() {
+                    ensure!(Instant::now() < deadline, "Java probe gate was not reached");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                assert!(
+                    session_host::status(&fixture.root, &id)
+                        .await?
+                        .java_pid
+                        .is_none()
+                );
+            } else {
+                wait_for(&fixture.root, &id, RunState::Running).await?;
+            }
+            Catalog::open(&fixture.root)?.delete_instance(&fixture.instance.id)?;
+            fs::write(
+                fixture.tools.join("probe-release"),
+                b"continue accepted plan",
+            )?;
+            let running = wait_for(&fixture.root, &id, RunState::Running).await?;
+            assert!(running.java_pid.is_some());
+            assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_err());
+            if stop {
+                session_host::stop(&fixture.root, &id).await?;
+            } else {
+                fixture.release()?;
+            }
+            let finished = wait_for(&fixture.root, &id, RunState::Finished).await?;
+            assert_eq!(
+                finished.outcome.context("terminal outcome missing")?.kind,
+                if stop {
+                    ExitKind::Stopped
+                } else {
+                    ExitKind::Normal
+                },
+            );
+            wait_host_exit(&fixture.root, &id).await?;
+            assert!(
+                fixture
+                    .game
+                    .join("crash-reports/crash-fixture-old-client.txt")
+                    .is_file()
+            );
+            fixture.complete();
+        }
+    }
     Ok(())
 }
 
 #[tokio::test]
 async fn abnormal_exit_collects_only_fresh_sanitized_evidence_and_retains_unread_help()
 -> anyhow::Result<()> {
-    let fixture = Fixture::new("crash")?;
+    let fixture = Fixture::new("crash").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id;
     wait_for(&fixture.root, &id, RunState::Running).await?;
@@ -396,7 +519,7 @@ async fn abnormal_exit_collects_only_fresh_sanitized_evidence_and_retains_unread
 #[tokio::test]
 async fn rejected_second_launch_preserves_the_other_live_sessions_reservation() -> anyhow::Result<()>
 {
-    let fixture = Fixture::new("normal")?;
+    let fixture = Fixture::new("normal").await?;
     let first = fixture.start().await?.context.run_id;
     wait_for(&fixture.root, &first, RunState::Running).await?;
     let second = fixture.start().await?.context.run_id;
@@ -425,7 +548,7 @@ async fn rejected_second_launch_preserves_the_other_live_sessions_reservation() 
 
 #[tokio::test]
 async fn terminal_exit_reports_a_reservation_that_could_not_be_released() -> anyhow::Result<()> {
-    let fixture = Fixture::new("normal")?;
+    let fixture = Fixture::new("normal").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id;
     wait_for(&fixture.root, &id, RunState::Running).await?;
@@ -440,7 +563,7 @@ async fn terminal_exit_reports_a_reservation_that_could_not_be_released() -> any
     );
     assert!(finished.status.contains("manual recovery"));
     assert!(!finished.status.contains("ready to play"));
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_err());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_err());
     wait_host_exit(&fixture.root, &id).await?;
     fs::write(marker, original)?;
     GameDirectoryGuard::clear_session_reservation(&fixture.game, &id)?;
@@ -451,7 +574,7 @@ async fn terminal_exit_reports_a_reservation_that_could_not_be_released() -> any
 #[tokio::test]
 async fn missing_supervisor_finishes_without_starting_java_or_leaking_the_token()
 -> anyhow::Result<()> {
-    let fixture = Fixture::new("normal")?;
+    let fixture = Fixture::new("normal").await?;
     let record = fixture
         .start_with(&fixture.tools.join("missing-supervisor"))
         .await?;
@@ -468,7 +591,7 @@ async fn missing_supervisor_finishes_without_starting_java_or_leaking_the_token(
     assert!(!serde_json::to_string(&report)?.contains(TOKEN));
     assert!(!fixture.tools.join("java.pid").exists());
     assert!(!fixture.game.join(".block-session.json").exists());
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_ok());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_ok());
     fixture.complete();
     Ok(())
 }
@@ -476,7 +599,7 @@ async fn missing_supervisor_finishes_without_starting_java_or_leaking_the_token(
 #[tokio::test]
 async fn java_probe_failure_is_a_launch_error_without_old_crash_attachments() -> anyhow::Result<()>
 {
-    let fixture = Fixture::new("probe-fail")?;
+    let fixture = Fixture::new("probe-fail").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id;
     let presentation = fixture.presenter(&id)?;
@@ -500,7 +623,7 @@ async fn java_probe_failure_is_a_launch_error_without_old_crash_attachments() ->
     assert!(!serde_json::to_string(&report)?.contains(TOKEN));
     wait_host_exit(&fixture.root, &id).await?;
     assert!(!fixture.game.join(".block-session.json").exists());
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_ok());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_ok());
     drop(presentation);
     fixture.complete();
     Ok(())
@@ -509,7 +632,7 @@ async fn java_probe_failure_is_a_launch_error_without_old_crash_attachments() ->
 #[tokio::test]
 async fn launch_report_write_failure_still_finalizes_the_known_terminal_session()
 -> anyhow::Result<()> {
-    let fixture = Fixture::new("probe-fail")?;
+    let fixture = Fixture::new("probe-fail").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id;
     let directory = session_host::report_directory(&fixture.root, &id)?;
@@ -528,7 +651,7 @@ async fn launch_report_write_failure_still_finalizes_the_known_terminal_session(
             .any(|text| text.contains("could not be saved"))
     );
     wait_host_exit(&fixture.root, &id).await?;
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_ok());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_ok());
     fixture.complete();
     Ok(())
 }
@@ -588,7 +711,7 @@ fn process_exists(pid: u32) -> anyhow::Result<bool> {
 
 #[tokio::test]
 async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<()> {
-    let fixture = Fixture::new("normal")?;
+    let fixture = Fixture::new("normal").await?;
     let record = fixture.start().await?;
     let id = record.context.run_id;
     let running = wait_for(&fixture.root, &id, RunState::Running).await?;
@@ -617,7 +740,7 @@ async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<(
     assert_eq!(interrupted.state, RunState::MonitoringInterrupted);
     assert!(process_exists(java)?);
     assert!(fixture.game.join(".block-session.json").exists());
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_err());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_err());
     assert!(session_host::stop(&fixture.root, &id).await.is_err());
     fixture.release()?;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -630,7 +753,7 @@ async fn abrupt_monitor_death_keeps_the_live_game_reserved() -> anyhow::Result<(
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     GameDirectoryGuard::clear_session_reservation(&fixture.game, &id)?;
-    assert!(GameDirectoryGuard::for_profile(&fixture.instance, &fixture.profile).is_ok());
+    assert!(GameDirectoryGuard::for_instance(&fixture.instance).is_ok());
     fixture.complete();
     Ok(())
 }

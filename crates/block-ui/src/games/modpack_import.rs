@@ -263,8 +263,6 @@ pub(super) struct State {
     pub operation_id: Option<String>,
     /// Present only after the Instance has been committed or explicitly resumed.
     pub instance: Option<String>,
-    /// Profile created for this import, selected only when the user finishes.
-    pub profile: Option<String>,
     /// The one Instance-name editor of this archive. It is created once per
     /// session, so the typed name, its selection and an ongoing composition
     /// survive every other choice in the wizard.
@@ -301,7 +299,6 @@ impl Default for State {
             completed_request: None,
             operation_id: None,
             instance: None,
-            profile: None,
             name: None,
             initial_name: None,
             name_error: None,
@@ -451,7 +448,6 @@ impl State {
             completed_request: self.completed_request,
             operation_id: self.operation_id.clone(),
             instance: self.instance.clone(),
-            profile: self.profile.clone(),
             name: self
                 .name
                 .as_ref()
@@ -775,18 +771,12 @@ impl Block {
         });
         let profile = self
             .snapshot
-            .profiles
+            .instances
             .iter_mut()
             .find(|profile| profile.id == "vanilla")
             .ok_or_else(|| anyhow::anyhow!("modpack scenario needs its fixture Profile"))?;
         profile.name = "Compact workshop".into();
-        self.receive_pack_created(
-            request,
-            "vanilla".into(),
-            "Compact workshop".into(),
-            "vanilla".into(),
-            cx,
-        );
+        self.receive_pack_created(request, "vanilla".into(), "Compact workshop".into(), cx);
         match name {
             "modpack-stopped" => {
                 self.stop_pack_import();
@@ -852,12 +842,8 @@ impl Block {
         if directory_import {
             self.import_games_closed(window, cx);
         }
-        let profile = self
-            .pack_profile(&instance)
-            .map(|profile| profile.id.clone());
         self.shell.pack_import = State {
             operation_id: Some(instance.clone()),
-            profile,
             instance: Some(instance),
             return_to: Some(return_to),
             ..State::default()
@@ -913,7 +899,7 @@ impl Block {
                 super::Form::Instance(form) if draft.wizard.is_dirty(form, cx) => {
                     Some(form.name.entity_id())
                 }
-                super::Form::Instance(_) | super::Form::Profile(_) => None,
+                super::Form::Instance(_) | super::Form::EditInstance(_) => None,
             })
     }
 
@@ -1174,22 +1160,12 @@ impl Block {
         if !self.pack_wizard_active() || self.shell.pack_import.phase != Phase::Complete {
             return false;
         }
-        let (Some(instance), Some(profile)) = (
-            self.shell.pack_import.instance.clone(),
-            self.shell.pack_import.profile.clone(),
-        ) else {
+        let Some(instance) = self.shell.pack_import.instance.clone() else {
             return false;
         };
         self.selected_instance = Some(instance.clone());
-        self.selected_profile = Some(profile.clone());
-        self.shell.games.inspected = Some(
-            if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
-                profile
-            } else {
-                instance
-            },
-        );
-        self.apply_profile_account();
+        self.shell.games.inspected = Some(instance);
+        self.apply_instance_account();
         self.pack_import_closed();
         true
     }
@@ -1220,16 +1196,11 @@ impl Block {
             self.initialize_browsers(cx);
             self.router.leave_task();
             self.form = None;
-            if let Some(profile) = self.shell.pack_import.profile.clone() {
-                let tab = if self.snapshot.profile_mode
-                    == block_launcher::catalog::ProfileMode::Bundled
-                {
-                    super::Tab::Instances
-                } else {
-                    super::Tab::Profiles
-                };
-                self.router
-                    .open_record(tab, super::navigation::RecordRef::Profile(profile));
+            if let Some(instance) = self.shell.pack_import.instance.clone() {
+                self.router.open_record(
+                    super::Tab::Instances,
+                    super::navigation::RecordRef::Instance(instance),
+                );
             }
         }
         true
@@ -1605,7 +1576,6 @@ impl Block {
         request: uuid::Uuid,
         instance: String,
         name: String,
-        profile: String,
         cx: &mut Context<'_, Self>,
     ) {
         if !self.shell.pack_import.accepts(request) {
@@ -1613,7 +1583,6 @@ impl Block {
         }
         self.shell.pack_import.operation_id = Some(instance.clone());
         self.shell.pack_import.instance = Some(instance.clone());
-        self.shell.pack_import.profile = Some(profile);
         self.shell.pack_import.reset_target();
         // The Instance now carries the name this session published, so the field
         // shows exactly that name and a retry cannot rename it.
@@ -1984,14 +1953,7 @@ impl Block {
         let locked = state.instance_name.is_some();
         Some(
             components::field_with(
-                tr!(
-                    language,
-                    if self.shell.wizard.separated {
-                        "games.instance_editor.name"
-                    } else {
-                        "wizard.setup.gameName"
-                    }
-                ),
+                tr!(language, "games.instance_editor.name"),
                 field,
                 self.palette,
                 FieldOptions {
@@ -2153,7 +2115,7 @@ impl Block {
         }
         let defaults = &self.saved_preferences.game;
         let java = if defaults.java.trim().is_empty() {
-            tr!(language, "wizard.profile.automaticJava")
+            tr!(language, "wizard.instance_settings.automaticJava")
         } else {
             defaults.java.clone()
         };
@@ -2162,13 +2124,13 @@ impl Block {
         } else {
             tr!(
                 language,
-                "wizard.profile.windowSizeValue",
+                "wizard.instance_settings.windowSizeValue",
                 width = defaults.width,
                 height = defaults.height
             )
         };
         details
-            .child(note(tr!(language, "modpack.review.profile_defaults")))
+            .child(note(tr!(language, "modpack.review.instance_defaults")))
             .child(note(tr!(
                 language,
                 "modpack.review.effective_defaults",
@@ -2179,58 +2141,34 @@ impl Block {
             .child(note(tr!(language, "modpack.review.install_effect")))
     }
 
-    /// The installer uses the first Profile for the Instance, regardless of
-    /// which target that Profile currently selects.
-    fn pack_profile(&self, instance: &str) -> Option<&block_launcher::catalog::Profile> {
-        self.snapshot
-            .profiles
-            .iter()
-            .find(|profile| profile.instance_id == instance)
-    }
-
-    /// Report the installer's Profile settings, not defaults used for creation.
+    /// Describe the saved Instance settings used when resuming installation.
     fn pack_resume_launch_summary(&self, state: &State, language: Language) -> Option<String> {
         let instance = self
             .snapshot
             .instances
             .iter()
             .find(|instance| Some(&instance.id) == state.instance.as_ref())?;
-        let profile = self.pack_profile(&instance.id)?;
-        let mut effective = profile.clone();
-        effective.runtime = profile.effective_runtime(instance);
-        effective.game_args = profile.effective_game_args(instance);
-        let settings = block_launcher::catalog::InstanceSettings::from_profile(&effective).ok()?;
-        let java = match &effective.runtime {
+        let java = match &instance.runtime {
             block_launcher::recipe::RuntimeSelection::Managed => {
-                tr!(language, "wizard.profile.automaticJava")
+                tr!(language, "wizard.instance_settings.automaticJava")
             }
             block_launcher::recipe::RuntimeSelection::Local { java } => java.display().to_string(),
         };
-        let has_width = effective
-            .game_args
-            .iter()
-            .any(|arg| arg == "--width" || arg.starts_with("--width="));
-        let has_height = effective
-            .game_args
-            .iter()
-            .any(|arg| arg == "--height" || arg.starts_with("--height="));
-        let window = if settings.fullscreen {
+        let window = if instance.fullscreen {
             tr!(language, "wizard.config.fullscreenValue")
-        } else if has_width && has_height {
+        } else {
             tr!(
                 language,
-                "wizard.profile.windowSizeValue",
-                width = settings.width,
-                height = settings.height
+                "wizard.instance_settings.windowSizeValue",
+                width = instance.width,
+                height = instance.height
             )
-        } else {
-            tr!(language, "modpack.review.saved_window")
         };
         Some(tr!(
             language,
-            "modpack.review.effective_profile",
+            "modpack.review.effective_instance",
             java = java,
-            memory = components::memory_label(profile.memory_mib),
+            memory = components::memory_label(instance.memory_mib),
             window = window
         ))
     }
@@ -3185,8 +3123,9 @@ mod tests {
             let source = root.path().join("pack.mrpack");
             crate::test_support::write_modpack(&source)?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (old_instance, old_profile) =
+            let old_instance =
                 catalog.create_instance("Existing".into(), "1.20.1".into(), None, None)?;
+            let old_profile = old_instance.clone();
             let snapshot = catalog.snapshot()?;
             let (engine, mut receiver) = crate::Engine::with_root(root.path().to_path_buf())?;
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -3194,7 +3133,7 @@ mod tests {
                 view.preferences.reduce_motion = true;
                 view.snapshot = snapshot;
                 view.selected_instance = Some(old_instance.id.clone());
-                view.selected_profile = Some(old_profile.id.clone());
+                view.selected_instance = Some(old_profile.id.clone());
                 view.engine = Some(engine);
                 view
             });
@@ -3301,11 +3240,11 @@ mod tests {
                 .read_with(cx, |view, _| view.shell.pack_import.inspection.clone())
                 .ok_or_else(|| anyhow::anyhow!("the inspection was lost"))?;
             let selection = view.read_with(cx, |view, _| view.shell.pack_import.selection());
-            let configuration = block_launcher::catalog::ProfileConfiguration {
+            let configuration = block_launcher::catalog::InstanceConfiguration {
                 name: String::from("My imported game"),
                 ..Default::default()
             };
-            let (instance, profile) = library.create_pack(
+            let instance = library.create_pack(
                 &uuid::Uuid::new_v4().to_string(),
                 &source,
                 &inspection,
@@ -3313,25 +3252,20 @@ mod tests {
                 configuration,
                 &CancellationToken::new(),
             )?;
+            let profile = instance.clone();
             let request = uuid::Uuid::new_v4();
             let updated = catalog.snapshot()?;
             view.update(cx, |view, cx| {
                 view.snapshot = updated;
                 view.shell.pack_import.phase = Phase::Installing;
                 view.shell.pack_import.request = Some(request);
-                view.receive_pack_created(
-                    request,
-                    instance.id.clone(),
-                    instance.name.clone(),
-                    profile.id.clone(),
-                    cx,
-                );
+                view.receive_pack_created(request, instance.id.clone(), instance.name.clone(), cx);
                 assert_eq!(
                     view.selected_instance.as_deref(),
                     Some(old_instance.id.as_str())
                 );
                 assert_eq!(
-                    view.selected_profile.as_deref(),
+                    view.selected_instance.as_deref(),
                     Some(old_profile.id.as_str())
                 );
                 view.finish_pack_import(request, Ok(()), cx);
@@ -3343,7 +3277,7 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 !view.pack_wizard_active()
                     && view.selected_instance.as_ref() == Some(&instance.id)
-                    && view.selected_profile.as_ref() == Some(&profile.id)
+                    && view.selected_instance.as_ref() == Some(&profile.id)
                     && view.shell.games.inspected.as_ref() == Some(&profile.id)
             }));
             Ok(())
@@ -3834,7 +3768,7 @@ mod tests {
                 let mut view = crate::tests::test_view(window, cx);
                 view.preferences.reduce_motion = true;
                 view.selected_instance = None;
-                view.selected_profile = None;
+                view.selected_instance = None;
                 view.start_pack_wizard(cx);
                 view.shell.pack_import.phase = Phase::Installing;
                 view.shell.pack_import.request = Some(request);
@@ -3846,7 +3780,6 @@ mod tests {
                     request,
                     String::from("instance-a"),
                     String::from("Test game"),
-                    String::from("profile-a"),
                     cx,
                 );
                 view.apply_catalog(crate::test_support::ready_snapshot(), cx);
@@ -3861,7 +3794,7 @@ mod tests {
             click_pack(cx, "modpack-done")?;
             assert!(view.read_with(cx, |view, _| {
                 view.selected_instance.as_deref() == Some("instance-a")
-                    && view.selected_profile.as_deref() == Some("profile-a")
+                    && view.selected_instance.as_deref() == Some("instance-a")
             }));
             Ok(())
         })();
@@ -3887,7 +3820,7 @@ mod tests {
                 view.open_pack_import(window, cx);
                 view.shell.pack_import.phase = Phase::Complete;
                 view.shell.pack_import.instance = Some(String::from("instance-a"));
-                view.shell.pack_import.profile = Some(String::from("profile-a"));
+                view.shell.pack_import.instance = Some(String::from("instance-a"));
                 view
             });
             cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
@@ -3897,7 +3830,7 @@ mod tests {
                     && view.shell.first_run.stage == Stage::Overview
                     && !view.router.game_wizard()
                     && view.selected_instance.as_deref() == Some("instance-a")
-                    && view.selected_profile.as_deref() == Some("profile-a")
+                    && view.selected_instance.as_deref() == Some("instance-a")
             }));
             Ok(())
         })();
@@ -3940,7 +3873,7 @@ mod tests {
                 view.update(cx, |view, cx| {
                     view.shell.pack_import.phase = Phase::Complete;
                     view.shell.pack_import.instance = Some(String::from("instance-a"));
-                    view.shell.pack_import.profile = Some(String::from("profile-a"));
+                    view.shell.pack_import.instance = Some(String::from("instance-a"));
                     cx.notify();
                 });
                 match exit {
@@ -3985,11 +3918,9 @@ mod tests {
                     view.preferences.reduce_motion = true;
                     view.snapshot = crate::test_support::ready_snapshot();
                     view.selected_instance = Some(String::from("previous-instance"));
-                    view.selected_profile = Some(String::from("previous-profile"));
                     view.start_pack_wizard(cx);
                     view.shell.pack_import.phase = Phase::Complete;
                     view.shell.pack_import.instance = Some(String::from("instance-a"));
-                    view.shell.pack_import.profile = Some(String::from("profile-a"));
                     view
                 });
                 cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
@@ -4017,7 +3948,7 @@ mod tests {
                 assert!(view.read_with(cx, |view, _| {
                     !view.pack_wizard_active()
                         && view.selected_instance.as_deref() == Some("instance-a")
-                        && view.selected_profile.as_deref() == Some("profile-a")
+                        && view.selected_instance.as_deref() == Some("instance-a")
                         && view.router.tab()
                             == if exit == "settings" {
                                 Tab::Settings
@@ -4027,7 +3958,7 @@ mod tests {
                         && (exit == "settings"
                             || matches!(view.router.screen(),
                             crate::navigation::Screen::Record(
-                                crate::navigation::RecordRef::Profile(id)) if id == "profile-a"))
+                                crate::navigation::RecordRef::Instance(id)) if id == "instance-a"))
                 }));
                 Ok(())
             })();
@@ -4087,7 +4018,7 @@ mod tests {
             selection
                 .optional_files
                 .insert(String::from("mods/optional.jar"));
-            let config = block_launcher::catalog::ProfileConfiguration {
+            let config = block_launcher::catalog::InstanceConfiguration {
                 name: String::from("Saved pack"),
                 memory_mib: 6144,
                 game_args: vec![
@@ -4098,7 +4029,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            let (instance, profile) = library.create_pack(
+            let instance = library.create_pack(
                 &uuid::Uuid::new_v4().to_string(),
                 &source,
                 &inspection,
@@ -4106,21 +4037,21 @@ mod tests {
                 config,
                 &CancellationToken::new(),
             )?;
+            let profile = instance.clone();
             library.catalog().save_instance(
                 &instance.id,
                 block_launcher::catalog::InstanceConfiguration {
                     name: instance.name.clone(),
-                    settings: block_launcher::catalog::InstanceSettings {
-                        runtime: block_launcher::recipe::RuntimeSelection::Local {
-                            java: std::env::temp_dir().join("saved-pack-java"),
-                        },
-                        width: 1920,
-                        height: 1080,
-                        fullscreen: false,
+
+                    runtime: block_launcher::recipe::RuntimeSelection::Local {
+                        java: std::env::temp_dir().join("saved-pack-java"),
                     },
+                    width: 1920,
+                    height: 1080,
+                    fullscreen: false,
+                    ..block_launcher::catalog::InstanceConfiguration::from(&instance)
                 },
             )?;
-            library.catalog().separate_profiles()?;
             let snapshot = library.catalog().snapshot()?;
             let (engine, mut receiver) = crate::Engine::with_root(root.path().to_path_buf())?;
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -4128,7 +4059,7 @@ mod tests {
                 view.preferences.reduce_motion = true;
                 view.snapshot = snapshot;
                 view.selected_instance = Some(instance.id.clone());
-                view.selected_profile = Some(profile.id.clone());
+                view.selected_instance = Some(profile.id.clone());
                 view.saved_preferences.game.memory_mib = 4096;
                 view.saved_preferences.game.width = 854;
                 view.saved_preferences.game.height = 480;
@@ -4142,7 +4073,6 @@ mod tests {
             cx.run_until_parked();
             assert!(view.read_with(cx, |view, _| {
                 view.pack_wizard_active()
-                    && view.shell.wizard.separated
                     && view.shell.pack_import.instance.as_ref() == Some(&instance.id)
                     && view.shell.pack_import.phase == Phase::Choose
                     && !view.shell.surfaces.is_open()
@@ -4212,7 +4142,7 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 view.shell.games.inspected.as_ref() == Some(&instance.id)
                     && view.selected_instance.as_ref() == Some(&instance.id)
-                    && view.selected_profile.as_ref() == Some(&profile.id)
+                    && view.selected_instance.as_ref() == Some(&profile.id)
             }));
             Ok(())
         })();
@@ -4220,12 +4150,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn pending_modded_pack_uses_the_first_instance_profile_for_summary_and_completion(
+    fn pending_modded_pack_uses_its_saved_instance_settings_for_summary_and_completion(
         cx: &mut gpui::TestAppContext,
     ) {
         let result =
             (|| -> anyhow::Result<()> {
-                use block_launcher::catalog::{ProfileConfiguration, ProfileInheritance};
+                use block_launcher::catalog::InstanceConfiguration;
                 use block_launcher::recipe::RuntimeSelection;
 
                 let root = tempfile::tempdir()?;
@@ -4237,59 +4167,31 @@ mod tests {
                     std::sync::Arc::new(|_| {}),
                     std::sync::Arc::new(|_| {}),
                 )?;
-                let (instance, mut first) = library.create_pack(
+                let mut first = library.create_pack(
                     &uuid::Uuid::new_v4().to_string(),
                     &source,
                     &inspection,
                     &PackSelection::default(),
-                    ProfileConfiguration {
+                    InstanceConfiguration {
                         name: "Fabric pack".into(),
                         ..Default::default()
                     },
                     &CancellationToken::new(),
                 )?;
-                library.catalog().separate_profiles()?;
                 first.target_id = "vanilla".into();
                 first.memory_mib = 3072;
                 first.runtime = RuntimeSelection::Local {
                     java: std::env::temp_dir().join("first-profile-java"),
                 };
-                first.inheritance = ProfileInheritance::default();
-                first.game_args = vec![
-                    "--width".into(),
-                    "1024".into(),
-                    "--height".into(),
-                    "768".into(),
-                ];
-                library.catalog().save_profile(first.clone())?;
-                let target = instance
-                    .pack
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("pack target missing"))?
-                    .target_id
-                    .clone();
-                let second = library.catalog().create_profile_configured(
-                    &instance.id,
-                    ProfileConfiguration {
-                        name: "Fabric profile".into(),
-                        target_id: target.clone(),
-                        memory_mib: 6144,
-                        runtime: RuntimeSelection::Local {
-                            java: std::env::temp_dir().join("second-profile-java"),
-                        },
-                        game_args: vec![
-                            "--width".into(),
-                            "1600".into(),
-                            "--height".into(),
-                            "900".into(),
-                        ],
-                        ..Default::default()
-                    },
-                )?;
+                first.width = 1024;
+                first.height = 768;
+                library
+                    .catalog()
+                    .save_instance(&first.id, InstanceConfiguration::from(&first))?;
+                let instance = first.clone();
                 let snapshot = library.catalog().snapshot()?;
-                assert_eq!(snapshot.profiles[0].id, first.id);
-                assert_eq!(snapshot.profiles[0].target_id, "vanilla");
-                assert_eq!(snapshot.profiles[1].target_id, target);
+                assert_eq!(snapshot.instances[0].id, first.id);
+                assert_eq!(snapshot.instances[0].target_id, "vanilla");
 
                 let (engine, mut receiver) = crate::Engine::with_root(root.path().to_path_buf())?;
                 let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -4297,7 +4199,7 @@ mod tests {
                     view.preferences.reduce_motion = true;
                     view.snapshot = snapshot;
                     view.selected_instance = Some(instance.id.clone());
-                    view.selected_profile = Some(second.id.clone());
+                    view.selected_instance = Some(first.id.clone());
                     view.engine = Some(engine);
                     view
                 });
@@ -4308,7 +4210,7 @@ mod tests {
                 cx.run_until_parked();
                 assert!(view.read_with(cx, |view, _| {
                     view.pack_wizard_active()
-                        && view.shell.pack_import.profile.as_ref() == Some(&first.id)
+                        && view.shell.pack_import.instance.as_ref() == Some(&first.id)
                 }));
                 click_pack(cx, "modpack-choose")?;
                 let chosen = source.clone();
@@ -4345,9 +4247,11 @@ mod tests {
                 })?;
                 let request = match &created {
                     crate::Message::PackCreated {
-                        request, profile, ..
+                        request,
+                        instance: saved_instance,
+                        ..
                     } => {
-                        assert_eq!(profile, &first.id);
+                        assert_eq!(saved_instance, &first.id);
                         *request
                     }
                     _ => unreachable!("the receiver returned a pack creation"),
@@ -4388,7 +4292,7 @@ mod tests {
                 click_pack(cx, "modpack-done")?;
                 assert!(view.read_with(cx, |view, _| {
                     view.selected_instance.as_ref() == Some(&instance.id)
-                        && view.selected_profile.as_ref() == Some(&first.id)
+                        && view.selected_instance.as_ref() == Some(&first.id)
                 }));
                 Ok(())
             })();
@@ -4427,7 +4331,7 @@ mod tests {
                     let profile = view
                         .shell
                         .wizard
-                        .profile
+                        .draft
                         .as_ref()
                         .map(|draft| draft.name.clone());
                     (name, profile)
@@ -4498,7 +4402,7 @@ mod tests {
                                     && form.name.read(cx).is_composing()
                                     && form.loader == LoaderKind::Forge
                                     && form.loader_version.as_deref() == Some("47.2.20"))
-                                && view.shell.wizard.profile.as_ref().is_some_and(|profile| {
+                                && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
                                     profile.name.entity_id() == profile_name.entity_id()
                                         && profile.name.read(cx).value() == "Custom profile"
                                 })
@@ -4520,7 +4424,7 @@ mod tests {
                 view.update(cx, |view, cx| {
                     view.shell.pack_import.phase = Phase::Complete;
                     view.shell.pack_import.instance = Some(String::from("instance-a"));
-                    view.shell.pack_import.profile = Some(String::from("profile-a"));
+                    view.shell.pack_import.instance = Some(String::from("instance-a"));
                     cx.notify();
                 });
                 click_pack(cx, "modpack-done")?;
@@ -4532,7 +4436,7 @@ mod tests {
                                 && form.name.read(cx).value() == value
                                 && form.name.read(cx).is_composing()
                                 && form.loader_version.as_deref() == Some("47.2.20"))
-                            && view.shell.wizard.profile.as_ref().is_some_and(|profile| {
+                            && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
                                 profile.name.entity_id() == profile_name.entity_id()
                                     && profile.name.read(cx).value() == "Custom profile"
                             })
@@ -4849,12 +4753,12 @@ mod tests {
             selection
                 .optional_files
                 .insert(String::from("mods/optional.jar"));
-            let configuration = block_launcher::catalog::ProfileConfiguration {
+            let configuration = block_launcher::catalog::InstanceConfiguration {
                 name: String::from("Saved"),
                 ..Default::default()
             };
             let operation = uuid::Uuid::new_v4().to_string();
-            let (instance, profile) = library.create_pack(
+            let instance = library.create_pack(
                 &operation,
                 &source,
                 &inspection,
@@ -4890,13 +4794,7 @@ mod tests {
                 view.shell.pack_import.operation_id = Some(uuid::Uuid::new_v4().to_string());
                 assert!(view.shell.pack_import.toggleable_file("mods/optional.jar"));
                 view.shell.pack_import.phase = Phase::Installing;
-                view.receive_pack_created(
-                    request,
-                    instance.id.clone(),
-                    instance.name.clone(),
-                    profile.id.clone(),
-                    cx,
-                );
+                view.receive_pack_created(request, instance.id.clone(), instance.name.clone(), cx);
                 view.finish_pack_import(request, Err(format!("{failure:#}")), cx);
                 assert!(!view.shell.pack_import.toggleable_file("mods/optional.jar"));
                 view.shell.pack_import.toggle_file("mods/optional.jar");
@@ -4963,7 +4861,6 @@ mod tests {
                     request,
                     String::from("instance-a"),
                     String::from("Saved"),
-                    String::from("profile-a"),
                     cx,
                 );
                 view.finish_pack_import(request, Err(String::from("synthetic failure")), cx);
@@ -5000,7 +4897,7 @@ mod tests {
             crate::test_support::write_modpack(&source)?;
             let inspection = block_launcher::modpack::inspect(&source)?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (saved, _) = catalog.create_instance(
+            let saved = catalog.create_instance(
                 String::from("Saved game"),
                 String::from("1.20.1"),
                 None,
@@ -6012,7 +5909,6 @@ mod tests {
                 request,
                 String::from("instance-x"),
                 String::from("Saved catalog name"),
-                String::from("profile-x"),
                 cx,
             );
         });

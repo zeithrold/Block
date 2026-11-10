@@ -13,13 +13,7 @@ use std::{
 };
 
 use anyhow::ensure;
-use block_launcher::{
-    DownloadOptions, ProxyMode,
-    catalog::{
-        DataPolicy, Profile, ProfileAppearance, ProfileInheritance, ProfileMode, ServerPreferences,
-    },
-    recipe::{Compatibility, RuntimeSelection},
-};
+use block_launcher::{DownloadOptions, ProxyMode};
 use gpui::{
     Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
     IntoElement as _, ParentElement as _, Pixels, ScrollHandle, SharedString,
@@ -75,26 +69,6 @@ impl Default for GameDefaults {
 
 impl GameDefaults {
     pub(super) fn validate(&self) -> anyhow::Result<()> {
-        let mut profile = Profile {
-            id: "defaults".into(),
-            name: "Defaults".into(),
-            instance_id: "defaults".into(),
-            target_id: "vanilla".into(),
-            runtime: RuntimeSelection::Managed,
-            memory_mib: 2048,
-            jvm_args: Vec::new(),
-            game_args: Vec::new(),
-            data_policy: DataPolicy::Isolated,
-            default_account: None,
-            compatibility: Compatibility::Official,
-            appearance: ProfileAppearance::default(),
-            inheritance: ProfileInheritance::default(),
-            server: ServerPreferences::default(),
-        };
-        self.apply_to(&mut profile)
-    }
-
-    pub(super) fn apply_to(&self, profile: &mut Profile) -> anyhow::Result<()> {
         ensure!(
             (block_launcher::MIN_MEMORY_MIB..=block_launcher::MAX_MEMORY_MIB)
                 .contains(&self.memory_mib),
@@ -112,25 +86,25 @@ impl GameDefaults {
             !self.java.contains('\0'),
             "Java path cannot contain NUL bytes"
         );
-        profile.memory_mib = self.memory_mib;
-        profile.runtime = if self.java.trim().is_empty() {
-            RuntimeSelection::Managed
-        } else {
-            RuntimeSelection::Local {
-                java: PathBuf::from(self.java.trim()),
-            }
-        };
-        profile.jvm_args = super::parse_arguments(&self.jvm_arguments)?;
-        profile.game_args = vec![
-            "--width".into(),
-            self.width.to_string(),
-            "--height".into(),
-            self.height.to_string(),
-        ];
-        if self.fullscreen {
-            profile.game_args.push("--fullscreen".into());
-        }
-        profile.validate()
+        ensure!(
+            self.java.trim().is_empty() || std::path::Path::new(self.java.trim()).is_absolute(),
+            "custom Java path must be absolute"
+        );
+        let arguments = super::parse_arguments(&self.jvm_arguments)?;
+        ensure!(
+            arguments.iter().all(|arg| !arg.contains('\0')),
+            "arguments cannot contain NUL bytes"
+        );
+        ensure!(
+            !arguments.iter().any(|arg| matches!(
+                arg.as_str(),
+                "-cp" | "-classpath" | "--class-path"
+            ) || ["-Xmx", "-Xms", "--class-path="]
+                .iter()
+                .any(|prefix| arg.starts_with(prefix))),
+            "classpath and memory are managed by Block"
+        );
+        Ok(())
     }
 }
 
@@ -1179,12 +1153,6 @@ impl Block {
                 tr!(language, "settings.index.game"),
             ),
             (
-                2,
-                "profiles",
-                tr!(language, "settings.navigation.profiles"),
-                tr!(language, "settings.index.profiles"),
-            ),
-            (
                 3,
                 "downloads",
                 tr!(language, "settings.navigation.downloads"),
@@ -1307,7 +1275,6 @@ impl Block {
         let language = self.language();
         let description = match page {
             1 => tr!(language, "settings.page.game.description"),
-            2 => tr!(language, "settings.page.profiles.description"),
             3 => tr!(language, "settings.page.downloads.description"),
             4 => tr!(language, "settings.page.storage.description"),
             _ => tr!(language, "settings.page.general.description"),
@@ -1379,7 +1346,6 @@ impl Block {
     ) -> gpui::AnyElement {
         match draft.page {
             1 => self.settings_fields(draft, cx),
-            2 => self.settings_profile_mode(draft, cx),
             3 => self.settings_downloads(draft, cx),
             4 => self.settings_storage(),
             _ => self.settings_appearance(draft, cx),
@@ -1954,77 +1920,6 @@ impl Block {
                     .whitespace_normal()
                     .child(wrapped),
             )
-    }
-
-    fn settings_profile_mode(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        let separated = self.snapshot.profile_mode == ProfileMode::Separated;
-        let card = |title, description, active| {
-            components::card(self.palette)
-                .border_color(rgb(if active {
-                    self.palette.ring
-                } else {
-                    self.palette.border
-                }))
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(title),
-                )
-                .child(note(description))
-                .children(active.then(|| {
-                    components::badge(
-                        tr!(language, "settings.profile_mode.current"),
-                        self.palette,
-                        components::BadgeVariant::Secondary,
-                    )
-                }))
-        };
-        let mode_note = if separated {
-            tr!(language, "settings.profile_mode.note_separated")
-        } else {
-            tr!(language, "settings.profile_mode.note_bundled")
-        };
-        div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        card(
-                            tr!(language, "settings.profile_mode.bundled.title"),
-                            tr!(language, "settings.profile_mode.bundled.description"),
-                            !separated,
-                        )
-                        .flex_1(),
-                    )
-                    .child(
-                        card(
-                            tr!(language, "settings.profile_mode.separated.title"),
-                            tr!(language, "settings.profile_mode.separated.description"),
-                            separated,
-                        )
-                        .flex_1(),
-                    ),
-            )
-            .child(note(mode_note))
-            .children((!separated).then(|| {
-                draft.focus_regions.observe_control(
-                    "separate-profiles",
-                    self.button(
-                        "separate-profiles",
-                        tr!(language, "settings.profile_mode.switch"),
-                        UiAction::ConfirmSeparate(true),
-                        cx,
-                    ),
-                    cx,
-                )
-            }))
     }
 }
 

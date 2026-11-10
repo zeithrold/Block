@@ -28,6 +28,8 @@ impl LaunchPlan {
         directory: GameDirectoryGuard,
         environment: BTreeMap<String, String>,
     ) -> anyhow::Result<Self> {
+        directory.validate()?;
+        prepared.prepare_game_resources(directory.directory())?;
         let mut command = JavaCommand::bind_for_directory(
             &prepared.plan,
             &prepared.root,

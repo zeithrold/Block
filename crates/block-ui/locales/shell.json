@@ -15,11 +15,7 @@
     "zh-Hans": "实例设置",
     "ja": "インスタンス設定"
   },
-  "nav.profile_appearance": {
-    "en": "Profile appearance",
-    "zh-Hans": "配置外观",
-    "ja": "プロファイルの外観"
-  },
+  "nav.instance_appearance": {"en": "Instance appearance", "zh-Hans": "实例外观", "ja": "インスタンスの外観"},
   "nav.data_and_account": {
     "en": "Data and account",
     "zh-Hans": "数据与账户",
@@ -281,9 +277,9 @@
     "ja": "ゲームをインポート"
   },
   "surface.games_help": {
-    "en": "Instances and Profiles",
-    "zh-Hans": "实例与配置",
-    "ja": "インスタンスとプロファイル"
+    "en": "About instances",
+    "zh-Hans": "关于实例",
+    "ja": "インスタンスについて"
   },
   "surface.wizard_version": {
     "en": "Minecraft version",
@@ -305,21 +301,13 @@
     "zh-Hans": "添加认证提供者",
     "ja": "認証プロバイダーを追加"
   },
-  "sheet.profiles_title": {
-    "en": "Switch Profile",
-    "zh-Hans": "切换配置",
-    "ja": "プロファイルを切り替え"
-  },
+  "sheet.instances_title": {"en": "Switch Instance", "zh-Hans": "切换配置", "ja": "インスタンスを切り替え"},
   "sheet.accounts_title": {
     "en": "Switch Account",
     "zh-Hans": "切换账户",
     "ja": "アカウントを切り替え"
   },
-  "sheet.profiles_description": {
-    "en": "Choose how you want to play.",
-    "zh-Hans": "选择你的游玩方式。",
-    "ja": "プレイ方法を選択してください。"
-  },
+  "sheet.instances_description": {"en": "Choose how you want to play.", "zh-Hans": "选择你的游玩方式。", "ja": "プレイ方法を選択してください。"},
   "sheet.accounts_description": {
     "en": "Choose the account you want to use.",
     "zh-Hans": "选择要使用的账户。",
@@ -330,26 +318,10 @@
     "zh-Hans": "跟踪你的下载任务。",
     "ja": "ダウンロードタスクを確認できます。"
   },
-  "dialog.delete_profile.title": {
-    "en": "Delete this profile?",
-    "zh-Hans": "删除此配置？",
-    "ja": "このプロファイルを削除しますか？"
-  },
-  "dialog.delete_profile.title_named": {
-    "en": "Delete %{name}?",
-    "zh-Hans": "删除 %{name}？",
-    "ja": "%{name} を削除しますか？"
-  },
-  "dialog.delete_profile.bundled": {
-    "en": "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.",
-    "zh-Hans": "此游戏及其启动设置将从库中移除。世界、游戏数据和安装文件仍保留在磁盘上。",
-    "ja": "このゲームと起動設定はライブラリから削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"
-  },
-  "dialog.delete_profile.separated": {
-    "en": "Only launch settings are removed. Worlds, game data and installation files stay on disk.",
-    "zh-Hans": "只会移除启动设置。世界、游戏数据和安装文件仍保留在磁盘上。",
-    "ja": "起動設定のみが削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"
-  },
+  "dialog.delete_instance.title": {"en": "Delete this instance?", "zh-Hans": "删除此配置？", "ja": "このインスタンスを削除しますか？"},
+  "dialog.delete_instance.title_named": {"en": "Delete %{name}?", "zh-Hans": "删除 %{name}？", "ja": "%{name} を削除しますか？"},
+  "dialog.delete_instance.bundled": {"en": "This game and its launch settings are removed from the library. Worlds, game data and installation files stay on disk.", "zh-Hans": "此游戏及其启动设置将从库中移除。世界、游戏数据和安装文件仍保留在磁盘上。", "ja": "このゲームと起動設定はライブラリから削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"},
+  "dialog.delete_instance.separated": {"en": "Only launch settings are removed. Worlds, game data and installation files stay on disk.", "zh-Hans": "只会移除启动设置。世界、游戏数据和安装文件仍保留在磁盘上。", "ja": "起動設定のみが削除されます。ワールド、ゲームデータ、インストールファイルはディスクに残ります。"},
   "dialog.remove_account.title": {
     "en": "Remove this account?",
     "zh-Hans": "移除此账户？",
@@ -380,26 +352,7 @@
     "zh-Hans": "已保存的提供者和缓存元数据将被移除。游戏文件仍保留在磁盘上。",
     "ja": "保存されたプロバイダーとキャッシュされたメタデータが削除されます。ゲームファイルはディスクに残ります。"
   },
-  "dialog.separate_profiles.title": {
-    "en": "Enable separated profiles?",
-    "zh-Hans": "启用独立配置？",
-    "ja": "分離プロファイルを有効にしますか？"
-  },
-  "dialog.separate_profiles.note": {
-    "en": "This one-way change lets several launch profiles share an Instance. Existing games and files are preserved. Bundled mode cannot be restored.",
-    "zh-Hans": "此单向更改允许多个启动配置共享一个实例。现有游戏和文件将保留。捆绑模式无法恢复。",
-    "ja": "この一方向の変更により、複数の起動プロファイルで 1 つのインスタンスを共有できます。既存のゲームとファイルは保持されます。バンドルモードには戻せません。"
-  },
-  "action.profile_mode": {
-    "en": "Profile mode",
-    "zh-Hans": "配置模式",
-    "ja": "プロファイルモード"
-  },
-  "action.delete_profile": {
-    "en": "Delete profile",
-    "zh-Hans": "删除配置",
-    "ja": "プロファイルを削除"
-  },
+  "action.delete_instance": {"en": "Delete instance", "zh-Hans": "删除配置", "ja": "インスタンスを削除"},
   "action.remove_account": {
     "en": "Remove account",
     "zh-Hans": "移除账户",
@@ -409,16 +362,6 @@
     "en": "Remove provider",
     "zh-Hans": "移除提供者",
     "ja": "プロバイダーを削除"
-  },
-  "action.keep_bundled": {
-    "en": "Keep bundled mode",
-    "zh-Hans": "保留捆绑模式",
-    "ja": "バンドルモードを維持"
-  },
-  "action.enable_separated": {
-    "en": "Enable separated profiles",
-    "zh-Hans": "启用独立配置",
-    "ja": "分離プロファイルを有効化"
   },
   "action.back": {
     "en": "Back",
@@ -470,30 +413,17 @@
     "zh-Hans": "默认窗口大小",
     "ja": "既定のウィンドウサイズ"
   },
-  "select.profile_color": {
-    "en": "Profile color",
-    "zh-Hans": "配置颜色",
-    "ja": "プロファイルの色"
-  },
-  "select.profile_icon": {
-    "en": "Profile icon",
-    "zh-Hans": "配置图标",
-    "ja": "プロファイルのアイコン"
-  },
-  "select.profile_actions": {
-    "en": "Profile actions",
-    "zh-Hans": "配置操作",
-    "ja": "プロファイルの操作"
-  },
+  "select.instance_color": {"en": "Instance color", "zh-Hans": "配置颜色", "ja": "インスタンスの色"},
+  "select.instance_icon": {"en": "Instance icon", "zh-Hans": "配置图标", "ja": "インスタンスのアイコン"},
   "choice.data_isolated": {
-    "en": "Isolated profile directory",
-    "zh-Hans": "独立配置目录",
-    "ja": "分離プロファイルディレクトリ"
+    "en": "Isolated game data",
+    "zh-Hans": "独立游戏数据",
+    "ja": "分離されたゲームデータ"
   },
   "choice.data_shared": {
-    "en": "Shared Instance directory",
-    "zh-Hans": "共享实例目录",
-    "ja": "共有インスタンスディレクトリ"
+    "en": "Shared game data",
+    "zh-Hans": "共享游戏数据",
+    "ja": "共有ゲームデータ"
   },
   "choice.java_automatic": {
     "en": "Automatic Java",
@@ -540,11 +470,6 @@
     "zh-Hans": "自定义大小…",
     "ja": "カスタムサイズ…"
   },
-  "choice.copy_settings": {
-    "en": "Copy settings",
-    "zh-Hans": "复制设置",
-    "ja": "設定をコピー"
-  },
   "choice.delete_from_library": {
     "en": "Delete from library",
     "zh-Hans": "从库中删除",
@@ -580,11 +505,7 @@
     "zh-Hans": "搜索账户…",
     "ja": "アカウントを検索…"
   },
-  "search.profiles_placeholder": {
-    "en": "Search profiles…",
-    "zh-Hans": "搜索配置…",
-    "ja": "プロファイルを検索…"
-  },
+  "search.instances_placeholder": {"en": "Search instances…", "zh-Hans": "搜索实例…", "ja": "インスタンスを検索…"},
   "search.accounts_field": {
     "en": "Search accounts",
     "zh-Hans": "搜索账户",
@@ -665,21 +586,9 @@
     "zh-Hans": "提供者不可用",
     "ja": "プロバイダーを利用できません"
   },
-  "profile.instance_unavailable": {
-    "en": "Instance unavailable",
-    "zh-Hans": "实例不可用",
-    "ja": "インスタンスを利用できません"
-  },
-  "profile.target_unavailable": {
-    "en": "Launch target unavailable",
-    "zh-Hans": "启动目标不可用",
-    "ja": "起動ターゲットを利用できません"
-  },
-  "profile.summary": {
-    "en": "%{instance} · Minecraft %{version}",
-    "zh-Hans": "%{instance} · Minecraft %{version}",
-    "ja": "%{instance} · Minecraft %{version}"
-  },
+  "instance.instance_unavailable": {"en": "Instance unavailable", "zh-Hans": "实例不可用", "ja": "インスタンスを利用できません"},
+  "instance.target_unavailable": {"en": "Launch target unavailable", "zh-Hans": "启动目标不可用", "ja": "起動ターゲットを利用できません"},
+  "instance.summary": {"en": "%{instance} · Minecraft %{version}", "zh-Hans": "%{instance} · Minecraft %{version}", "ja": "%{instance} · Minecraft %{version}"},
   "badge.minecraft_version": {
     "en": "Minecraft %{version}",
     "zh-Hans": "Minecraft %{version}",
@@ -701,9 +610,9 @@
     "ja": "次の世界のために。"
   },
   "about.intro": {
-    "en": "A quiet home for your accounts, games, and the way you play. Built around persistent Instances and the Profiles that make them yours.",
-    "zh-Hans": "为你的账户、游戏和游玩方式提供一个安静的家。围绕持久实例以及让它们成为你的配置而构建。",
-    "ja": "アカウント、ゲーム、そしてあなたの遊び方のための静かな場所。永続的なインスタンスと、それをあなたのものにするプロファイルを中心に作られています。"
+    "en": "A quiet home for your accounts, Minecraft instances and the way you play. Each instance keeps its own launch settings and game data location.",
+    "zh-Hans": "为你的账户、Minecraft 实例和游玩方式提供一个安静的家。每个实例都有自己的启动设置和游戏数据位置。",
+    "ja": "アカウント、Minecraft インスタンス、そしてあなたの遊び方のための静かな場所。各インスタンスが起動設定とゲームデータの場所を保持します。"
   },
   "about.website": {
     "en": "Website",
@@ -859,5 +768,6 @@
     "en": "The log export save dialog could not open.",
     "zh-Hans": "无法打开日志导出的保存对话框。",
     "ja": "ログのエクスポート用の保存ダイアログを開けませんでした。"
-  }
+  },
+  "dialog.delete_instance.note": {"en": "Remove this instance from Block. All Minecraft files remain in place.", "zh-Hans": "从 Block 中移除此实例，所有 Minecraft 文件均保留在原处。", "ja": "このインスタンスを Block から削除します。Minecraft のファイルはすべて元の場所に残ります。"}
 }

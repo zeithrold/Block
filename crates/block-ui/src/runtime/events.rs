@@ -90,8 +90,7 @@ impl Block {
                     request,
                     instance,
                     name,
-                    profile,
-                } => self.receive_pack_created(request, instance, name, profile, cx),
+                } => self.receive_pack_created(request, instance, name, cx),
                 Message::PackFinished { request, result } => {
                     self.finish_pack_import(request, result, cx);
                 }
@@ -137,8 +136,8 @@ impl Block {
                 Message::ConnectionTest(request, result) => {
                     self.connection_finished(request, result, cx);
                 }
-                Message::Created { instance, profile } => {
-                    self.creation_saved(instance, profile);
+                Message::Created { instance } => {
+                    self.creation_saved(instance);
                 }
                 Message::Status(status) => self.status = status,
                 Message::Downloads(tracker) => {
@@ -203,18 +202,16 @@ impl Block {
             Ok(snapshot) => {
                 self.apply_catalog(snapshot, cx);
                 self.shell.games.load = browser::CollectionLoad::Ready;
-                self.shell.profiles.load = browser::CollectionLoad::Ready;
             }
             Err(error) => {
                 self.shell.games.load = browser::CollectionLoad::Failed(error.clone().into());
-                self.shell.profiles.load = browser::CollectionLoad::Failed(error.clone().into());
                 self.report(crate::i18n::UiText::Raw(error));
             }
         }
     }
 
     /// Accounts arrive as one snapshot: the browser labels, the onboarding
-    /// default and the profile's own default account all follow it.
+    /// default and the instance's own default account all follow it.
     fn receive_accounts(&mut self, result: Result<Vec<Account>, String>) {
         let accounts = match result {
             Ok(accounts) => accounts,
@@ -240,7 +237,7 @@ impl Block {
                 .iter()
                 .any(|a| Some(account_id(a)) == self.selected_account)
         {
-            self.apply_profile_account();
+            self.apply_instance_account();
         }
         if let Some(engine) = &self.engine {
             engine.load_images();
@@ -324,9 +321,6 @@ impl Block {
         self.providers_finished(&result);
         if scoped && operation == Some(crate::ui_logging::Operation::SaveInstance) {
             self.instance_edit_finished(&result, cx);
-        }
-        if scoped && operation == Some(crate::ui_logging::Operation::SaveProfile) {
-            self.profile_edit_finished(&result, cx);
         }
         self.auth_finished(&result);
         self.busy = self.active_run.is_some();

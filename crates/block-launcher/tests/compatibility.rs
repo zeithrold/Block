@@ -124,7 +124,7 @@ async fn explicit_macos_profile_replaces_both_jna_artifacts_without_changing_man
             .command
             .classpath
             .iter()
-            .any(|path| path.ends_with("jna-5.12.1.jar"))
+            .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with("jna-5.12.1.jar")))
     );
     recipe.compatibility = Compatibility::MacosJna513;
     let patched = resolve(&recipe, &context).await?;
@@ -148,7 +148,7 @@ async fn explicit_macos_profile_replaces_both_jna_artifacts_without_changing_man
                 .command
                 .classpath
                 .iter()
-                .any(|path| path.ends_with(&format!("{artifact}-5.13.0.jar")))
+                .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with(&format!("{artifact}-5.13.0.jar"))))
         );
     }
     let serialized = serde_json::to_string(&patched_plan)?;
@@ -264,7 +264,7 @@ async fn linux_arm64_substitutes_published_arm64_natives_and_records_the_composi
             plan.command
                 .classpath
                 .iter()
-                .any(|path| path.ends_with(&format!("{module}-3.3.3-natives-linux-arm64.jar"))),
+                .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with(&format!("{module}-3.3.3-natives-linux-arm64.jar")))),
             "{module} ARM64 native missing from the plan"
         );
     }
@@ -273,7 +273,7 @@ async fn linux_arm64_substitutes_published_arm64_natives_and_records_the_composi
             .command
             .classpath
             .iter()
-            .any(|path| path.ends_with("-natives-linux.jar")),
+            .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with("-natives-linux.jar"))),
         "the x64 Linux natives must not survive a reviewed ARM64 plan"
     );
 
@@ -367,7 +367,7 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_compo
             plan.command
                 .classpath
                 .iter()
-                .any(|path| path.ends_with(&format!("{module}-3.3.1.jar"))),
+                .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with(&format!("{module}-3.3.1.jar")))),
             "{module} 3.3.1 core jar missing"
         );
         assert!(
@@ -387,19 +387,19 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_linux_arm64_compo
         plan.command
             .classpath
             .iter()
-            .any(|path| path.ends_with("jna-5.13.0.jar"))
+            .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with("jna-5.13.0.jar")))
     );
     assert!(
         plan.command
             .classpath
             .iter()
-            .any(|path| path.ends_with("text2speech-1.12.4.jar"))
+            .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with("text2speech-1.12.4.jar")))
     );
     assert!(
         plan.command
             .classpath
             .iter()
-            .any(|path| path.ends_with("slf4j-api-1.8.0-beta4.jar")),
+            .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with("slf4j-api-1.8.0-beta4.jar"))),
         "text2speech dependency must join the classpath"
     );
     assert!(
@@ -506,7 +506,7 @@ async fn windows_arm64_substitutes_the_published_natives_and_records_the_composi
             plan.command
                 .classpath
                 .iter()
-                .any(|path| path.ends_with(&format!("{module}-3.3.3-natives-windows-arm64.jar"))),
+                .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with(&format!("{module}-3.3.3-natives-windows-arm64.jar")))),
             "{module} ARM64 native missing from the plan"
         );
     }
@@ -589,7 +589,7 @@ async fn classifier_era_manifest_is_replaced_with_the_reviewed_windows_arm64_com
             plan.command
                 .classpath
                 .iter()
-                .any(|path| path.ends_with(&format!("{module}-3.3.1.jar"))),
+                .any(|path| matches!(path, block_launcher::plan::ResourcePath::Cache { relative } if relative.ends_with(&format!("{module}-3.3.1.jar")))),
             "{module} 3.3.1 core jar missing"
         );
         assert!(

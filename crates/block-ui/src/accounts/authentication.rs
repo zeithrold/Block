@@ -4335,7 +4335,7 @@ mod tests {
             view.preferences.reduce_motion = true;
             view.snapshot = crate::test_support::ready_snapshot();
             view.selected_instance = Some("instance-a".into());
-            view.selected_profile = Some("profile-a".into());
+            view.selected_instance = Some("instance-a".into());
             cx.notify();
         });
         view.update_in(cx, |view, window, cx| {
@@ -4550,8 +4550,7 @@ mod tests {
                     screen: crate::navigation::Screen::List,
                     inspected: None,
                     editor_page: None,
-                    profile_form: false,
-                    instance_editor: None,
+                    instance_form: false,
                 }
             );
             view.read_with(cx, |view, _| assert_no_launch(view));

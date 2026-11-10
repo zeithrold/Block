@@ -144,7 +144,9 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             view.saved_preferences.onboarding_complete = true;
             view.saved_preferences.game.memory_mib = 4096;
             view.preferences.clone_from(&view.saved_preferences);
-            view.snapshot.profile_mode = block_launcher::catalog::ProfileMode::Separated;
+            view.snapshot = crate::test_support::ready_snapshot();
+            let saved_instances = serde_json::to_value(&view.snapshot.instances);
+            assert!(saved_instances.is_ok(), "{saved_instances:?}");
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
             view.preview_appearance(Appearance::Dark);
             if let Some(draft) = &view.settings_form {
@@ -168,8 +170,8 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             assert!(view.saved_preferences.onboarding_complete);
             assert_eq!(view.preferences.game.memory_mib, 4096);
             assert_eq!(
-                view.snapshot.profile_mode,
-                block_launcher::catalog::ProfileMode::Separated
+                serde_json::to_value(&view.snapshot.instances).ok(),
+                saved_instances.ok()
             );
             view.handle(UiAction::Tab(Tab::Home), window, cx);
             view.handle(UiAction::SettingsExitDiscard, window, cx);
@@ -1185,78 +1187,62 @@ fn returning_restores_index_and_category_scroll_positions(cx: &mut gpui::TestApp
 }
 
 #[gpui::test]
-fn completed_profile_conversion_survives_discarding_the_settings_draft(
-    cx: &mut gpui::TestAppContext,
-) {
-    use block_launcher::catalog::{Catalog, ProfileMode};
-
+fn completed_instance_edit_survives_discarding_the_settings_draft(cx: &mut gpui::TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let catalog = Catalog::open(root.path())?;
-        assert_eq!(catalog.snapshot()?.profile_mode, ProfileMode::Bundled);
-        let (engine, mut messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
+        let catalog = block_launcher::catalog::Catalog::open(root.path())?;
+        let original = catalog.create_instance("Original".into(), "1.20.6".into(), None, None)?;
+        let snapshot = catalog.snapshot()?;
+        let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
-            view.router.navigate(Tab::Home);
             view.preferences.reduce_motion = true;
             view.saved_preferences.reduce_motion = true;
-            view.snapshot = catalog.snapshot().unwrap_or_default();
+            view.snapshot = snapshot;
             view.engine = Some(engine);
+            view.messages = Some(messages);
             view
         });
-        cx.simulate_resize(size(px(360.), px(720.)));
         view.update_in(cx, |view, window, cx| {
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
             view.preview_appearance(Appearance::Dark);
-            view.handle(UiAction::SettingsPage(2), window, cx);
-            view.handle(UiAction::ConfirmSeparate(true), window, cx);
-            view.handle(UiAction::SeparateProfiles, window, cx);
-            assert!(view.busy);
+            view.begin(
+                msg!("games.instance_editor.saving"),
+                crate::ui_logging::Operation::SaveInstance,
+            );
+            if let Some(engine) = &view.engine {
+                engine.save_instance(
+                    original.id.clone(),
+                    crate::engine::InstanceDraftValues {
+                        name: "Updated".into(),
+                        defaults: crate::settings::GameDefaults::default(),
+                        appearance: original.appearance,
+                        target_id: Some(original.target_id.clone()),
+                        server: original.server.clone(),
+                        data_policy: original.data_policy,
+                        game_directory: original.game_directory.clone(),
+                        game_args: original.game_args.clone(),
+                        default_account: original.default_account.clone(),
+                    },
+                    None,
+                );
+            }
         });
-        let runtime = tokio::runtime::Runtime::new()?;
-        let received = runtime.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                let mut received = Vec::new();
-                loop {
-                    let message = messages.recv().await.ok_or_else(|| {
-                        anyhow::anyhow!("conversion ended without a completion message")
-                    })?;
-                    let inner = match &message {
-                        crate::Message::ForOperation { message, .. } => message.as_ref(),
-                        message => message,
-                    };
-                    let done = matches!(inner, crate::Message::Finished(_));
-                    received.push(message);
-                    if done {
-                        return Ok::<_, anyhow::Error>(received);
-                    }
-                }
-            })
-            .await?
-        })?;
-        let (sender, receiver) = tokio::sync::mpsc::channel(received.len() + 1);
-        for message in received {
-            sender.try_send(message)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while view.read_with(cx, |view, _| view.busy) && std::time::Instant::now() < deadline {
+            view.update(cx, crate::Block::poll);
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        view.update(cx, |view, cx| {
-            view.messages = Some(receiver);
-            view.poll(cx);
-        });
-        assert!(view.read_with(cx, |view, _| {
-            !view.busy && view.snapshot.profile_mode == ProfileMode::Separated
-        }));
+        assert!(view.read_with(cx, |view, _| !view.busy
+            && view.snapshot.instances[0].name == "Updated"));
         view.update_in(cx, |view, window, cx| {
             view.handle(UiAction::Tab(Tab::Home), window, cx);
             view.handle(UiAction::SettingsExitDiscard, window, cx);
         });
         assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::Home
-            && view.snapshot.profile_mode == ProfileMode::Separated
+            && view.snapshot.instances[0].name == "Updated"
             && view.preferences.appearance == view.saved_preferences.appearance));
-        assert_eq!(
-            Catalog::open(root.path())?.snapshot()?.profile_mode,
-            ProfileMode::Separated
-        );
-        assert!(Catalog::open(root.path())?.separate_profiles().is_err());
+        assert_eq!(catalog.snapshot()?.instances[0].name, "Updated");
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -1288,7 +1274,6 @@ fn settings_controls_and_long_storage_paths_fit_the_home_frame(cx: &mut gpui::Te
                 "settings-back",
                 "settings-page-general",
                 "settings-page-game",
-                "settings-page-profiles",
                 "settings-page-downloads",
                 "settings-page-storage",
                 "save-preferences",
@@ -1401,6 +1386,7 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
 
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
+        view.snapshot = crate::test_support::ready_snapshot();
         view.router.navigate(Tab::Home);
         view.preferences.reduce_motion = true;
         view.saved_preferences.reduce_motion = true;
@@ -1409,8 +1395,9 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     cx.simulate_resize(size(px(360.), px(720.)));
     view.update_in(cx, |view, window, cx| {
         view.handle(UiAction::Tab(Tab::Settings), window, cx);
-        view.handle(UiAction::SettingsPage(2), window, cx);
-        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+        view.handle(UiAction::SettingsPage(1), window, cx);
+        view.preview_appearance(Appearance::Dark);
+        view.handle(UiAction::Tab(Tab::Home), window, cx);
     });
     settings_frame(cx);
     assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
@@ -1421,10 +1408,10 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     crate::test_support::press(cx, "alt-left");
     settings_frame(cx);
     assert!(view.read_with(cx, |view, _| {
-        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(2)
+        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(1)
     }));
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+        view.handle(UiAction::Tab(Tab::Home), window, cx);
     });
     settings_frame(cx);
     let initial_focus = cx.update(|window, cx| window.focused(cx));
@@ -1434,7 +1421,7 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     crate::test_support::press(cx, "alt-left");
     settings_frame(cx);
     assert!(view.read_with(cx, |view, _| {
-        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(2)
+        !view.shell.surfaces.is_open() && view.shell.settings_page == Some(1)
     }));
     view.update_in(cx, |view, window, cx| {
         view.preview_appearance(Appearance::Dark);
@@ -1454,20 +1441,21 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
 }
 
 #[gpui::test]
-fn separated_profile_confirmation_actions_fit_the_home_frame(cx: &mut gpui::TestAppContext) {
+fn instance_deletion_confirmation_actions_fit_the_home_frame(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
+        view.snapshot = crate::test_support::ready_snapshot();
         view.router.navigate(Tab::Settings);
         view.preferences.reduce_motion = true;
         view.open_settings(cx);
-        view.select_settings_page(2, window, cx);
-        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+        view.select_settings_page(1, window, cx);
+        view.handle(UiAction::DeleteInstanceId("instance-a".into()), window, cx);
         view
     });
     cx.simulate_resize(size(px(360.), px(720.)));
     settings_frame(cx);
-    let cancel = crate::test_support::control_bounds(cx, "cancel-separate");
-    let confirm = crate::test_support::control_bounds(cx, "confirm-separate");
+    let cancel = crate::test_support::control_bounds(cx, "close-drawer");
+    let confirm = crate::test_support::control_bounds(cx, "confirm-delete");
     assert!(
         cancel.zip(confirm).is_some_and(|(cancel, confirm)| {
             cancel.left() >= px(0.)
@@ -1479,15 +1467,15 @@ fn separated_profile_confirmation_actions_fit_the_home_frame(cx: &mut gpui::Test
         "cancel={cancel:?}, confirm={confirm:?}"
     );
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::ConfirmSeparate(false), window, cx);
+        view.handle(UiAction::Drawer(None), window, cx);
     });
     cx.simulate_resize(size(px(960.), px(720.)));
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::ConfirmSeparate(true), window, cx);
+        view.handle(UiAction::DeleteInstanceId("instance-a".into()), window, cx);
     });
     settings_frame(cx);
-    let cancel = crate::test_support::control_bounds(cx, "cancel-separate");
-    let confirm = crate::test_support::control_bounds(cx, "confirm-separate");
+    let cancel = crate::test_support::control_bounds(cx, "close-drawer");
+    let confirm = crate::test_support::control_bounds(cx, "confirm-delete");
     assert!(
         cancel.zip(confirm).is_some_and(|(cancel, confirm)| {
             cancel.left() >= px(0.)
@@ -1512,7 +1500,6 @@ fn native_settings_title_stays_stable_while_chrome_names_each_category(
     for (page, title) in [
         (0, "General"),
         (1, "Game defaults"),
-        (2, "Profile mode"),
         (3, "Downloads & network"),
         (4, "Storage"),
     ] {

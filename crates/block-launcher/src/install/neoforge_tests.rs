@@ -15,7 +15,7 @@ use crate::{
         model::{Download, VersionIndex, VersionManifest},
         resources::AssetObjects,
     },
-    plan::{PrepareAction, compile},
+    plan::{PrepareAction, ResourcePath, compile},
     platform::{Architecture, OperatingSystem, Target},
     recipe::{Compatibility, LaunchRecipe, ParsedRecipe, RecipeSource, RuntimeSelection},
     resolver::{ResolveContext, ResolvedMetadata},
@@ -198,6 +198,7 @@ fn canonical_paths_and_generated_outputs_survive_plan_binding() -> anyhow::Resul
         companion_libraries: Vec::new(),
         classifier_overrides: BTreeMap::new(),
         compatibility: None,
+        existing: None,
     };
     let recipe = LaunchRecipe {
         schema_version: 1,
@@ -240,13 +241,13 @@ fn canonical_paths_and_generated_outputs_survive_plan_binding() -> anyhow::Resul
         plan.command
             .classpath
             .iter()
-            .any(|path| path.ends_with("/example/tool/1/tool-1.jar"))
+            .any(|path| matches!(path, ResourcePath::Cache { relative } if relative.ends_with("/example/tool/1/tool-1.jar")))
     );
     assert!(
         plan.command
             .classpath
             .iter()
-            .any(|path| path.ends_with("/neoforge-20.6.144.jar"))
+            .any(|path| matches!(path, ResourcePath::Cache { relative } if relative.ends_with("/neoforge-20.6.144.jar")))
     );
     assert_eq!(
         plan.command.variables.get("classpath_separator"),

@@ -1,106 +1,38 @@
 mod common;
-
 use block_launcher::{
-    catalog::{
-        Catalog, GameDirectoryGuard, InstanceConfiguration, InstanceSettings, ProfileConfiguration,
-        ProfileInheritance,
-    },
+    catalog::{Catalog, DataPolicy, GameDirectoryGuard, InstanceConfiguration},
     recipe::RuntimeSelection,
 };
-use std::{fs, path::PathBuf};
+use std::fs;
 
 #[test]
-fn legacy_missing_defaults_preserve_java_arguments_and_catalog_bytes() -> anyhow::Result<()> {
-    let root = tempfile::tempdir()?;
-    let catalog = Catalog::open(root.path())?;
-    let (_, mut profile) = catalog.create_instance("Legacy".into(), "1.20.6".into(), None, None)?;
-    let java = std::env::current_exe()?;
-    profile.runtime = RuntimeSelection::Local { java: java.clone() };
-    profile.game_args = vec![
-        "--width".into(),
-        "1200".into(),
-        "--height=700".into(),
-        "--fullscreen".into(),
-        "--server".into(),
-        "localhost".into(),
-    ];
-    catalog.save_profile(profile.clone())?;
-    let path = common::path(root.path());
-    let mut document = common::load(root.path())?;
-    common::first_instance_mut(&mut document)?.remove("settings");
-    common::first_profile_mut(&mut document)?.remove("inheritance");
-    let bytes = toml::to_string_pretty(&document)?.into_bytes();
-    fs::write(&path, &bytes)?;
-    let state = Catalog::open(root.path())?.snapshot()?;
-    let (instance, profile, _) = state.selection(&profile.id)?;
-    assert!(instance.settings.is_none());
-    assert_eq!(profile.inheritance, ProfileInheritance::default());
-    assert_eq!(profile.effective_game_args(instance), profile.game_args);
-    assert!(
-        matches!(profile.effective_runtime(instance), RuntimeSelection::Local { java: path } if path == java)
-    );
-    assert_eq!(fs::read(path)?, bytes);
-    Ok(())
-}
-
-#[test]
-fn configured_defaults_are_consumed_and_explicit_profile_java_keeps_priority() -> anyhow::Result<()>
-{
+fn typed_window_settings_override_only_owned_extra_flags() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     let java = std::env::current_exe()?;
-    let (instance, profile) = catalog.create_instance_configured(
-        "Configured".into(),
+    let instance = catalog.create_instance_configured(
         "1.20.6".into(),
         None,
         None,
-        ProfileConfiguration {
-            name: "Profile".into(),
+        InstanceConfiguration {
+            name: "Configured".into(),
             runtime: RuntimeSelection::Local { java: java.clone() },
             game_args: vec![
                 "--width".into(),
                 "1600".into(),
                 "--height=900".into(),
-                "--fullscreen".into(),
+                "--fullscreen=true".into(),
                 "--server".into(),
                 "example.invalid".into(),
             ],
-            ..ProfileConfiguration::default()
+            width: 1440,
+            height: 810,
+            ..Default::default()
         },
     )?;
-    let settings = instance
-        .settings
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("new instance defaults missing"))?;
+    assert!(matches!(&instance.runtime, RuntimeSelection::Local { java: path } if *path == java));
     assert_eq!(
-        (settings.width, settings.height, settings.fullscreen),
-        (1600, 900, true)
-    );
-    assert_eq!(
-        profile.inheritance,
-        ProfileInheritance {
-            runtime: true,
-            window: true
-        }
-    );
-    catalog.save_instance(
-        &instance.id,
-        InstanceConfiguration {
-            name: "Changed".into(),
-            settings: InstanceSettings {
-                width: 1440,
-                height: 810,
-                ..InstanceSettings::default()
-            },
-        },
-    )?;
-    let state = catalog.snapshot()?;
-    let (instance, profile, _) = state.selection(&profile.id)?;
-    assert!(
-        matches!(profile.effective_runtime(instance), RuntimeSelection::Local { java: path } if path == java)
-    );
-    assert_eq!(
-        profile.effective_game_args(instance),
+        instance.launch_game_args(),
         [
             "--server",
             "example.invalid",
@@ -110,151 +42,143 @@ fn configured_defaults_are_consumed_and_explicit_profile_java_keeps_priority() -
             "810"
         ]
     );
-    assert_eq!(profile.game_args[1], "1600");
-    let mut managed = profile.clone();
-    managed.runtime = RuntimeSelection::Managed;
-    let mut instance = instance.clone();
-    instance.settings = Some(InstanceSettings {
-        runtime: RuntimeSelection::Local { java: java.clone() },
-        ..InstanceSettings::default()
-    });
-    assert!(
-        matches!(managed.effective_runtime(&instance), RuntimeSelection::Local { java: path } if path == java)
+    let mut changed = instance.clone();
+    changed.fullscreen = true;
+    changed.game_args = vec![
+        "--width".into(),
+        "--server".into(),
+        "localhost".into(),
+        "--fullscreen".into(),
+    ];
+    assert_eq!(
+        changed.launch_game_args(),
+        [
+            "--server",
+            "localhost",
+            "--width",
+            "1440",
+            "--height",
+            "810",
+            "--fullscreen"
+        ]
     );
-    managed.inheritance.runtime = false;
-    assert!(matches!(
-        managed.effective_runtime(&instance),
-        RuntimeSelection::Managed
-    ));
-    managed.inheritance.window = false;
-    assert_eq!(managed.effective_game_args(&instance), managed.game_args);
+    assert_eq!(instance.game_args[1], "1600");
     Ok(())
 }
 
 #[test]
-fn instance_save_is_atomic_and_preserves_world_locks_and_mode_names() -> anyhow::Result<()> {
-    for separated in [false, true] {
-        let root = tempfile::tempdir()?;
-        let catalog = Catalog::open(root.path())?;
-        let (instance, profile) =
-            catalog.create_instance("Original".into(), "1.20.6".into(), None, None)?;
-        if separated {
-            catalog.separate_profiles()?;
+fn instance_save_is_atomic_and_preserves_worlds_and_live_locks() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    let instance = common::instance(&catalog)?;
+    let world = instance.game_directory.join("saves/Fixture");
+    fs::create_dir_all(&world)?;
+    let world = world.join("level.dat");
+    fs::write(&world, b"test-only world marker")?;
+    let _guard = GameDirectoryGuard::for_instance(&instance)?;
+    let mut configuration = InstanceConfiguration::from(&instance);
+    configuration.name = "Renamed".into();
+    configuration.width = 1500;
+    catalog.save_instance(&instance.id, configuration.clone())?;
+    let state = Catalog::open(root.path())?.snapshot()?;
+    let (saved, _) = state.selection(&instance.id)?;
+    assert_eq!(saved.name, "Renamed");
+    assert_eq!(saved.width, 1500);
+    assert_eq!(saved.game_directory, instance.game_directory);
+    assert!(GameDirectoryGuard::for_instance(saved).is_err());
+    assert_eq!(fs::read(&world)?, b"test-only world marker");
+    let before = fs::read(common::path(root.path()))?;
+    for change in [0, 1, 2, 3, 4] {
+        let mut invalid = configuration.clone();
+        match change {
+            0 => invalid.width = 0,
+            1 => invalid.height = 1,
+            2 => {
+                invalid.runtime = RuntimeSelection::Local {
+                    java: "relative-java".into(),
+                }
+            }
+            3 => invalid.game_directory = instance.game_directory.join("new-place"),
+            4 => invalid.data_policy = DataPolicy::Shared,
+            _ => unreachable!(),
         }
-        let directory = profile.game_directory(&instance)?;
-        fs::create_dir_all(directory.join("saves/Fixture"))?;
-        fs::write(
-            directory.join("saves/Fixture/level.dat"),
-            b"test-only world marker",
-        )?;
-        let _guard = GameDirectoryGuard::for_profile(&instance, &profile)?;
-        catalog.save_instance(
-            &instance.id,
-            InstanceConfiguration {
-                name: "Renamed".into(),
-                settings: InstanceSettings::default(),
-            },
-        )?;
-        let state = Catalog::open(root.path())?.snapshot()?;
-        let (saved, saved_profile, _) = state.selection(&profile.id)?;
-        assert_eq!(saved.name, "Renamed");
-        assert_eq!(
-            saved_profile.name,
-            if separated { "Original" } else { "Renamed" }
-        );
-        assert_eq!(saved.directory, instance.directory);
-        assert_eq!(saved_profile.game_directory(saved)?, directory);
-        assert!(GameDirectoryGuard::for_profile(saved, saved_profile).is_err());
-        assert_eq!(
-            fs::read(directory.join("saves/Fixture/level.dat"))?,
-            b"test-only world marker"
-        );
-        let before = fs::read(common::path(root.path()))?;
-        for settings in [
-            InstanceSettings {
-                width: 0,
-                ..InstanceSettings::default()
-            },
-            InstanceSettings {
-                height: 1,
-                ..InstanceSettings::default()
-            },
-            InstanceSettings {
-                runtime: RuntimeSelection::Local {
-                    java: PathBuf::from("relative-java"),
-                },
-                ..InstanceSettings::default()
-            },
-        ] {
-            assert!(
-                catalog
-                    .save_instance(
-                        &instance.id,
-                        InstanceConfiguration {
-                            name: "Must not save".into(),
-                            settings
-                        }
-                    )
-                    .is_err()
-            );
-            assert_eq!(fs::read(common::path(root.path()))?, before);
-        }
+        assert!(catalog.save_instance(&instance.id, invalid).is_err());
+        assert_eq!(fs::read(common::path(root.path()))?, before);
     }
+    assert!(!instance.game_directory.join("new-place").exists());
     Ok(())
 }
 
 #[test]
-fn invalid_creation_leaves_no_game_directory_and_unknown_fields_preserve_bytes()
--> anyhow::Result<()> {
+fn changed_data_location_selects_a_path_without_moving_or_creating_files() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    let instance = common::instance(&catalog)?;
+    fs::write(
+        instance.game_directory.join("options.txt"),
+        b"original options",
+    )?;
+    let new_directory = instance.resource_directory.join("future/game");
+    let mut configuration = InstanceConfiguration::from(&instance);
+    configuration.game_directory.clone_from(&new_directory);
+    catalog.save_instance(&instance.id, configuration)?;
+    assert!(!new_directory.exists());
+    assert_eq!(
+        fs::read(instance.game_directory.join("options.txt"))?,
+        b"original options"
+    );
+    let saved = catalog.snapshot()?.selection(&instance.id)?.0.clone();
+    assert_eq!(saved.game_directory, new_directory);
+    let guard = GameDirectoryGuard::for_instance(&saved)?;
+    assert_eq!(guard.directory(), new_directory);
+    Ok(())
+}
+
+#[test]
+fn invalid_creation_and_unknown_fields_leave_catalog_bytes_unchanged() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     let directory = root.path().join("new-game");
     assert!(
         catalog
             .create_instance_configured(
-                "Invalid".into(),
                 "1.20.6".into(),
                 Some(directory.clone()),
                 None,
-                ProfileConfiguration {
-                    game_args: vec!["--width".into(), "invalid".into()],
-                    ..ProfileConfiguration::default()
+                InstanceConfiguration {
+                    name: "Invalid".into(),
+                    width: 0,
+                    ..Default::default()
                 }
             )
             .is_err()
     );
     assert!(!directory.exists());
     assert!(catalog.snapshot()?.instances.is_empty());
-    let (instance, profile) =
-        catalog.create_instance("Guarded".into(), "1.20.6".into(), None, None)?;
-    let fingerprint = catalog.snapshot()?.launch_fingerprint(&profile.id)?;
-    catalog.save_instance(
-        &instance.id,
-        InstanceConfiguration {
-            name: instance.name,
-            settings: InstanceSettings {
-                width: 1500,
-                ..InstanceSettings::default()
-            },
-        },
-    )?;
-    assert_ne!(
-        catalog.snapshot()?.launch_fingerprint(&profile.id)?,
-        fingerprint
-    );
-    let path = common::path(root.path());
+    common::instance(&catalog)?;
     let mut document = common::load(root.path())?;
-    common::first_instance_mut(&mut document)?
-        .get_mut("settings")
-        .and_then(toml::Value::as_table_mut)
-        .ok_or_else(|| anyhow::anyhow!("instance settings fixture"))?
-        .insert(
-            "gameDirectory".into(),
-            toml::Value::String("outside".into()),
-        );
-    let bytes = toml::to_string_pretty(&document)?.into_bytes();
-    fs::write(&path, &bytes)?;
+    common::first_instance_mut(&mut document)?.insert("gameDirectory".into(), "outside".into());
+    common::save(root.path(), &document)?;
+    let before = fs::read(common::path(root.path()))?;
     assert!(catalog.snapshot().is_err());
-    assert_eq!(fs::read(path)?, bytes);
+    assert_eq!(fs::read(common::path(root.path()))?, before);
+    Ok(())
+}
+
+#[test]
+fn sticky_session_rejects_directory_changes_and_survives_metadata_deletion() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    let instance = common::instance(&catalog)?;
+    let run = uuid::Uuid::new_v4().to_string();
+    let guard = GameDirectoryGuard::for_session(&instance, &run)?;
+    drop(guard);
+    let mut configuration = InstanceConfiguration::from(&instance);
+    configuration.game_directory = instance.game_directory.join("other");
+    assert!(catalog.save_instance(&instance.id, configuration).is_err());
+    catalog.delete_instance(&instance.id)?;
+    assert!(GameDirectoryGuard::for_instance(&instance).is_err());
+    GameDirectoryGuard::clear_session_reservation(&instance.game_directory, &run)?;
+    assert!(GameDirectoryGuard::for_instance(&instance).is_ok());
     Ok(())
 }

@@ -17,8 +17,8 @@ const MAX_FRAME: u32 = 2 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub(super) struct Bootstrap {
     pub schema_version: u32,
-    pub profile_id: String,
-    pub profile_fingerprint: String,
+    pub instance_id: String,
+    pub instance_fingerprint: String,
     pub expires_at: u64,
     username: String,
     uuid: String,
@@ -48,22 +48,22 @@ fn empty_user_properties() -> String {
 impl fmt::Debug for Bootstrap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Bootstrap")
-            .field("profile_id", &self.profile_id)
+            .field("instance_id", &self.instance_id)
             .finish_non_exhaustive()
     }
 }
 
 impl Bootstrap {
     pub(super) fn new(
-        profile_id: &str,
+        instance_id: &str,
         game: &GameSession,
         expires_at: SystemTime,
     ) -> anyhow::Result<Self> {
         game.validate()?;
         Ok(Self {
-            schema_version: 1,
-            profile_id: profile_id.into(),
-            profile_fingerprint: String::new(),
+            schema_version: 2,
+            instance_id: instance_id.into(),
+            instance_fingerprint: String::new(),
             expires_at: expires_at.duration_since(UNIX_EPOCH)?.as_secs(),
             username: game.username.clone(),
             uuid: game.uuid.clone(),
@@ -98,7 +98,7 @@ impl Bootstrap {
 
 impl SessionProvider for Bootstrap {
     fn session(&self) -> anyhow::Result<GameSession> {
-        ensure!(self.schema_version == 1, "unsupported bootstrap protocol");
+        ensure!(self.schema_version == 2, "unsupported bootstrap protocol");
         let expiry = UNIX_EPOCH.checked_add(Duration::from_secs(self.expires_at));
         ensure!(
             expiry
@@ -180,7 +180,7 @@ mod tests {
 
     fn bootstrap() -> anyhow::Result<Bootstrap> {
         Bootstrap::new(
-            "fixture-profile",
+            "fixture-instance",
             &GameSession {
                 username: "FixturePlayer".into(),
                 uuid: "0123456789abcdef0123456789abcdef".into(),
@@ -210,10 +210,10 @@ mod tests {
         let session = decoded.session()?;
         assert_eq!(session.access_token, TOKEN);
         assert_eq!(session.username, "FixturePlayer");
-        assert_eq!(decoded.profile_id, original.profile_id);
+        assert_eq!(decoded.instance_id, original.instance_id);
 
         let debug = format!("{decoded:?}");
-        assert!(debug.contains("fixture-profile"));
+        assert!(debug.contains("fixture-instance"));
         for value in [
             TOKEN,
             session.username.as_str(),
@@ -378,7 +378,7 @@ mod tests {
     fn unsupported_protocol_and_invalid_identity_fail_without_quoting_credentials()
     -> anyhow::Result<()> {
         let mut value = bootstrap()?;
-        value.schema_version = 2;
+        value.schema_version = 1;
         assert_eq!(
             value
                 .session()
@@ -387,7 +387,7 @@ mod tests {
                 .to_string(),
             "unsupported bootstrap protocol"
         );
-        value.schema_version = 1;
+        value.schema_version = 2;
         value.access_token = format!("{TOKEN}\n");
         let error = value
             .session()

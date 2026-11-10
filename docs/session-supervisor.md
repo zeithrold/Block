@@ -1,12 +1,20 @@
 # Session supervision and crash help
 
-Native Profile launches use one independent supervisor per game session. The same `block` executable has three modes: the launcher, headless `--supervise <run-id>`, and `--crash <run-id>`. Internal modes require `--data-dir`; they are not saved launch recipes.
+Native Instance launches use one independent supervisor per game session. The same `block` executable has three modes: the launcher, headless `--supervise <run-id>`, and `--crash <run-id>`. Internal modes require `--data-dir`; they are not saved launch recipes. `--instance <id>` selects a catalog Instance; there is no product `--profile` alias.
 
 ## Ownership and authentication
 
 The launcher refreshes the selected Microsoft account, then transfers only the current game session and its expiry over the supervisor's inherited stdin pipe. Supervisor arguments contain the run ID and data directory, not credentials. The bootstrap is not written to disk or placed in environment variables. The supervisor does not sign in, access refresh-token storage, or refresh credentials. It checks authorization expiry again before binding the Java command. The eventual Java command still uses Minecraft's authentication arguments; command previews and captured output are redacted.
 
-The supervisor constructs the transient LaunchPlan and owns the Java child, log pipes, installation/game-directory locks, and sticky directory reservation. Closing the launcher does not request Stop. Reopening it restores active sessions from the registry and reconnects through local IPC. **Stop** explicitly requests cancellation from the owning supervisor. Development recipes retain their existing execution path.
+The supervisor constructs the transient LaunchPlan and owns the Java child, log pipes, preparation/game-directory locks, cache resource lease, storage lease and sticky directory reservation. The accepted plan keeps the Instance's resolved settings and actual game directory. Closing the launcher does not request Stop. Deleting its catalog entry preserves the accepted session and game files. Reopening the launcher restores active sessions from the registry and reconnects through local IPC. **Stop** explicitly requests cancellation from the owning supervisor. Development recipes retain their existing execution path.
+
+Preparation locks, receipts and run-private natives live under
+`<cache>/preparations/<instance-id>`, separately from the managed
+`<library>/<instance-id>` game root. Catalog session logs use the locked actual
+game directory's `.block-runs/<run-id>`. Canonical actual-directory identity
+prevents two sessions writing the same game directory, while separate game
+directories can share resources. The cache resource lease prevents installation
+or Repair from replacing shared resources while an accepted session uses them.
 
 Public session metadata lives under `<data-dir>/sessions/<run-id>/session.json`: IDs, version/loader, game directory, process IDs, state, revision, bounded redacted output, and capture warnings. It contains no account credentials or serialized LaunchPlan. All active records remain observable; only terminal history shown by the observer is capped at 128 records. Live status requests have bounded concurrency and deadlines.
 
@@ -16,7 +24,7 @@ Exit facts distinguish normal exit, explicit Stop, failed start, abnormal termin
 
 For a failed start or abnormal exit, the supervisor saves `crash.json`. An open launcher can claim and show it inline; otherwise the supervisor attempts to open a separate help window. A file lock prevents competing presenters. The report is acknowledged only after the help view has been constructed. If no window can open, the unread report remains available on the next launcher start.
 
-The help page presents profile/version context, possible explanations, matching evidence, and suggested next steps. Local rules recognize Java heap exhaustion, native-memory exhaustion, incompatible Java, mod dependencies, and graphics initialization failures. These are heuristics, not confirmed root causes. Unrecognized output remains explicitly unknown; an exit code alone is insufficient. The page provides logs/details, a summary clipboard action, a user-selected JSON export, and a return to the instance without automatic relaunch or configuration changes.
+The help page presents Instance/version context, possible explanations, matching evidence, and suggested next steps. Local rules recognize Java heap exhaustion, native-memory exhaustion, incompatible Java, mod dependencies, and graphics initialization failures. These are heuristics, not confirmed root causes. Unrecognized output remains explicitly unknown; an exit code alone is insufficient. The page provides logs/details, a summary clipboard action, a user-selected JSON export, and a return to the instance without automatic relaunch or configuration changes.
 
 ## Diagnostic bounds and privacy
 
@@ -46,11 +54,16 @@ Operator recovery requires independently verifying that both the previous game a
 
 ## Validation scope
 
-`crates/block-app/tests/session_supervisor.rs` launches the actual supervisor executable and a compiled synthetic Java fixture. It exercises process detachment, reconnect/Stop, normal and abnormal exits, launch failures, redaction, fresh-report selection, unread presentation, and retained reservations after monitor death. GPUI tests cover help interaction/export, inline return, session restoration, stale updates, and requested-profile selection. The observer regression includes an older active session behind more than 128 newer terminal runs.
+`crates/block-app/tests/session_supervisor.rs` launches the actual supervisor executable and a compiled synthetic Java fixture. It exercises process detachment, reconnect/Stop, normal and abnormal exits, launch failures, redaction, fresh-report selection, unread presentation, and retained reservations after monitor death. GPUI tests cover help interaction/export, inline return, session restoration, stale updates, and requested-Instance selection. The observer regression includes an older active session behind more than 128 newer terminal runs.
 
 These tests use real operating-system processes with synthetic game data and credentials. They do not establish real Minecraft gameplay or Microsoft authorization. The additional native acceptance below remains separate from the synthetic suite.
 
-### Native acceptance on 2026-10-21
+### Historical native acceptance on 2026-10-21
+
+This record exercised the earlier Profile-based model. Its terminology and
+counts are retained as historical evidence, not as acceptance of the
+2026-11-09 Instance-only redesign. Its native acceptance matrix remains in
+progress.
 
 The complete verification sequence is formatting, workspace type checking with all targets/features, strict Clippy, then all workspace tests. A frozen source snapshot was verified independently on each environment; private logs retain phase exit codes, source fingerprints, failures, and subsequent complete reruns. Documentation and API-comment updates followed the verified implementation snapshot.
 

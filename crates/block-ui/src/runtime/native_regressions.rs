@@ -72,7 +72,7 @@ fn busy_home_keeps_stop_reachable_and_cancels_the_operation(cx: &mut TestAppCont
                 let mut view = super::tests::test_view(window, cx);
                 view.snapshot = ready_snapshot();
                 view.selected_instance = Some("instance-a".into());
-                view.selected_profile = Some("profile-a".into());
+                view.selected_instance = Some("instance-a".into());
                 view.selected_account = Some(account_id(&account));
                 view.accounts = vec![account];
                 view.router.navigate(Tab::Home);
@@ -106,8 +106,8 @@ fn busy_home_keeps_stop_reachable_and_cancels_the_operation(cx: &mut TestAppCont
             );
             assert!(view.read_with(cx, |view, _| {
                 view.snapshot.instances.len() == 1
-                    && view.snapshot.profiles.len() == 1
-                    && view.selected_profile.as_deref() == Some("profile-a")
+                    && view.snapshot.instances.len() == 1
+                    && view.selected_instance.as_deref() == Some("instance-a")
             }));
         }
         Ok(())
@@ -183,8 +183,8 @@ fn crash_help_preserves_report_actions_in_the_default_window(cx: &mut TestAppCon
             CrashReport::new(
                 CrashContext {
                     run_id: "layout-test-session".into(),
-                    profile_id: "profile-a".into(),
-                    profile_name: "Test profile".into(),
+                    instance_id: "instance-a".into(),
+                    instance_name: "Test instance".into(),
                     minecraft_version: "1.20.6".into(),
                     loader: None,
                 },

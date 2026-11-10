@@ -1,4 +1,4 @@
-//! A native launcher with persistent installations, launch profiles and Microsoft accounts.
+//! A native launcher with persistent installations, instances and Microsoft accounts.
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -92,11 +92,6 @@ mod page_host;
 mod patterns;
 #[path = "runtime/platform.rs"]
 mod platform;
-#[path = "games/profile_editor.rs"]
-mod profile_editor;
-#[cfg(test)]
-#[path = "games/profile_editor_tests.rs"]
-mod profile_editor_tests;
 #[path = "accounts/providers.rs"]
 mod providers;
 #[cfg(debug_assertions)]
@@ -271,7 +266,7 @@ use std::{
 use block_auth::Account;
 use block_launcher::{
     CancellationToken,
-    catalog::{Profile, Snapshot},
+    catalog::{Instance, Snapshot},
     crash::CrashReport,
     platform::Architecture,
     recipe::{LaunchRecipe, RuntimeSelection},
@@ -302,7 +297,7 @@ use text_input::TextInput;
 pub struct LaunchOptions {
     pub recipe: Option<PathBuf>,
     pub launch: bool,
-    pub profile: Option<String>,
+    pub instance: Option<String>,
     pub data_dir: Option<PathBuf>,
     pub build_info: BuildInfo,
     #[cfg(debug_assertions)]
@@ -354,8 +349,8 @@ impl InstanceForm {
 }
 
 #[derive(Debug)]
-struct ProfileForm {
-    original: Profile,
+struct InstanceEditForm {
+    original: Instance,
     name: Entity<TextInput>,
     memory: Entity<TextInput>,
     java: Entity<TextInput>,
@@ -363,6 +358,12 @@ struct ProfileForm {
     game: Entity<TextInput>,
     server: Entity<TextInput>,
     managed: bool,
+    width: Entity<TextInput>,
+    height: Entity<TextInput>,
+    game_directory: Entity<TextInput>,
+    window_custom: bool,
+    optifine: Option<Box<block_launcher::install::optifine::OptiFineJar>>,
+    optifine_request: Option<uuid::Uuid>,
 }
 
 #[derive(Debug)]
@@ -375,7 +376,7 @@ struct PendingCrash {
 #[derive(Debug)]
 enum Form {
     Instance(InstanceForm),
-    Profile(Box<ProfileForm>),
+    EditInstance(Box<InstanceEditForm>),
 }
 
 /// The GPUI view owns only public account metadata and editable settings.
@@ -406,8 +407,7 @@ pub struct Block {
     version_load: browser::CollectionLoad,
     version_catalog: Vec<block_launcher::manifest::model::VersionEntry>,
     selected_instance: Option<String>,
-    selected_profile: Option<String>,
-    pending_profile: Option<String>,
+    pending_instance: Option<String>,
     selected_account: Option<String>,
     router: Router,
     form: Option<Form>,
@@ -570,7 +570,6 @@ impl Block {
         if let Some(selector) = &self.shell.selector {
             selector.refresh_placeholder(language, cx);
         }
-        self.refresh_instance_editor_placeholders(language, cx);
         match &self.form {
             Some(Form::Instance(form)) => {
                 for (input, key) in [
@@ -582,12 +581,12 @@ impl Block {
                     input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
                 }
             }
-            Some(Form::Profile(form)) => {
+            Some(Form::EditInstance(form)) => {
                 for (input, key) in [
-                    (&form.name, "games.profile_editor.name_placeholder"),
+                    (&form.name, "games.instance_editor.name_placeholder"),
                     (&form.java, "games.java.executable_placeholder"),
-                    (&form.jvm, "games.profile_editor.jvm_placeholder"),
-                    (&form.game, "games.profile_editor.game_placeholder"),
+                    (&form.jvm, "games.instance_editor.jvm_placeholder"),
+                    (&form.game, "games.instance_editor.game_placeholder"),
                 ] {
                     let placeholder = tr!(language, key);
                     input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
@@ -737,8 +736,7 @@ impl Block {
             },
             version_catalog: Vec::new(),
             selected_instance: None,
-            selected_profile: None,
-            pending_profile: options.profile,
+            pending_instance: options.instance,
             selected_account: None,
             router: Router::new(tab),
             form: None,
@@ -782,7 +780,6 @@ impl Block {
             browser::CollectionLoad::Failed(view.status.clone())
         };
         view.shell.games.load = load.clone();
-        view.shell.profiles.load = load.clone();
         view.shell.accounts.load = load;
         if tab == Tab::Onboarding {
             view.begin_first_run(cx);
@@ -794,7 +791,7 @@ impl Block {
         if let Some(path) = options.recipe {
             view.load_recipe(path, options.launch, cx);
         } else if options.launch {
-            view.status = UiText::message("common.select_profile_account");
+            view.status = UiText::message("common.select_instance_account");
         }
         #[cfg(debug_assertions)]
         if let Some(scenario) = options.scenario {
@@ -813,62 +810,46 @@ impl Block {
 
     fn apply_catalog(&mut self, snapshot: Snapshot, cx: &mut Context<'_, Self>) {
         let previous = self
-            .profile()
-            .map(|profile| (profile.id.clone(), profile.default_account.clone()));
+            .instance()
+            .map(|instance| (instance.id.clone(), instance.default_account.clone()));
         self.snapshot = snapshot;
-        if let Some(profile) = self.pending_profile.take() {
-            self.select_requested_profile(&profile, cx);
+        if let Some(instance) = self.pending_instance.take() {
+            self.select_requested_instance(&instance, cx);
         }
         self.normalize_selection();
-        // The catalog decides Bundled vs Separated browsing, so the selector
-        // labels must follow the loaded mode instead of their creation-time one.
         self.initialize_browsers(cx);
         if previous
             != self
-                .profile()
-                .map(|profile| (profile.id.clone(), profile.default_account.clone()))
+                .instance()
+                .map(|instance| (instance.id.clone(), instance.default_account.clone()))
         {
-            self.apply_profile_account();
+            self.apply_instance_account();
         }
     }
 
-    fn select_requested_profile(&mut self, id: &str, _cx: &mut Context<'_, Self>) {
-        if let Some(profile) = self
+    fn select_requested_instance(&mut self, id: &str, _cx: &mut Context<'_, Self>) {
+        if let Some(instance) = self
             .snapshot
-            .profiles
+            .instances
             .iter()
-            .find(|profile| profile.id == id)
+            .find(|instance| instance.id == id)
         {
-            self.selected_instance = Some(profile.instance_id.clone());
-            self.selected_profile = Some(profile.id.clone());
-            self.shell.games.inspected = Some(
-                if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
-                    profile.id.clone()
-                } else {
-                    profile.instance_id.clone()
-                },
-            );
-            self.shell.profiles.inspected = Some(profile.id.clone());
+            self.selected_instance = Some(instance.id.clone());
+            self.shell.games.inspected = Some(instance.id.clone());
             if self.form.is_none()
                 && self.shell.auth.is_none()
-                && self.shell.instance_editor.is_none()
                 && !self.setup_incomplete()
                 && self.router.tab() != Tab::Settings
             {
-                let tab = if self.snapshot.profile_mode
-                    == block_launcher::catalog::ProfileMode::Bundled
-                {
-                    Tab::Instances
-                } else {
-                    Tab::Profiles
-                };
-                let record = navigation::RecordRef::Profile(profile.id.clone());
-                self.router.navigate(tab);
-                self.router.open_record(tab, record);
+                self.router.navigate(Tab::Instances);
+                self.router.open_record(
+                    Tab::Instances,
+                    navigation::RecordRef::Instance(instance.id.clone()),
+                );
             }
-            self.apply_profile_account();
+            self.apply_instance_account();
         } else {
-            self.status = UiText::message("common.requested_profile_unavailable");
+            self.status = UiText::message("common.requested_instance_unavailable");
         }
     }
 
@@ -908,13 +889,13 @@ impl Block {
             if self.active_run.is_none() {
                 if self
                     .snapshot
-                    .profiles
+                    .instances
                     .iter()
-                    .any(|profile| profile.id == record.context.profile_id)
+                    .any(|profile| profile.id == record.context.instance_id)
                 {
-                    self.select_requested_profile(&record.context.profile_id, cx);
+                    self.select_requested_instance(&record.context.instance_id, cx);
                 } else {
-                    self.pending_profile = Some(record.context.profile_id.clone());
+                    self.pending_instance = Some(record.context.instance_id.clone());
                 }
             }
             self.active_run = Some(id);
@@ -951,7 +932,7 @@ impl Block {
         let Some(pending) = self.pending_crashes.pop_front() else {
             return;
         };
-        let profile = pending.report.context.profile_id.clone();
+        let profile = pending.report.context.instance_id.clone();
         let run = pending.report.context.run_id.clone();
         let language = self.language();
         let preferences = self.preferences.clone();
@@ -965,7 +946,7 @@ impl Block {
                     let _ = launcher.update(cx, |view, cx| {
                         view.crash_help = None;
                         view.crash_guard = None;
-                        view.select_requested_profile(&profile, cx);
+                        view.select_requested_instance(&profile, cx);
                         if view.router.tab() == Tab::Settings {
                             view.handle(UiAction::Tab(Tab::Instances), window, cx);
                         } else {
@@ -1005,22 +986,14 @@ impl Block {
         }
     }
 
-    fn creation_saved(&mut self, instance: String, profile: String) {
+    fn creation_saved(&mut self, instance: String) {
         let context = self
             .pending_creation
             .take()
             .filter(|context| context.operation == self.operation_revision);
         let owns_draft = context.is_some_and(|context| context.entry == self.router.entry_id() && context.tab == self.router.tab() && matches!(&self.form, Some(Form::Instance(form)) if form.name.entity_id().as_u64() == context.draft));
         self.selected_instance = Some(instance.clone());
-        self.selected_profile = Some(profile.clone());
-        self.shell.games.inspected = Some(
-            if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Bundled {
-                profile.clone()
-            } else {
-                instance
-            },
-        );
-        self.shell.profiles.inspected = Some(profile.clone());
+        self.shell.games.inspected = Some(instance.clone());
         if owns_draft {
             if self.router.tab() == Tab::Onboarding {
                 self.form = None;
@@ -1029,15 +1002,8 @@ impl Block {
             } else {
                 self.form = None;
                 self.router.leave_task();
-                let tab = if self.snapshot.profile_mode
-                    == block_launcher::catalog::ProfileMode::Bundled
-                {
-                    Tab::Instances
-                } else {
-                    Tab::Profiles
-                };
                 self.router
-                    .open_record(tab, navigation::RecordRef::Profile(profile));
+                    .open_record(Tab::Instances, navigation::RecordRef::Instance(instance));
             }
         }
     }
@@ -1046,7 +1012,7 @@ impl Block {
         if self.router.tab() == Tab::Onboarding {
             return;
         }
-        let previous_profile = self.selected_profile.clone();
+        let previous_instance = self.selected_instance.clone();
         if !self
             .snapshot
             .instances
@@ -1055,30 +1021,18 @@ impl Block {
         {
             self.selected_instance = self.snapshot.instances.last().map(|i| i.id.clone());
         }
-        if !self.snapshot.profiles.iter().any(|p| {
-            Some(&p.id) == self.selected_profile.as_ref()
-                && Some(&p.instance_id) == self.selected_instance.as_ref()
-        }) {
-            self.selected_profile = self
-                .snapshot
-                .profiles
-                .iter()
-                .rev()
-                .find(|p| Some(&p.instance_id) == self.selected_instance.as_ref())
-                .map(|p| p.id.clone());
-        }
-        if previous_profile != self.selected_profile {
-            self.apply_profile_account();
+        if previous_instance != self.selected_instance {
+            self.apply_instance_account();
         }
     }
 
-    fn apply_profile_account(&mut self) {
+    fn apply_instance_account(&mut self) {
         if self.router.tab() == Tab::Onboarding {
             return;
         }
         if let Some(default) = self
-            .profile()
-            .and_then(|profile| profile.default_account.as_ref())
+            .instance()
+            .and_then(|instance| instance.default_account.as_ref())
         {
             self.selected_account = self
                 .accounts
@@ -1155,8 +1109,9 @@ impl Block {
         self.logged_operation = Some(operation);
         ui_logging::operation_started(self.view_id, self.operation_revision, operation);
         self.pending_creation = None;
+        self.cancel = CancellationToken::new();
         if let Some(engine) = &mut self.engine {
-            engine.begin_operation(self.operation_revision);
+            engine.begin_operation(self.operation_revision, self.cancel.clone());
         }
         self.busy = true;
         self.completed = 0;
@@ -1166,7 +1121,6 @@ impl Block {
         self.show_command = false;
         self.logs.clear();
         self.status = status;
-        self.cancel = CancellationToken::new();
     }
 
     fn finish_logged_operation(&mut self, outcome: ui_logging::Outcome) {
@@ -1187,18 +1141,18 @@ impl Block {
         self.finish_logged_operation(ui_logging::Outcome::Cancelled);
         self.operation_revision = self.operation_revision.wrapping_add(1);
         if let Some(engine) = &mut self.engine {
-            engine.begin_operation(self.operation_revision);
+            engine.begin_operation(self.operation_revision, self.cancel.clone());
         }
         self.busy = self.active_run.is_some();
         self.operation_cancellable = false;
         true
     }
 
-    fn profile(&self) -> Option<&Profile> {
+    fn instance(&self) -> Option<&Instance> {
         self.snapshot
-            .profiles
+            .instances
             .iter()
-            .find(|p| Some(&p.id) == self.selected_profile.as_ref())
+            .find(|instance| Some(&instance.id) == self.selected_instance.as_ref())
     }
 
     fn form_inputs(&self) -> Vec<Entity<TextInput>> {
@@ -1208,7 +1162,7 @@ impl Block {
                 form.version.clone(),
                 form.directory.clone(),
             ],
-            Some(Form::Profile(form)) => vec![
+            Some(Form::EditInstance(form)) => vec![
                 form.name.clone(),
                 form.memory.clone(),
                 form.java.clone(),
@@ -1219,7 +1173,7 @@ impl Block {
             None => Vec::new(),
         };
         fields.extend(self.shell.wizard.loader_search.iter().cloned());
-        if let Some(profile) = &self.shell.wizard.profile {
+        if let Some(profile) = &self.shell.wizard.draft {
             fields.extend([
                 profile.name.clone(),
                 profile.memory.clone(),
@@ -1247,7 +1201,6 @@ impl Block {
         if self.router.game_wizard() && self.shell.wizard.step == WizardStep::GetStarted {
             let item = match self.shell.wizard.kind {
                 game_wizard::CreationKind::NewInstance => "instance",
-                game_wizard::CreationKind::ExistingInstance => "profile",
                 game_wizard::CreationKind::ImportPack => "pack",
             };
             let handle = self.shell.wizard.creation_focus(item, cx);
@@ -1294,15 +1247,6 @@ impl Block {
                 {
                     vec![&form.name]
                 }
-                None if self.shell.wizard.step == WizardStep::Setup
-                    && self.shell.wizard.kind == game_wizard::CreationKind::ExistingInstance =>
-                {
-                    self.shell
-                        .wizard
-                        .profile
-                        .as_ref()
-                        .map_or_else(Vec::new, |profile| vec![&profile.name])
-                }
                 Some(WizardPage::Loader)
                     if form.loader != block_launcher::catalog::LoaderKind::Vanilla =>
                 {
@@ -1315,7 +1259,7 @@ impl Block {
                 }
                 Some(WizardPage::Loader | WizardPage::OptiFine) | None => Vec::new(),
             },
-            Some(Form::Profile(form)) => {
+            Some(Form::EditInstance(form)) => {
                 let mut fields = vec![&form.name, &form.memory];
                 if !form.managed {
                     fields.push(&form.java);
@@ -1390,42 +1334,53 @@ impl Block {
         })
     }
 
-    fn edit_profile(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        self.shell.instance_editor = None;
-        let Some(profile) = self.inspected_profile().cloned() else {
+    fn edit_instance(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
+        let Some(instance) = self.inspected_instance().cloned() else {
             return;
         };
-        let java = match &profile.runtime {
+        let java = match &instance.runtime {
             RuntimeSelection::Managed => String::new(),
             RuntimeSelection::Local { java } => java.display().to_string(),
         };
-        self.shell.editor = self.begin_profile_editor(window, cx);
+        self.shell.editor = self.begin_instance_editor(window, cx);
         let language = self.language();
-        self.form = Some(Form::Profile(Box::new(ProfileForm {
+        let optifine = instance
+            .targets
+            .iter()
+            .find(|target| target.id == instance.target_id)
+            .and_then(|target| target.optifine.clone())
+            .map(Box::new);
+        self.form = Some(Form::EditInstance(Box::new(InstanceEditForm {
             name: input(
-                &profile.name,
-                &tr!(language, "games.profile_editor.name_placeholder"),
+                &instance.name,
+                &tr!(language, "games.instance_editor.name_placeholder"),
                 cx,
             ),
-            memory: input(&components::memory_gb_text(profile.memory_mib), "2", cx),
+            memory: input(&components::memory_gb_text(instance.memory_mib), "2", cx),
             java: input(
                 &java,
                 &tr!(language, "games.java.executable_placeholder"),
                 cx,
             ),
             jvm: input(
-                &format_arguments(&profile.jvm_args),
-                &tr!(language, "games.profile_editor.jvm_placeholder"),
+                &format_arguments(&instance.jvm_args),
+                &tr!(language, "games.instance_editor.jvm_placeholder"),
                 cx,
             ),
             game: input(
-                &format_arguments(&profile.game_args),
-                &tr!(language, "games.profile_editor.game_placeholder"),
+                &format_arguments(&instance.game_args),
+                &tr!(language, "games.instance_editor.game_placeholder"),
                 cx,
             ),
-            server: input(&profile.server.address, "play.example.com", cx),
-            managed: matches!(profile.runtime, RuntimeSelection::Managed),
-            original: profile,
+            server: input(&instance.server.address, "play.example.com", cx),
+            managed: matches!(instance.runtime, RuntimeSelection::Managed),
+            width: input(&instance.width.to_string(), "1280", cx),
+            height: input(&instance.height.to_string(), "720", cx),
+            game_directory: input(&instance.game_directory.display().to_string(), "", cx),
+            window_custom: !settings::WINDOW_PRESETS.contains(&(instance.width, instance.height)),
+            optifine,
+            optifine_request: None,
+            original: instance,
         })));
     }
 
@@ -1440,8 +1395,8 @@ impl Block {
             return;
         }
         self.pending_play = false;
-        let Some(profile) = self.selected_profile.clone() else {
-            self.report(msg!("runtime.select_profile"));
+        let Some(profile) = self.selected_instance.clone() else {
+            self.report(msg!("runtime.select_instance"));
             return;
         };
         let Some(account) = self
@@ -1452,7 +1407,7 @@ impl Block {
         else {
             self.router.navigate(Tab::Accounts);
             self.status = if self
-                .profile()
+                .instance()
                 .is_some_and(|profile| profile.default_account.is_some())
             {
                 msg!("runtime.default_account_unavailable")
@@ -1625,13 +1580,12 @@ impl Block {
     ) -> components::Control {
         let variant = match &action {
             UiAction::SaveInstance
-            | UiAction::SaveProfile
             | UiAction::SavePreferences
             | UiAction::Play
             | UiAction::WizardNext
-            | UiAction::ProfilePageDone
+            | UiAction::InstancePageDone
             | UiAction::SignIn
-            | UiAction::Drawer(Some(Drawer::Profiles)) => components::ButtonVariant::Primary,
+            | UiAction::Drawer(Some(Drawer::Instances)) => components::ButtonVariant::Primary,
             UiAction::SignOut(_) | UiAction::ConfirmDelete => {
                 components::ButtonVariant::Destructive
             }
@@ -1664,7 +1618,6 @@ impl Block {
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
         let app_menu = matches!(action, UiAction::Drawer(Some(Drawer::Menu)));
-        let profile_actions = matches!(action, UiAction::ProfileActions);
         let product_choice = match &action {
             UiAction::OpenProductSelect(kind) => Some(*kind),
             _ => None,
@@ -1689,10 +1642,6 @@ impl Block {
                 cx.notify();
             } else if app_menu {
                 view.open_app_menu_at(captured_anchor.get(), window, cx);
-                view.motion_dirty = true;
-                cx.notify();
-            } else if profile_actions {
-                view.open_profile_actions_at(captured_anchor.get(), window, cx);
                 view.motion_dirty = true;
                 cx.notify();
             } else {
@@ -1720,7 +1669,7 @@ impl Block {
                 on_activate,
             )
         };
-        if choice.is_some() || profile_actions || product_choice.is_some() {
+        if choice.is_some() || product_choice.is_some() {
             control.child(
                 gpui::canvas(
                     move |bounds, _, _| anchor.set(Some(bounds)),
@@ -2011,13 +1960,12 @@ mod queued_play_ui_tests {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (_, profile) =
-                catalog.create_instance("Queued".into(), "1.20.6".into(), None, None)?;
+            let instance = catalog.create_instance("Queued".into(), "1.20.6".into(), None, None)?;
             let snapshot = catalog.snapshot()?;
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
             view.update(cx, |view, _| {
                 view.snapshot = snapshot;
-                view.selected_profile = Some(profile.id.clone());
+                view.selected_instance = Some(instance.id.clone());
                 view.busy = true;
                 view.operation_kind = OperationKind::Launch;
             });
@@ -2317,8 +2265,7 @@ mod tests {
                 compliance_level: 1,
             }],
             selected_instance: None,
-            selected_profile: None,
-            pending_profile: None,
+            pending_instance: None,
             selected_account: None,
             router: super::Router::new(super::Tab::Instances),
             form: None,
@@ -2696,7 +2643,7 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (instance, profile) =
+            let instance =
                 catalog.create_instance("First game".into(), "1.20.6".into(), None, None)?;
             let snapshot = catalog.snapshot()?;
             let (engine, _messages) = super::Engine::with_root(root.path().into())?;
@@ -2707,7 +2654,6 @@ mod tests {
                 view.begin_first_run(cx);
                 view.snapshot = snapshot;
                 view.selected_instance = Some(instance.id.clone());
-                view.selected_profile = Some(profile.id.clone());
                 assert!(!view.complete_onboarding());
                 cx.notify();
             });
@@ -2722,8 +2668,8 @@ mod tests {
             assert_eq!(snapshot.instances.len(), 1);
             assert_eq!(snapshot.instances[0].id, instance.id);
             assert_eq!(
-                view.read_with(cx, |view, _| view.selected_profile.clone()),
-                Some(profile.id)
+                view.read_with(cx, |view, _| view.selected_instance.clone()),
+                Some(instance.id)
             );
             assert!(super::Preferences::load(root.path())?.onboarding_complete);
             Ok(())
@@ -2775,10 +2721,10 @@ mod tests {
             view.read_with(cx, |view, _| view.preferences.clone()),
             super::Preferences::default()
         );
-        click_selector(cx, "home-profiles");
+        click_selector(cx, "home-instances");
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.drawer()),
-            Some(super::Drawer::Profiles)
+            Some(super::Drawer::Instances)
         );
         crate::test_support::press(cx, "escape");
         assert!(view.read_with(cx, |view, _| view.shell.drawer().is_none()));
@@ -2807,15 +2753,14 @@ mod tests {
 
     fn supervised_record() -> block_launcher::session_host::RunRecord {
         block_launcher::session_host::RunRecord {
-            schema_version: 1,
+            schema_version: 2,
             context: block_launcher::crash::CrashContext {
                 run_id: "synthetic-run".into(),
-                profile_id: "synthetic-profile".into(),
-                profile_name: "Synthetic profile".into(),
+                instance_id: "synthetic-instance".into(),
+                instance_name: "Synthetic instance".into(),
                 minecraft_version: "1.20.6".into(),
                 loader: None,
             },
-            instance_id: "synthetic-instance".into(),
             game_directory: std::env::temp_dir().join("synthetic-game"),
             supervisor_pid: Some(123),
             java_pid: Some(456),
@@ -3006,7 +2951,7 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (instance, profile) =
+            let instance =
                 catalog.create_instance("Requested".into(), "1.20.6".into(), None, None)?;
             let _ =
                 catalog.create_instance("Last in catalog".into(), "1.20.6".into(), None, None)?;
@@ -3015,19 +2960,15 @@ mod tests {
             let (view, cx) = crate::test_support::window(cx, test_view);
             view.update(cx, |view, cx| {
                 view.router.navigate(super::Tab::Home);
-                view.pending_profile = Some(profile.id.clone());
+                view.pending_instance = Some(instance.id.clone());
                 view.messages = Some(receiver);
                 view.poll(cx);
             });
             assert_eq!(
-                view.read_with(cx, |view, _| view.selected_profile.clone()),
-                Some(profile.id)
-            );
-            assert_eq!(
                 view.read_with(cx, |view, _| view.selected_instance.clone()),
                 Some(instance.id)
             );
-            assert!(view.read_with(cx, |view, _| view.pending_profile.is_none()));
+            assert!(view.read_with(cx, |view, _| view.pending_instance.is_none()));
             assert_eq!(
                 view.read_with(cx, |view, _| view.router.tab()),
                 super::Tab::Instances
@@ -3049,7 +2990,7 @@ mod tests {
             ] {
                 let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
                 let mut context = supervised_record().context;
-                context.profile_id = "profile-a".into();
+                context.instance_id = "profile-a".into();
                 let report = block_launcher::crash::CrashReport::new(
                     context,
                     block_launcher::crash::ExitOutcome::start_failed(),
@@ -3176,7 +3117,7 @@ mod tests {
                     form.loader.clone(),
                     form.loader_version.clone(),
                 ),
-                super::Form::Profile(_) => (
+                super::Form::EditInstance(_) => (
                     false,
                     String::new(),
                     block_launcher::catalog::LoaderKind::Vanilla,
@@ -3331,8 +3272,10 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (existing, _) =
+            let existing =
                 catalog.create_instance("Existing game".into(), "1.20.6".into(), None, None)?;
+            let blocked = existing.resource_directory.join("not-a-directory");
+            std::fs::write(&blocked, b"existing data")?;
             let original = serde_json::to_value(catalog.snapshot()?)?;
             let snapshot = catalog.snapshot()?;
             let (engine, messages) = super::Engine::with_root(root.path().to_path_buf())?;
@@ -3349,7 +3292,7 @@ mod tests {
             view.update(cx, |view, cx| {
                 if let Some(super::Form::Instance(form)) = &view.form {
                     form.directory.update(cx, |field, cx| {
-                        field.set_value(&existing.directory.to_string_lossy(), cx);
+                        field.set_value(&blocked.to_string_lossy(), cx);
                     });
                 }
             });
@@ -3357,7 +3300,7 @@ mod tests {
             assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             click_selector(cx, "wizard-next");
             assert!(view.read_with(cx, |view, _| view.busy));
-            // The real engine rejects this overlapping location before network
+            // The real engine rejects this file location before network
             // installation. That failure proves the final action reached it.
             for _ in 0..200 {
                 view.update(cx, super::Block::poll);
@@ -3370,8 +3313,9 @@ mod tests {
             assert!(view.read_with(cx, |view, _| {
                 view.status
                     .text(crate::Language::English)
-                    .contains("installation directory overlaps another instance")
+                    .contains("selected path is not a directory")
             }));
+            assert_eq!(std::fs::read(blocked)?, b"existing data");
             assert_eq!(serde_json::to_value(catalog.snapshot()?)?, original);
             assert_eq!(catalog.snapshot()?.instances.len(), 1);
             Ok(())
@@ -3385,7 +3329,7 @@ mod tests {
     ) {
         let (view, cx) = crate::test_support::window(cx, test_view);
         view.update(cx, |view, cx| {
-            view.selected_profile = Some("profile".into());
+            view.selected_instance = Some("profile".into());
             view.play(cx);
         });
         assert_eq!(
@@ -3414,58 +3358,22 @@ mod tests {
         );
     }
     #[gpui::test]
-    fn actual_profile_editor_keeps_invalid_drafts_and_preserves_saved_settings(
+    fn actual_instance_editor_keeps_invalid_drafts_and_preserves_saved_settings(
         cx: &mut gpui::TestAppContext,
     ) {
-        use block_launcher::{
-            catalog::{DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile},
-            recipe::{Compatibility, RuntimeSelection},
-        };
         let (view, cx) = crate::test_support::window(cx, test_view);
         cx.simulate_resize(gpui::size(gpui::px(1300.), gpui::px(1600.)));
         view.update(cx, |view, cx| {
-            view.snapshot.instances.push(Instance {
-                settings: None,
-                pack: None,
-                id: "instance".into(),
-                name: "Worlds".into(),
-                minecraft_version: "1.20.6".into(),
-                directory: std::env::temp_dir().join("block-ui-synthetic"),
-                targets: vec![LaunchTarget {
-                    id: "vanilla".into(),
-                    kind: LoaderKind::Vanilla,
-                    loader_version: None,
-                    manifest: None,
-                    status: InstallStatus::Pending,
-                    optifine: None,
-                    optifine_mod: None,
-                }],
-            });
-            view.snapshot.profiles.push(Profile {
-                id: "profile".into(),
-                instance_id: "instance".into(),
-                name: "Default".into(),
-                target_id: "vanilla".into(),
-                runtime: RuntimeSelection::Managed,
-                memory_mib: 2048,
-                jvm_args: Vec::new(),
-                game_args: Vec::new(),
-                data_policy: DataPolicy::Isolated,
-                appearance: block_launcher::catalog::ProfileAppearance::default(),
-                inheritance: block_launcher::catalog::ProfileInheritance::default(),
-                server: block_launcher::catalog::ServerPreferences::default(),
-                default_account: None,
-                compatibility: Compatibility::Official,
-            });
+            view.snapshot = crate::test_support::ready_snapshot();
             view.normalize_selection();
             view.router.open_record(
                 super::Tab::Instances,
-                super::navigation::RecordRef::Profile("profile".into()),
+                super::navigation::RecordRef::Instance("instance-a".into()),
             );
             cx.notify();
         });
         cx.run_until_parked();
-        let bounds = cx.debug_bounds("edit-profile");
+        let bounds = cx.debug_bounds("edit-instance");
         assert!(bounds.is_some());
         let Some(bounds) = bounds else {
             return;
@@ -3480,24 +3388,24 @@ mod tests {
         }
         crate::test_support::ensure_live_window(cx);
         view.update(cx, |view, cx| {
-            if let Some(super::Form::Profile(form)) = &view.form {
+            if let Some(super::Form::EditInstance(form)) = &view.form {
                 form.memory
                     .update(cx, |field, cx| field.set_value("invalid", cx));
             }
         });
-        click_selector(cx, "save-profile");
+        click_selector(cx, "save-instance");
         assert!(view.read_with(cx, |view, _| {
             view.status
                 .text(crate::Language::English)
                 .contains("Choose a memory limit between 1 and 32 GB.")
         }));
         assert_eq!(
-            view.read_with(cx, |view, _| view.profile().map(|p| p.memory_mib)),
+            view.read_with(cx, |view, _| view.instance().map(|p| p.memory_mib)),
             Some(2048)
         );
         assert!(view.read_with(cx, |view, _| matches!(
             view.form,
-            Some(super::Form::Profile(_))
+            Some(super::Form::EditInstance(_))
         )));
     }
     #[gpui::test]
@@ -3507,10 +3415,10 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let root = tempfile::tempdir()?;
             let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-            let (first, mut first_profile) =
-                catalog.create_instance("First".into(), "1.20.6".into(), None, None)?;
-            let (second, mut second_profile) =
-                catalog.create_instance("Second".into(), "1.20.6".into(), None, None)?;
+            let first = catalog.create_instance("First".into(), "1.20.6".into(), None, None)?;
+            let second = catalog.create_instance("Second".into(), "1.20.6".into(), None, None)?;
+            let mut first_values = block_launcher::catalog::InstanceConfiguration::from(&first);
+            let mut second_values = block_launcher::catalog::InstanceConfiguration::from(&second);
             let account_a = block_auth::Account {
                 reference: block_auth::AccountRef {
                     player_id: "00000000-0000-4000-8000-000000000001".parse()?,
@@ -3525,17 +3433,16 @@ mod tests {
             account_b.reference.player_id = "00000000-0000-4000-8000-000000000002".parse()?;
             account_b.player_name = "AccountB".into();
             account_b.credential_ref = "synthetic-b".into();
-            first_profile.default_account = Some(super::account_id(&account_a));
-            second_profile.default_account = Some("missing-account".into());
-            catalog.save_profile(first_profile.clone())?;
-            catalog.save_profile(second_profile.clone())?;
+            first_values.default_account = Some(super::account_id(&account_a));
+            second_values.default_account = Some("missing-account".into());
+            catalog.save_instance(&first.id, first_values)?;
+            catalog.save_instance(&second.id, second_values)?;
             let snapshot = catalog.snapshot()?;
             let (view, cx) = crate::test_support::window(cx, test_view);
             view.update(cx, |view, cx| {
                 view.accounts = vec![account_b.clone(), account_a.clone()];
-                view.snapshot = snapshot;
                 view.selected_instance = Some(first.id.clone());
-                view.normalize_selection();
+                view.apply_catalog(snapshot, cx);
                 cx.notify();
             });
             assert_eq!(
@@ -3544,14 +3451,11 @@ mod tests {
             );
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
-                    view.handle(super::UiAction::Inspect(second.id), window, cx);
+                    view.handle(super::UiAction::Inspect(second.id.clone()), window, cx);
                     assert_eq!(view.selected_account, Some(super::account_id(&account_a)));
-                    assert_eq!(
-                        view.selected_profile.as_deref(),
-                        Some(first_profile.id.as_str())
-                    );
+                    assert_eq!(view.selected_instance.as_deref(), Some(first.id.as_str()));
                     view.handle(
-                        super::UiAction::SelectProfile(second_profile.id.clone()),
+                        super::UiAction::SelectInstance(second.id.clone()),
                         window,
                         cx,
                     );
@@ -3583,7 +3487,7 @@ mod tests {
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
                     view.handle(
-                        super::UiAction::SelectProfile(first_profile.id.clone()),
+                        super::UiAction::SelectInstance(first.id.clone()),
                         window,
                         cx,
                     );
@@ -3604,7 +3508,7 @@ mod tests {
             });
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
-                    view.handle(super::UiAction::SelectProfile(first_profile.id), window, cx);
+                    view.handle(super::UiAction::SelectInstance(first.id), window, cx);
                 });
             });
             assert_eq!(

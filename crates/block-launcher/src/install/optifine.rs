@@ -762,19 +762,18 @@ mod tests {
             false,
         )?)?;
         let catalog = crate::catalog::Catalog::open(root.path())?;
-        let (instance, profile) = catalog.create_instance_with_components(
-            "OptiFine game".into(),
+        let instance = catalog.create_instance_with_components(
             "1.21.1".into(),
             None,
             None,
             Some(selected.clone()),
-            crate::catalog::ProfileConfiguration {
-                name: "OptiFine profile".into(),
+            crate::catalog::InstanceConfiguration {
+                name: "OptiFine game".into(),
                 ..Default::default()
             },
         )?;
         let state = crate::catalog::Catalog::open(root.path())?.snapshot()?;
-        let (_, _, target) = state.selection(&profile.id)?;
+        let (_, target) = state.selection(&instance.id)?;
         assert_eq!(target.optifine, Some(selected.clone()));
         let mut changed = target.clone();
         changed.optifine = None;
@@ -783,12 +782,14 @@ mod tests {
         assert!(
             catalog
                 .create_instance_with_components(
-                    "Incompatible".into(),
                     "1.20.6".into(),
                     None,
                     None,
                     Some(selected.clone()),
-                    crate::catalog::ProfileConfiguration::default()
+                    crate::catalog::InstanceConfiguration {
+                        name: "Incompatible".into(),
+                        ..Default::default()
+                    }
                 )
                 .is_err()
         );

@@ -90,21 +90,13 @@
     "zh-Hans": "引擎不可用 · 请检查数据目录后重启 Block",
     "ja": "エンジンを利用できません · データディレクトリを確認して Block を再起動してください"
   },
-  "common.select_profile_account": {
-    "en": "Select a profile and account before playing",
-    "zh-Hans": "游玩前请选择配置档案和账户",
-    "ja": "プレイする前にプロファイルとアカウントを選択してください"
-  },
+  "common.select_instance_account": {"en": "Select an instance and account before playing", "zh-Hans": "游玩前请选择实例和账户", "ja": "プレイする前にインスタンスとアカウントを選択してください"},
   "common.scenario_failed": {
     "en": "Could not prepare UI scenario: %{error}",
     "zh-Hans": "无法准备界面场景：%{error}",
     "ja": "UI シナリオを準備できませんでした: %{error}"
   },
-  "common.requested_profile_unavailable": {
-    "en": "The requested profile is no longer available. Select another profile.",
-    "zh-Hans": "所选配置档案已不可用。请选择其他配置档案。",
-    "ja": "指定されたプロファイルは使用できません。別のプロファイルを選択してください。"
-  },
+  "common.requested_instance_unavailable": {"en": "The requested instance is no longer available. Select another instance.", "zh-Hans": "所选实例已不可用。请选择其他实例。", "ja": "指定されたインスタンスは使用できません。別のインスタンスを選択してください。"},
   "common.logging_unavailable": {
     "en": "Launcher logs are unavailable. Check disk space and permissions.",
     "zh-Hans": "启动器日志不可用。请检查磁盘空间和权限。",

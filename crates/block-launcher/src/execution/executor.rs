@@ -14,6 +14,10 @@ use tokio_util::sync::CancellationToken;
 
 const RUN_ID_TOKEN: &str = "${run_id}";
 
+#[path = "resource_lease.rs"]
+mod resource_lease;
+pub(crate) use resource_lease::ResourceLease;
+
 use crate::{
     command::JavaCommand,
     plan::{ExecutionPlan, JavaExecutable, PrepareAction},
@@ -40,6 +44,41 @@ pub struct PreparedInstance {
     pub root: PathBuf,
     pub run_id: String,
     _lock: fs::File,
+    _resources: Arc<ResourceLease>,
+}
+
+impl PreparedInstance {
+    pub(crate) fn prepare_game_resources(&self, directory: &Path) -> anyhow::Result<()> {
+        for action in &self.plan.actions {
+            if let PrepareAction::GameResource {
+                source,
+                sha1,
+                size,
+                path,
+            } = action
+            {
+                let source = source.resolve(&self.root)?;
+                crate::plan::ExistingResource {
+                    path: source.clone(),
+                    sha1: sha1.clone(),
+                    size: *size,
+                }
+                .verify()?;
+                let resources = directory.join("resources");
+                let destination = confined_path(&resources, path)?;
+                ensure_write_path(directory, &destination)?;
+                fs::create_dir_all(destination.parent().context("asset has no parent")?)?;
+                copy_immutable(&source, &destination, false)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Preparation {
+    Install { repair: bool },
+    Installed,
 }
 
 #[derive(Clone)]
@@ -71,7 +110,15 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PreparedInstance> {
-        self.prepare_inner(plan, cancel, false, None).await
+        let resources = Arc::new(ResourceLease::exclusive(self.store.root())?);
+        self.prepare_inner(
+            plan,
+            cancel,
+            Preparation::Install { repair: false },
+            None,
+            resources,
+        )
+        .await
     }
 
     /// Explicitly repair declared immutable views, retaining corrupt bytes for diagnosis.
@@ -82,7 +129,25 @@ impl Executor {
         plan: ExecutionPlan,
         cancel: &CancellationToken,
     ) -> anyhow::Result<PreparedInstance> {
-        self.prepare_inner(plan, cancel, true, None).await
+        let resources = Arc::new(ResourceLease::exclusive(self.store.root())?);
+        self.prepare_repair_with_resources(plan, cancel, resources)
+            .await
+    }
+
+    pub(crate) async fn prepare_repair_with_resources(
+        &self,
+        plan: ExecutionPlan,
+        cancel: &CancellationToken,
+        resources: Arc<ResourceLease>,
+    ) -> anyhow::Result<PreparedInstance> {
+        self.prepare_inner(
+            plan,
+            cancel,
+            Preparation::Install { repair: true },
+            None,
+            resources,
+        )
+        .await
     }
 
     /// Prepare an installed target using the supervisor's already allocated run ID.
@@ -98,7 +163,19 @@ impl Executor {
             uuid::Uuid::parse_str(run_id)?.to_string() == run_id,
             "invalid run ID"
         );
-        self.prepare_inner(plan, cancel, false, Some(run_id.to_owned()))
+        let resources = Arc::new(ResourceLease::shared(self.store.root())?);
+        self.prepare_installed(plan, cancel, Some(run_id.to_owned()), resources)
+            .await
+    }
+
+    pub(crate) async fn prepare_installed(
+        &self,
+        plan: ExecutionPlan,
+        cancel: &CancellationToken,
+        run_id: Option<String>,
+        resources: Arc<ResourceLease>,
+    ) -> anyhow::Result<PreparedInstance> {
+        self.prepare_inner(plan, cancel, Preparation::Installed, run_id, resources)
             .await
     }
 
@@ -106,17 +183,18 @@ impl Executor {
         &self,
         plan: ExecutionPlan,
         cancel: &CancellationToken,
-        repair: bool,
+        preparation: Preparation,
         run_id: Option<String>,
+        resources: Arc<ResourceLease>,
     ) -> anyhow::Result<PreparedInstance> {
         ensure!(
-            plan.schema_version == 1,
+            plan.schema_version == 2,
             "unsupported execution-plan schema"
         );
         crate::support::plan_support(&plan).require()?;
         plan.target.validate_execution()?;
         let root = self.store.root().canonicalize()?;
-        let instance = confined_path(&root, &format!("instances/{}", plan.instance))?;
+        let instance = confined_path(&root, &format!("preparations/{}", plan.instance))?;
         ensure_write_path(&root, &instance)?;
         fs::create_dir_all(&instance)?;
         ensure_write_path(&root, &instance.join("instance.lock"))?;
@@ -131,12 +209,41 @@ impl Executor {
         if let JavaExecutable::Local { path } = &plan.command.java {
             probe_java(path, &plan).await?;
         }
-        self.download_resources(&plan, cancel, repair).await?;
-        tracing::debug!(event = "preparation_phase", phase = "materialize", repair);
+        plan.verify_existing_resources()?;
+        if matches!(preparation, Preparation::Installed) {
+            (self.events)(ExecutionEvent::Stage {
+                name: "Checking installed resources".into(),
+            });
+            Store::with_options(
+                self.store.root().to_owned(),
+                true,
+                Arc::new(|_| {}),
+                self.store.options().clone(),
+            )?
+            .fetch_all(&plan.resources, cancel)
+            .await?;
+        } else {
+            self.download_resources(
+                &plan,
+                cancel,
+                matches!(preparation, Preparation::Install { repair: true }),
+            )
+            .await?;
+        }
+        tracing::debug!(event = "preparation_phase", phase = "materialize");
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
         });
-        let run_id = materialize_async(&plan, &root, &self.store, cancel, repair, run_id).await?;
+        let run_id = materialize_async(
+            &plan,
+            &root,
+            &self.store,
+            cancel,
+            preparation,
+            run_id,
+            Arc::clone(&resources),
+        )
+        .await?;
         if let JavaExecutable::Managed { path } = &plan.command.java {
             probe_java(&confined_path(&root, path)?, &plan).await?;
         }
@@ -157,6 +264,7 @@ impl Executor {
             root,
             run_id,
             _lock: lock,
+            _resources: resources,
         })
     }
 
@@ -190,7 +298,7 @@ impl Executor {
         let logs = confined_path(
             &prepared.root,
             &format!(
-                "instances/{}/runs/{}/logs",
+                "preparations/{}/runs/{}/logs",
                 prepared.plan.instance, prepared.run_id
             ),
         )?;
@@ -205,8 +313,9 @@ async fn materialize_async(
     root: &Path,
     store: &Store,
     cancel: &CancellationToken,
-    repair: bool,
+    preparation: Preparation,
     run_id: Option<String>,
+    resources: Arc<ResourceLease>,
 ) -> anyhow::Result<String> {
     let run_id = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let materialization = (
@@ -215,10 +324,10 @@ async fn materialize_async(
         run_id.clone(),
         store.clone(),
         cancel.clone(),
-        repair,
     );
     tokio::task::spawn_blocking(move || {
-        if materialization.5 {
+        let _resources = resources;
+        if matches!(preparation, Preparation::Install { repair: true }) {
             crate::repair::quarantine_corrupt_copies(
                 &materialization.3,
                 &materialization.0,
@@ -232,6 +341,7 @@ async fn materialize_async(
             &materialization.2,
             &materialization.3,
             &materialization.4,
+            preparation,
         )
     })
     .await??;
@@ -357,10 +467,12 @@ fn materialize(
     run_id: &str,
     store: &Store,
     cancel: &CancellationToken,
+    preparation: Preparation,
 ) -> anyhow::Result<()> {
     let mut links = Vec::new();
     for action in &plan.actions {
         ensure!(!cancel.is_cancelled(), "preparation cancelled");
+        let installed = matches!(preparation, Preparation::Installed);
         match action {
             PrepareAction::Copy {
                 sha1,
@@ -369,6 +481,12 @@ fn materialize(
             } => {
                 let destination = confined_path(root, &path.replace(RUN_ID_TOKEN, run_id))?;
                 ensure_write_path(root, &destination)?;
+                if installed && !path.contains(RUN_ID_TOKEN) {
+                    ensure!(
+                        destination.is_file(),
+                        "installed resource is missing; repair before playing"
+                    );
+                }
                 fs::create_dir_all(
                     destination
                         .parent()
@@ -377,18 +495,51 @@ fn materialize(
                 copy_immutable(&store.object_path(sha1)?, &destination, *executable)?;
             }
             PrepareAction::Directory { path } => {
-                let path = confined_path(root, &path.replace(RUN_ID_TOKEN, run_id))?;
-                ensure_write_path(root, &path)?;
-                fs::create_dir_all(path)?;
+                let directory = confined_path(root, &path.replace(RUN_ID_TOKEN, run_id))?;
+                ensure_write_path(root, &directory)?;
+                if installed && !path.contains(RUN_ID_TOKEN) {
+                    ensure!(
+                        directory.is_dir(),
+                        "installed resource directory is missing; repair before playing"
+                    );
+                } else {
+                    fs::create_dir_all(directory)?;
+                }
             }
             PrepareAction::Extract {
                 sha1,
                 directory,
                 excludes,
             } => {
+                ensure!(
+                    !installed || directory.contains(RUN_ID_TOKEN),
+                    "installed preparation cannot extract into shared resources"
+                );
                 let directory = confined_path(root, &directory.replace(RUN_ID_TOKEN, run_id))?;
                 extract(root, &store.object_path(sha1)?, &directory, excludes)?;
             }
+            PrepareAction::ExtractExisting {
+                resource,
+                directory,
+                excludes,
+            } => {
+                ensure!(
+                    directory.contains(RUN_ID_TOKEN),
+                    "source natives must extract into a run-private directory"
+                );
+                ensure!(
+                    plan.existing_resources.iter().any(|declared| {
+                        declared.path == resource.path
+                            && declared.sha1 == resource.sha1
+                            && declared.size == resource.size
+                    }),
+                    "native source was not declared by the plan"
+                );
+                resource.verify()?;
+                let directory = confined_path(root, &directory.replace(RUN_ID_TOKEN, run_id))?;
+                extract(root, &resource.path, &directory, excludes)?;
+            }
+            PrepareAction::GameResource { .. } => {}
             PrepareAction::ExtractArchive {
                 sha256,
                 directory,
@@ -396,18 +547,39 @@ fn materialize(
             } => {
                 let directory = confined_path(root, &directory.replace(RUN_ID_TOKEN, run_id))?;
                 ensure_write_path(root, &directory)?;
-                install_archive(
-                    root,
-                    &store.sha256_object_path(sha256)?,
-                    &directory,
-                    *archive,
-                )?;
+                if installed {
+                    ensure!(
+                        directory
+                            .join(if cfg!(windows) {
+                                "bin/java.exe"
+                            } else {
+                                "bin/java"
+                            })
+                            .is_file(),
+                        "installed runtime is missing; repair before playing"
+                    );
+                } else {
+                    install_archive(
+                        root,
+                        &store.sha256_object_path(sha256)?,
+                        &directory,
+                        *archive,
+                    )?;
+                }
             }
             PrepareAction::Link {
                 path,
                 target,
                 scope,
-            } => links.push((path, target, scope)),
+            } => {
+                if installed {
+                    ensure!(
+                        fs::symlink_metadata(confined_path(root, path)?).is_ok(),
+                        "installed runtime link is missing; repair before playing"
+                    );
+                }
+                links.push((path, target, scope));
+            }
         }
     }
     while !links.is_empty() {

@@ -4,8 +4,8 @@ Choose **Add Game**, then **Import pack**, or use the pack shortcut in the
 existing game-directory import drawer. Block inspects the selected archive
 before creating a new Instance. Review the original pack name, game or Instance
 name, target and optional files; required files can be expanded. The new name
-does not change the original pack name. The first Profile uses the current
-defaults; its launch settings can be changed after import.
+does not change the original pack name. The Instance stores the current
+creation defaults directly; its launch settings can be changed after import.
 
 ## Supported inputs
 
@@ -37,11 +37,13 @@ Archives are read-only inputs. ZIP paths, links, duplicate entries, conflicting
 destinations and extraction bounds are checked before publishing content.
 Installation does not execute archive scripts or copy launcher credentials.
 
-Pack metadata and the original content baseline live under the Instance's fixed
-`.block-pack/` directory. Download URLs remain transient. The baseline is
-separate from the Profile's writable game directory: initial Profile preparation
-uses it without cloning another Profile's played worlds or configuration.
-Existing game data is not overwritten during later preparation or policy changes.
+Pack metadata and the original content baseline live under the managed Instance's
+resource root in `.block-pack/`. Download URLs remain transient. Initial
+preparation publishes that baseline into the Instance's actual locked game
+directory without cloning another game's played worlds or configuration.
+The selected pack target and Managed ownership are checked; Registered sources
+never enter pack baseline initialization. Existing destination entries are not
+overwritten during preparation, and policy changes do not move game data.
 Ordinary Repair continues to repair the base game and Loader, not reset pack
 configuration or worlds.
 
@@ -57,7 +59,11 @@ Keep the original archive for recovery. After restarting Block or moving the
 archive, select it again to resume; its declarations must match the saved pack.
 The already-snapshotted overrides remain the baseline for that installation.
 
-## Verification
+## Historical verification
+
+The following Game Wizard results predate the 2026-11-09 Instance-only contract.
+They retain their original scope and counts; they do not establish current
+redesign acceptance. The native acceptance matrix remains in progress.
 
 The Game Wizard integration passed `just check` on macOS ARM64, including
 534 UI tests and 3 GPUI framework tests, plus strict UI Clippy with

@@ -147,11 +147,11 @@ async fn execute(
     let library = Library::new(root.to_owned(), Arc::new(|_| {}), events(state))?;
     let plan = library
         .prepare_launch(
-            &bootstrap.profile_id,
+            &bootstrap.instance_id,
             bootstrap,
             stop,
             Some(&record.context.run_id),
-            Some(&bootstrap.profile_fingerprint),
+            Some(&bootstrap.instance_fingerprint),
         )
         .await?;
     tracing::info!(
@@ -420,7 +420,7 @@ pub async fn run_session_host(root: &Path, run_id: &str) -> anyhow::Result<()> {
     )
     .await;
     let outcome = match bootstrap {
-        Ok(Ok(bootstrap)) if bootstrap.profile_id == snapshot(&shared)?.context.profile_id => {
+        Ok(Ok(bootstrap)) if bootstrap.instance_id == snapshot(&shared)?.context.instance_id => {
             execute_accepted(&root, run_id, &bootstrap, &shared, &stop).await?
         }
         _ => launch_error(

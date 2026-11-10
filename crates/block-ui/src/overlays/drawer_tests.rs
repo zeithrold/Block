@@ -23,7 +23,6 @@ fn fixture(
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.snapshot = crate::test_support::ready_snapshot();
-        view.selected_profile = Some("profile-a".into());
         view.selected_instance = Some("instance-a".into());
         view.preferences.reduce_motion = reduced;
         view.saved_preferences.reduce_motion = reduced;
@@ -183,7 +182,9 @@ fn import_candidate(id: &str) -> GameCandidate {
         source: SourceKind::OfficialLauncher,
         source_root: "/synthetic/launcher".into(),
         name: id.into(),
-        game_directory: format!("/synthetic/{id}").into(),
+        resource_directory: format!("/synthetic/{id}").into(),
+        version_id: Some("1.20.6".into()),
+        data: block_launcher::game_import::GameDataEvidence::Unknown,
         configured_version: Some("1.20.6".into()),
         minecraft_version: Some("1.20.6".into()),
         loader: None,
@@ -202,7 +203,7 @@ fn headers_keep_their_text_aligned_without_a_back_action(cx: &mut TestAppContext
         cx.simulate_resize(size(px(width), px(768.)));
         for drawer in [
             Drawer::Accounts,
-            Drawer::Profiles,
+            Drawer::Instances,
             Drawer::Downloads,
             Drawer::ImportGames,
         ] {
@@ -291,7 +292,7 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
         "keyboard focus must not add a thick inner border underneath the outer selection"
     );
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page),
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
         Page::Sources,
         "the path area selects the source without navigating"
     );
@@ -355,7 +356,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
     }
     click(cx, "import-view-OfficialLauncher");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page),
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
         Page::List
     );
 
@@ -372,7 +373,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
     assert!(description.top() >= back.bottom());
     let node = control_node(cx, "import-header-back");
     assert_eq!(node.role(), Some(gpui::Role::Button));
-    assert_eq!(node.label(), Some("Back to sources"));
+    assert_eq!(node.label(), Some("Back"));
 
     let mut border_failures = Vec::new();
     for (appearance, palette) in [
@@ -386,7 +387,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
         cx.run_until_parked();
         cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
         cx.run_until_parked();
-        assert_control_color(cx, "import-copy", palette.primary);
+        assert_control_color(cx, "import-add", palette.primary);
         for selector in ["drawer-close", "import-header-back"] {
             cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
             cx.run_until_parked();
@@ -477,9 +478,9 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         "one selection row must directly precede the cards without a separate count row"
     );
     assert_eq!(
-        card.top() - bounds(cx, "import-game-one").bottom(),
+        card.top() - bounds(cx, "import-data-one").bottom(),
         px(4.),
-        "candidate choices retain a small vertical gap"
+        "the next candidate follows the preceding data warning with a small gap"
     );
     assert_eq!(
         control_node(cx, "import-game-two").role(),
@@ -502,12 +503,18 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
             "clicking the metadata or trailing indicator must toggle the complete card once"
         );
         assert_eq!(control_node(cx, "import-game-two").checked(), Some(true));
-        assert_import_selection_summary(cx, "2 / 2 selected");
+        assert_eq!(
+            control_node(cx, "import-selection-count").label(),
+            Some("2 / 2 selected")
+        );
         assert_selection_surface(&view, cx, "import-game-two", true);
         crate::test_support::press(cx, "space");
         cx.run_until_parked();
         assert_eq!(control_node(cx, "import-game-two").checked(), Some(false));
-        assert_import_selection_summary(cx, "1 / 2 selected");
+        assert_eq!(
+            control_node(cx, "import-selection-count").label(),
+            Some("1 / 2 selected")
+        );
         assert_eq!(
             bounds(cx, "import-game-two"),
             card,
@@ -528,13 +535,17 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
         cx.notify();
     });
     cx.run_until_parked();
+    assert_import_selection_summary(cx, "1 / 2 selected");
     assert_eq!(
         bounds(cx, "import-select-all").right(),
         panel.right() - px(20.),
         "bulk selection stays aligned with the fixed footer"
     );
-    assert_eq!(card.left(), panel.left() + px(20.));
-    assert_eq!(card.right(), panel.right() - px(20.));
+    assert_eq!(
+        (card.left(), card.right()),
+        (panel.left() + px(20.), panel.right() - px(20.)),
+        "candidate cards keep symmetric horizontal insets"
+    );
     assert_eq!(
         control_node(cx, "import-select-all").label(),
         Some("Select all")
@@ -548,7 +559,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     assert_eq!(control_node(cx, "import-select-all").label(), Some("Clear"));
     click(cx, "import-header-back");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page),
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
         Page::Sources
     );
     assert_eq!(
@@ -566,7 +577,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     );
     click(cx, "import-header-back");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page),
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
         Page::Sources
     );
     assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
@@ -603,7 +614,7 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
         );
         click(cx, "import-view-OfficialLauncher");
         assert_eq!(
-            view.read_with(cx, |view, _| view.shell.import_games.page),
+            view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
             Page::List,
             "partial and empty selections must retain access to all candidates"
         );
@@ -715,7 +726,7 @@ fn import_header_keyboard_back_and_close_preserve_dismissal_policy(cx: &mut Test
     crate::test_support::press(cx, "enter");
     cx.run_until_parked();
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page),
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
         Page::Sources
     );
 
@@ -770,7 +781,7 @@ fn import_header_keyboard_back_and_close_preserve_dismissal_policy(cx: &mut Test
 fn handle_drag_tracks_pointer_rebounds_then_dismisses_and_restores_focus(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     let start_panel = bounds(cx, "block-drawer");
     let handle = bounds(cx, "drawer-handle").center();
     cx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::none());
@@ -814,7 +825,7 @@ fn handle_drag_tracks_pointer_rebounds_then_dismisses_and_restores_focus(cx: &mu
 #[gpui::test]
 fn body_pointer_motion_does_not_start_a_drawer_gesture(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     let panel = bounds(cx, "block-drawer");
     let list = bounds(cx, "selector-results");
     let start = list.origin + point(px(8.), px(8.));
@@ -838,7 +849,7 @@ fn body_pointer_motion_does_not_start_a_drawer_gesture(cx: &mut TestAppContext) 
 fn fixed_panel_keeps_management_action_visible(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     cx.simulate_resize(size(px(360.), px(720.)));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     let panel = bounds(cx, "block-drawer");
     assert_eq!(panel.size.height, px(540.));
     assert!(panel.origin.y >= bounds(cx, "window-title").bottom() + px(super::TITLE_BAR_GAP));
@@ -862,7 +873,7 @@ fn fixed_panel_keeps_management_action_visible(cx: &mut TestAppContext) {
 fn full_height_panel_stops_a_gap_below_the_title_bar(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     cx.simulate_resize(size(px(360.), px(540.)));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     let title = bounds(cx, "window-title");
     let backdrop = bounds(cx, "block-drawer-backdrop");
     let panel = bounds(cx, "block-drawer");
@@ -908,7 +919,7 @@ fn full_height_panel_stops_a_gap_below_the_title_bar(cx: &mut TestAppContext) {
 fn full_height_gesture_measures_the_shortened_panel(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     cx.simulate_resize(size(px(360.), px(540.)));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     let handle = bounds(cx, "drawer-handle").center();
     let pulled = handle + point(px(0.), px(152.));
     cx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::none());
@@ -945,7 +956,7 @@ fn panel_quad(cx: &mut VisualTestContext) -> gpui::Quad {
 fn exit_keeps_body_and_modal_input_until_animation_finishes(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     frame(cx, 500);
     let panel = bounds(cx, "block-drawer");
     act(&view, UiAction::Drawer(None), cx);
@@ -966,7 +977,7 @@ fn exit_keeps_body_and_modal_input_until_animation_finishes(cx: &mut TestAppCont
 fn rapid_reopen_cannot_be_removed_by_the_previous_exit(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     frame(cx, 500);
     let stale = view.read_with(cx, |view, _| {
         view.shell.surfaces.top().map(|layer| layer.revision)
@@ -999,10 +1010,10 @@ fn dialog_opened_during_drawer_exit_keeps_focus_and_returns_to_the_trigger(
 
     let (view, cx, _system_motion) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     frame(cx, 500);
     act(&view, UiAction::Drawer(None), cx);
-    act(&view, UiAction::DeleteProfileId("profile-a".into()), cx);
+    act(&view, UiAction::DeleteInstanceId("instance-a".into()), cx);
     let dialog_focus = cx.update(|window, cx| window.focused(cx));
     frame(cx, 500);
     assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
@@ -1016,7 +1027,7 @@ fn dialog_opened_during_drawer_exit_keeps_focus_and_returns_to_the_trigger(
 fn system_reduced_motion_closes_immediately_with_the_app_preference_off(cx: &mut TestAppContext) {
     let (view, cx, _normal_policy) = fixture(cx, false);
     let invoking_focus = cx.update(|window, cx| window.focused(cx));
-    act(&view, UiAction::Drawer(Some(Drawer::Profiles)), cx);
+    act(&view, UiAction::Drawer(Some(Drawer::Instances)), cx);
     frame(cx, 500);
     let _reduced_policy = crate::platform::test_system_motion(true);
     act(&view, UiAction::Drawer(None), cx);

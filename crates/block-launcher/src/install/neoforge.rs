@@ -19,7 +19,7 @@ use sha1::{Digest as _, Sha1};
 
 use crate::{
     manifest::model::{Argument, Library, VersionManifest},
-    plan::{ExecutionPlan, PrepareAction},
+    plan::{ExecutionPlan, PrepareAction, ResourcePath},
     resolver::{ResolveContext, download_resource},
 };
 
@@ -1056,8 +1056,10 @@ pub(crate) fn adapt_plan_kind(
         }
     }
     for path in &mut plan.command.classpath {
-        if let Some(replacement) = mappings.get(path) {
-            *path = replacement.clone();
+        if let ResourcePath::Cache { relative } = path
+            && let Some(replacement) = mappings.get(relative)
+        {
+            *relative = replacement.clone();
         }
     }
     for artifact in &installed.artifacts {
@@ -1081,9 +1083,12 @@ pub(crate) fn adapt_plan_kind(
             plan.actions.push(PrepareAction::Copy { sha1: artifact.resource.sha1.clone(), path, executable: false });
         }
     }
-    plan.command
-        .path_variables
-        .insert("library_directory".into(), library_root);
+    plan.command.path_variables.insert(
+        "library_directory".into(),
+        ResourcePath::Cache {
+            relative: library_root,
+        },
+    );
     let separator = if plan.target.os == crate::platform::OperatingSystem::Windows {
         ";"
     } else {

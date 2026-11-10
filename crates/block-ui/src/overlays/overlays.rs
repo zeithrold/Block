@@ -496,11 +496,7 @@ fn settings_dialog_back(
         let view = owner.read(cx);
         view.router.tab() == super::Tab::Settings
             && view.shell.surfaces.top().is_some_and(|entry| {
-                entry.revision == revision
-                    && matches!(
-                        entry.kind,
-                        Surface::SeparateProfiles | Surface::SettingsExit(_)
-                    )
+                entry.revision == revision && matches!(entry.kind, Surface::SettingsExit(_))
             })
             && !view.settings_form.as_ref().is_some_and(|draft| {
                 draft
@@ -555,12 +551,6 @@ impl Block {
             .iter()
             .find(|entry| entry.revision == revision)?;
         match &entry.kind {
-            Surface::SeparateProfiles => Some(
-                self.shell
-                    .surfaces
-                    .trigger_focus("cancel-separate", cx)
-                    .tab_stop(true),
-            ),
             Surface::SettingsExit(_) => Some(
                 self.shell
                     .surfaces
@@ -573,7 +563,7 @@ impl Block {
                     .trigger_focus("editor-exit-stay", cx)
                     .tab_stop(true),
             ),
-            Surface::Drawer(Drawer::Accounts | Drawer::Profiles) => self
+            Surface::Drawer(Drawer::Accounts | Drawer::Instances) => self
                 .shell
                 .selector
                 .as_ref()
@@ -638,13 +628,12 @@ impl Surface {
             Self::Drawer(Drawer::Language) => "language",
             Self::Drawer(Drawer::Menu) => "menu",
             Self::Drawer(Drawer::Accounts) => "accounts",
-            Self::Drawer(Drawer::Profiles) => "profiles",
+            Self::Drawer(Drawer::Instances) => "instances",
             Self::Drawer(Drawer::Downloads) => "downloads",
             Self::DownloadFiles(_) => "download_files",
-            Self::DeleteProfile(_) => "delete_profile",
+            Self::DeleteInstance(_) => "delete_instance",
             Self::RemoveAccount(_) => "remove_account",
             Self::RemoveProvider(_) => "remove_provider",
-            Self::SeparateProfiles => "separate_profiles",
             Self::StopPackImport { .. } => "stop_pack_import",
             Self::DiscardGameDraft { .. } => "discard_game_draft",
             Self::SettingsExit(_) => "settings_exit",
@@ -670,14 +659,13 @@ impl Surface {
             Self::Drawer(Drawer::Menu) => tr!(language, "surface.menu"),
             Self::Drawer(Drawer::Language) => tr!(language, "setup.language.label"),
             Self::Drawer(Drawer::Accounts) => tr!(language, "action.switch_account"),
-            Self::Drawer(Drawer::Profiles) => tr!(language, "action.switch_game"),
+            Self::Drawer(Drawer::Instances) => tr!(language, "action.switch_game"),
             Self::Drawer(Drawer::Downloads) => tr!(language, "surface.downloads"),
             Self::Drawer(Drawer::ImportGames) => tr!(language, "surface.import_games"),
             Self::DownloadFiles(group) => group.label(language),
-            Self::DeleteProfile(_) => tr!(language, "action.delete_profile"),
+            Self::DeleteInstance(_) => tr!(language, "action.delete_instance"),
             Self::RemoveAccount(_) => tr!(language, "action.remove_account"),
             Self::RemoveProvider(_) => tr!(language, "action.remove_provider"),
-            Self::SeparateProfiles => tr!(language, "action.enable_separated"),
             Self::StopPackImport { .. } => tr!(language, "modpack.leave.title"),
             Self::DiscardGameDraft { .. } => tr!(language, "wizard.discard.title"),
             Self::SettingsExit(_) => tr!(language, "settings.exit.home_title"),
@@ -695,7 +683,7 @@ impl Surface {
             Self::Drawer(Drawer::Menu) | Self::Select(_) => None,
             Self::Drawer(
                 Drawer::Accounts
-                | Drawer::Profiles
+                | Drawer::Instances
                 | Drawer::Downloads
                 | Drawer::ImportGames
                 | Drawer::Language,
@@ -703,10 +691,9 @@ impl Surface {
             Self::DownloadFiles(_)
             | Self::GamesHelp
             | Self::AuthProviderAdd
-            | Self::DeleteProfile(_)
+            | Self::DeleteInstance(_)
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)
-            | Self::SeparateProfiles
             | Self::StopPackImport { .. }
             | Self::DiscardGameDraft { .. }
             | Self::SettingsExit(_)

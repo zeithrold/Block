@@ -531,7 +531,7 @@ fn open_editor(
             view.preferences.reduce_motion = true;
             view.router.navigate(Tab::Instances);
             view.snapshot = crate::test_support::ready_snapshot();
-            view.handle(UiAction::Inspect("profile-a".into()), window, cx);
+            view.handle(UiAction::Inspect("instance-a".into()), window, cx);
             view.handle(action, window, cx);
         });
     });
@@ -543,37 +543,37 @@ fn open_editor(
 fn profile_selects_commit_only_the_page_draft_and_cancel_restores_its_checkpoint(
     cx: &mut gpui::TestAppContext,
 ) {
-    let (view, cx) = open_editor(cx, UiAction::EditProfile);
-    click(cx, "edit-profile-data");
+    let (view, cx) = open_editor(cx, UiAction::EditInstance);
+    click(cx, "edit-instance-data");
     click(cx, "data-policy");
     assert!(view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, Surface::Select(state) if state.choices.len() == 2 && state.active == 0))));
     crate::test_support::press(cx, "end enter");
-    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(Form::Profile(form)) if form.original.data_policy == DataPolicy::Shared) && view.snapshot.profiles[0].data_policy == DataPolicy::Isolated));
-    click(cx, "cancel-profile-page");
-    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(Form::Profile(form)) if form.original.data_policy == DataPolicy::Isolated)));
-    click(cx, "edit-profile-launch");
-    click(cx, "profile-runtime");
+    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(Form::EditInstance(form)) if form.original.data_policy == DataPolicy::Shared) && view.snapshot.instances[0].data_policy == DataPolicy::Isolated));
+    click(cx, "cancel-instance-page");
+    assert!(view.read_with(cx, |view, _| matches!(&view.form, Some(Form::EditInstance(form)) if form.original.data_policy == DataPolicy::Isolated)));
+    click(cx, "edit-instance-launch");
+    click(cx, "instance-runtime");
     crate::test_support::press(cx, "end enter");
     assert!(view.read_with(
         cx,
-        |view, _| matches!(&view.form, Some(Form::Profile(form)) if !form.managed)
+        |view, _| matches!(&view.form, Some(Form::EditInstance(form)) if !form.managed)
     ));
     cx.update(|window, cx| {
         view.read_with(cx, |view, cx| {
-            assert!(matches!(&view.form, Some(Form::Profile(form)) if form.java.read(cx).focus_handle(cx).is_focused(window)));
+            assert!(matches!(&view.form, Some(Form::EditInstance(form)) if form.java.read(cx).focus_handle(cx).is_focused(window)));
         });
     });
     view.update(cx, |view, cx| {
-        if let Some(Form::Profile(form)) = &view.form {
+        if let Some(Form::EditInstance(form)) = &view.form {
             form.java
                 .update(cx, |input, cx| input.set_value("/usr/bin/java", cx));
         }
     });
-    click(cx, "profile-runtime");
+    click(cx, "instance-runtime");
     crate::test_support::press(cx, "home enter");
-    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::Profile(form)) if form.managed && form.java.read(cx).value() == "/usr/bin/java")));
-    click(cx, "cancel-profile-page");
-    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::Profile(form)) if form.managed && form.java.read(cx).value().is_empty())));
+    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value() == "/usr/bin/java")));
+    click(cx, "cancel-instance-page");
+    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value().is_empty())));
 }
 
 #[gpui::test]
@@ -581,6 +581,7 @@ fn instance_selects_preserve_custom_input_validate_real_values_and_discard_on_ca
     cx: &mut gpui::TestAppContext,
 ) {
     let (view, cx) = open_editor(cx, UiAction::EditInstance);
+    click(cx, "edit-instance-launch");
     click(cx, "instance-runtime");
     crate::test_support::press(cx, "end enter");
     assert_eq!(
@@ -613,20 +614,21 @@ fn instance_selects_preserve_custom_input_validate_real_values_and_discard_on_ca
     );
     settle(cx);
 
-    click(cx, "cancel-instance-settings");
+    click(cx, "done-instance-page");
+    click(cx, "cancel-instance");
     assert!(view.read_with(cx, |view, _| {
-        view.shell.instance_editor.is_some()
+        matches!(view.form, Some(Form::EditInstance(_)))
             && matches!(
                 view.shell.surfaces.top().map(|layer| &layer.kind),
                 Some(Surface::EditorExit(_))
             )
-            && view.snapshot.instances[0].settings.is_none()
+            && view.snapshot.instances[0].width == 1280
+            && view.snapshot.instances[0].height == 720
     }));
     click(cx, "editor-exit-discard");
-    assert!(
-        view.read_with(cx, |view, _| view.shell.instance_editor.is_none()
-            && view.snapshot.instances[0].settings.is_none())
-    );
+    assert!(view.read_with(cx, |view, _| view.form.is_none()
+        && view.snapshot.instances[0].width == 1280
+        && view.snapshot.instances[0].height == 720));
 }
 
 #[gpui::test]

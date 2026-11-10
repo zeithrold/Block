@@ -1,6 +1,7 @@
 //! Native architecture policy shared by catalog views, planners and saved-plan execution.
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
@@ -8,7 +9,7 @@ use std::{
 
 use crate::{
     manifest::model::VersionManifest,
-    plan::ExecutionPlan,
+    plan::{ExecutionPlan, ResourcePath},
     platform::{Architecture, OperatingSystem, Target},
     rules,
 };
@@ -317,11 +318,25 @@ pub fn plan_support(plan: &ExecutionPlan) -> NativeSupport {
     if !needs_arm64_policy(&plan.target) {
         return NativeSupport::Supported;
     }
+    let paths: Vec<_> = plan
+        .command
+        .classpath
+        .iter()
+        .map(|path| match path {
+            ResourcePath::Cache { relative } => Cow::Borrowed(relative.as_str()),
+            ResourcePath::Existing { path } => path.to_string_lossy(),
+        })
+        .chain(
+            plan.existing_resources
+                .iter()
+                .map(|resource| resource.path.to_string_lossy()),
+        )
+        .collect();
     if plan.target.os == OperatingSystem::Linux {
         // The Linux plan carries the substituted ARM64 classifiers explicitly.
         let mut evidence = NativeEvidence::default();
         let mut arm64_native = false;
-        for path in &plan.command.classpath {
+        for path in &paths {
             let filename = plan_filename(path);
             if filename.starts_with("lwjgl-2.") || filename.starts_with("lwjgl_util-2.") {
                 evidence.legacy = true;
@@ -356,7 +371,7 @@ pub fn plan_support(plan: &ExecutionPlan) -> NativeSupport {
         // The Windows plan carries the substituted ARM64 classifiers explicitly.
         let mut legacy = false;
         let mut arm64_native = false;
-        for path in &plan.command.classpath {
+        for path in &paths {
             let filename = plan_filename(path);
             if filename.starts_with("lwjgl-2.") || filename.starts_with("lwjgl_util-2.") {
                 legacy = true;
@@ -388,7 +403,7 @@ pub fn plan_support(plan: &ExecutionPlan) -> NativeSupport {
         });
     }
     let mut evidence = NativeEvidence::default();
-    for path in &plan.command.classpath {
+    for path in &paths {
         evidence.record(path);
     }
     evidence.decision(&plan.version, &plan.target)

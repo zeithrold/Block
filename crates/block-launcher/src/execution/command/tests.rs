@@ -23,7 +23,7 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
         authlib: None,
     };
     let plan = ExecutionPlan {
-        schema_version: 1,
+        schema_version: 2,
         instance: "fixture".into(),
         version: "fixture".into(),
         manifest_sha1: String::new(),
@@ -33,6 +33,8 @@ fn external_properties_bind_only_at_runtime_and_remain_redacted() -> anyhow::Res
             os_version: String::new(),
         },
         resources: Vec::new(),
+        existing_resources: Vec::new(),
+        existing_asset_root: None,
         actions: Vec::new(),
         compatibility: None,
         runtime_substitution: None,
@@ -160,7 +162,7 @@ fn binding_normalizes_every_java_path_but_preserves_canonical_storage() -> anyho
     let root = temporary.path().canonicalize()?;
     assert!(root.to_string_lossy().starts_with(r"\\?\"));
     let plan = ExecutionPlan {
-        schema_version: 1,
+        schema_version: 2,
         instance: "windows-test".into(),
         version: "test".into(),
         manifest_sha1: String::new(),
@@ -170,6 +172,8 @@ fn binding_normalizes_every_java_path_but_preserves_canonical_storage() -> anyho
             os_version: "10.0.19044".into(),
         },
         resources: Vec::new(),
+        existing_resources: Vec::new(),
+        existing_asset_root: None,
         actions: Vec::new(),
         compatibility: None,
         runtime_substitution: None,
@@ -185,11 +189,28 @@ fn binding_normalizes_every_java_path_but_preserves_canonical_storage() -> anyho
                 "-Djava.library.path=${natives_directory}".into(),
             ],
             game_args: vec!["--gameDir".into(), "${game_directory}".into()],
-            classpath: vec!["libraries/one.jar".into(), "clients/client.jar".into()],
+            classpath: vec![
+                crate::plan::ResourcePath::Cache {
+                    relative: "libraries/one.jar".into(),
+                },
+                crate::plan::ResourcePath::Cache {
+                    relative: "clients/client.jar".into(),
+                },
+            ],
             variables: BTreeMap::new(),
             path_variables: BTreeMap::from([
-                ("natives_directory".into(), "runs/${run_id}/natives".into()),
-                ("game_directory".into(), "instances/game with spaces".into()),
+                (
+                    "natives_directory".into(),
+                    crate::plan::ResourcePath::Cache {
+                        relative: "runs/${run_id}/natives".into(),
+                    },
+                ),
+                (
+                    "game_directory".into(),
+                    crate::plan::ResourcePath::Cache {
+                        relative: "instances/game with spaces".into(),
+                    },
+                ),
             ]),
             cwd: "instances/game with spaces".into(),
         },

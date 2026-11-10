@@ -23,6 +23,7 @@ const CACHE_TREES: &[&str] = &[
     "loaders",
     "installations",
     "installer-staging",
+    "preparations",
 ];
 // Crash-recovery state for an in-flight relocation. This is deliberately not
 // user configuration: it is a disposable, internal JSON document that is
@@ -45,6 +46,17 @@ pub struct StorageUse {
     pub library: PathBuf,
     pub cache: PathBuf,
     pub(crate) lease: Arc<File>,
+}
+
+impl StorageUse {
+    pub(crate) fn validate_game_location(&self, directory: &Path) -> anyhow::Result<()> {
+        let reserved = resolve(&self.cache.join("preparations"))?;
+        ensure!(
+            !directory.starts_with(&reserved) && !reserved.starts_with(directory),
+            "Game directory overlaps private preparation data"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -603,7 +615,13 @@ fn rewrite_value(value: &mut serde_json::Value, trees: &[Tree]) {
             for (key, value) in values {
                 if matches!(
                     key.as_str(),
-                    "manifest" | "manifest_path" | "directory" | "game_directory" | "java" | "path"
+                    "manifest"
+                        | "manifest_path"
+                        | "directory"
+                        | "resource_directory"
+                        | "game_directory"
+                        | "java"
+                        | "path"
                 ) && let Some(path) = value.as_str()
                 {
                     *value = serde_json::Value::String(
@@ -768,8 +786,11 @@ pub fn apply(
         for instance in &snapshot.instances {
             ensure!(
                 new_cache == root
-                    || (!instance.directory.starts_with(&new_cache)
-                        && !new_cache.starts_with(&instance.directory)),
+                    || [&instance.resource_directory, &instance.game_directory]
+                        .into_iter()
+                        .all(|directory| {
+                            !directory.starts_with(&new_cache) && !new_cache.starts_with(directory)
+                        }),
                 "Cache folder overlaps game data"
             );
         }
@@ -786,31 +807,36 @@ pub fn apply(
     }
     if move_games {
         for instance in &snapshot.instances {
-            if instance
-                .directory
-                .file_name()
-                .is_some_and(|name| name == instance.id.as_str())
-                && instance.directory != new_library.join(&instance.id)
+            if instance.ownership == crate::catalog::InstanceOwnership::Managed
+                && instance.resource_directory != new_library.join(&instance.id)
             {
                 trees.push(Tree {
-                    source: instance.directory.clone(),
+                    source: instance.resource_directory.clone(),
                     destination: new_library.join(&instance.id),
-                    skip_runtime: true,
+                    skip_runtime: false,
                 });
             }
         }
     }
+    ensure!(
+        snapshot
+            .instances
+            .iter()
+            .filter(|instance| instance.ownership == crate::catalog::InstanceOwnership::Registered)
+            .flat_map(|instance| [&instance.resource_directory, &instance.game_directory])
+            .all(|directory| trees
+                .iter()
+                .all(|tree| !directory.starts_with(&tree.source))),
+        "A registered installation uses files inside a folder selected for relocation; its files were preserved"
+    );
     for tree in &trees {
         ensure!(
             !tree.destination.starts_with(&tree.source)
                 && !tree.source.starts_with(&tree.destination),
             "Old and new data folders must not overlap"
         );
-        let runtime_only = tree.destination.starts_with(old_cache.join("instances"))
-            && tree.destination.is_dir()
-            && scan(&tree.destination, true)?.len() == 1;
         ensure!(
-            !tree.destination.exists() || (move_games && runtime_only),
+            !tree.destination.exists(),
             "A destination game or cache tree already exists"
         );
     }
@@ -1016,10 +1042,7 @@ pub fn finish_cleanup(root: &Path, id: uuid::Uuid, remove: bool) -> anyhow::Resu
                     && path.canonicalize()? == *path,
                 "A retained folder was replaced; no files were removed from it"
             );
-            if tree.skip_runtime
-                || (state.phase == Phase::RolledBack
-                    && path.starts_with(state.before.cache(&root).join("instances")))
-            {
+            if tree.skip_runtime {
                 for entry in fs::read_dir(path)? {
                     let entry = entry?;
                     if !excluded(Path::new(&entry.file_name()), true) {

@@ -7,7 +7,7 @@ use super::{
     Block, Form, Language, Tab, UiAction, browser::CollectionLoad, design::Icon, modpack_import,
     scroll_area::ScrollAreaExt as _, shell::Surface,
 };
-use block_launcher::catalog::{DataPolicy, LoaderKind, ProfileColor, ProfileIcon};
+use block_launcher::catalog::{DataPolicy, InstanceColor, InstanceIcon, LoaderKind};
 use gpui::{
     App, Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
     ParentElement as _, Pixels, Point, RenderOnce, ScrollHandle, StatefulInteractiveElement as _,
@@ -28,8 +28,7 @@ pub(super) enum ProductChoice {
     Proxy,
     DefaultJava,
     DefaultWindow,
-    ProfileRuntime,
-    ProfileDataPolicy,
+    InstanceDataPolicy,
     InstanceRuntime,
     InstanceWindow,
     WizardRuntime,
@@ -105,7 +104,6 @@ pub(super) struct SelectState<A> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MenuKind {
-    ProfileActions,
     App,
 }
 
@@ -113,7 +111,6 @@ pub(super) enum MenuKind {
 enum SelectIdentity {
     Product(ProductChoice),
     Appearance { wizard: bool, color: bool },
-    ProfileActions(String),
     AppMenu,
 }
 
@@ -125,7 +122,6 @@ impl SelectIdentity {
                 wizard: *wizard,
                 color: *color,
             },
-            Self::ProfileActions(_) => UiAction::ProfileActions,
             Self::AppMenu => UiAction::Drawer(Some(super::Drawer::Menu)),
         }
     }
@@ -227,42 +223,36 @@ impl Block {
             SelectIdentity::Product(kind) => self
                 .product_choices(kind, cx)
                 .map(|(_, choices)| choices.into_iter().map(|choice| choice.label).collect()),
-            SelectIdentity::AppMenu
-            | SelectIdentity::ProfileActions(_)
-            | SelectIdentity::Appearance { .. } => {
-                self.shell
-                    .surfaces
-                    .top()
-                    .and_then(|layer| match &layer.kind {
-                        Surface::Select(state) => Some(
-                            state
-                                .choices
-                                .iter()
-                                .map(|choice| match &choice.action {
-                                    UiAction::CopyProfileId(_) => {
-                                        tr!(language, "choice.copy_settings")
-                                    }
-                                    UiAction::DeleteProfileId(_) => {
-                                        tr!(language, "choice.delete_from_library")
-                                    }
-                                    UiAction::ProfileIcon(icon)
-                                    | UiAction::WizardProfileIcon(icon) => {
-                                        crate::i18n::profile_icon_name(language, *icon)
-                                    }
-                                    UiAction::ProfileColor(color)
-                                    | UiAction::WizardProfileColor(color) => {
-                                        crate::i18n::profile_color_name(language, *color)
-                                    }
-                                    action => app_menu_item(action).map_or_else(
-                                        || choice.label.clone(),
-                                        |item| tr!(language, item.label),
-                                    ),
-                                })
-                                .collect(),
-                        ),
-                        _ => None,
-                    })
-            }
+            SelectIdentity::AppMenu | SelectIdentity::Appearance { .. } => self
+                .shell
+                .surfaces
+                .top()
+                .and_then(|layer| match &layer.kind {
+                    Surface::Select(state) => Some(
+                        state
+                            .choices
+                            .iter()
+                            .map(|choice| match &choice.action {
+                                UiAction::DeleteInstanceId(_) => {
+                                    tr!(language, "choice.delete_from_library")
+                                }
+                                UiAction::InstanceIcon(icon)
+                                | UiAction::WizardInstanceIcon(icon) => {
+                                    crate::i18n::instance_icon_name(language, *icon)
+                                }
+                                UiAction::InstanceColor(color)
+                                | UiAction::WizardInstanceColor(color) => {
+                                    crate::i18n::instance_color_name(language, *color)
+                                }
+                                action => app_menu_item(action).map_or_else(
+                                    || choice.label.clone(),
+                                    |item| tr!(language, item.label),
+                                ),
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                }),
         };
         if let (Some(labels), Some(layer)) = (labels, self.shell.surfaces.top_mut())
             && let Surface::Select(state) = &mut layer.kind
@@ -339,17 +329,8 @@ impl Block {
                 let choices = self.auth_provider_choices();
                 (!choices.is_empty()).then_some(("select.auth_provider", choices))
             }
-            ProductChoice::ProfileRuntime => {
-                let Some(Form::Profile(form)) = &self.form else {
-                    return None;
-                };
-                Some((
-                    "select.java_runtime",
-                    runtime_choices(language, form.managed, UiAction::ProfileRuntimeAutomatic),
-                ))
-            }
-            ProductChoice::ProfileDataPolicy => {
-                let Some(Form::Profile(form)) = &self.form else {
+            ProductChoice::InstanceDataPolicy => {
+                let Some(Form::EditInstance(form)) = &self.form else {
                     return None;
                 };
                 Some((
@@ -362,7 +343,7 @@ impl Block {
                     .map(|(label, value)| SelectChoice {
                         label: tr!(language, label),
                         selected: form.original.data_policy == value,
-                        action: UiAction::ProfileDataPolicy(value),
+                        action: UiAction::InstanceDataPolicy(value),
                     })
                     .collect(),
                 ))
@@ -390,14 +371,14 @@ impl Block {
                 ))
             }
             ProductChoice::WizardRuntime => {
-                let profile = self.shell.wizard.profile.as_ref()?;
+                let profile = self.shell.wizard.draft.as_ref()?;
                 Some((
                     "select.java_runtime",
                     runtime_choices(language, profile.managed, UiAction::WizardRuntime),
                 ))
             }
             ProductChoice::WizardWindow => {
-                let profile = self.shell.wizard.profile.as_ref()?;
+                let profile = self.shell.wizard.draft.as_ref()?;
                 Some((
                     "select.window_size",
                     window_choices(
@@ -550,8 +531,7 @@ impl Block {
             ),
             ProductChoice::AuthProvider
             | ProductChoice::Language
-            | ProductChoice::ProfileRuntime
-            | ProductChoice::ProfileDataPolicy
+            | ProductChoice::InstanceDataPolicy
             | ProductChoice::InstanceRuntime
             | ProductChoice::InstanceWindow
             | ProductChoice::WizardRuntime
@@ -662,7 +642,6 @@ impl Block {
         }
         let menu = match identity {
             SelectIdentity::AppMenu => Some(MenuKind::App),
-            SelectIdentity::ProfileActions(_) => Some(MenuKind::ProfileActions),
             SelectIdentity::Product(_) | SelectIdentity::Appearance { .. } => None,
         };
         let product = match identity {
@@ -748,80 +727,46 @@ impl Block {
         let language = self.language();
         let appearance = if wizard {
             self.wizard_appearance()
-        } else if let Some(Form::Profile(form)) = &self.form {
+        } else if let Some(Form::EditInstance(form)) = &self.form {
             form.original.appearance
         } else {
             return;
         };
         let choices: Vec<_> = if color {
-            ProfileColor::ALL
+            InstanceColor::ALL
                 .into_iter()
                 .map(|value| SelectChoice {
-                    label: crate::i18n::profile_color_name(language, value),
+                    label: crate::i18n::instance_color_name(language, value),
                     selected: value == appearance.color,
                     action: if wizard {
-                        UiAction::WizardProfileColor(value)
+                        UiAction::WizardInstanceColor(value)
                     } else {
-                        UiAction::ProfileColor(value)
+                        UiAction::InstanceColor(value)
                     },
                 })
                 .collect()
         } else {
-            ProfileIcon::ALL
+            InstanceIcon::ALL
                 .into_iter()
                 .map(|value| SelectChoice {
-                    label: crate::i18n::profile_icon_name(language, value),
+                    label: crate::i18n::instance_icon_name(language, value),
                     selected: value == appearance.icon,
                     action: if wizard {
-                        UiAction::WizardProfileIcon(value)
+                        UiAction::WizardInstanceIcon(value)
                     } else {
-                        UiAction::ProfileIcon(value)
+                        UiAction::InstanceIcon(value)
                     },
                 })
                 .collect()
         };
         self.open_select_at(
             if color {
-                "select.profile_color"
+                "select.instance_color"
             } else {
-                "select.profile_icon"
+                "select.instance_icon"
             },
             choices,
             SelectIdentity::Appearance { wizard, color },
-            anchor,
-            window,
-            cx,
-        );
-    }
-
-    pub(super) fn open_profile_actions_at(
-        &mut self,
-        anchor: Option<Bounds<Pixels>>,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let Some(profile) = self.inspected_profile() else {
-            return;
-        };
-        let language = self.language();
-        let id = profile.id.clone();
-        let mut choices = Vec::new();
-        if self.snapshot.profile_mode == block_launcher::catalog::ProfileMode::Separated {
-            choices.push(SelectChoice {
-                label: tr!(language, "choice.copy_settings"),
-                selected: false,
-                action: UiAction::CopyProfileId(id.clone()),
-            });
-        }
-        choices.push(SelectChoice {
-            label: tr!(language, "choice.delete_from_library"),
-            selected: false,
-            action: UiAction::DeleteProfileId(id.clone()),
-        });
-        self.open_select_at(
-            "select.profile_actions",
-            choices,
-            SelectIdentity::ProfileActions(id),
             anchor,
             window,
             cx,
@@ -834,11 +779,7 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let current = if self.router.tab() == Tab::Profiles {
-            Tab::Instances
-        } else {
-            self.router.tab()
-        };
+        let current = self.router.tab();
         let language = self.language();
         let choices = APP_MENU
             .into_iter()

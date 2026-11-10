@@ -45,6 +45,10 @@ const BACKDROP_EASING: Easing = Easing::CubicBezier {
     y2: 1.,
 };
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "cjk_wrapping_tests.rs"]
+mod cjk_wrapping_tests;
+
 #[cfg(debug_assertions)]
 #[path = "drawer_trace.rs"]
 mod drawer_trace;
@@ -565,8 +569,7 @@ impl DrawerLayer {
         panel.into_any_element()
     }
 
-    /// Import games keeps one layer across its pages; only the list offers the
-    /// way back to its sources.
+    /// Import pages keep one layer and expose Back only when there is a parent page.
     fn import_header_back(
         &self,
         frame: &DrawerFrame,
@@ -576,23 +579,26 @@ impl DrawerLayer {
         (matches!(
             frame.kind,
             Surface::Drawer(super::shell::Drawer::ImportGames)
-        ) && owner.read(cx).shell.import_games.page == super::import_games::Page::List)
-            .then(|| {
-                let target = owner.downgrade();
-                components::button_sized(
-                    "import-header-back",
-                    "",
-                    frame.palette,
-                    ButtonVariant::Ghost,
-                    ButtonSize::Icon,
-                    ControlState::default(),
-                    move |_, window, cx| {
-                        let _ = target.update(cx, |view, cx| view.import_header_back(window, cx));
-                    },
-                )
-                .aria_label(tr!(frame.language, "chrome.back_to_sources"))
-                .child(Icon::ChevronLeft.render(16., frame.palette.foreground))
-            })
+        ) && matches!(
+            &owner.read(cx).shell.import_games.page,
+            super::import_games::Page::List | super::import_games::Page::DataPolicy(_)
+        ))
+        .then(|| {
+            let target = owner.downgrade();
+            components::button_sized(
+                "import-header-back",
+                "",
+                frame.palette,
+                ButtonVariant::Ghost,
+                ButtonSize::Icon,
+                ControlState::default(),
+                move |_, window, cx| {
+                    let _ = target.update(cx, |view, cx| view.import_header_back(window, cx));
+                },
+            )
+            .aria_label(tr!(frame.language, "action.back"))
+            .child(Icon::ChevronLeft.render(16., frame.palette.foreground))
+        })
     }
 
     /// The library sheet: full-window scrim, focus trap and dismissal around the

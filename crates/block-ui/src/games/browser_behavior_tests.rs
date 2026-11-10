@@ -1,7 +1,7 @@
 //! Browser outcomes use synthetic records, never credentials or player files.
 
 use anyhow::Context as _;
-use block_launcher::catalog::{InstallStatus, LaunchTarget, LoaderKind, ProfileMode};
+use block_launcher::catalog::{InstallStatus, LaunchTarget, LoaderKind};
 use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, px, size};
 
 use super::{CollectionLoad, RowIcon};
@@ -11,16 +11,11 @@ use crate::{
     test_support::{ready_snapshot, test_account},
 };
 
-fn fixture(
-    window: &mut gpui::Window,
-    cx: &mut gpui::Context<'_, Block>,
-    mode: ProfileMode,
-) -> Block {
+fn fixture(window: &mut gpui::Window, cx: &mut gpui::Context<'_, Block>) -> Block {
     let mut view = crate::tests::test_view(window, cx);
     view.preferences.reduce_motion = true;
     view.saved_preferences.reduce_motion = true;
     view.snapshot = ready_snapshot();
-    view.snapshot.profile_mode = mode;
     let mut instance = view.snapshot.instances[0].clone();
     instance.id = "instance-b".into();
     instance.name = "Modded Instance".into();
@@ -29,20 +24,15 @@ fn fixture(
         id: "neoforge-b".into(),
         kind: LoaderKind::NeoForge,
         loader_version: Some("21.1.90".into()),
-        manifest: None,
+        source: block_launcher::catalog::TargetSource::Managed { manifest: None },
         status: InstallStatus::Ready,
         optifine: None,
         optifine_mod: None,
     });
-    let mut profile = view.snapshot.profiles[0].clone();
-    profile.id = "profile-b".into();
-    profile.name = "Adventure 中文".into();
-    profile.instance_id.clone_from(&instance.id);
-    profile.target_id = "neoforge-b".into();
+    instance.name = "Adventure 中文".into();
+    instance.target_id = "neoforge-b".into();
     view.snapshot.instances.push(instance);
-    view.snapshot.profiles.push(profile);
     view.selected_instance = Some("instance-a".into());
-    view.selected_profile = Some("profile-a".into());
     view.router.navigate(Tab::Instances);
     view.initialize_browsers(cx);
     view
@@ -75,45 +65,25 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
 }
 
 #[gpui::test]
-fn separated_categories_roving_tabs_move_focus_and_expose_only_the_current_panel(
-    cx: &mut TestAppContext,
-) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Separated));
+fn instance_browser_keeps_one_collection_and_selection_when_opened(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(960.), px(600.)));
-    click(cx, "games-tab-instances");
-    for (key, expected, _label) in [
-        ("right", Tab::Profiles, "Profile"),
-        ("right", Tab::Instances, "Instance"),
-        ("end", Tab::Profiles, "Profile"),
-        ("home", Tab::Instances, "Instance"),
-    ] {
-        crate::test_support::press(cx, key);
-        for _ in 0..2 {
-            cx.update(|window, cx| window.simulate_next_frame(cx));
-            cx.run_until_parked();
-        }
-        assert_eq!(view.read_with(cx, |view, _| view.router.tab()), expected);
-    }
-    crate::test_support::press(cx, "tab");
-
-    // Category changes never alter Home's chosen Profile.
-    assert_eq!(
-        view.read_with(cx, |view, _| view.selected_profile.clone())
-            .as_deref(),
-        Some("profile-a")
-    );
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("games-tabs").is_none());
+    view.read_with(cx, |view, cx| {
+        assert_eq!(view.browser_records(cx).len(), 2);
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
+    });
 }
 
 #[gpui::test]
-fn bundled_games_are_profiles_joined_to_their_real_instance_and_target(cx: &mut TestAppContext) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+fn instance_records_show_their_own_appearance_and_selected_target(cx: &mut TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, fixture);
     view.update(cx, |view, cx| {
         let records = view.browser_records(cx);
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].title, "Test profile");
-        assert!(matches!(records[1].icon, RowIcon::Profile(_)));
+        assert_eq!(records[0].title, "Test game");
+        assert!(matches!(records[1].icon, RowIcon::Instance(_)));
         assert!(
             records[1]
                 .badges
@@ -130,27 +100,26 @@ fn bundled_games_are_profiles_joined_to_their_real_instance_and_target(cx: &mut 
         }
         let records = view.browser_records(cx);
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].id, "profile-b");
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert_eq!(records[0].id, "instance-b");
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
     });
 }
 
 #[gpui::test]
 fn inspection_and_current_disabled_action_do_not_change_home_until_use(cx: &mut TestAppContext) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(960.), px(600.)));
     click(cx, "instance-instance-b");
     view.read_with(cx, |view, _| {
         assert_eq!(
-            view.inspected_profile().map(|profile| profile.id.as_str()),
-            Some("profile-b")
+            view.inspected_instance().map(|profile| profile.id.as_str()),
+            Some("instance-b")
         );
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
     });
-    click(cx, "use-profile");
+    click(cx, "use-instance");
     view.read_with(cx, |view, _| {
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-b"));
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-b"));
         assert_eq!(view.selected_instance.as_deref(), Some("instance-b"));
         assert!(view.shell.toast.is_some());
         assert_eq!(view.router.tab(), Tab::Instances);
@@ -159,7 +128,7 @@ fn inspection_and_current_disabled_action_do_not_change_home_until_use(cx: &mut 
         view.shell.toast = None;
         cx.notify();
     });
-    click(cx, "use-profile");
+    click(cx, "use-instance");
     assert!(
         view.read_with(cx, |view, _| view.shell.toast.is_none()),
         "Current game must not activate again"
@@ -176,7 +145,7 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
     };
 
     let result = (|| -> anyhow::Result<()> {
-        for mode in [ProfileMode::Bundled, ProfileMode::Separated] {
+        {
             let proxy = TcpListener::bind("127.0.0.1:0")?;
             proxy.set_nonblocking(true)?;
             let proxy_url = format!("http://{}", proxy.local_addr()?);
@@ -213,17 +182,18 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
                 Arc::new(|_| {}),
             )?;
             let catalog = library.catalog();
-            let (first, chosen) =
-                catalog.create_instance("Home game".into(), "1.20.6".into(), None, None)?;
-            let (damaged, inspected) =
+            let first = catalog.create_instance("Home game".into(), "1.20.6".into(), None, None)?;
+            let chosen = first.clone();
+            let damaged =
                 catalog.create_instance("Damaged game".into(), "1.20.6".into(), None, None)?;
+            let inspected = damaged.clone();
             for instance in [&first, &damaged] {
                 let mut target = instance.targets[0].clone();
                 target.status = InstallStatus::Ready;
                 catalog.set_target(&instance.id, &target)?;
             }
-            let world = damaged.directory.join("saves/Test world/level.dat");
-            let options = damaged.directory.join("options.txt");
+            let world = damaged.game_directory.join("saves/Test world/level.dat");
+            let options = damaged.game_directory.join("options.txt");
             std::fs::create_dir_all(
                 world
                     .parent()
@@ -250,8 +220,7 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
                 matches!(refusal, Err(ref error) if error.to_string().contains("choose Repair"))
             );
 
-            let mut snapshot = catalog.snapshot()?;
-            snapshot.profile_mode = mode;
+            let snapshot = catalog.snapshot()?;
             let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
             let chosen_id = chosen.id.clone();
             let inspected_id = inspected.id.clone();
@@ -264,24 +233,20 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
                 view.engine = Some(engine);
                 view.messages = Some(messages);
                 view.selected_instance = Some(first_id.clone());
-                view.selected_profile = Some(chosen_id.clone());
+                view.selected_instance = Some(chosen_id.clone());
                 view.shell.games.inspected = Some(inspected_id.clone());
-                view.shell.profiles.inspected = Some(inspected_id.clone());
-                view.router.navigate(if mode == ProfileMode::Bundled {
-                    Tab::Instances
-                } else {
-                    Tab::Profiles
-                });
+                view.shell.games.inspected = Some(inspected_id.clone());
+                view.router.navigate(Tab::Instances);
                 view.router
-                    .open_record(view.router.tab(), RecordRef::Profile(inspected_id.clone()));
+                    .open_record(view.router.tab(), RecordRef::Instance(inspected_id.clone()));
                 view.initialize_browsers(cx);
                 view
             });
             cx.simulate_resize(size(px(960.), px(600.)));
             cx.run_until_parked();
-            let repair = crate::test_support::control_bounds(cx, "repair-profile");
-            let edit = crate::test_support::control_bounds(cx, "edit-profile");
-            let choose = crate::test_support::control_bounds(cx, "use-profile");
+            let repair = crate::test_support::control_bounds(cx, "repair-instance");
+            let edit = crate::test_support::control_bounds(cx, "edit-instance");
+            let choose = crate::test_support::control_bounds(cx, "use-instance");
             assert!(
                 repair
                     .zip(edit)
@@ -294,7 +259,7 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
                     }),
                 "the stacked repair and edit actions must stay above the fixed Use action: {repair:?} {edit:?} {choose:?}"
             );
-            click(cx, "repair-profile");
+            click(cx, "repair-instance");
             assert!(view.read_with(cx, |view, _| view.busy));
             let deadline = Instant::now() + Duration::from_secs(5);
             while view.read_with(cx, |view, _| view.busy) && Instant::now() < deadline {
@@ -307,12 +272,12 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
                 .map_err(|_| anyhow::anyhow!("proxy worker failed"))??;
             let state = catalog.snapshot()?;
             assert!(matches!(
-                state.selection(&inspected.id)?.2.status,
+                state.selection(&inspected.id)?.1.status,
                 InstallStatus::Failed { .. }
             ));
-            assert_eq!(state.selection(&chosen.id)?.2.status, InstallStatus::Ready);
+            assert_eq!(state.selection(&chosen.id)?.1.status, InstallStatus::Ready);
             assert_eq!(
-                view.read_with(cx, |view, _| view.selected_profile.clone()),
+                view.read_with(cx, |view, _| view.selected_instance.clone()),
                 Some(chosen_id)
             );
             assert_eq!(
@@ -331,14 +296,14 @@ fn repair_uses_the_inspected_ready_profile_without_changing_home(cx: &mut TestAp
 #[gpui::test]
 fn crash_return_reconciles_selection_and_inspection_in_both_modes(cx: &mut TestAppContext) {
     let result = (|| -> anyhow::Result<()> {
-        for mode in [ProfileMode::Bundled, ProfileMode::Separated] {
+        {
             let root = tempfile::tempdir()?;
             let guard = std::fs::File::create(root.path().join("presentation.lock"))?;
             let report = block_launcher::crash::CrashReport::new(
                 block_launcher::crash::CrashContext {
                     run_id: "run-a".into(),
-                    profile_id: "profile-a".into(),
-                    profile_name: "Test profile".into(),
+                    instance_id: "instance-a".into(),
+                    instance_name: "Test game".into(),
                     minecraft_version: "1.20.6".into(),
                     loader: None,
                 },
@@ -347,18 +312,11 @@ fn crash_return_reconciles_selection_and_inspection_in_both_modes(cx: &mut TestA
                 Vec::new(),
             );
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
-                let mut view = fixture(window, cx, mode);
-                view.selected_profile = Some("profile-b".into());
+                let mut view = fixture(window, cx);
                 view.selected_instance = Some("instance-b".into());
-                view.shell.games.inspected = Some(
-                    if mode == ProfileMode::Bundled {
-                        "profile-b"
-                    } else {
-                        "instance-b"
-                    }
-                    .into(),
-                );
-                view.shell.profiles.inspected = Some("profile-b".into());
+                view.selected_instance = Some("instance-b".into());
+                view.shell.games.inspected = Some("instance-b".into());
+                view.shell.games.inspected = Some("instance-b".into());
                 view.pending_crashes.push_back(crate::PendingCrash {
                     report,
                     directory: root.path().to_path_buf(),
@@ -370,42 +328,35 @@ fn crash_return_reconciles_selection_and_inspection_in_both_modes(cx: &mut TestA
             click(cx, "crash-return");
             view.read_with(cx, |view, _| {
                 assert_eq!(
-                    view.selected_profile.as_deref(),
-                    Some("profile-a"),
-                    "{mode:?}"
+                    view.selected_instance.as_deref(),
+                    Some("instance-a"),
+                    "Instance"
                 );
                 assert_eq!(
                     view.selected_instance.as_deref(),
                     Some("instance-a"),
-                    "{mode:?}"
+                    "Instance"
                 );
                 assert_eq!(
                     view.inspected_instance()
                         .map(|instance| instance.id.as_str()),
                     Some("instance-a"),
-                    "{mode:?}"
+                    "Instance"
                 );
                 assert_eq!(
-                    view.inspected_profile().map(|profile| profile.id.as_str()),
-                    Some("profile-a"),
-                    "{mode:?}"
+                    view.inspected_instance().map(|profile| profile.id.as_str()),
+                    Some("instance-a"),
+                    "Instance"
                 );
-                assert_eq!(
-                    view.router.tab(),
-                    if mode == ProfileMode::Bundled {
-                        Tab::Instances
-                    } else {
-                        Tab::Profiles
-                    }
-                );
+                assert_eq!(view.router.tab(), Tab::Instances);
             });
-            click(cx, "edit-profile");
+            click(cx, "edit-instance");
             assert!(
                 view.read_with(cx, |view, _| matches!(
                     &view.form,
-                    Some(crate::Form::Profile(form)) if form.original.id == "profile-a"
+                    Some(crate::Form::EditInstance(form)) if form.original.id == "instance-a"
                 )),
-                "Edit must target the requested profile in {mode:?}"
+                "Edit must target the requested instance"
             );
         }
         Ok(())
@@ -416,9 +367,7 @@ fn crash_return_reconciles_selection_and_inspection_in_both_modes(cx: &mut TestA
 #[gpui::test]
 fn repeated_detail_visits_restore_each_entry_and_seed_reopened_records(cx: &mut TestAppContext) {
     for reduced in [true, false] {
-        let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            fixture(window, cx, ProfileMode::Separated)
-        });
+        let (view, cx) = crate::test_support::window(cx, fixture);
         cx.simulate_resize(size(px(360.), px(720.)));
         view.update_in(cx, |view, window, cx| {
             view.preferences.reduce_motion = reduced;
@@ -431,11 +380,11 @@ fn repeated_detail_visits_restore_each_entry_and_seed_reopened_records(cx: &mut 
                 .detail_scroll
                 .set_offset(gpui::point(px(0.), px(-120.)));
             view.router
-                .open_record(Tab::Profiles, RecordRef::Profile("profile-b".into()));
+                .open_record(Tab::Instances, RecordRef::Instance("instance-a".into()));
             view.prepare_motion(window, cx);
-            assert_eq!(view.shell.profiles.detail_scroll.offset().y, px(0.));
+            assert_eq!(view.shell.games.detail_scroll.offset().y, px(0.));
             view.shell
-                .profiles
+                .games
                 .detail_scroll
                 .set_offset(gpui::point(px(0.), px(-40.)));
             view.router
@@ -448,7 +397,7 @@ fn repeated_detail_visits_restore_each_entry_and_seed_reopened_records(cx: &mut 
                 .set_offset(gpui::point(px(0.), px(-220.)));
             view.router.back();
             view.prepare_motion(window, cx);
-            assert_eq!(view.shell.profiles.detail_scroll.offset().y, px(-40.));
+            assert_eq!(view.shell.games.detail_scroll.offset().y, px(-40.));
             view.router.back();
             view.prepare_motion(window, cx);
             assert_eq!(
@@ -467,7 +416,7 @@ fn repeated_detail_visits_restore_each_entry_and_seed_reopened_records(cx: &mut 
             assert!(frozen.shell.games.detail_offsets.is_empty());
             assert!(frozen.shell.return_focus.is_empty());
             view.router
-                .open_record(Tab::Profiles, RecordRef::Profile("profile-b".into()));
+                .open_record(Tab::Instances, RecordRef::Instance("instance-a".into()));
             view.prepare_motion(window, cx);
             view.snapshot
                 .instances
@@ -494,8 +443,7 @@ fn repeated_detail_visits_restore_each_entry_and_seed_reopened_records(cx: &mut 
 
 #[gpui::test]
 fn detail_navigation_focuses_heading_then_restores_mounted_invoker(cx: &mut TestAppContext) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Separated));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(360.), px(720.)));
     cx.run_until_parked();
     let invoker = view.update_in(cx, |view, window, cx| {
@@ -535,78 +483,43 @@ fn detail_navigation_focuses_heading_then_restores_mounted_invoker(cx: &mut Test
 }
 
 #[gpui::test]
-fn linked_profile_and_instance_navigation_preserves_selection_and_each_query(
+fn detail_navigation_preserves_query_and_selection_during_a_background_operation(
     cx: &mut TestAppContext,
 ) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Separated));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(360.), px(720.)));
-    view.update(cx, |view, cx| {
-        if let Some(query) = &view.shell.games.query {
-            query.update(cx, |field, cx| field.set_value("Test", cx));
-        }
-        if let Some(query) = &view.shell.profiles.query {
-            query.update(cx, |field, cx| field.set_value("Adventure", cx));
-        }
-        view.shell.games.inspected = Some("instance-b".into());
-        view.router
-            .open_record(Tab::Instances, RecordRef::Instance("instance-b".into()));
-        cx.notify();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            if let Some(query) = &view.shell.games.query {
+                query.update(cx, |field, cx| field.set_value("Adventure", cx));
+            }
+            view.handle(UiAction::Inspect("instance-b".into()), window, cx);
+        });
     });
     cx.run_until_parked();
-    view.update(cx, |view, cx| {
-        view.shell.games.detail_scroll.scroll_to_bottom();
-        cx.notify();
-    });
-    click(cx, "linked-profile-profile-b");
-    view.read_with(cx, |view, cx| {
-        assert_eq!(view.router.tab(), Tab::Profiles);
-        assert_eq!(
-            view.inspected_profile().map(|profile| profile.id.as_str()),
-            Some("profile-b")
-        );
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
-        assert_eq!(
-            view.shell
-                .profiles
-                .query
-                .as_ref()
-                .map(|field| field.read(cx).value())
-                .as_deref(),
-            Some("Adventure")
-        );
-    });
-    click(cx, "linked-instance");
-    view.read_with(cx, |view, cx| {
+    view.read_with(cx, |view, _| {
         assert_eq!(view.router.tab(), Tab::Instances);
         assert_eq!(
             view.inspected_instance()
                 .map(|instance| instance.id.as_str()),
             Some("instance-b")
         );
-        assert_eq!(
-            view.shell
-                .games
-                .query
-                .as_ref()
-                .map(|field| field.read(cx).value())
-                .as_deref(),
-            Some("Test")
-        );
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
     });
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.busy = true;
             view.handle(UiAction::NavigationBack, window, cx);
+            assert_eq!(view.router.screen(), &Screen::List);
+            assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
             assert_eq!(
-                view.router.screen(),
-                &Screen::Record(RecordRef::Profile("profile-b".into()))
-            );
-            view.handle(UiAction::NavigationBack, window, cx);
-            assert_eq!(
-                view.router.screen(),
-                &Screen::Record(RecordRef::Instance("instance-b".into()))
+                view.shell
+                    .games
+                    .query
+                    .as_ref()
+                    .map(|field| field.read(cx).value())
+                    .as_deref(),
+                Some("Adventure")
             );
             assert!(
                 view.busy,
@@ -620,8 +533,7 @@ fn linked_profile_and_instance_navigation_preserves_selection_and_each_query(
 fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
     cx: &mut TestAppContext,
 ) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(960.), px(600.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -634,12 +546,12 @@ fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.games.inspected.clone())
             .as_deref(),
-        Some("profile-b")
+        Some("instance-b")
     );
     assert_eq!(
-        view.read_with(cx, |view, _| view.selected_profile.clone())
+        view.read_with(cx, |view, _| view.selected_instance.clone())
             .as_deref(),
-        Some("profile-a")
+        Some("instance-a")
     );
     assert_eq!(
         view.read_with(cx, |view, _| view.router.screen().clone()),
@@ -657,9 +569,9 @@ fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
     });
     crate::test_support::press(cx, "up enter");
     view.read_with(cx, |view, cx| {
-        assert_eq!(view.shell.games.inspected.as_deref(), Some("profile-b"));
+        assert_eq!(view.shell.games.inspected.as_deref(), Some("instance-b"));
         assert_eq!(view.router.screen(), &Screen::List);
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
         assert!(
             view.shell
                 .games
@@ -673,8 +585,7 @@ fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
 #[gpui::test]
 fn activating_a_highlight_opens_its_detail_without_changing_home(cx: &mut TestAppContext) {
     for key in ["enter", "space"] {
-        let (view, cx) =
-            crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+        let (view, cx) = crate::test_support::window(cx, fixture);
         cx.simulate_resize(size(px(360.), px(720.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -692,9 +603,9 @@ fn activating_a_highlight_opens_its_detail_without_changing_home(cx: &mut TestAp
         view.read_with(cx, |view, _| {
             assert_eq!(
                 view.router.screen(),
-                &Screen::Record(RecordRef::Profile("profile-b".into()))
+                &Screen::Record(RecordRef::Instance("instance-b".into()))
             );
-            assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+            assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("collection-list").is_none());
@@ -706,12 +617,10 @@ fn activating_a_highlight_opens_its_detail_without_changing_home(cx: &mut TestAp
 fn missing_routed_records_never_substitute_the_home_or_first_record(cx: &mut TestAppContext) {
     for (tab, record) in [
         (Tab::Instances, RecordRef::Instance("missing".into())),
-        (Tab::Profiles, RecordRef::Profile("missing".into())),
+        (Tab::Instances, RecordRef::Instance("missing".into())),
         (Tab::Accounts, RecordRef::Account("missing".into())),
     ] {
-        let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            fixture(window, cx, ProfileMode::Separated)
-        });
+        let (view, cx) = crate::test_support::window(cx, fixture);
         cx.simulate_resize(size(px(360.), px(720.)));
         view.update(cx, |view, cx| {
             if let Ok(account) = test_account() {
@@ -720,46 +629,50 @@ fn missing_routed_records_never_substitute_the_home_or_first_record(cx: &mut Tes
             }
             view.router.open_record(tab, record.clone());
             assert!(view.inspected_instance().is_none());
-            assert!(view.inspected_profile().is_none());
+            assert!(view.inspected_instance().is_none());
             cx.notify();
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("record-back").is_some());
-        assert!(cx.debug_bounds("use-profile").is_none());
+        assert!(cx.debug_bounds("use-instance").is_none());
         assert!(cx.debug_bounds("collection-list").is_none());
         view.read_with(cx, |view, _| {
             assert_eq!(view.router.screen(), &Screen::Record(record.clone()));
-            assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+            assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
         });
     }
 }
 
 #[gpui::test]
 fn details_keep_fixed_action_rail_and_selected_game(cx: &mut TestAppContext) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     cx.simulate_resize(size(px(360.), px(720.)));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.handle(UiAction::Inspect("profile-b".into()), window, cx);
+            view.handle(UiAction::Inspect("instance-b".into()), window, cx);
         });
     });
     cx.run_until_parked();
     let footer = cx.debug_bounds("detail-footer");
     assert!(footer.is_some());
     if let Some(footer) = footer {
-        assert_eq!(footer.size.height, px(72.));
         assert!(footer.bottom() <= px(720.));
         assert!(footer.left() >= px(0.) && footer.right() <= px(360.));
     }
-    let use_game = cx.debug_bounds("use-profile");
+    let use_game = cx.debug_bounds("use-instance");
     assert!(
         use_game.is_some_and(|bounds| bounds.bottom() <= px(720.) && bounds.right() <= px(360.))
     );
+    view.update(cx, |view, cx| {
+        view.shell.games.detail_scroll.scroll_to_bottom();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.debug_bounds("detail-footer"), footer);
     assert_eq!(
-        view.read_with(cx, |view, _| view.selected_profile.clone())
+        view.read_with(cx, |view, _| view.selected_instance.clone())
             .as_deref(),
-        Some("profile-a")
+        Some("instance-a")
     );
 }
 
@@ -767,12 +680,11 @@ fn details_keep_fixed_action_rail_and_selected_game(cx: &mut TestAppContext) {
 fn load_error_preserves_old_records_and_successful_update_recovers_typed_state(
     cx: &mut TestAppContext,
 ) {
-    let (view, cx) =
-        crate::test_support::window(cx, |window, cx| fixture(window, cx, ProfileMode::Bundled));
+    let (view, cx) = crate::test_support::window(cx, fixture);
     view.update(cx, |view, cx| {
         view.shell.games.load = CollectionLoad::Failed("Read failed in isolated fixture".into());
         assert_eq!(view.browser_records(cx).len(), 2);
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
         cx.notify();
     });
     cx.run_until_parked();
@@ -792,7 +704,7 @@ fn load_error_preserves_old_records_and_successful_update_recovers_typed_state(
 #[gpui::test]
 fn account_inspection_selection_and_remove_cancel_keep_real_boundaries(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = fixture(window, cx, ProfileMode::Bundled);
+        let mut view = fixture(window, cx);
         view.router.navigate(Tab::Accounts);
         if let Ok(first) = test_account() {
             let mut second = first.clone();
@@ -834,30 +746,29 @@ fn account_inspection_selection_and_remove_cancel_keep_real_boundaries(cx: &mut 
 #[gpui::test]
 fn profile_actions_keep_the_captured_profile_when_inspection_refreshes(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = fixture(window, cx, ProfileMode::Separated);
-        view.router.navigate(Tab::Profiles);
+        let mut view = fixture(window, cx);
+        view.router.navigate(Tab::Instances);
         view.router
-            .open_record(Tab::Profiles, RecordRef::Profile("profile-b".into()));
-        view.shell.profiles.inspected = Some("profile-b".into());
+            .open_record(Tab::Instances, RecordRef::Instance("instance-b".into()));
+        view.shell.games.inspected = Some("instance-b".into());
         view
     });
     cx.simulate_resize(size(px(960.), px(600.)));
-    click(cx, "profile-actions");
+    click(cx, "delete-instance");
     assert!(view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
     view.update(cx, |view, cx| {
         // A catalog/inspection refresh must not retarget an already-open menu.
-        view.shell.profiles.inspected = Some("profile-a".into());
+        view.shell.games.inspected = Some("instance-a".into());
         cx.notify();
     });
-    click(cx, "select-choice-1");
     view.read_with(cx, |view, _| {
-        assert!(view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, crate::shell::Surface::DeleteProfile(id) if id == "profile-b")));
-        assert_eq!(view.snapshot.profiles.len(), 2);
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
+        assert!(view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, crate::shell::Surface::DeleteInstance(id) if id == "instance-b")));
+        assert_eq!(view.snapshot.instances.len(), 2);
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
     });
     click(cx, "close-drawer");
     assert_eq!(
-        view.read_with(cx, |view, _| view.snapshot.profiles.len()),
+        view.read_with(cx, |view, _| view.snapshot.instances.len()),
         2
     );
 }
@@ -868,7 +779,7 @@ fn component_cards_open_and_return_to_their_own_editor_context(cx: &mut TestAppC
         let root = tempfile::tempdir()?;
         let (engine, messages) = crate::engine::Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
-            let mut view = fixture(window, cx, ProfileMode::Bundled);
+            let mut view = fixture(window, cx);
             view.engine = Some(engine);
             view.messages = Some(messages);
             view
@@ -876,7 +787,7 @@ fn component_cards_open_and_return_to_their_own_editor_context(cx: &mut TestAppC
         cx.simulate_resize(size(px(1152.), px(720.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.handle(UiAction::Inspect("profile-a".into()), window, cx);
+                view.handle(UiAction::Inspect("instance-a".into()), window, cx);
             });
         });
         cx.run_until_parked();
@@ -885,11 +796,12 @@ fn component_cards_open_and_return_to_their_own_editor_context(cx: &mut TestAppC
         });
         click(cx, "component-optifine");
         assert_eq!(
-            view.read_with(cx, |view, _| view
-                .shell
-                .instance_editor
-                .as_ref()
-                .map(|editor| editor.identity().to_owned())),
+            view.read_with(cx, |view, _| view.form.as_ref().and_then(
+                |form| match form {
+                    crate::Form::EditInstance(form) => Some(form.original.id.clone()),
+                    _ => None,
+                }
+            )),
             Some("instance-a".to_owned())
         );
         let body = cx.debug_bounds("instance-editor-body");
@@ -904,13 +816,30 @@ fn component_cards_open_and_return_to_their_own_editor_context(cx: &mut TestAppC
         assert!(cx.did_prompt_for_paths(), "OptiFine action has focus");
         cx.simulate_path_prompt_response(|_| None);
         cx.run_until_parked();
-        click(cx, "cancel-instance-settings");
+        click(cx, "cancel-instance");
         cx.update(|window, _| assert!(trigger.is_focused(window)));
 
+        let viewport = crate::test_support::control_bounds(cx, "management-detail");
+        assert!(
+            viewport.is_some_and(|viewport| crate::test_support::scroll_into_view(
+                cx,
+                viewport,
+                "component-instance-settings",
+            )),
+            "general settings must be reachable in the component list"
+        );
         click(cx, "component-instance-settings");
         let initial = cx.update(|window, cx| window.focused(cx));
         let name = cx.debug_bounds("instance-field-Name");
-        assert!(name.is_some(), "generic settings show the name field");
+        assert!(
+            name.is_some(),
+            "generic settings show the name field: {:?}",
+            view.read_with(cx, |view, _| (
+                view.router.screen().clone(),
+                view.form.is_some(),
+                view.shell.editor.page
+            ))
+        );
         if let Some(name) = name {
             cx.simulate_click(
                 gpui::point(name.center().x, name.bottom() - px(12.)),
@@ -991,18 +920,18 @@ fn assert_representative_game_copy() {
         "模组加载器"
     );
     assert_eq!(tr!(Japanese, "games.components.mod_loader"), "Mod ローダー");
-    assert_eq!(tr!(English, "games.browser.help"), "What’s the difference?");
-    assert_eq!(
-        tr!(English, "games.profile_editor.inherit_window"),
-        "Use this Instance’s window size and fullscreen setting"
-    );
+    assert_eq!(tr!(English, "games.browser.help"), "About instances");
     assert_eq!(
         tr!(Japanese, "games.instance_editor.error.width"),
         "ウィンドウ幅は 320～16384 ピクセルの範囲で指定してください"
     );
     assert_eq!(
-        tr!(SimplifiedChinese, "games.browser.count.profiles", count = 3),
-        "3 个配置"
+        tr!(
+            SimplifiedChinese,
+            "games.browser.count.instances",
+            count = 3
+        ),
+        "3 个实例"
     );
     assert_eq!(
         tr!(Japanese, "games.install.failed_repair", message = "boom"),
@@ -1013,7 +942,7 @@ fn assert_representative_game_copy() {
 #[gpui::test]
 fn fixed_instance_components_keep_their_lock_in_every_language(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = fixture(window, cx, ProfileMode::Separated);
+        let mut view = fixture(window, cx);
         view.shell.games.inspected = Some("instance-a".into());
         view.router
             .open_record(Tab::Instances, RecordRef::Instance("instance-a".into()));

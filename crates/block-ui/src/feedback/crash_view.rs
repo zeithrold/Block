@@ -25,7 +25,7 @@ use super::scroll_area::ScrollAreaExt as _;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HelpAction {
-    ReturnToProfile,
+    ReturnToInstance,
     OpenFolder,
     Export,
     CopySummary,
@@ -53,7 +53,7 @@ struct FindText;
 #[action(namespace = crash_help)]
 struct CloseHelp;
 
-type ReturnToProfile = Box<dyn FnMut(&mut Window, &mut App)>;
+type ReturnToInstance = Box<dyn FnMut(&mut Window, &mut App)>;
 
 #[derive(Clone)]
 struct SourceChoice {
@@ -212,7 +212,7 @@ pub struct CrashView {
     report_directory: PathBuf,
     language: crate::Language,
     preferences: super::Preferences,
-    return_to_profile: ReturnToProfile,
+    return_to_instance: ReturnToInstance,
     focus: FocusHandle,
     return_focus: FocusHandle,
     copy_focus: FocusHandle,
@@ -257,19 +257,19 @@ impl CrashView {
     pub(super) fn scenario(
         name: &str,
         preferences: super::Preferences,
-        return_to_profile: impl FnMut(&mut Window, &mut App) + 'static,
+        return_to_instance: impl FnMut(&mut Window, &mut App) + 'static,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
         use block_launcher::crash::{AttachmentKind, DiagnosticAttachment};
 
         let mut report = fixture_report();
-        report.context.profile_id = "vanilla".into();
+        report.context.instance_id = "vanilla".into();
         report.context.run_id = "00000000-0000-4000-8000-000000360720".into();
         report.context.minecraft_version = "1.20.1".into();
         report.context.loader = None;
-        report.context.profile_name = if name == "crash-long-metadata" {
-            "Creative worlds and archived experiments with a deliberately long Profile name"
+        report.context.instance_name = if name == "crash-long-metadata" {
+            "Creative worlds and archived experiments with a deliberately long Instance name"
         } else {
             "Vanilla"
         }
@@ -290,7 +290,7 @@ impl CrashView {
             report,
             PathBuf::from("/scenario/Block/reports/synthetic-session"),
             language,
-            return_to_profile,
+            return_to_instance,
             window,
             cx,
         );
@@ -356,7 +356,7 @@ impl CrashView {
         report: CrashReport,
         report_directory: PathBuf,
         language: crate::Language,
-        return_to_profile: impl FnMut(&mut Window, &mut App) + 'static,
+        return_to_instance: impl FnMut(&mut Window, &mut App) + 'static,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
@@ -463,7 +463,7 @@ impl CrashView {
             report_directory,
             language,
             preferences: super::Preferences::default(),
-            return_to_profile: Box::new(return_to_profile),
+            return_to_instance: Box::new(return_to_instance),
             focus,
             return_focus,
             copy_focus: cx.focus_handle().tab_stop(true),
@@ -485,7 +485,7 @@ impl CrashView {
 
     fn handle(&mut self, action: HelpAction, window: &mut Window, cx: &mut Context<'_, Self>) {
         match action {
-            HelpAction::ReturnToProfile => (self.return_to_profile)(window, cx),
+            HelpAction::ReturnToInstance => (self.return_to_instance)(window, cx),
             HelpAction::OpenFolder => cx.reveal_path(&self.report_directory),
             HelpAction::Export => self.export(window, cx),
             HelpAction::CancelExport => {
@@ -679,7 +679,7 @@ impl CrashView {
             },
         );
         match action {
-            HelpAction::ReturnToProfile => control.track_focus(&self.return_focus),
+            HelpAction::ReturnToInstance => control.track_focus(&self.return_focus),
             HelpAction::CopySummary => control.track_focus(&self.copy_focus),
             HelpAction::CancelExport => control.track_focus(&self.cancel_focus),
             _ => self.body_focus.control(control, action),
@@ -1013,7 +1013,7 @@ impl CrashView {
                     .text_color(rgb(palette.muted))
                     .child(format!(
                         "{} · Minecraft {} · {edition}",
-                        context.profile_name, context.minecraft_version
+                        context.instance_name, context.minecraft_version
                     )),
             )
             .children(
@@ -1149,7 +1149,7 @@ impl CrashView {
                             .child(self.button(
                                 "crash-return",
                                 tr!(self.language, "crash.return"),
-                                HelpAction::ReturnToProfile,
+                                HelpAction::ReturnToInstance,
                                 ButtonVariant::Primary,
                                 palette,
                                 cx,
@@ -1373,9 +1373,9 @@ fn exit_details(report: &CrashReport) -> String {
 
 fn diagnostic_summary(report: &CrashReport) -> String {
     let mut text = format!(
-        "{}\nProfile: {}\nMinecraft: {}\nLoader: {}\n{}\n",
+        "{}\nInstance: {}\nMinecraft: {}\nLoader: {}\n{}\n",
         report.summary,
-        report.context.profile_name,
+        report.context.instance_name,
         report.context.minecraft_version,
         report.context.loader.as_deref().unwrap_or("Vanilla"),
         exit_details(report)
@@ -1400,8 +1400,8 @@ fn fixture_report() -> CrashReport {
     CrashReport::new(
         CrashContext {
             run_id: "test-session".into(),
-            profile_id: "profile".into(),
-            profile_name: "My world".into(),
+            instance_id: "instance".into(),
+            instance_name: "My world".into(),
             minecraft_version: "1.20.6".into(),
             loader: Some("NeoForge".into()),
         },
@@ -2299,7 +2299,7 @@ mod tests {
             ] {
                 let (view, cx) = crate::test_support::window(cx, |window, cx| {
                     let mut report = report();
-                    report.context.profile_name =
+                    report.context.instance_name =
                         "很长的世界名称とても長いインスタンスの名前测试世界很长的世界名称とても長い名前"
                             .into();
                     let mut view = CrashView::new(

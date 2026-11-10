@@ -20,15 +20,15 @@ struct Args {
     #[arg(long)]
     launch: bool,
     #[arg(long, conflicts_with_all = ["supervise", "crash"])]
-    profile: Option<String>,
+    instance: Option<String>,
     #[arg(long)]
     data_dir: Option<PathBuf>,
-    #[arg(long, conflicts_with_all = ["recipe", "launch", "crash", "profile"], requires = "data_dir")]
+    #[arg(long, conflicts_with_all = ["recipe", "launch", "crash", "instance"], requires = "data_dir")]
     supervise: Option<String>,
-    #[arg(long, conflicts_with_all = ["recipe", "launch", "supervise", "profile"], requires = "data_dir")]
+    #[arg(long, conflicts_with_all = ["recipe", "launch", "supervise", "instance"], requires = "data_dir")]
     crash: Option<String>,
     #[cfg(debug_assertions)]
-    #[arg(long, conflicts_with_all = ["recipe", "launch", "profile", "data_dir", "supervise", "crash", "build_info"], value_parser = clap::builder::PossibleValuesParser::new(block_ui::SCENARIOS.iter().copied()))]
+    #[arg(long, conflicts_with_all = ["recipe", "launch", "instance", "data_dir", "supervise", "crash", "build_info"], value_parser = clap::builder::PossibleValuesParser::new(block_ui::SCENARIOS.iter().copied()))]
     scenario: Option<String>,
     #[cfg(debug_assertions)]
     #[arg(long, requires = "scenario", value_parser = ["light", "dark"])]
@@ -161,7 +161,7 @@ fn run(args: Args, logging: Logging) -> anyhow::Result<()> {
                 LaunchOptions {
                     recipe: args.recipe,
                     launch: args.launch,
-                    profile: args.profile,
+                    instance: args.instance,
                     data_dir: args.data_dir,
                     build_info: block_ui::BuildInfo::default(),
                     #[cfg(debug_assertions)]
@@ -246,7 +246,7 @@ fn open_launcher(cx: &mut App, mut options: LaunchOptions) -> anyhow::Result<()>
 fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> anyhow::Result<()> {
     let directory = session_host::report_directory(&root, &report.context.run_id)?;
     let run_id = report.context.run_id.clone();
-    let profile = report.context.profile_id.clone();
+    let instance = report.context.instance_id.clone();
     let (preferences, language_error) = block_ui::initialize_saved_desktop_preferences(&root);
     let language = preferences.language();
     gpui_platform::application()
@@ -259,16 +259,19 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
             }
             configure_application(cx, language);
             let return_root = root.clone();
-            let return_to_profile = move |window: &mut gpui::Window, cx: &mut App| {
+            let return_to_instance = move |window: &mut gpui::Window, cx: &mut App| {
                 let options = LaunchOptions {
-                    profile: Some(profile.clone()),
+                    instance: Some(instance.clone()),
                     data_dir: Some(return_root.clone()),
                     ..Default::default()
                 };
                 match open_launcher(cx, options) {
                     Ok(()) => window.remove_window(),
                     Err(error) => {
-                        tracing::error!(event = "window_open_failed", window = "return_to_profile");
+                        tracing::error!(
+                            event = "window_open_failed",
+                            window = "return_to_instance"
+                        );
                         eprintln!("Could not return to the instance: {error:#}");
                     }
                 }
@@ -279,7 +282,7 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
                 window.set_window_title(&block_ui::crash_window_title(language));
                 let view = cx.new(|cx| {
                     let mut view =
-                        CrashView::new(report, directory, language, return_to_profile, window, cx);
+                        CrashView::new(report, directory, language, return_to_instance, window, cx);
                     view.set_saved_preferences(&preferences, window, cx);
                     if let Some(error) = language_error {
                         view.report_language_initialization_error(format!("{error:#}"));
@@ -301,4 +304,22 @@ fn crash_application(root: PathBuf, report: CrashReport, logging: Logging) -> an
             cx.activate(true);
         });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use anyhow::Context as _;
+    use clap::Parser as _;
+
+    #[test]
+    fn instance_selection_is_the_only_catalog_launch_argument() -> anyhow::Result<()> {
+        let args = Args::try_parse_from(["block", "--instance", "fixture-instance"])?;
+        assert_eq!(args.instance.as_deref(), Some("fixture-instance"));
+        let error = Args::try_parse_from(["block", "--profile", "fixture-instance"])
+            .err()
+            .context("removed product argument must not be accepted")?;
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        Ok(())
+    }
 }

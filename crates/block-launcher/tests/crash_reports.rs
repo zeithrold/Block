@@ -9,8 +9,8 @@ fn report(log: &str) -> CrashReport {
     CrashReport::new(
         CrashContext {
             run_id: "owned-test-run".into(),
-            profile_id: "test-profile".into(),
-            profile_name: "Test".into(),
+            instance_id: "test-instance".into(),
+            instance_name: "Test".into(),
             minecraft_version: "1.20.6".into(),
             loader: Some("NeoForge".into()),
         },

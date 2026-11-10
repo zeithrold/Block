@@ -3,13 +3,16 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
 use block_launcher::{
     CancellationToken,
-    game_import::{DiscoveryReport, DiscoveryRoots, GameCandidate, SourceKind},
+    catalog::DataPolicy,
+    game_import::{
+        DiscoveryReport, DiscoveryRoots, GameCandidate, GameDataEvidence, ImportSelection,
+        SourceKind,
+    },
 };
 use gpui::{
     Context, InteractiveElement as _, IntoElement as _, ParentElement as _, ScrollHandle,
@@ -30,13 +33,14 @@ use super::{
 };
 use crate::Language;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) enum Page {
     #[default]
     Sources,
     List,
     Progress,
     Results,
+    DataPolicy(String),
 }
 
 const PAGE_SLIDE_DURATION: Duration = Duration::from_millis(280);
@@ -55,11 +59,11 @@ struct SourceListMotion {
 }
 
 impl SourceListMotion {
-    fn navigate(&mut self, page: Page, now: Instant, reduced_motion: bool) {
+    fn navigate(&mut self, page: &Page, now: Instant, reduced_motion: bool) {
         let target = match page {
             Page::Sources => Some(0.),
             Page::List => Some(1.),
-            Page::Progress | Page::Results => None,
+            Page::Progress | Page::Results | Page::DataPolicy(_) => None,
         };
         let Some(target) = target else {
             self.run = None;
@@ -100,14 +104,17 @@ impl SourceListMotion {
         (self.position, self.run.is_some())
     }
 
-    fn settle(&mut self, page: Page) {
-        self.position = if page == Page::List { 1. } else { 0. };
+    fn settle(&mut self, page: &Page) {
+        self.position = if *page == Page::List { 1. } else { 0. };
         self.run = None;
     }
 }
 
 #[derive(Clone, Debug)]
 pub(super) enum Action {
+    OpenDataPolicy(String),
+    SelectDataPolicy(String, DataPolicy),
+    Back,
     Source(SourceKind),
     View(SourceKind),
     Sources,
@@ -138,6 +145,11 @@ pub(super) struct State {
     pub page: Page,
     pub source: SourceKind,
     pub selected: BTreeSet<String>,
+    pub selections: BTreeMap<String, ImportSelection>,
+    pub acknowledged: BTreeSet<String>,
+    policy_return: Option<Page>,
+    policy_focus: Option<gpui::FocusHandle>,
+    radio_focus: RefCell<std::collections::HashMap<String, gpui::FocusHandle>>,
     pub submitted: Vec<String>,
     pub outcomes: BTreeMap<String, Outcome>,
     pub cancel: CancellationToken,
@@ -158,6 +170,11 @@ impl Default for State {
             page: Page::Sources,
             source: SourceKind::AdjacentMinecraft,
             selected: BTreeSet::new(),
+            selections: BTreeMap::new(),
+            acknowledged: BTreeSet::new(),
+            policy_return: None,
+            policy_focus: None,
+            radio_focus: RefCell::new(std::collections::HashMap::new()),
             submitted: Vec::new(),
             outcomes: BTreeMap::new(),
             cancel: CancellationToken::new(),
@@ -195,12 +212,29 @@ impl State {
                 .collect()
         })
     }
-    fn pending(&self) -> Vec<GameCandidate> {
+    fn pending(&self) -> Vec<ImportSelection> {
         self.candidates(self.source)
             .into_iter()
             .filter(|candidate| self.can_import(candidate) && self.selected.contains(&candidate.id))
-            .cloned()
+            .filter_map(|candidate| self.selection(candidate))
             .collect()
+    }
+    fn selection(&self, candidate: &GameCandidate) -> Option<ImportSelection> {
+        if let Some(selection) = self.selections.get(&candidate.id) {
+            return Some(selection.clone());
+        }
+        let data_policy = match candidate.data {
+            GameDataEvidence::Shared { .. } => DataPolicy::Shared,
+            GameDataEvidence::Isolated { .. } | GameDataEvidence::Unknown => DataPolicy::Isolated,
+        };
+        candidate
+            .data_directory(data_policy)
+            .ok()
+            .map(|game_directory| ImportSelection {
+                candidate: candidate.clone(),
+                data_policy,
+                game_directory,
+            })
     }
     fn eligible_ids(&self) -> Vec<String> {
         self.candidates(self.source)
@@ -231,7 +265,7 @@ impl State {
             self.selected.insert(id.clone());
         }
     }
-    fn apply_discovery(&mut self, report: DiscoveryReport) {
+    pub(super) fn apply_discovery(&mut self, report: DiscoveryReport) {
         let previous_ids = self.report.as_ref().map_or_else(BTreeSet::new, |previous| {
             previous
                 .candidates
@@ -246,6 +280,19 @@ impl State {
             .map(|candidate| candidate.id.clone())
             .collect::<BTreeSet<_>>();
         self.selected.retain(|id| new_ids.contains(id));
+        self.selections.retain(|id, _| new_ids.contains(id));
+        self.acknowledged.retain(|id| new_ids.contains(id));
+        for candidate in &report.candidates {
+            if let Some(selection) = self.selection(candidate) {
+                self.selections.insert(
+                    candidate.id.clone(),
+                    ImportSelection {
+                        candidate: candidate.clone(),
+                        ..selection
+                    },
+                );
+            }
+        }
 
         if !report
             .candidates
@@ -272,7 +319,7 @@ impl State {
         self.report = Some(report);
     }
     pub(super) fn chrome(&self, language: Language) -> (String, String, f32) {
-        match self.page {
+        match &self.page {
             Page::Sources => (
                 tr!(language, "surface.import_games"),
                 tr!(language, "import.header.choose"),
@@ -282,6 +329,11 @@ impl State {
                 source_label(self.source, language),
                 tr!(language, "import.header.select"),
                 (260. + self.candidates(self.source).len() as f32 * 74.).min(620.),
+            ),
+            Page::DataPolicy(_) => (
+                tr!(language, "import.policy.title"),
+                tr!(language, "import.policy.subtitle"),
+                540.,
             ),
             Page::Progress => (
                 tr!(language, "import.header.importing"),
@@ -354,7 +406,10 @@ impl Block {
                 | Action::Source(_)
                 | Action::Sources
                 | Action::View(_)
-                | Action::All,
+                | Action::All
+                | Action::OpenDataPolicy(_)
+                | Action::SelectDataPolicy(_, _)
+                | Action::Back,
             ) => state.running,
             _ => false,
         }
@@ -372,7 +427,7 @@ impl Block {
                 .import_games
                 .motion
                 .borrow_mut()
-                .settle(Page::Sources);
+                .settle(&Page::Sources);
         }
         self.shell
             .surfaces
@@ -396,7 +451,7 @@ impl Block {
         let state = &mut self.shell.import_games;
         state.discovery = Some(request);
         state.page = Page::Sources;
-        state.motion.borrow_mut().settle(Page::Sources);
+        state.motion.borrow_mut().settle(&Page::Sources);
         state.error = None;
         let Some(engine) = &self.engine else {
             self.shell.import_games.discovery = None;
@@ -419,15 +474,14 @@ impl Block {
         &mut self,
         request: uuid::Uuid,
         candidate: String,
-        result: Result<(String, String), String>,
+        result: Result<String, String>,
     ) {
         if self.shell.import_games.batch != Some(request) {
             return;
         }
         let outcome = match result {
-            Ok((instance, profile)) => {
+            Ok(instance) => {
                 self.selected_instance = Some(instance);
-                self.selected_profile = Some(profile);
                 Outcome::Saved
             }
             Err(error) => Outcome::Failed(error),
@@ -514,6 +568,70 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) {
         match action {
+            Action::OpenDataPolicy(id) => {
+                if !self.shell.import_games.running {
+                    let state = &mut self.shell.import_games;
+                    state.policy_return = Some(state.page.clone());
+                    state.policy_focus = window.focused(cx);
+                    let policy = state
+                        .report
+                        .as_ref()
+                        .and_then(|report| {
+                            report
+                                .candidates
+                                .iter()
+                                .find(|candidate| candidate.id == id)
+                        })
+                        .and_then(|candidate| state.selection(candidate))
+                        .map_or(DataPolicy::Isolated, |selection| selection.data_policy);
+                    let key = match policy {
+                        DataPolicy::Shared => "shared",
+                        DataPolicy::Isolated => "isolated",
+                    };
+                    let focus = state
+                        .radio_focus
+                        .borrow_mut()
+                        .entry(format!("import-data-policy:{key}"))
+                        .or_insert_with(|| cx.focus_handle())
+                        .clone();
+                    state.page = Page::DataPolicy(id);
+                    focus.focus(window, cx);
+                }
+            }
+            Action::SelectDataPolicy(id, data_policy) => {
+                let state = &mut self.shell.import_games;
+                if let Some(candidate) = state.report.as_ref().and_then(|report| {
+                    report
+                        .candidates
+                        .iter()
+                        .find(|candidate| candidate.id == id)
+                }) {
+                    match candidate.data_directory(data_policy) {
+                        Ok(game_directory) => {
+                            state.selections.insert(
+                                id.clone(),
+                                ImportSelection {
+                                    candidate: candidate.clone(),
+                                    data_policy,
+                                    game_directory,
+                                },
+                            );
+                            state.acknowledged.insert(id);
+                            state.error = None;
+                        }
+                        Err(error) => {
+                            state.error = Some(crate::i18n::UiText::Raw(error.to_string()))
+                        }
+                    }
+                }
+            }
+            Action::Back => {
+                let state = &mut self.shell.import_games;
+                state.page = state.policy_return.take().unwrap_or(Page::List);
+                if let Some(focus) = state.policy_focus.take() {
+                    focus.focus(window, cx);
+                }
+            }
             Action::Rescan => {
                 self.begin_import_discovery();
                 // Base disables the invoking button's focus target while busy.
@@ -535,7 +653,10 @@ impl Block {
                 let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
                 state.source = source;
-                state.motion.borrow_mut().navigate(Page::List, now, reduced);
+                state
+                    .motion
+                    .borrow_mut()
+                    .navigate(&Page::List, now, reduced);
                 state.page = Page::List;
             }
             Action::Sources => {
@@ -545,7 +666,7 @@ impl Block {
                 state
                     .motion
                     .borrow_mut()
-                    .navigate(Page::Sources, now, reduced);
+                    .navigate(&Page::Sources, now, reduced);
                 state.page = Page::Sources;
             }
             Action::Toggle(id) => {
@@ -573,35 +694,11 @@ impl Block {
                     return;
                 }
                 let request = uuid::Uuid::new_v4();
-                let parent = self.proposed_import_parent(&candidates);
-                let Some(engine) = &self.engine else {
-                    self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
-                    return;
-                };
-                if candidates.iter().any(|candidate| {
-                    super::engine::import_overlaps_source(&engine.root, &parent, candidate)
-                }) {
-                    let error = msg!("setup.library.import_overlap");
-                    if let Some(scope) = self.setup_import_library_scope() {
-                        self.library_location_error(&scope, error);
-                    } else {
-                        self.shell.import_games.error = Some(error);
-                    }
-                    return;
-                }
                 if let Err(error) = self.saved_preferences.game.validate() {
-                    self.shell.import_games.error = Some(msg!(
-                        "setup.library.preflight_failed",
-                        detail = format!("{error:#}")
-                    ));
+                    self.shell.import_games.error =
+                        Some(crate::i18n::UiText::Raw(error.to_string()));
                     return;
                 }
-                if let Some(scope) = self.setup_import_library_scope()
-                    && !self.commit_setup_library(&scope, cx)
-                {
-                    return;
-                }
-                let parent = self.proposed_import_parent(&candidates);
                 let state = &mut self.shell.import_games;
                 state.batch = Some(request);
                 state.cancel = CancellationToken::new();
@@ -610,7 +707,7 @@ impl Block {
                 state.motion.borrow_mut().run = None;
                 state.submitted = candidates
                     .iter()
-                    .map(|candidate| candidate.id.clone())
+                    .map(|selection| selection.candidate.id.clone())
                     .collect();
                 for id in &state.submitted {
                     state.outcomes.remove(id);
@@ -625,7 +722,6 @@ impl Block {
                     engine.import_games(
                         request,
                         candidates,
-                        parent,
                         self.saved_preferences.game.clone(),
                         self.shell.import_games.cancel.clone(),
                     );
@@ -672,18 +768,221 @@ impl Block {
         );
     }
 
-    fn proposed_import_parent(&self, candidates: &[GameCandidate]) -> PathBuf {
-        let preferred = self.setup_import_library_scope().map_or_else(
-            || self.first_run_game_parent(),
-            |scope| self.setup_library_parent(&scope),
+    fn import_data_status(
+        &self,
+        state: &State,
+        candidate: &GameCandidate,
+        interactive: bool,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let language = self.language();
+        let Some(selection) = state.selection(candidate) else {
+            return div().into_any_element();
+        };
+        let unknown = matches!(candidate.data, GameDataEvidence::Unknown)
+            && !state.acknowledged.contains(&candidate.id);
+        let shared = selection.data_policy == DataPolicy::Shared;
+        let heading = tr!(
+            language,
+            if shared {
+                "import.policy.shared_warning"
+            } else if unknown {
+                "import.policy.unknown_warning"
+            } else {
+                "import.policy.isolated"
+            }
         );
-        let fallback = self
-            .engine
-            .as_ref()
-            .map_or_else(|| preferred.clone(), |engine| engine.root.join("instances"));
-        candidates.iter().fold(preferred, |parent, candidate| {
-            super::setup_storage::import_parent(&parent, &candidate.game_directory, &fallback)
-        })
+        let explanation = tr!(
+            language,
+            if shared {
+                "import.policy.shared_explanation"
+            } else if unknown {
+                "import.policy.unknown_explanation"
+            } else {
+                "import.policy.isolated_explanation"
+            }
+        );
+        let label = format!(
+            "{heading}. {explanation}. {}",
+            tr!(language, "import.policy.change")
+        );
+        let mut content = div()
+            .font_weight(gpui::FontWeight::NORMAL)
+            .min_w_0()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .whitespace_normal()
+            .child(div().font_weight(gpui::FontWeight::BOLD).child(heading))
+            .child(div().text_sm().child(explanation))
+            .child(
+                div()
+                    .text_xs()
+                    .child(selection.game_directory.display().to_string()),
+            );
+        if !unknown && !shared && matches!(candidate.data, GameDataEvidence::Unknown) {
+            content = content.child(note(tr!(language, "import.policy.files_remain")));
+        }
+        if !interactive {
+            return content.into_any_element();
+        }
+        let button = self
+            .button_with_variant(
+                format!("import-data-{}", candidate.id),
+                "",
+                UiAction::ImportGames(Action::OpenDataPolicy(candidate.id.clone())),
+                ButtonVariant::Outline,
+                cx,
+            )
+            .aria_label(label)
+            .w_full()
+            .h_auto()
+            .items_start()
+            .justify_start()
+            .gap_3()
+            .p_3();
+        if shared || unknown {
+            button
+                .bg(rgb(self.palette.warning_background))
+                .border_color(rgb(self.palette.warning))
+                .text_color(rgb(self.palette.warning))
+                .child(Icon::Warning.render(18., self.palette.warning))
+                .child(content)
+                .child(Icon::ChevronRight.render(16., self.palette.warning))
+                .into_any_element()
+        } else {
+            button
+                .child(content)
+                .child(Icon::ChevronRight.render(16., self.palette.muted))
+                .into_any_element()
+        }
+    }
+
+    fn render_import_data_policy(
+        &self,
+        state: &State,
+        id: &str,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let Some(candidate) = state.report.as_ref().and_then(|report| {
+            report
+                .candidates
+                .iter()
+                .find(|candidate| candidate.id == id)
+        }) else {
+            return div().into_any_element();
+        };
+        let language = self.language();
+        let selected = state
+            .selection(candidate)
+            .map(|selection| selection.data_policy);
+        let choices = [
+            (
+                "shared",
+                DataPolicy::Shared,
+                "import.policy.shared",
+                "import.policy.shared_explanation",
+            ),
+            (
+                "isolated",
+                DataPolicy::Isolated,
+                "import.policy.isolated",
+                "import.policy.isolated_explanation",
+            ),
+        ];
+        let paths = choices
+            .iter()
+            .map(|(_, policy, _, _)| candidate.data_directory(*policy))
+            .collect::<Vec<_>>();
+        let group = components::RadioGroup::new(
+            "import-data-policy",
+            tr!(language, "import.policy.title"),
+            choices
+                .iter()
+                .zip(&paths)
+                .map(|((key, policy, _, _), path)| components::RadioOption {
+                    id: (*key).into(),
+                    checked: selected == Some(*policy),
+                    disabled: path.is_err(),
+                    action: UiAction::ImportGames(Action::SelectDataPolicy(id.to_owned(), *policy)),
+                })
+                .collect(),
+            &state.radio_focus,
+            cx,
+            cx.listener(|view, action: &UiAction, window, cx| {
+                view.handle(action.clone(), window, cx)
+            }),
+        );
+        let mut cards = group.container().flex().flex_col().gap_3();
+        for ((key, policy, heading, explanation), path) in choices.into_iter().zip(paths) {
+            let id = id.to_owned();
+            let path_text = match &path {
+                Ok(path) => path.display().to_string(),
+                Err(error) => error.to_string(),
+            };
+            cards = cards.child(
+                group.item(
+                    key,
+                    components::radio_row(
+                        format!("import-policy-{key}"),
+                        "",
+                        selected == Some(policy),
+                        self.palette,
+                        ControlState {
+                            disabled: path.is_err(),
+                            ..Default::default()
+                        },
+                        cx.listener(move |view, (): &(), window, cx| {
+                            view.handle(
+                                UiAction::ImportGames(Action::SelectDataPolicy(id.clone(), policy)),
+                                window,
+                                cx,
+                            )
+                        }),
+                    )
+                    .aria_label(format!("{}. {path_text}", tr!(language, heading)))
+                    .w_full()
+                    .h_auto()
+                    .items_start()
+                    .gap_3()
+                    .p_4()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .whitespace_normal()
+                            .child(
+                                div()
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .child(tr!(language, heading)),
+                            )
+                            .child(note(tr!(language, explanation)))
+                            .child(div().text_xs().child(path_text)),
+                    ),
+                ),
+            );
+        }
+        div()
+            .id("import-data-policy-page")
+            .flex_1()
+            .min_h_0()
+            .mr(gpui::rems(-1.))
+            .pr_4()
+            .scroll_area(&state.scroll, "import.policy", self.palette, false)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(candidate.name.clone())
+                    .child(cards)
+                    .child(note(tr!(language, "import.policy.files_remain"))),
+            )
+            .into_any_element()
     }
 
     fn render_sources(
@@ -834,6 +1133,10 @@ impl Block {
                     note(tr!(language, "common.diagnostic_detail", detail = warning))
                 }));
                 if let [candidate] = candidates.as_slice() {
+                    if candidate.importable {
+                        rows =
+                            rows.child(self.import_data_status(state, candidate, interactive, cx));
+                    }
                     rows = rows.children(candidate.unsupported_reason.as_ref().map(|reason| {
                         note(tr!(
                             language,
@@ -980,6 +1283,9 @@ impl Block {
                 .gap_3()
                 .child(content),
             );
+            if candidate.importable && !saved {
+                rows = rows.child(self.import_data_status(state, candidate, interactive, cx));
+            }
         }
         body = body.child(rows);
         if let Some(error) = &state.error {
@@ -1041,33 +1347,12 @@ impl Block {
         let state = &self.shell.import_games;
         let language = self.language();
         let pending = state.pending();
-        let library_scope = self.setup_import_library_scope();
-        let destination_parent =
-            (!pending.is_empty()).then(|| self.proposed_import_parent(&pending));
-        let destination = destination_parent.as_ref().map(|parent| {
-            tr!(
-                language,
-                "import.footer.destination",
-                path = parent.display()
-            )
-        });
-        let list_destination = match (&library_scope, &destination_parent) {
-            (Some(scope), Some(parent)) => (super::setup_storage::comparable_path(parent)
-                != super::setup_storage::comparable_path(&self.setup_library_parent(scope)))
-            .then(|| {
-                tr!(
-                    language,
-                    "setup.library.import_fallback",
-                    path = parent.display()
-                )
-            }),
-            _ => destination.clone(),
-        };
         // Borrow focus paint room from the surrounding inset. Keep compensation
         // in scroll content so the outer paint remains reachable at its limits.
         let paint_outset = gpui::px(super::design::FOCUS_RING_SPREAD);
         let mut running_motion = false;
-        let body = match state.page {
+        let body = match &state.page {
+            Page::DataPolicy(id) => self.render_import_data_policy(state, id, cx),
             Page::Sources | Page::List => {
                 let (position, running) = state.motion.borrow_mut().sample(
                     cx.background_executor().now(),
@@ -1088,16 +1373,7 @@ impl Block {
                             .flex()
                             .flex_col()
                             .gap_3()
-                            .child(self.render_sources(state, state.page == Page::Sources, cx))
-                            .children(library_scope.clone().map(|scope| {
-                                self.setup_library_location(scope, state.page == Page::Sources, cx)
-                            }))
-                            .children(list_destination.as_ref().map(|destination| {
-                                note(destination.clone())
-                                    .id("import-destination")
-                                    .w_full()
-                                    .whitespace_normal()
-                            })),
+                            .child(self.render_sources(state, state.page == Page::Sources, cx)),
                     );
                 let list = div()
                     .id("import-list-content")
@@ -1113,16 +1389,7 @@ impl Block {
                             .flex()
                             .flex_col()
                             .gap_3()
-                            .child(self.render_list(state, state.page == Page::List, cx))
-                            .children(library_scope.map(|scope| {
-                                self.setup_library_location(scope, state.page == Page::List, cx)
-                            }))
-                            .children(list_destination.as_ref().map(|destination| {
-                                note(destination.clone())
-                                    .id("import-list-destination")
-                                    .w_full()
-                                    .whitespace_normal()
-                            })),
+                            .child(self.render_list(state, state.page == Page::List, cx)),
                     );
                 let page = |offset: f32, content: gpui::AnyElement| {
                     div()
@@ -1172,6 +1439,13 @@ impl Block {
                     cx,
                 ))
                 .child(note(tr!(language, "import.footer.completedStay")));
+        } else if matches!(state.page, Page::DataPolicy(_)) {
+            footer = footer.child(self.button(
+                "import-policy-done",
+                tr!(language, "common.apply_draft"),
+                UiAction::ImportGames(Action::Back),
+                cx,
+            ));
         } else if state.page == Page::Results {
             // At most one Primary answer: finishing leaves the sheet, retrying
             // only picks up the games that did not arrive.
@@ -1193,12 +1467,9 @@ impl Block {
             ));
         } else {
             let n = pending.len();
-            if n > 0 {
-                footer = footer.child(note(tr!(language, "import.footer.originalFiles")));
-            }
             if n > 0 || state.page != Page::Sources {
                 footer = footer.child(self.button_with_variant(
-                    "import-copy",
+                    "import-add",
                     {
                         let import_key = if n == 1 {
                             "import.footer.importOne"
@@ -1238,8 +1509,13 @@ impl Block {
     }
 
     pub(super) fn import_header_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.shell.import_games.page == Page::List && !self.shell.import_games.running {
-            self.handle_import_games(Action::Sources, window, cx);
+        if !self.shell.import_games.running {
+            let action = if matches!(self.shell.import_games.page, Page::DataPolicy(_)) {
+                Action::Back
+            } else {
+                Action::Sources
+            };
+            self.handle_import_games(action, window, cx);
         }
     }
 }
@@ -1254,7 +1530,9 @@ mod tests {
             source,
             source_root: "/synthetic/root".into(),
             name: id.into(),
-            game_directory: format!("/synthetic/{id}").into(),
+            resource_directory: format!("/synthetic/{id}").into(),
+            version_id: Some("1.21.1".into()),
+            data: GameDataEvidence::Unknown,
             configured_version: Some("1.21.1".into()),
             minecraft_version: Some("1.21.1".into()),
             loader: None,
@@ -1282,7 +1560,7 @@ mod tests {
         );
         assert_eq!(
             tr!(Language::English, "import.footer.importOne", count = 1),
-            "Import 1 game"
+            "Add 1 instance"
         );
         assert_eq!(
             tr!(
@@ -1290,7 +1568,7 @@ mod tests {
                 "import.footer.importMany",
                 count = 3
             ),
-            "导入 3 个游戏"
+            "添加 3 个实例"
         );
         assert_eq!(
             tr!(Language::Japanese, "import.source.many", count = 3),
@@ -1302,22 +1580,22 @@ mod tests {
     fn source_list_motion_reverses_continuously_and_respects_reduced_motion() {
         let start = Instant::now();
         let mut motion = SourceListMotion::default();
-        motion.navigate(Page::List, start, false);
+        motion.navigate(&Page::List, start, false);
         let at_100 = motion.sample(start + Duration::from_millis(100), false).0;
         assert!(at_100 > 0. && at_100 < 1.);
-        motion.navigate(Page::Sources, start + Duration::from_millis(100), false);
+        motion.navigate(&Page::Sources, start + Duration::from_millis(100), false);
         assert_eq!(
             motion.sample(start + Duration::from_millis(100), false).0,
             at_100
         );
         let returning = motion.sample(start + Duration::from_millis(140), false).0;
         assert!(returning < at_100);
-        motion.navigate(Page::List, start + Duration::from_millis(140), false);
+        motion.navigate(&Page::List, start + Duration::from_millis(140), false);
         assert_eq!(
             motion.sample(start + Duration::from_millis(140), false).0,
             returning
         );
-        motion.navigate(Page::Sources, start + Duration::from_millis(150), true);
+        motion.navigate(&Page::Sources, start + Duration::from_millis(150), true);
         assert_eq!(
             motion.sample(start + Duration::from_millis(150), true),
             (0., false)
@@ -1425,5 +1703,97 @@ mod tests {
         assert!(state.selected.contains("single"));
         assert!(!state.selected.contains("saved"));
         assert!(!state.selected.contains("unsupported"));
+    }
+    #[test]
+    fn evidence_defaults_preserve_exact_paths_and_retry_does_not_repeat_saved_instances()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let external = tempfile::tempdir()?;
+        let mut shared = candidate("shared", SourceKind::AdjacentMinecraft, true);
+        shared.resource_directory = root.path().to_path_buf();
+        shared.data = GameDataEvidence::Shared {
+            directory: root.path().to_path_buf(),
+        };
+        let mut isolated = candidate("isolated", SourceKind::AdjacentMinecraft, true);
+        isolated.resource_directory = root.path().to_path_buf();
+        isolated.data = GameDataEvidence::Isolated {
+            directory: external.path().to_path_buf(),
+        };
+        let mut unknown = candidate("unknown", SourceKind::AdjacentMinecraft, true);
+        unknown.resource_directory = root.path().to_path_buf();
+        let mut state = State::default();
+        state.apply_discovery(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![shared, isolated, unknown],
+        });
+        let pending = state.pending();
+        assert_eq!(pending.len(), 3);
+        assert_eq!(pending[0].data_policy, DataPolicy::Shared);
+        assert_eq!(pending[0].game_directory, root.path().canonicalize()?);
+        assert_eq!(pending[1].data_policy, DataPolicy::Isolated);
+        assert_eq!(pending[1].game_directory, external.path().canonicalize()?);
+        assert_eq!(pending[2].data_policy, DataPolicy::Isolated);
+        assert_eq!(
+            pending[2].game_directory,
+            root.path().canonicalize()?.join("versions/1.21.1")
+        );
+        state.outcomes.insert("shared".into(), Outcome::Saved);
+        state.outcomes.insert(
+            "unknown".into(),
+            Outcome::Failed("catalog unavailable".into()),
+        );
+        let retry = state.pending();
+        assert_eq!(
+            retry
+                .iter()
+                .map(|selection| selection.candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            ["isolated", "unknown"]
+        );
+        assert_eq!(retry[1].game_directory, pending[2].game_directory);
+        assert!(!root.path().join("versions").exists());
+        Ok(())
+    }
+
+    #[gpui::test]
+    fn policy_cards_keep_selection_paths_scroll_and_acknowledgement_when_returning(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let result = (|| -> anyhow::Result<()> {
+            let root = tempfile::tempdir()?;
+            let source = root.path().canonicalize()?;
+            let mut unknown = candidate("unknown", SourceKind::AdjacentMinecraft, true);
+            unknown.resource_directory = root.path().to_path_buf();
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            cx.update(|window, cx| view.update(cx, |view, cx| {
+                view.shell.import_games.apply_discovery(DiscoveryReport {
+                    sources: Vec::new(),
+                    candidates: vec![unknown],
+                });
+                view.shell.import_games.page = Page::List;
+                view.shell.import_games.list_scroll.set_offset(gpui::point(gpui::px(0.), gpui::px(-84.)));
+                view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
+                assert!(matches!(view.shell.import_games.page, Page::DataPolicy(ref id) if id == "unknown"));
+                view.handle_import_games(Action::SelectDataPolicy("unknown".into(), DataPolicy::Shared), window, cx);
+                view.handle_import_games(Action::Back, window, cx);
+                assert_eq!(view.shell.import_games.page, Page::List);
+                assert!(view.shell.import_games.selected.contains("unknown"));
+                assert!(view.shell.import_games.acknowledged.contains("unknown"));
+                assert_eq!(view.shell.import_games.list_scroll.offset().y, gpui::px(-84.));
+                let chosen = &view.shell.import_games.selections["unknown"];
+                assert_eq!(chosen.data_policy, DataPolicy::Shared);
+                assert_eq!(chosen.game_directory, source);
+                view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
+                view.handle_import_games(Action::SelectDataPolicy("unknown".into(), DataPolicy::Isolated), window, cx);
+                view.handle_import_games(Action::Back, window, cx);
+                let pending = view.shell.import_games.pending();
+                assert_eq!(pending.len(), 1);
+                assert_eq!(pending[0].data_policy, DataPolicy::Isolated);
+                assert_eq!(pending[0].game_directory, source.join("versions/1.21.1"));
+            }));
+            assert!(!root.path().join("versions").exists());
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:?}");
     }
 }

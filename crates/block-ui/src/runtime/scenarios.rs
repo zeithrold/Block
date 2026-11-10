@@ -6,8 +6,8 @@ use block_auth::{Account, AccountProvider, AccountRef};
 use block_launcher::{
     DownloadEvent,
     catalog::{
-        DataPolicy, InstallStatus, Instance, LaunchTarget, LoaderKind, Profile, ProfileColor,
-        ProfileIcon, ProfileMode, Snapshot,
+        DataPolicy, InstallStatus, Instance, InstanceColor, InstanceIcon, InstanceOwnership,
+        LaunchTarget, LoaderKind, Snapshot, TargetSource,
     },
     game_import::{DetectedLoader, DiscoveryReport, GameCandidate, ImportSourceReport, SourceKind},
     recipe::{Compatibility, RuntimeSelection},
@@ -31,7 +31,6 @@ pub const SCENARIOS: &[&str] = &[
     "home-downloading",
     "home-error",
     "games-bundled",
-    "games-separated",
     "games-detail",
     "games-instance-settings",
     "wizard-setup",
@@ -66,7 +65,6 @@ pub const SCENARIOS: &[&str] = &[
     "settings-invalid-proxy",
     "settings-general",
     "settings-game",
-    "settings-profiles",
     "settings-downloads",
     "settings-socks5",
     "settings-storage",
@@ -78,7 +76,7 @@ pub const SCENARIOS: &[&str] = &[
     "setup-import-list",
     "setup-account",
     "setup-game",
-    "home-profile-drawer",
+    "home-instance-drawer",
     "home-account-drawer",
     "home-downloads-drawer",
     "toast-motion",
@@ -97,16 +95,14 @@ pub const SCENARIOS: &[&str] = &[
     "wizard-configuration",
     "remove-confirmation",
     "remove-account-confirmation",
-    "separate-confirmation",
     "games-help",
     "provider-detail",
     "provider-edit",
-    "profile-editor-root",
-    "profile-editor-data",
-    "profile-editor-launch",
-    "profile-editor-appearance",
+    "instance-editor-root",
+    "instance-editor-data",
+    "instance-editor-launch",
+    "instance-editor-appearance",
     "instance-editor-exit-dirty",
-    "profile-editor-exit-dirty",
     "provider-editor-exit-dirty",
     "games-missing-record",
     "games-detail-long-path",
@@ -210,7 +206,6 @@ impl Block {
         self.palette = self.preferences.palette(window.appearance());
         self.snapshot = library();
         self.accounts = scenario_accounts()?;
-        self.selected_profile = Some("vanilla".into());
         self.selected_instance = Some("vanilla".into());
         self.selected_account = self.accounts.first().map(account_id);
         self.versions = ["1.21.1", "1.20.6", "1.20.1", "1.16.5", "1.12.2", "24w14a"]
@@ -243,19 +238,17 @@ impl Block {
             .collect();
         self.version_load = CollectionLoad::Ready;
         self.shell.games.load = CollectionLoad::Ready;
-        self.shell.profiles.load = CollectionLoad::Ready;
         self.shell.accounts.load = CollectionLoad::Ready;
         self.router.navigate(Tab::Home);
         Ok(())
     }
 
     /// Home fixtures: an empty library, an active download set, or a failed
-    /// install for the selected Profile.
+    /// install for the selected Instance.
     fn home_scenario(&mut self, name: &str) -> anyhow::Result<()> {
         if name == "home-empty" {
             self.snapshot = Snapshot::default();
             self.accounts.clear();
-            self.selected_profile = None;
             self.selected_instance = None;
             self.selected_account = None;
         }
@@ -302,23 +295,16 @@ impl Block {
     /// that open over them.
     fn games_scenario(&mut self, name: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if name.starts_with("games-")
-            || name.starts_with("profile-editor-")
-            || name == "instance-editor-exit-dirty"
-            || matches!(
-                name,
-                "remove-confirmation" | "separate-confirmation" | "games-help"
-            )
+            || name.starts_with("instance-editor-")
+            || matches!(name, "remove-confirmation" | "games-help")
         {
             self.router.navigate(Tab::Instances);
-            if name == "games-separated" {
-                self.snapshot.profile_mode = ProfileMode::Separated;
-            }
             if name == "games-detail-long-path" {
                 let directory = std::path::PathBuf::from(
                     "/scenario/Application Support/Block/shared installations/creative worlds and archived experiments/very long installation directory/Vanilla",
                 );
-                self.snapshot.instances[0].directory = directory.clone();
-                self.snapshot.profiles[0].runtime = RuntimeSelection::Local {
+                self.snapshot.instances[0].resource_directory = directory.clone();
+                self.snapshot.instances[0].runtime = RuntimeSelection::Local {
                     java: directory.join("custom Java runtime/bin/java"),
                 };
             }
@@ -329,46 +315,34 @@ impl Block {
                     | "games-missing-record"
                     | "games-detail-long-path"
                     | "instance-editor-exit-dirty"
-            ) || name.starts_with("profile-editor-")
+            ) || name.starts_with("instance-editor-")
             {
                 self.handle(UiAction::Inspect("vanilla".into()), window, cx);
-                if matches!(
-                    name,
-                    "games-instance-settings" | "instance-editor-exit-dirty"
-                ) {
+                if name == "games-instance-settings" {
                     self.handle(UiAction::EditInstance, window, cx);
-                }
-                if name == "instance-editor-exit-dirty" {
-                    self.handle(
-                        UiAction::InstanceWindow {
-                            width: 1536,
-                            height: 864,
-                        },
-                        window,
-                        cx,
-                    );
-                    self.handle(UiAction::NavigationBack, window, cx);
                 }
                 if name == "games-missing-record" {
                     self.snapshot
-                        .profiles
-                        .retain(|profile| profile.id != "vanilla");
+                        .instances
+                        .retain(|instance| instance.id != "vanilla");
                 }
-                if name.starts_with("profile-editor-") {
-                    self.handle(UiAction::EditProfile, window, cx);
+                if name.starts_with("instance-editor-") {
+                    self.handle(UiAction::EditInstance, window, cx);
                     let page = match name {
-                        "profile-editor-data" => Some(crate::profile_editor::EditorPage::Data),
-                        "profile-editor-launch" => Some(crate::profile_editor::EditorPage::Launch),
-                        "profile-editor-appearance" => {
-                            Some(crate::profile_editor::EditorPage::Appearance)
+                        "instance-editor-data" => Some(crate::instance_editor::EditorPage::Data),
+                        "instance-editor-launch" => {
+                            Some(crate::instance_editor::EditorPage::Launch)
+                        }
+                        "instance-editor-appearance" => {
+                            Some(crate::instance_editor::EditorPage::Appearance)
                         }
                         _ => None,
                     };
                     if let Some(page) = page {
-                        self.handle(UiAction::ProfilePage(page), window, cx);
+                        self.handle(UiAction::InstancePage(page), window, cx);
                     }
-                    if name == "profile-editor-exit-dirty" {
-                        if let Some(super::Form::Profile(form)) = &self.form {
+                    if name == "instance-editor-exit-dirty" {
+                        if let Some(super::Form::EditInstance(form)) = &self.form {
                             form.name
                                 .update(cx, |field, cx| field.set_value("Vanilla draft", cx));
                         }
@@ -576,13 +550,18 @@ impl Block {
                 self.handle(UiAction::Tab(Tab::Home), window, cx);
             }
         }
-        if let Some(section) = ["general", "game", "profiles", "downloads", "storage"]
-            .iter()
-            .position(|section| name == format!("settings-{section}"))
+        if let Some(page) = [
+            ("general", 0),
+            ("game", 1),
+            ("downloads", 3),
+            ("storage", 4),
+        ]
+        .into_iter()
+        .find_map(|(section, page)| (name == format!("settings-{section}")).then_some(page))
         {
             self.router.navigate(Tab::Settings);
             self.open_settings(cx);
-            self.select_settings_page(section as u8, window, cx);
+            self.select_settings_page(page, window, cx);
         }
         if name == "settings-storage" {
             self.shell.storage.paths = Ok(crate::settings::StoragePaths {
@@ -633,7 +612,6 @@ impl Block {
         self.shell.import_games = import_games::State::default();
         self.shell.onboarding.account = None;
         self.selected_account = None;
-        self.selected_profile = None;
         self.selected_instance = None;
         self.accounts.clear();
         self.snapshot = Snapshot::default();
@@ -646,21 +624,12 @@ impl Block {
                 self.selected_account = self.accounts.first().map(account_id);
                 self.shell.onboarding.account = self.selected_account.clone();
                 self.snapshot = library();
-                self.selected_profile = Some("vanilla".into());
                 self.selected_instance = Some("vanilla".into());
             }
             "setup-import-sources" | "setup-import-list" | "setup-import-long-destination" => {
                 let report = setup_import_report();
                 let state = &mut self.shell.import_games;
-                state.report = Some(report);
-                state.selected = state
-                    .report
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|report| report.candidates.iter())
-                    .filter(|candidate| candidate.importable)
-                    .map(|candidate| candidate.id.clone())
-                    .collect();
+                state.apply_discovery(report);
                 if matches!(name, "setup-import-list" | "setup-import-long-destination") {
                     self.handle(
                         UiAction::ImportGames(import_games::Action::View(
@@ -708,17 +677,16 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) {
         let surface = match name {
-            "home-profile-drawer" => Some(Surface::Drawer(Drawer::Profiles)),
+            "home-instance-drawer" => Some(Surface::Drawer(Drawer::Instances)),
             "home-account-drawer" => Some(Surface::Drawer(Drawer::Accounts)),
             "home-downloads-drawer" => Some(Surface::Drawer(Drawer::Downloads)),
             "download-files" => Some(Surface::DownloadFiles(
                 crate::downloads::DownloadGroup::Active,
             )),
-            "remove-confirmation" => Some(Surface::DeleteProfile("vanilla".into())),
+            "remove-confirmation" => Some(Surface::DeleteInstance("vanilla".into())),
             "remove-account-confirmation" => {
                 self.selected_account.clone().map(Surface::RemoveAccount)
             }
-            "separate-confirmation" => Some(Surface::SeparateProfiles),
             "games-help" => Some(Surface::GamesHelp),
             "setup-import-sources" | "setup-import-list" | "setup-import-long-destination" => {
                 Some(Surface::Drawer(Drawer::ImportGames))
@@ -728,7 +696,7 @@ impl Block {
         let Some(surface) = surface else {
             return;
         };
-        if let Surface::Drawer(drawer @ (Drawer::Profiles | Drawer::Accounts)) = surface {
+        if let Surface::Drawer(drawer @ (Drawer::Instances | Drawer::Accounts)) = surface {
             self.handle(UiAction::Drawer(Some(drawer)), window, cx);
         } else {
             self.shell.surfaces.open(surface, window, cx);
@@ -791,26 +759,19 @@ impl Block {
 
 fn fail_selected_target(
     snapshot: &mut Snapshot,
-    profile_id: &str,
+    instance_id: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let profile = snapshot
-        .profiles
-        .iter()
-        .find(|profile| profile.id == profile_id)
-        .ok_or_else(|| anyhow::anyhow!("scenario profile is missing: {profile_id}"))?;
-    let (instance_id, target_id) = (profile.instance_id.clone(), profile.target_id.clone());
-    let target = snapshot
+    let instance = snapshot
         .instances
         .iter_mut()
         .find(|instance| instance.id == instance_id)
-        .and_then(|instance| {
-            instance
-                .targets
-                .iter_mut()
-                .find(|target| target.id == target_id)
-        })
-        .ok_or_else(|| anyhow::anyhow!("scenario launch target is missing: {profile_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("scenario instance is missing: {instance_id}"))?;
+    let target = instance
+        .targets
+        .iter_mut()
+        .find(|target| target.id == instance.target_id)
+        .ok_or_else(|| anyhow::anyhow!("scenario launch target is missing: {instance_id}"))?;
     target.status = InstallStatus::Failed {
         message: message.into(),
     };
@@ -890,10 +851,7 @@ fn wizard_page(name: &str) -> Option<WizardPage> {
 }
 
 fn library() -> Snapshot {
-    let mut snapshot = Snapshot {
-        profile_mode: ProfileMode::Bundled,
-        ..Snapshot::default()
-    };
+    let mut snapshot = Snapshot::default();
     for (index, (id, name, version, kind)) in [
         ("vanilla", "Vanilla", "1.20.1", LoaderKind::Vanilla),
         (
@@ -911,23 +869,19 @@ fn library() -> Snapshot {
             id: id.into(),
             name: name.into(),
             minecraft_version: version.into(),
-            directory: std::env::temp_dir().join("block-ui-scenario-only").join(id),
+            resource_directory: std::env::temp_dir().join("block-ui-scenario-only").join(id),
+            game_directory: std::env::temp_dir().join("block-ui-scenario-only").join(id),
+            ownership: InstanceOwnership::Managed,
             targets: vec![LaunchTarget {
                 id: "default".into(),
                 loader_version: (kind == LoaderKind::NeoForge).then(|| "21.1.80".into()),
                 kind,
-                manifest: None,
+                source: TargetSource::Managed { manifest: None },
                 status: InstallStatus::Ready,
                 optifine: None,
                 optifine_mod: None,
             }],
-            settings: None,
             pack: None,
-        });
-        snapshot.profiles.push(Profile {
-            id: id.into(),
-            name: name.into(),
-            instance_id: id.into(),
             target_id: "default".into(),
             runtime: RuntimeSelection::Managed,
             memory_mib: 2048,
@@ -936,19 +890,21 @@ fn library() -> Snapshot {
             data_policy: DataPolicy::Isolated,
             default_account: None,
             compatibility: Compatibility::Official,
-            appearance: block_launcher::catalog::ProfileAppearance {
+            appearance: block_launcher::catalog::InstanceAppearance {
                 icon: [
-                    ProfileIcon::Blocks,
-                    ProfileIcon::Sword,
-                    ProfileIcon::FlaskConical,
+                    InstanceIcon::Blocks,
+                    InstanceIcon::Sword,
+                    InstanceIcon::FlaskConical,
                 ][index],
                 color: [
-                    ProfileColor::Gray,
-                    ProfileColor::Purple,
-                    ProfileColor::Orange,
+                    InstanceColor::Gray,
+                    InstanceColor::Purple,
+                    InstanceColor::Orange,
                 ][index],
             },
-            inheritance: Default::default(),
+            width: 1280,
+            height: 720,
+            fullscreen: false,
             server: Default::default(),
         });
     }
@@ -1033,7 +989,9 @@ fn setup_candidate(
         source,
         source_root: source_root.to_path_buf(),
         name: name.into(),
-        game_directory: source_root.join("instances").join(id),
+        resource_directory: source_root.to_path_buf(),
+        version_id: Some(version.into()),
+        data: block_launcher::game_import::GameDataEvidence::Unknown,
         configured_version: Some(version.into()),
         minecraft_version: Some(version.into()),
         loader: Some(DetectedLoader {
@@ -1074,8 +1032,29 @@ fn scenario_accounts() -> anyhow::Result<Vec<Account>> {
 mod tests {
     use super::*;
 
+    #[gpui::test]
+    fn named_settings_scenarios_open_the_requested_category(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        for (name, category) in [
+            ("settings-general", 0),
+            ("settings-game", 1),
+            ("settings-downloads", 3),
+            ("settings-storage", 4),
+            ("settings-socks5", 3),
+        ] {
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.settings_scenario(name, window, cx));
+            });
+            assert_eq!(
+                view.read_with(cx, |view, _| view.shell.settings_page),
+                Some(category),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
-    fn home_error_fixture_fails_the_selected_profile_target_only() -> anyhow::Result<()> {
+    fn home_error_fixture_fails_the_selected_instance_target_only() -> anyhow::Result<()> {
         let mut snapshot = library();
 
         fail_selected_target(
@@ -1084,12 +1063,12 @@ mod tests {
             "The download was interrupted. Check your connection and retry.",
         )?;
 
-        let (_, _, target) = snapshot.selection("vanilla")?;
+        let (_, target) = snapshot.selection("vanilla")?;
         assert!(matches!(
             &target.status,
             InstallStatus::Failed { message } if message.contains("download was interrupted")
         ));
-        let (_, _, untouched) = snapshot.selection("neoforge")?;
+        let (_, untouched) = snapshot.selection("neoforge")?;
         assert_eq!(untouched.status, InstallStatus::Ready);
         Ok(())
     }

@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use block_launcher::{
     Resource,
-    catalog::{Catalog, InstanceConfiguration, InstanceSettings, LoaderKind, ProfileConfiguration},
+    catalog::{Catalog, Instance, InstanceConfiguration, LoaderKind},
     install::optifine::OptiFineJar,
 };
 
@@ -21,10 +21,10 @@ fn jar(minecraft: &str) -> OptiFineJar {
     }
 }
 
-fn configuration(name: &str) -> InstanceConfiguration {
+fn configuration(instance: &Instance, name: &str) -> InstanceConfiguration {
     InstanceConfiguration {
         name: name.into(),
-        settings: InstanceSettings::default(),
+        ..InstanceConfiguration::from(instance)
     }
 }
 
@@ -32,13 +32,11 @@ fn configuration(name: &str) -> InstanceConfiguration {
 fn reimport_replaces_and_clears_optifine_in_one_commit() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let target_id = instance.targets[0].id.clone();
+    let instance = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
 
     catalog.save_instance_with_optifine(
         &instance.id,
-        configuration("Renamed"),
-        &target_id,
+        configuration(&instance, "Renamed"),
         Some(jar("1.20.6")),
     )?;
     let state = catalog.snapshot()?;
@@ -53,12 +51,7 @@ fn reimport_replaces_and_clears_optifine_in_one_commit() -> anyhow::Result<()> {
     );
     assert_eq!(target.optifine_mod, None);
 
-    catalog.save_instance_with_optifine(
-        &instance.id,
-        configuration("Renamed"),
-        &target_id,
-        None,
-    )?;
+    catalog.save_instance_with_optifine(&instance.id, configuration(&instance, "Renamed"), None)?;
     let state = catalog.snapshot()?;
     assert_eq!(state.instances[0].targets[0].optifine, None);
     assert_eq!(state.instances[0].targets[0].optifine_mod, None);
@@ -69,14 +62,12 @@ fn reimport_replaces_and_clears_optifine_in_one_commit() -> anyhow::Result<()> {
 fn reimport_rejects_incompatible_game_or_loader_without_writing() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    let (instance, _) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let target_id = instance.targets[0].id.clone();
+    let instance = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
 
     let error = catalog
         .save_instance_with_optifine(
             &instance.id,
-            configuration("Should not persist"),
-            &target_id,
+            configuration(&instance, "Should not persist"),
             Some(jar("1.21.1")),
         )
         .err()
@@ -88,28 +79,20 @@ fn reimport_rejects_incompatible_game_or_loader_without_writing() -> anyhow::Res
 
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    let (fabric, _) = catalog.create_instance_with_loader(
-        "Fabric game".into(),
+    let fabric = catalog.create_instance_with_loader(
         "1.20.6".into(),
         None,
         Some((LoaderKind::Fabric, "0.16.0".into())),
-        ProfileConfiguration {
-            name: "Profile".into(),
-            ..ProfileConfiguration::default()
+        InstanceConfiguration {
+            name: "Fabric game".into(),
+            target_id: "fabric-0.16.0".into(),
+            ..Default::default()
         },
     )?;
-    let fabric_target = fabric
-        .targets
-        .iter()
-        .find(|target| target.kind == LoaderKind::Fabric)
-        .context("fabric target")?
-        .id
-        .clone();
     let error = catalog
         .save_instance_with_optifine(
             &fabric.id,
-            configuration("Should not persist"),
-            &fabric_target,
+            configuration(&fabric, "Should not persist"),
             Some(jar("1.20.6")),
         )
         .err()

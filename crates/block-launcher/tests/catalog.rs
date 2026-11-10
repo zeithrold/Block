@@ -1,3 +1,4 @@
+mod common;
 use block_launcher::catalog::{Catalog, DataPolicy, GameDirectoryGuard};
 use std::{fs, sync::Arc};
 
@@ -7,8 +8,8 @@ use std::os::unix::fs::symlink as symlink_dir;
 use std::os::windows::fs::symlink_dir;
 
 #[test]
-fn explicit_loader_targets_survive_reopen_and_profile_selection() -> anyhow::Result<()> {
-    use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
+fn explicit_loader_targets_survive_reopen_and_instance_selection() -> anyhow::Result<()> {
+    use block_launcher::catalog::{InstanceConfiguration, LoaderKind};
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     for (kind, prefix, minecraft, version) in [
@@ -24,22 +25,21 @@ fn explicit_loader_targets_survive_reopen_and_profile_selection() -> anyhow::Res
         ),
     ] {
         let target_id = format!("{prefix}-{version}");
-        let (instance, profile) = catalog.create_instance_with_loader(
-            format!("{prefix} test"),
+        let instance = catalog.create_instance_with_loader(
             minecraft.into(),
             None,
             Some((kind.clone(), version.into())),
-            ProfileConfiguration {
-                name: "Default".into(),
+            InstanceConfiguration {
+                name: format!("{prefix} test"),
                 target_id: target_id.clone(),
                 ..Default::default()
             },
         )?;
         let state = Catalog::open(root.path())?.snapshot()?;
-        let (saved_instance, saved_profile, target) = state.selection(&profile.id)?;
+        let (saved_instance, target) = state.selection(&instance.id)?;
         assert_eq!(saved_instance.id, instance.id);
         assert_eq!(saved_instance.targets.len(), 2);
-        assert_eq!(saved_profile.target_id, target_id);
+        assert_eq!(saved_instance.target_id, target_id);
         assert_eq!(target.kind, kind);
         assert_eq!(target.loader_version.as_deref(), Some(version));
         assert_eq!(
@@ -52,7 +52,7 @@ fn explicit_loader_targets_survive_reopen_and_profile_selection() -> anyhow::Res
 
 #[test]
 fn invalid_loader_identity_creates_no_instance_directory_or_catalog_entry() -> anyhow::Result<()> {
-    use block_launcher::catalog::{LoaderKind, ProfileConfiguration};
+    use block_launcher::catalog::{InstanceConfiguration, LoaderKind};
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
     for (kind, version) in [
@@ -65,12 +65,11 @@ fn invalid_loader_identity_creates_no_instance_directory_or_catalog_entry() -> a
         assert!(
             catalog
                 .create_instance_with_loader(
-                    "Invalid".into(),
                     "1.20.6".into(),
                     Some(directory.clone()),
                     Some((kind, version.into())),
-                    ProfileConfiguration {
-                        name: "Default".into(),
+                    InstanceConfiguration {
+                        name: "Invalid".into(),
                         ..Default::default()
                     }
                 )
@@ -83,76 +82,97 @@ fn invalid_loader_identity_creates_no_instance_directory_or_catalog_entry() -> a
 }
 
 #[test]
-fn installations_own_multiple_persistent_profiles() -> anyhow::Result<()> {
+fn managed_default_is_a_self_contained_game_root() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    catalog.separate_profiles()?;
-    let (instance, first) = catalog.create_instance(
-        "Survival".into(),
-        "1.20.6".into(),
-        None,
-        Some("20.6.144".into()),
-    )?;
-    let mut second = catalog.create_profile(&instance.id, "Creative".into())?;
-    second.memory_mib = 4096;
-    second.default_account = Some("a-public-player-id".into());
-    catalog.save_profile(second.clone())?;
-    let state = Catalog::open(root.path())?.snapshot()?;
-    assert_eq!(state.instances.len(), 1);
-    assert_eq!(state.profiles.len(), 2);
-    let (_, saved, target) = state.selection(&second.id)?;
-    assert_eq!(saved.memory_mib, 4096);
-    assert_eq!(target.id, "vanilla");
+    let instance = common::instance(&catalog)?;
+    assert_eq!(instance.resource_directory, instance.game_directory);
     assert_eq!(
-        state.selection(&first.id)?.2.loader_version.as_deref(),
-        Some("20.6.144")
+        instance
+            .resource_directory
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some(instance.id.as_str())
     );
+    assert_eq!(instance.data_policy, DataPolicy::Isolated);
+    assert_eq!(
+        instance.ownership,
+        block_launcher::catalog::InstanceOwnership::Managed
+    );
+    assert!(!instance.game_directory.join("profiles").exists());
     Ok(())
 }
 
 #[test]
-fn isolated_copy_changes_data_path_and_shared_profiles_reuse_one_directory() -> anyhow::Result<()> {
+fn preparation_namespace_cannot_be_selected_as_game_or_resource_data() -> anyhow::Result<()> {
+    use block_launcher::catalog::InstanceConfiguration;
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    catalog.separate_profiles()?;
-    let (instance, mut original) =
-        catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let copy = catalog.copy_profile(&original.id, "Copy settings".into())?;
-    assert_ne!(
-        original.game_directory(&instance)?,
-        copy.game_directory(&instance)?
+    let reserved = catalog.root().join("preparations");
+    assert!(
+        catalog
+            .create_instance(
+                "Invalid".into(),
+                "1.20.6".into(),
+                Some(reserved.join("new")),
+                None,
+            )
+            .is_err()
     );
-    original.data_policy = DataPolicy::Shared;
-    catalog.save_profile(original.clone())?;
-    let shared = catalog.copy_profile(&original.id, "Shared".into())?;
-    assert_eq!(
-        original.game_directory(&instance)?,
-        shared.game_directory(&instance)?
-    );
+    assert!(!reserved.exists());
+    let instance = common::instance(&catalog)?;
+    let before = fs::read(catalog.root().join("block.toml"))?;
+    for game_directory in [reserved.join("nested"), catalog.root().to_owned()] {
+        let mut values = InstanceConfiguration::from(&instance);
+        values.game_directory = game_directory;
+        assert!(catalog.save_instance(&instance.id, values).is_err());
+        assert_eq!(fs::read(catalog.root().join("block.toml"))?, before);
+    }
+    assert!(!reserved.exists());
     Ok(())
 }
 
 #[test]
-fn deleting_profile_keeps_shared_resources_worlds_and_other_profiles() -> anyhow::Result<()> {
+fn managed_creation_rejects_a_file_location_without_changing_existing_data() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    catalog.separate_profiles()?;
-    let (instance, profile) =
-        catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let copy = catalog.copy_profile(&profile.id, "Other".into())?;
-    let saves = profile.game_directory(&instance)?.join("saves/World");
+    let original = common::instance(&catalog)?;
+    let before = fs::read(catalog.root().join("block.toml"))?;
+    let file = original.resource_directory.join("options.txt");
+    fs::write(&file, b"existing options")?;
+    let error = catalog
+        .create_instance("Invalid".into(), "1.20.6".into(), Some(file.clone()), None)
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("A file was accepted as a directory"))?;
+    assert!(
+        error
+            .to_string()
+            .contains("selected path is not a directory"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(catalog.root().join("block.toml"))?, before);
+    assert_eq!(fs::read(file)?, b"existing options");
+    Ok(())
+}
+
+#[test]
+fn deleting_instance_keeps_resources_worlds_and_other_instances() -> anyhow::Result<()> {
+    let root = tempfile::tempdir()?;
+    let catalog = Catalog::open(root.path())?;
+    let instance = common::instance(&catalog)?;
+    let other = common::instance(&catalog)?;
+    let saves = instance.game_directory.join("saves/World");
     fs::create_dir_all(&saves)?;
     fs::write(saves.join("level.dat"), b"existing world")?;
     let immutable = root.path().join("objects");
     fs::create_dir_all(&immutable)?;
     fs::write(immutable.join("sentinel"), b"cached")?;
-    catalog.delete_profile(&profile.id)?;
+    catalog.delete_instance(&instance.id)?;
     assert_eq!(fs::read(saves.join("level.dat"))?, b"existing world");
-    assert!(immutable.join("sentinel").exists());
+    assert_eq!(fs::read(immutable.join("sentinel"))?, b"cached");
     let state = catalog.snapshot()?;
     assert_eq!(state.instances.len(), 1);
-    assert_eq!(state.profiles.len(), 1);
-    assert_eq!(state.profiles[0].id, copy.id);
+    assert_eq!(state.instances[0].id, other.id);
     Ok(())
 }
 
@@ -200,94 +220,84 @@ fn catalog_serializes_concurrent_creates_without_lost_updates() -> anyhow::Resul
     }
     let state = catalog.snapshot()?;
     assert_eq!(state.instances.len(), 4);
-    assert_eq!(state.profiles.len(), 4);
     Ok(())
 }
 
 #[test]
-fn profiles_cannot_override_account_identity_or_cross_installation_ownership() -> anyhow::Result<()>
-{
+fn instance_validation_rejects_managed_process_argument_overrides() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    let (_, mut profile) = catalog.create_instance("A".into(), "1.20.6".into(), None, None)?;
-    profile.game_args = vec!["--accessToken=an-untrusted-override".into()];
-    assert!(catalog.save_profile(profile.clone()).is_err());
-    profile.game_args.clear();
-    let (other, _) = catalog.create_instance("B".into(), "1.20.6".into(), None, None)?;
-    profile.instance_id = other.id;
-    assert!(catalog.save_profile(profile).is_err());
+    let instance = common::instance(&catalog)?;
+    let original = fs::read(common::path(root.path()))?;
+    for argument in [
+        "--accessToken=untrusted",
+        "--gameDir",
+        "--gameDir=/elsewhere",
+        "--uuid=other",
+        "--username=other",
+    ] {
+        let mut configuration = block_launcher::catalog::InstanceConfiguration::from(&instance);
+        configuration.game_args = vec![argument.into()];
+        assert!(
+            catalog.save_instance(&instance.id, configuration).is_err(),
+            "{argument}"
+        );
+        assert_eq!(fs::read(common::path(root.path()))?, original);
+    }
     Ok(())
 }
 
 #[test]
-fn existing_installation_root_cannot_be_reused_by_another_instance() -> anyhow::Result<()> {
+fn overlapping_roots_are_legal_but_equal_actual_game_directories_share_a_lock() -> anyhow::Result<()>
+{
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path().join("catalog"))?;
     let directory = root.path().join("game");
-    catalog.create_instance("A".into(), "1.20.6".into(), Some(directory.clone()), None)?;
-    assert!(
-        catalog
-            .create_instance(
-                "B".into(),
-                "1.20.6".into(),
-                Some(directory.join("profiles")),
-                None
-            )
-            .is_err()
-    );
+    let first =
+        catalog.create_instance("A".into(), "1.20.6".into(), Some(directory.clone()), None)?;
+    let second = catalog.create_instance(
+        "B".into(),
+        "1.20.6".into(),
+        Some(directory.join("versions/V")),
+        None,
+    )?;
+    let shared = catalog.create_instance("C".into(), "1.20.6".into(), Some(directory), None)?;
+    let _first = GameDirectoryGuard::for_instance(&first)?;
+    let _second = GameDirectoryGuard::for_instance(&second)?;
+    assert!(GameDirectoryGuard::for_instance(&shared).is_err());
     Ok(())
 }
 
 #[test]
-fn isolated_profile_cannot_alias_another_profile_with_a_symlink() -> anyhow::Result<()> {
+fn planned_game_directory_replaced_by_symlink_is_rejected_without_writes() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    catalog.separate_profiles()?;
-    let (instance, first) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let second = catalog.copy_profile(&first.id, "Other".into())?;
-    let original = first.game_directory(&instance)?;
-    fs::create_dir_all(&original)?;
-    let alias = second.game_directory(&instance)?;
-    fs::create_dir_all(
-        alias
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
-    )?;
-    symlink_dir(&original, &alias)?;
-    assert!(GameDirectoryGuard::for_profile(&instance, &second).is_err());
-    assert!(GameDirectoryGuard::for_profile(&instance, &first).is_ok());
+    let mut instance = common::instance(&catalog)?;
+    let original = root.path().join("other");
+    fs::create_dir(&original)?;
+    instance.game_directory = instance.resource_directory.join("planned");
+    symlink_dir(&original, &instance.game_directory)?;
+    assert!(GameDirectoryGuard::for_instance(&instance).is_err());
+    assert!(!original.join(".block-game.lock").exists());
     Ok(())
 }
 
 #[cfg(windows)]
 #[test]
-fn isolated_profile_cannot_alias_another_profile_with_a_junction() -> anyhow::Result<()> {
+fn planned_game_directory_replaced_by_junction_is_rejected() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     let catalog = Catalog::open(root.path())?;
-    catalog.separate_profiles()?;
-    let (instance, first) = catalog.create_instance("Game".into(), "1.20.6".into(), None, None)?;
-    let second = catalog.copy_profile(&first.id, "Other".into())?;
-    let original = first.game_directory(&instance)?;
-    fs::create_dir_all(&original)?;
-    let alias = second.game_directory(&instance)?;
-    fs::create_dir_all(
-        alias
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
-    )?;
+    let mut instance = common::instance(&catalog)?;
+    let original = root.path().join("other");
+    fs::create_dir(&original)?;
+    instance.game_directory = instance.resource_directory.join("planned");
     let output = std::process::Command::new("cmd")
         .args(["/D", "/C", "mklink", "/J"])
-        .arg(&alias)
+        .arg(&instance.game_directory)
         .arg(&original)
         .output()?;
-    anyhow::ensure!(
-        output.status.success(),
-        "could not create the fixture junction: {} {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(alias.canonicalize()?, original.canonicalize()?);
-    assert!(GameDirectoryGuard::for_profile(&instance, &second).is_err());
-    assert!(GameDirectoryGuard::for_profile(&instance, &first).is_ok());
+    anyhow::ensure!(output.status.success(), "could not create fixture junction");
+    assert!(GameDirectoryGuard::for_instance(&instance).is_err());
+    assert!(!original.join(".block-game.lock").exists());
     Ok(())
 }

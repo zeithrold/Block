@@ -1,10 +1,5 @@
 {
   "_version": 2,
-  "wizard.status.savingProfile": {
-    "en": "Saving your new Profile",
-    "zh-Hans": "正在保存新的配置文件",
-    "ja": "新しいプロファイルを保存しています"
-  },
   "wizard.status.savingSetup": {
     "en": "Saving your game setup",
     "zh-Hans": "正在保存游戏设置",
@@ -30,20 +25,10 @@
     "zh-Hans": "创建并准备",
     "ja": "作成して準備"
   },
-  "wizard.footer.createProfile": {
-    "en": "Create Profile",
-    "zh-Hans": "创建配置文件",
-    "ja": "プロファイルを作成"
-  },
   "wizard.footer.saveGame": {
     "en": "Save game setup",
     "zh-Hans": "保存游戏设置",
     "ja": "ゲーム設定を保存"
-  },
-  "wizard.footer.effectProfile": {
-    "en": "Adds a Profile to this Instance; existing game files remain unchanged.",
-    "zh-Hans": "为此实例添加配置文件；现有游戏文件保持不变。",
-    "ja": "このインスタンスにプロファイルを追加します。既存のゲームファイルは変更されません。"
   },
   "wizard.footer.effectSave": {
     "en": "Saves this game setup; preparation starts when you choose it from setup.",
@@ -125,16 +110,6 @@
     "zh-Hans": "游戏文件与组件",
     "ja": "ゲームファイルとコンポーネント"
   },
-  "wizard.rail.profile": {
-    "en": "Profile",
-    "zh-Hans": "配置文件",
-    "ja": "プロファイル"
-  },
-  "wizard.rail.profileDetail": {
-    "en": "Make it yours",
-    "zh-Hans": "打造成你的风格",
-    "ja": "自分好みに設定"
-  },
   "wizard.rail.review": {
     "en": "Review",
     "zh-Hans": "检查",
@@ -175,16 +150,6 @@
     "zh-Hans": "创建新游戏或导入本地整合包。",
     "ja": "新しいゲームを作成するか、ローカルの Mod パックをインポートします。"
   },
-  "wizard.start.badge": {
-    "en": "Separated Profile",
-    "zh-Hans": "分离配置文件",
-    "ja": "分離プロファイル"
-  },
-  "wizard.start.newInstance": {
-    "en": "New Instance + Profile",
-    "zh-Hans": "新实例 + 配置文件",
-    "ja": "新しいインスタンス + プロファイル"
-  },
   "wizard.start.newGame": {
     "en": "Create a new game",
     "zh-Hans": "创建新游戏",
@@ -195,55 +160,10 @@
     "zh-Hans": "选择 Minecraft 版本并配置新游戏。",
     "ja": "Minecraft のバージョンを選んで新しいゲームを設定します。"
   },
-  "wizard.start.newInstanceNote": {
-    "en": "A fresh Minecraft setup, with your first Profile ready to go.",
-    "zh-Hans": "全新的 Minecraft 环境，并已准备好第一个配置文件。",
-    "ja": "新しい Minecraft 環境と、すぐに使える最初のプロファイルを用意します。"
-  },
-  "wizard.start.newProfile": {
-    "en": "New Profile",
-    "zh-Hans": "新配置文件",
-    "ja": "新しいプロファイル"
-  },
-  "wizard.start.noInstancesNote": {
-    "en": "Create an Instance first. New Profiles can reuse it later without duplicating game files.",
-    "zh-Hans": "请先创建实例。之后新建配置文件可以复用它，无需复制游戏文件。",
-    "ja": "先にインスタンスを作成してください。新しいプロファイルは後で再利用でき、ゲームファイルを複製しません。"
-  },
   "wizard.start.reuseNote": {
     "en": "Reuse an existing Instance with independent appearance and launch settings. Game files are shared.",
     "zh-Hans": "复用现有实例，外观和启动设置保持独立，游戏文件共享。",
     "ja": "既存のインスタンスを再利用し、外観と起動設定は個別に保ちます。ゲームファイルは共有されます。"
-  },
-  "wizard.instance.group": {
-    "en": "Existing game Instance",
-    "zh-Hans": "现有游戏实例",
-    "ja": "既存のゲームインスタンス"
-  },
-  "wizard.instance.heading": {
-    "en": "Choose a game Instance",
-    "zh-Hans": "选择游戏实例",
-    "ja": "ゲームインスタンスを選択"
-  },
-  "wizard.instance.subtitle": {
-    "en": "Your new Profile uses these existing game files and components.",
-    "zh-Hans": "新配置文件将使用这些现有游戏文件和组件。",
-    "ja": "新しいプロファイルは、この既存のゲームファイルとコンポーネントを使用します。"
-  },
-  "wizard.instance.profiles": {
-    "en": "%{count} Profiles",
-    "zh-Hans": "%{count} 个配置文件",
-    "ja": "%{count} 個のプロファイル"
-  },
-  "wizard.instance.emptyTitle": {
-    "en": "No Instances",
-    "zh-Hans": "没有实例",
-    "ja": "インスタンスがありません"
-  },
-  "wizard.instance.emptyDetail": {
-    "en": "Go back and create a new Instance with its first Profile.",
-    "zh-Hans": "请返回并新建一个实例及其第一个配置文件。",
-    "ja": "戻って、最初のプロファイルとともに新しいインスタンスを作成してください。"
   },
   "wizard.setup.heading": {
     "en": "Create your game",
@@ -775,181 +695,41 @@
     "zh-Hans": "无法直接与 %{loader} 组合使用",
     "ja": "%{loader} と直接組み合わせることはできません"
   },
-  "wizard.profile.title": {
-    "en": "Your way to play",
-    "zh-Hans": "你的玩法",
-    "ja": "あなたの遊び方"
-  },
-  "wizard.profile.defaultName": {
-    "en": "New Profile",
-    "zh-Hans": "新配置文件",
-    "ja": "新しいプロファイル"
-  },
-  "wizard.profile.name": {
-    "en": "Profile name",
-    "zh-Hans": "配置文件名称",
-    "ja": "プロファイル名"
-  },
-  "wizard.profile.namePlaceholder": {
-    "en": "Profile name",
-    "zh-Hans": "配置文件名称",
-    "ja": "プロファイル名"
-  },
-  "wizard.profile.icon": {
-    "en": "Icon",
-    "zh-Hans": "图标",
-    "ja": "アイコン"
-  },
-  "wizard.profile.color": {
-    "en": "Color",
-    "zh-Hans": "颜色",
-    "ja": "カラー"
-  },
-  "wizard.profile.advanced": {
-    "en": "Advanced launch settings",
-    "zh-Hans": "高级启动设置",
-    "ja": "詳細な起動設定"
-  },
-  "wizard.profile.server": {
-    "en": "Server address (optional)",
-    "zh-Hans": "服务器地址（可选）",
-    "ja": "サーバーアドレス（任意）"
-  },
-  "wizard.profile.serverHint": {
-    "en": "A hostname or IP address, with an optional port. Saving does not connect.",
-    "zh-Hans": "主机名或 IP 地址，可包含端口。保存不会连接。",
-    "ja": "ホスト名または IP アドレス（ポートは任意）。保存しても接続は行いません。"
-  },
-  "wizard.profile.connect": {
-    "en": "Connect to this server automatically on launch",
-    "zh-Hans": "启动时自动连接到此服务器",
-    "ja": "起動時にこのサーバーへ自動接続"
-  },
-  "wizard.profile.connectionUnsupported": {
-    "en": "This version’s client does not accept an automatic server connection. The address can still be saved.",
-    "zh-Hans": "此版本的客户端不接受自动服务器连接。地址仍可保存。",
-    "ja": "このバージョンのクライアントは自動サーバー接続を受け付けません。アドレスは保存できます。"
-  },
-  "wizard.profile.connectionUnknown": {
-    "en": "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.",
-    "zh-Hans": "地址可以保存。在此版本的官方清单可用之前，自动连接不可用。",
-    "ja": "アドレスは保存できます。このバージョンの公式マニフェストが利用可能になるまで、自動接続は無効です。"
-  },
-  "wizard.profile.launchTarget": {
-    "en": "Launch target",
-    "zh-Hans": "启动目标",
-    "ja": "起動ターゲット"
-  },
-  "wizard.profile.installReady": {
-    "en": "Installed",
-    "zh-Hans": "已安装",
-    "ja": "インストール済み"
-  },
-  "wizard.profile.installPending": {
-    "en": "Installs before play",
-    "zh-Hans": "游玩前安装",
-    "ja": "プレイ前にインストール"
-  },
-  "wizard.profile.installInstalling": {
-    "en": "Installing",
-    "zh-Hans": "正在安装",
-    "ja": "インストール中"
-  },
-  "wizard.profile.installFailed": {
-    "en": "Installation needs retry",
-    "zh-Hans": "安装需要重试",
-    "ja": "インストールの再試行が必要"
-  },
-  "wizard.profile.memory": {
-    "en": "Maximum memory (GB)",
-    "zh-Hans": "最大内存（GB）",
-    "ja": "最大メモリ（GB）"
-  },
-  "wizard.profile.memoryHint": {
-    "en": "Allowed: 1–32 GB. Step: 1 GB.",
-    "zh-Hans": "允许范围：1–32 GB。步长：1 GB。",
-    "ja": "許容範囲: 1〜32 GB。刻み: 1 GB。"
-  },
-  "wizard.profile.jvm": {
-    "en": "Extra JVM arguments",
-    "zh-Hans": "额外 JVM 参数",
-    "ja": "追加の JVM 引数"
-  },
-  "wizard.profile.jvmPlaceholder": {
-    "en": "Extra JVM arguments",
-    "zh-Hans": "额外 JVM 参数",
-    "ja": "追加の JVM 引数"
-  },
-  "wizard.profile.automaticJava": {
-    "en": "Automatic Java",
-    "zh-Hans": "自动 Java",
-    "ja": "自動 Java"
-  },
-  "wizard.profile.customExecutable": {
-    "en": "Custom executable",
-    "zh-Hans": "自定义可执行文件",
-    "ja": "カスタム実行ファイル"
-  },
-  "wizard.profile.javaPlaceholder": {
-    "en": "Absolute path to Java",
-    "zh-Hans": "Java 的绝对路径",
-    "ja": "Java の絶対パス"
-  },
-  "wizard.profile.javaExecutable": {
-    "en": "Java executable",
-    "zh-Hans": "Java 可执行文件",
-    "ja": "Java 実行ファイル"
-  },
-  "wizard.profile.windowSizeValue": {
-    "en": "%{width} × %{height}",
-    "zh-Hans": "%{width} × %{height}",
-    "ja": "%{width} × %{height}"
-  },
-  "wizard.profile.windowSizeCustom": {
-    "en": "%{width} × %{height} · Custom",
-    "zh-Hans": "%{width} × %{height} · 自定义",
-    "ja": "%{width} × %{height} · カスタム"
-  },
-  "wizard.profile.windowWidth": {
-    "en": "Window width (px)",
-    "zh-Hans": "窗口宽度（px）",
-    "ja": "ウィンドウ幅（px）"
-  },
-  "wizard.profile.windowHeight": {
-    "en": "Window height (px)",
-    "zh-Hans": "窗口高度（px）",
-    "ja": "ウィンドウ高さ（px）"
-  },
-  "wizard.profile.fullscreen": {
-    "en": "Start in fullscreen",
-    "zh-Hans": "以全屏启动",
-    "ja": "フルスクリーンで起動"
-  },
-  "wizard.profile.defaultError": {
-    "en": "Use a Profile name of at most 160 UTF-8 bytes without control characters.",
-    "zh-Hans": "配置名称最多 160 个 UTF-8 字节，且不能包含控制字符。",
-    "ja": "プロファイル名は制御文字を含まない 160 UTF-8 バイト以内で入力してください。"
-  },
-  "wizard.profile.widthError": {
-    "en": "Enter a whole number for window width.",
-    "zh-Hans": "窗口宽度请输入整数。",
-    "ja": "ウィンドウ幅は整数で入力してください。"
-  },
-  "wizard.profile.heightError": {
-    "en": "Enter a whole number for window height.",
-    "zh-Hans": "窗口高度请输入整数。",
-    "ja": "ウィンドウ高さは整数で入力してください。"
-  },
-  "wizard.profile.javaError": {
-    "en": "Choose a Java executable or use managed Java.",
-    "zh-Hans": "请选择 Java 可执行文件，或使用托管 Java。",
-    "ja": "Java 実行ファイルを選択するか、管理された Java を使用してください。"
-  },
-  "wizard.profile.validationDetail": {
-    "en": "Could not validate Profile settings. Details: %{detail}",
-    "zh-Hans": "无法验证配置文件设置。详情：%{detail}",
-    "ja": "プロファイル設定を検証できませんでした。詳細: %{detail}"
-  },
+  "wizard.instance_settings.title": {"en": "Your way to play", "zh-Hans": "你的玩法", "ja": "あなたの遊び方"},
+  "wizard.instance_settings.defaultName": {"en": "New Instance", "zh-Hans": "新配置文件", "ja": "新しいインスタンス"},
+  "wizard.instance_settings.name": {"en": "Instance name", "zh-Hans": "配置文件名称", "ja": "インスタンス名"},
+  "wizard.instance_settings.namePlaceholder": {"en": "Instance name", "zh-Hans": "配置文件名称", "ja": "インスタンス名"},
+  "wizard.instance_settings.icon": {"en": "Icon", "zh-Hans": "图标", "ja": "アイコン"},
+  "wizard.instance_settings.color": {"en": "Color", "zh-Hans": "颜色", "ja": "カラー"},
+  "wizard.instance_settings.advanced": {"en": "Advanced launch settings", "zh-Hans": "高级启动设置", "ja": "詳細な起動設定"},
+  "wizard.instance_settings.server": {"en": "Server address (optional)", "zh-Hans": "服务器地址（可选）", "ja": "サーバーアドレス（任意）"},
+  "wizard.instance_settings.serverHint": {"en": "A hostname or IP address, with an optional port. Saving does not connect.", "zh-Hans": "主机名或 IP 地址，可包含端口。保存不会连接。", "ja": "ホスト名または IP アドレス（ポートは任意）。保存しても接続は行いません。"},
+  "wizard.instance_settings.connect": {"en": "Connect to this server automatically on launch", "zh-Hans": "启动时自动连接到此服务器", "ja": "起動時にこのサーバーへ自動接続"},
+  "wizard.instance_settings.connectionUnsupported": {"en": "This version’s client does not accept an automatic server connection. The address can still be saved.", "zh-Hans": "此版本的客户端不接受自动服务器连接。地址仍可保存。", "ja": "このバージョンのクライアントは自動サーバー接続を受け付けません。アドレスは保存できます。"},
+  "wizard.instance_settings.connectionUnknown": {"en": "The address can be saved. Automatic connection stays unavailable until this version’s official manifest is available.", "zh-Hans": "地址可以保存。在此版本的官方清单可用之前，自动连接不可用。", "ja": "アドレスは保存できます。このバージョンの公式マニフェストが利用可能になるまで、自動接続は無効です。"},
+  "wizard.instance_settings.launchTarget": {"en": "Launch target", "zh-Hans": "启动目标", "ja": "起動ターゲット"},
+  "wizard.instance_settings.installReady": {"en": "Installed", "zh-Hans": "已安装", "ja": "インストール済み"},
+  "wizard.instance_settings.installPending": {"en": "Installs before play", "zh-Hans": "游玩前安装", "ja": "プレイ前にインストール"},
+  "wizard.instance_settings.installInstalling": {"en": "Installing", "zh-Hans": "正在安装", "ja": "インストール中"},
+  "wizard.instance_settings.installFailed": {"en": "Installation needs retry", "zh-Hans": "安装需要重试", "ja": "インストールの再試行が必要"},
+  "wizard.instance_settings.memory": {"en": "Maximum memory (GB)", "zh-Hans": "最大内存（GB）", "ja": "最大メモリ（GB）"},
+  "wizard.instance_settings.memoryHint": {"en": "Allowed: 1–32 GB. Step: 1 GB.", "zh-Hans": "允许范围：1–32 GB。步长：1 GB。", "ja": "許容範囲: 1〜32 GB。刻み: 1 GB。"},
+  "wizard.instance_settings.jvm": {"en": "Extra JVM arguments", "zh-Hans": "额外 JVM 参数", "ja": "追加の JVM 引数"},
+  "wizard.instance_settings.jvmPlaceholder": {"en": "Extra JVM arguments", "zh-Hans": "额外 JVM 参数", "ja": "追加の JVM 引数"},
+  "wizard.instance_settings.automaticJava": {"en": "Automatic Java", "zh-Hans": "自动 Java", "ja": "自動 Java"},
+  "wizard.instance_settings.customExecutable": {"en": "Custom executable", "zh-Hans": "自定义可执行文件", "ja": "カスタム実行ファイル"},
+  "wizard.instance_settings.javaPlaceholder": {"en": "Absolute path to Java", "zh-Hans": "Java 的绝对路径", "ja": "Java の絶対パス"},
+  "wizard.instance_settings.javaExecutable": {"en": "Java executable", "zh-Hans": "Java 可执行文件", "ja": "Java 実行ファイル"},
+  "wizard.instance_settings.windowSizeValue": {"en": "%{width} × %{height}", "zh-Hans": "%{width} × %{height}", "ja": "%{width} × %{height}"},
+  "wizard.instance_settings.windowSizeCustom": {"en": "%{width} × %{height} · Custom", "zh-Hans": "%{width} × %{height} · 自定义", "ja": "%{width} × %{height} · カスタム"},
+  "wizard.instance_settings.windowWidth": {"en": "Window width (px)", "zh-Hans": "窗口宽度（px）", "ja": "ウィンドウ幅（px）"},
+  "wizard.instance_settings.windowHeight": {"en": "Window height (px)", "zh-Hans": "窗口高度（px）", "ja": "ウィンドウ高さ（px）"},
+  "wizard.instance_settings.fullscreen": {"en": "Start in fullscreen", "zh-Hans": "以全屏启动", "ja": "フルスクリーンで起動"},
+  "wizard.instance_settings.defaultError": {"en": "Use a Instance name of at most 160 UTF-8 bytes without control characters.", "zh-Hans": "实例名称最多 160 个 UTF-8 字节，且不能包含控制字符。", "ja": "インスタンス名は制御文字を含まない 160 UTF-8 バイト以内で入力してください。"},
+  "wizard.instance_settings.widthError": {"en": "Enter a whole number for window width.", "zh-Hans": "窗口宽度请输入整数。", "ja": "ウィンドウ幅は整数で入力してください。"},
+  "wizard.instance_settings.heightError": {"en": "Enter a whole number for window height.", "zh-Hans": "窗口高度请输入整数。", "ja": "ウィンドウ高さは整数で入力してください。"},
+  "wizard.instance_settings.javaError": {"en": "Choose a Java executable or use managed Java.", "zh-Hans": "请选择 Java 可执行文件，或使用托管 Java。", "ja": "Java 実行ファイルを選択するか、管理された Java を使用してください。"},
+  "wizard.instance_settings.validationDetail": {"en": "Could not validate Instance settings. Details: %{detail}", "zh-Hans": "无法验证配置文件设置。详情：%{detail}", "ja": "インスタンス設定を検証できませんでした。詳細: %{detail}"},
   "wizard.error.reopen": {
     "en": "Reopen game setup to continue.",
     "zh-Hans": "重新打开游戏设置以继续。",
@@ -1226,25 +1006,20 @@
     "zh-Hans": "继续设置",
     "ja": "セットアップを続行"
   },
-  "import.footer.destination": {
-    "en": "Copy to: %{path}",
-    "zh-Hans": "复制到：%{path}",
-    "ja": "コピー先: %{path}"
-  },
   "import.footer.originalFiles": {
     "en": "Original files stay in place.",
     "zh-Hans": "原始文件保持原位。",
     "ja": "元のファイルはそのまま残ります。"
   },
   "import.footer.importOne": {
-    "en": "Import %{count} game",
-    "zh-Hans": "导入 %{count} 个游戏",
-    "ja": "%{count} 件のゲームをインポート"
+    "en": "Add %{count} instance",
+    "zh-Hans": "添加 %{count} 个实例",
+    "ja": "%{count} 件のインスタンスを追加"
   },
   "import.footer.importMany": {
-    "en": "Import %{count} games",
-    "zh-Hans": "导入 %{count} 个游戏",
-    "ja": "%{count} 件のゲームをインポート"
+    "en": "Add %{count} instances",
+    "zh-Hans": "添加 %{count} 个实例",
+    "ja": "%{count} 件のインスタンスを追加"
   },
   "import.footer.newGame": {
     "en": "Create a new game",
@@ -1270,5 +1045,16 @@
     "en": "Block's data directory is unavailable.",
     "zh-Hans": "Block 的数据目录不可用。",
     "ja": "Block のデータディレクトリを利用できません。"
-  }
+  },
+  "import.policy.title": {"en": "Game data location", "zh-Hans": "游戏数据位置", "ja": "ゲームデータの場所"},
+  "import.policy.subtitle": {"en": "Choose where this instance reads and saves game data.", "zh-Hans": "选择此实例读取和保存游戏数据的位置。", "ja": "このインスタンスがゲームデータを読み書きする場所を選択します。"},
+  "import.policy.shared": {"en": "Shared", "zh-Hans": "共享", "ja": "共有"},
+  "import.policy.isolated": {"en": "Isolated", "zh-Hans": "隔离", "ja": "分離"},
+  "import.policy.shared_warning": {"en": "Shared game data", "zh-Hans": "共享游戏数据", "ja": "ゲームデータを共有"},
+  "import.policy.unknown_warning": {"en": "Previous data location is unknown", "zh-Hans": "原有数据位置不明", "ja": "以前のデータの場所は不明です"},
+  "import.policy.shared_explanation": {"en": "Versions share saves, mods and configuration here. Changes can affect other versions and make separate maintenance harder.", "zh-Hans": "多个版本会共享此处的存档、模组和配置，改动可能相互影响，不利于后续分别维护。", "ja": "ワールド、MOD、設定を複数のバージョンで共有します。変更が互いに影響し、バージョンごとの保守が難しくなります。"},
+  "import.policy.unknown_explanation": {"en": "Isolated is selected by default. Old saves, mods and configuration may not appear here; the original files stay where they are.", "zh-Hans": "默认使用隔离位置。原有存档、模组和配置可能不会在此显示；原始文件仍留在原处。", "ja": "既定では分離された場所を使用します。以前のワールド、MOD、設定が表示されない場合があります。元のファイルは元の場所に残ります。"},
+  "import.policy.isolated_explanation": {"en": "This instance uses the game data at this location.", "zh-Hans": "此实例使用此位置的游戏数据。", "ja": "このインスタンスはこの場所のゲームデータを使用します。"},
+  "import.policy.files_remain": {"en": "Files are not moved or copied. Existing saves, mods and configuration remain at their original location.", "zh-Hans": "不会移动或复制文件。原有存档、模组和配置仍保留在原处。", "ja": "ファイルの移動やコピーは行いません。既存のワールド、MOD、設定は元の場所に残ります。"},
+  "import.policy.change": {"en": "Change data location", "zh-Hans": "更改数据位置", "ja": "データの場所を変更"}
 }

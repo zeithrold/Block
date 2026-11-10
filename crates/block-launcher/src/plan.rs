@@ -16,6 +16,11 @@ use crate::{
     rules,
 };
 
+mod resource_path;
+pub use resource_path::{ExistingResource, ResourcePath};
+mod existing;
+pub(crate) use existing::compile_existing;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PrepareAction {
@@ -36,6 +41,18 @@ pub enum PrepareAction {
         sha1: String,
         directory: String,
         excludes: Vec<String>,
+    },
+    ExtractExisting {
+        resource: ExistingResource,
+        directory: String,
+        excludes: Vec<String>,
+    },
+    /// Declared immutable legacy asset beneath the locked actual game directory.
+    GameResource {
+        source: ResourcePath,
+        sha1: String,
+        size: u64,
+        path: String,
     },
     /// Unpack a verified vendor runtime archive into a managed runtime directory.
     ExtractArchive {
@@ -60,9 +77,9 @@ pub struct CommandTemplate {
     pub main_class: String,
     pub jvm_args: Vec<String>,
     pub game_args: Vec<String>,
-    pub classpath: Vec<String>,
+    pub classpath: Vec<ResourcePath>,
     pub variables: BTreeMap<String, String>,
-    pub path_variables: BTreeMap<String, String>,
+    pub path_variables: BTreeMap<String, ResourcePath>,
     pub cwd: String,
 }
 
@@ -76,6 +93,8 @@ pub struct ExecutionPlan {
     pub manifest_sha1: String,
     pub target: Target,
     pub resources: Vec<Resource>,
+    pub existing_resources: Vec<ExistingResource>,
+    pub existing_asset_root: Option<PathBuf>,
     pub actions: Vec<PrepareAction>,
     pub command: CommandTemplate,
     /// Explicit compatibility substitution applied during resolution, if any.
@@ -92,7 +111,7 @@ pub struct ExecutionPlan {
 struct PlanFiles {
     resources: Vec<Resource>,
     actions: Vec<PrepareAction>,
-    classpath: Vec<String>,
+    classpath: Vec<ResourcePath>,
 }
 
 const CLASSPATH_TOKEN: &str = "${classpath}";
@@ -105,6 +124,21 @@ pub fn compile(
     recipe: &LaunchRecipe,
     metadata: &ResolvedMetadata,
 ) -> anyhow::Result<ExecutionPlan> {
+    compile_inner(recipe, metadata, true)
+}
+
+pub(crate) fn compile_catalog(
+    recipe: &LaunchRecipe,
+    metadata: &ResolvedMetadata,
+) -> anyhow::Result<ExecutionPlan> {
+    compile_inner(recipe, metadata, false)
+}
+
+fn compile_inner(
+    recipe: &LaunchRecipe,
+    metadata: &ResolvedMetadata,
+    prepare_game_directory: bool,
+) -> anyhow::Result<ExecutionPlan> {
     recipe.validate()?;
     crate::support::manifest_support(
         &metadata.parsed.manifest,
@@ -114,16 +148,18 @@ pub fn compile(
     .require()?;
     let mut files = PlanFiles::default();
     plan_libraries(recipe, metadata, &mut files)?;
-    plan_assets(metadata, &recipe.instance, &mut files)?;
+    plan_assets(metadata, &mut files)?;
     let java = plan_runtime(recipe, metadata, &mut files.resources, &mut files.actions)?;
-    let command = plan_command(recipe, metadata, java, &mut files)?;
+    let command = plan_command(recipe, metadata, java, &mut files, prepare_game_directory)?;
     Ok(ExecutionPlan {
-        schema_version: 1,
+        schema_version: 2,
         instance: recipe.instance.clone(),
         version: metadata.parsed.manifest.id.clone(),
         manifest_sha1: metadata.parsed.manifest_sha1.clone(),
         target: metadata.target.clone(),
         resources: files.resources,
+        existing_resources: Vec::new(),
+        existing_asset_root: None,
         actions: files.actions,
         command,
         compatibility: metadata.compatibility.clone(),
@@ -141,7 +177,7 @@ fn plan_libraries(
 ) -> anyhow::Result<()> {
     let manifest = &metadata.parsed.manifest;
     let target = &metadata.target;
-    let natives = format!("instances/{}/runs/${{run_id}}/natives", recipe.instance);
+    let natives = format!("preparations/{}/runs/${{run_id}}/natives", recipe.instance);
     let library_root = format!("views/libraries/{}", metadata.parsed.manifest_sha1);
     for library in &manifest.libraries {
         if !rules::allowed(library.rules.as_deref(), target, &recipe.features)? {
@@ -195,7 +231,7 @@ fn plan_libraries(
                 path.clone(),
                 false,
             );
-            files.classpath.push(path);
+            files.classpath.push(ResourcePath::Cache { relative: path });
         }
         if let Some(classifier) = library
             .natives
@@ -264,7 +300,7 @@ fn plan_libraries(
             path.clone(),
             false,
         );
-        files.classpath.push(path);
+        files.classpath.push(ResourcePath::Cache { relative: path });
     }
     let client_path = format!(
         "views/clients/{}/client.jar",
@@ -277,17 +313,14 @@ fn plan_libraries(
         client_path.clone(),
         false,
     );
-    files.classpath.push(client_path);
+    files.classpath.push(ResourcePath::Cache {
+        relative: client_path,
+    });
     Ok(())
 }
 
-fn plan_assets(
-    metadata: &ResolvedMetadata,
-    instance: &str,
-    files: &mut PlanFiles,
-) -> anyhow::Result<()> {
+fn plan_assets(metadata: &ResolvedMetadata, files: &mut PlanFiles) -> anyhow::Result<()> {
     let manifest = &metadata.parsed.manifest;
-    let game_dir = format!("instances/{instance}/game");
     let asset_root = format!("views/assets/{}", manifest.asset_index.sha1);
     let asset_descriptor = Resource {
         sha1: manifest.asset_index.sha1.clone(),
@@ -329,8 +362,6 @@ fn plan_assets(
         );
         let named_root = if metadata.assets.virtual_layout == Some(true) {
             Some(format!("{asset_root}/virtual/{}", manifest.asset_index.id))
-        } else if metadata.assets.map_to_resources == Some(true) {
-            Some(format!("{game_dir}/resources"))
         } else {
             None
         };
@@ -339,6 +370,16 @@ fn plan_assets(
                 sha1: asset.hash.clone(),
                 path: format!("{root}/{name}"),
                 executable: false,
+            });
+        }
+        if metadata.assets.map_to_resources == Some(true) {
+            files.actions.push(PrepareAction::GameResource {
+                source: ResourcePath::Cache {
+                    relative: format!("{asset_root}/objects/{}/{}", &asset.hash[..2], asset.hash),
+                },
+                sha1: asset.hash.clone(),
+                size: asset.size,
+                path: name.clone(),
             });
         }
     }
@@ -388,14 +429,15 @@ fn plan_command(
     metadata: &ResolvedMetadata,
     java: JavaExecutable,
     files: &mut PlanFiles,
+    prepare_game_directory: bool,
 ) -> anyhow::Result<CommandTemplate> {
     let manifest = &metadata.parsed.manifest;
     let (mut jvm_args, game_args) = argument_sets(recipe, metadata)?;
     let game_dir = format!("instances/{}/game", recipe.instance);
-    let natives = format!("instances/{}/runs/${{run_id}}/natives", recipe.instance);
+    let natives = format!("preparations/{}/runs/${{run_id}}/natives", recipe.instance);
     let asset_root = format!("views/assets/{}", manifest.asset_index.sha1);
     let library_root = format!("views/libraries/{}", metadata.parsed.manifest_sha1);
-    let mut path_variables = BTreeMap::from([
+    let mut path_variables: BTreeMap<String, ResourcePath> = [
         ("game_directory".into(), game_dir.clone()),
         ("natives_directory".into(), natives.clone()),
         ("assets_root".into(), asset_root.clone()),
@@ -408,7 +450,10 @@ fn plan_command(
             },
         ),
         ("library_directory".into(), library_root),
-    ]);
+    ]
+    .into_iter()
+    .map(|(name, relative)| (name, ResourcePath::Cache { relative }))
+    .collect();
     if let Some(logging) = &manifest.logging {
         let file = &logging.client.file;
         let path = format!("views/logging/{}/{}", file.sha1, file.id);
@@ -425,13 +470,16 @@ fn plan_command(
             path.clone(),
             false,
         );
-        path_variables.insert("path".into(), path);
+        path_variables.insert("path".into(), ResourcePath::Cache { relative: path });
         jvm_args.push(logging.client.argument.clone());
     }
-    for path in [&natives, &game_dir] {
-        files
-            .actions
-            .push(PrepareAction::Directory { path: path.clone() });
+    files.actions.push(PrepareAction::Directory {
+        path: natives.clone(),
+    });
+    if prepare_game_directory {
+        files.actions.push(PrepareAction::Directory {
+            path: game_dir.clone(),
+        });
     }
     // Recent manifests partition native extraction locations by subsystem.
     for directory in ["java", "jna", "lwjgl", "netty"] {

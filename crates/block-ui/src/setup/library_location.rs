@@ -16,14 +16,11 @@ use super::{
     components::ButtonVariant,
     first_run,
     game_wizard::{CreationKind, WizardStep},
-    import_games,
-    shell::{Drawer, Surface},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Scope {
     Game(EntityId),
-    Import(usize),
     Pack(EntityId, PathBuf),
 }
 
@@ -38,8 +35,6 @@ pub(super) struct Picker {
     pub id: uuid::Uuid,
     pub scope: Scope,
     pub wizard_revision: usize,
-    pub imports: Vec<String>,
-    pub import_source: Option<block_launcher::game_import::SourceKind>,
 }
 
 impl Block {
@@ -55,16 +50,6 @@ impl Block {
             return None;
         };
         Some(Scope::Game(form.directory.entity_id()))
-    }
-
-    pub(super) fn setup_import_library_scope(&self) -> Option<Scope> {
-        if !self.shell.first_run.enabled || !self.setup_incomplete() {
-            return None;
-        }
-        self.shell.surfaces.top().and_then(|surface| {
-            matches!(surface.kind, Surface::Drawer(Drawer::ImportGames))
-                .then_some(Scope::Import(surface.revision))
-        })
     }
 
     pub(super) fn setup_pack_library_scope(&self) -> Option<Scope> {
@@ -106,14 +91,6 @@ impl Block {
                     && self.shell.wizard.page.is_none()
                     && self.shell.surfaces.top().is_none()
             }
-            Scope::Import(_) => {
-                self.setup_import_library_scope().as_ref() == Some(scope)
-                    && !self.shell.import_games.running
-                    && matches!(
-                        self.shell.import_games.page,
-                        import_games::Page::Sources | import_games::Page::List
-                    )
-            }
             Scope::Pack(..) => {
                 self.setup_pack_library_scope().as_ref() == Some(scope)
                     && self.shell.wizard.kind == CreationKind::ImportPack
@@ -129,14 +106,10 @@ impl Block {
             return;
         }
         let id = uuid::Uuid::new_v4();
-        let import_source =
-            matches!(scope, Scope::Import(_)).then_some(self.shell.import_games.source);
         self.shell.first_run.library_picker = Some(Picker {
             id,
             scope,
             wizard_revision: self.shell.wizard.revision,
-            imports: self.shell.import_games.selected.iter().cloned().collect(),
-            import_source,
         });
         let selection = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -176,16 +149,6 @@ impl Block {
         if !self.library_scope_current(&picker.scope)
             || matches!(picker.scope, Scope::Game(_))
                 && picker.wizard_revision != self.shell.wizard.revision
-            || matches!(picker.scope, Scope::Import(_))
-                && (picker.import_source != Some(self.shell.import_games.source)
-                    || picker.imports
-                        != self
-                            .shell
-                            .import_games
-                            .selected
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>())
         {
             return;
         }
@@ -345,10 +308,7 @@ impl Block {
                     .justify_between()
                     .child(super::note(tr!(self.language(), "setup.library.label")))
                     .children(
-                        (interactive
-                            && !matches!(scope, Scope::Import(_))
-                            && self.library_scope_current(&scope))
-                        .then(|| {
+                        (interactive && self.library_scope_current(&scope)).then(|| {
                             self.button_with_variant(
                                 "setup-library-change",
                                 tr!(self.language(), "setup.library.change"),

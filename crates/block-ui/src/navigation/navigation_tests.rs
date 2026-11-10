@@ -134,7 +134,7 @@ fn list_to_detail_moves_one_body_and_keeps_chrome_and_native_bounds(cx: &mut Tes
     assert!(chrome.is_some());
     let native = cx.update(|window, _| window.bounds());
     view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Inspect("profile-a".into()), window, cx)
+        view.handle(UiAction::Inspect("instance-a".into()), window, cx)
     });
     frame(cx, 35);
     assert_eq!(cx.debug_bounds("window-chrome"), chrome);
@@ -179,7 +179,7 @@ fn scrolling_before_navigation_freezes_the_last_visible_detail(cx: &mut TestAppC
         view.snapshot = crate::test_support::ready_snapshot();
         view.router.open_record(
             Tab::Instances,
-            crate::navigation::RecordRef::Profile("profile-a".into()),
+            crate::navigation::RecordRef::Instance("instance-a".into()),
         );
         view
     });

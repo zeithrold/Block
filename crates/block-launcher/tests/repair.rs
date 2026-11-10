@@ -30,7 +30,7 @@ fn resource(store: &Store, bytes: &[u8]) -> anyhow::Result<Resource> {
 
 fn plan(resource: Resource, destination: &str) -> ExecutionPlan {
     ExecutionPlan {
-        schema_version: 1,
+        schema_version: 2,
         instance: "repair-test".into(),
         version: "test".into(),
         manifest_sha1: String::new(),
@@ -45,6 +45,8 @@ fn plan(resource: Resource, destination: &str) -> ExecutionPlan {
             executable: false,
         }],
         resources: vec![resource],
+        existing_resources: Vec::new(),
+        existing_asset_root: None,
         compatibility: None,
         runtime_substitution: None,
         command: CommandTemplate {

@@ -179,7 +179,7 @@ mod tests {
         });
         cx.simulate_resize(dimensions);
         cx.run_until_parked();
-        for selector in ["home-play", "home-profiles", "app-menu"] {
+        for selector in ["home-play", "home-instances", "app-menu"] {
             let action = cx.debug_bounds(selector);
             assert!(
                 action.is_some_and(|action| action.origin.x >= gpui::px(0.)

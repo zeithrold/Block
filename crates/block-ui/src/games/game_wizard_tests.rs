@@ -1,6 +1,6 @@
 //! Product outcomes for drafts, catalog choices, and wizard boundaries.
 
-use block_launcher::catalog::{ProfileColor, ProfileIcon, ProfileMode};
+use block_launcher::catalog::{InstanceColor, InstanceIcon};
 use gpui::{EntityInputHandler as _, Focusable as _, Modifiers, TestAppContext, point, px, size};
 
 use super::{CreationKind, WizardFailure, WizardField, WizardPage, WizardState, WizardStep};
@@ -194,7 +194,7 @@ fn optifine_chooser_failure_preserves_the_wizard_and_ignores_stale_requests(
             view
         });
         cx.simulate_resize(size(px(1100.), px(1300.)));
-        click(cx, "wizard-profile-options");
+        click(cx, "wizard-instance-settings-options");
         click(cx, "wizard-component-optifine");
         click(cx, "optifine-select-jar");
         assert!(cx.did_prompt_for_paths());
@@ -337,7 +337,7 @@ fn profile_name_uses_the_catalogs_utf8_byte_limit(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
     view.update(cx, |view, cx| {
         view.begin_game_wizard(cx);
-        let profile = view.shell.wizard.profile.as_ref();
+        let profile = view.shell.wizard.draft.as_ref();
         assert!(profile.is_some(), "missing Profile draft");
         let Some(profile) = profile else {
             return;
@@ -347,12 +347,12 @@ fn profile_name_uses_the_catalogs_utf8_byte_limit(cx: &mut TestAppContext) {
             .name
             .update(cx, |field, cx| field.set_value(&limit, cx));
         assert_eq!(limit.len(), 160);
-        assert_ne!(profile.invalid_field(cx), Some(WizardField::ProfileName));
+        assert_ne!(profile.invalid_field(cx), Some(WizardField::InstanceName));
         assert!(profile.values(cx).is_ok());
         profile
             .name
             .update(cx, |field, cx| field.set_value(&format!("{limit}a"), cx));
-        assert_eq!(profile.invalid_field(cx), Some(WizardField::ProfileName));
+        assert_eq!(profile.invalid_field(cx), Some(WizardField::InstanceName));
         assert!(profile.values(cx).is_err());
     });
 }
@@ -393,8 +393,8 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
             view.preferences.reduce_motion = true;
             view.snapshot = ready_snapshot();
             view.router.open_record(
-                crate::Tab::Profiles,
-                crate::navigation::RecordRef::Profile("profile-a".into()),
+                crate::Tab::Instances,
+                crate::navigation::RecordRef::Instance("instance-a".into()),
             );
             view
         });
@@ -431,34 +431,29 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
         assert!(view.read_with(cx, |view, _| view.form.is_none()
             && view.router.entry_id() == parent
             && matches!(view.router.screen(),
-                crate::navigation::Screen::Record(crate::navigation::RecordRef::Profile(id))
-                    if id == "profile-a")));
+                crate::navigation::Screen::Record(crate::navigation::RecordRef::Instance(id))
+                    if id == "instance-a")));
     }
 }
 
 #[test]
-fn bundled_and_separated_sources_both_lead_to_one_setup() {
-    let mut bundled = WizardState::default();
-    bundled.back();
-    assert_eq!(bundled.step, WizardStep::GetStarted);
-    bundled.next();
-    assert_eq!(bundled.step, WizardStep::Setup);
-    bundled.next();
-    assert_eq!(bundled.step, WizardStep::Setup);
-
-    let mut separated = WizardState {
-        separated: true,
-        step: WizardStep::GetStarted,
-        ..WizardState::default()
-    };
-    separated.next();
-    assert_eq!(separated.step, WizardStep::Setup);
-    separated.next();
-    assert_eq!(separated.step, WizardStep::Setup);
-    separated.back();
-    assert_eq!(separated.step, WizardStep::GetStarted);
-    separated.back();
-    assert_eq!(separated.step, WizardStep::GetStarted);
+fn source_and_setup_transitions_preserve_the_chosen_creation_kind() {
+    for kind in [CreationKind::NewInstance, CreationKind::ImportPack] {
+        let mut state = WizardState {
+            kind,
+            step: WizardStep::GetStarted,
+            ..WizardState::default()
+        };
+        state.next();
+        assert_eq!(state.step, WizardStep::Setup);
+        assert_eq!(state.kind, kind);
+        state.next();
+        assert_eq!(state.step, WizardStep::Setup);
+        state.back();
+        assert_eq!(state.step, WizardStep::GetStarted);
+        state.back();
+        assert_eq!(state.step, WizardStep::GetStarted);
+    }
 }
 
 #[gpui::test]
@@ -665,7 +660,7 @@ fn setup_summarizes_runtime_choices_and_keeps_details_folded(cx: &mut TestAppCon
     let location = entry_bounds(cx, "wizard-component-location", "Setup");
     let summary = entry_bounds(cx, "wizard-component-location-value", "Setup");
     let window = entry_bounds(cx, "wizard-component-location-detail", "Setup");
-    let options = entry_bounds(cx, "wizard-profile-options", "Setup");
+    let options = entry_bounds(cx, "wizard-instance-settings-options", "Setup");
     assert!(
         grid.bottom() <= options.top() && location.bottom() <= options.top(),
         "the component cards and their Configuration summary come before the fold"
@@ -715,7 +710,7 @@ fn setup_shows_effective_settings_and_keeps_its_draft_across_component_pages(
             form.directory
                 .update(cx, |field, cx| field.set_value(&directory, cx));
         }
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile.managed = false;
             profile
                 .java
@@ -735,7 +730,7 @@ fn setup_shows_effective_settings_and_keeps_its_draft_across_component_pages(
         view.shell.wizard.page.is_none()
             && view.wizard_configuration_summary(cx)
                 == ("Custom Java · 4 GB".to_owned(), "Fullscreen".to_owned())
-            && view.shell.wizard.profile.as_ref().is_some_and(|profile| {
+            && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
                 profile.jvm.read(cx).value() == "-XX:+UseG1GC"
                     && !profile.managed
                     && profile.fullscreen
@@ -836,7 +831,7 @@ fn setup_keeps_its_disclosure_after_a_component_page(cx: &mut TestAppContext) {
     });
     cx.simulate_resize(size(px(960.), px(1400.)));
     cx.run_until_parked();
-    click(cx, "wizard-profile-options");
+    click(cx, "wizard-instance-settings-options");
     assert!(
         view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
         "the setup disclosure must open"
@@ -852,13 +847,13 @@ fn setup_keeps_its_disclosure_after_a_component_page(cx: &mut TestAppContext) {
         "returning from a component must retain the setup disclosure"
     );
     assert!(
-        crate::test_support::control_bounds(cx, "wizard-profile-options").is_some()
+        crate::test_support::control_bounds(cx, "wizard-instance-settings-options").is_some()
             && crate::test_support::control_bounds(cx, "wizard-field-Jvm").is_some()
     );
 }
 
 #[gpui::test]
-fn outer_profile_validation_retains_its_language_across_continue_and_submit(
+fn outer_instance_validation_retains_its_language_across_continue_and_submit(
     cx: &mut TestAppContext,
 ) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -871,9 +866,9 @@ fn outer_profile_validation_retains_its_language_across_continue_and_submit(
         view
     });
     cx.simulate_resize(size(px(960.), px(1400.)));
-    click(cx, "wizard-profile-options");
+    click(cx, "wizard-instance-settings-options");
     view.update(cx, |view, cx| {
-        if let Some(profile) = &view.shell.wizard.profile {
+        if let Some(profile) = &view.shell.wizard.draft {
             profile
                 .jvm
                 .update(cx, |input, cx| input.set_value("\"", cx));
@@ -897,7 +892,7 @@ fn outer_profile_validation_retains_its_language_across_continue_and_submit(
                 view.shell.wizard.error_text(view.language()).as_deref(),
                 Some("追加引数の二重引用符を閉じてください")
             );
-            if let Some(profile) = &view.shell.wizard.profile {
+            if let Some(profile) = &view.shell.wizard.draft {
                 profile.jvm.update(cx, |input, cx| input.set_value("", cx));
                 profile
                     .width
@@ -971,7 +966,7 @@ fn setup_summary_states_java_and_arguments_inherited_from_saved_defaults(cx: &mu
         ("Custom Java · 2 GB".to_owned(), "1280 × 720".to_owned()),
         "the inherited executable and memory must be stated in the summary"
     );
-    let options = entry_bounds(cx, "wizard-profile-options", "Setup");
+    let options = entry_bounds(cx, "wizard-instance-settings-options", "Setup");
     let jvm = entry_bounds(cx, "wizard-field-Jvm", "Setup");
     assert!(
         jvm.top() >= options.bottom(),
@@ -981,7 +976,7 @@ fn setup_summary_states_java_and_arguments_inherited_from_saved_defaults(cx: &mu
         view.read_with(cx, |view, cx| view
             .shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .map(|profile| profile.jvm.read(cx).value())),
         Some("-XX:+UseG1GC".to_owned()),
@@ -1142,7 +1137,7 @@ fn expanded_setup_scrolls_all_fields_above_the_fixed_footer(cx: &mut TestAppCont
             form.directory
                 .update(cx, |field, cx| field.set_value(&directory, cx));
         }
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile.managed = false;
             profile
                 .java
@@ -1158,7 +1153,7 @@ fn expanded_setup_scrolls_all_fields_above_the_fixed_footer(cx: &mut TestAppCont
         cx.notify();
     });
     cx.run_until_parked();
-    click(cx, "wizard-profile-options");
+    click(cx, "wizard-instance-settings-options");
     assert!(
         view.read_with(cx, |view, _| view.shell.wizard.advanced.borrow().is_open()),
         "the fold must really open"
@@ -1326,7 +1321,6 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
         view.begin_game_wizard(cx);
         view
     });
@@ -1343,7 +1337,7 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
             .wizard
             .version_scroll
             .set_offset(point(px(0.), px(-64.)));
-        if let Some(profile) = &view.shell.wizard.profile {
+        if let Some(profile) = &view.shell.wizard.draft {
             profile
                 .name
                 .update(cx, |input, cx| input.set_value("中文 Profile", cx));
@@ -1361,7 +1355,7 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
             .wizard
             .version_scroll
             .set_offset(point(px(0.), px(-2.)));
-        if let Some(profile) = &view.shell.wizard.profile {
+        if let Some(profile) = &view.shell.wizard.draft {
             profile
                 .name
                 .update(cx, |input, cx| input.set_value("New live name", cx));
@@ -1373,7 +1367,7 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
             frozen.reveal.get().is_none(),
             "a retained exit must not reveal or focus fields"
         );
-        let profile = frozen.profile.as_ref();
+        let profile = frozen.draft.as_ref();
         assert!(profile.is_some());
         if let Some(profile) = profile {
             assert_eq!(profile.name.read(cx).value(), "中文 Profile");
@@ -1409,7 +1403,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
             let profile = view
                 .shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("profile draft"))?;
             profile
@@ -1431,7 +1425,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
             assert_eq!(
                 view.shell
                     .wizard
-                    .profile
+                    .draft
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("profile draft"))?
                     .width
@@ -1451,7 +1445,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
             }
             view.shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("profile draft"))?
                 .width
@@ -1463,7 +1457,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
             assert_eq!(
                 view.shell
                     .wizard
-                    .profile
+                    .draft
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("profile draft"))?
                     .width
@@ -1529,7 +1523,7 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
             assert_eq!(form.directory.read(cx).value(), directory);
         }
         assert_eq!(view.snapshot.instances.len(), 1);
-        assert_eq!(view.snapshot.profiles.len(), 1);
+        assert_eq!(view.snapshot.instances.len(), 1);
     });
 }
 
@@ -1587,30 +1581,26 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
 }
 
 #[gpui::test]
-fn separated_profile_setup_preserves_home_selection_until_submission(cx: &mut TestAppContext) {
+fn new_instance_draft_preserves_home_selection_until_submission(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
         view.selected_instance = Some("instance-a".into());
-        view.selected_profile = Some("profile-a".into());
         view.begin_game_wizard(cx);
         view
     });
     cx.simulate_resize(size(px(960.), px(600.)));
-    click(cx, "wizard-kind-profile");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.kind),
-        CreationKind::ExistingInstance
+        CreationKind::NewInstance
     );
-    click(cx, "wizard-instance-instance-a");
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.wizard.step),
         WizardStep::Setup
     );
     view.update(cx, |view, cx| {
-        let profile = view.shell.wizard.profile.as_ref();
+        let profile = view.shell.wizard.draft.as_ref();
         assert!(profile.is_some());
         if let Some(profile) = profile {
             profile
@@ -1620,31 +1610,31 @@ fn separated_profile_setup_preserves_home_selection_until_submission(cx: &mut Te
                 .memory
                 .update(cx, |field, cx| field.set_value("4", cx));
         }
-        view.wizard_profile_icon(ProfileIcon::Leaf);
-        view.wizard_profile_color(ProfileColor::Green);
-        if let Some(profile) = &view.shell.wizard.profile {
+        view.wizard_instance_icon(InstanceIcon::Leaf);
+        view.wizard_instance_color(InstanceColor::Green);
+        if let Some(profile) = &view.shell.wizard.draft {
             let values = profile.values(cx);
             assert!(values.is_ok());
             if let Ok(values) = values {
                 assert_eq!(values.name, "Creative 中文");
                 assert_eq!(values.defaults.memory_mib, 4096);
-                assert_eq!(values.appearance.icon, ProfileIcon::Leaf);
-                assert_eq!(values.target_id.as_deref(), Some("vanilla"));
+                assert_eq!(values.appearance.icon, InstanceIcon::Leaf);
+                assert_eq!(values.target_id, None);
             }
         }
-        assert_eq!(view.selected_profile.as_deref(), Some("profile-a"));
-        assert_eq!(view.snapshot.profiles.len(), 1);
+        assert_eq!(view.selected_instance.as_deref(), Some("instance-a"));
+        assert_eq!(view.snapshot.instances.len(), 1);
         cx.notify();
     });
     click(cx, "cancel-instance");
     click(cx, "discard-game-confirm");
     assert!(view.read_with(cx, |view, _| view.form.is_none()));
     assert_eq!(
-        view.read_with(cx, |view, _| view.selected_profile.clone()),
-        Some("profile-a".into())
+        view.read_with(cx, |view, _| view.selected_instance.clone()),
+        Some("instance-a".into())
     );
     assert_eq!(
-        view.read_with(cx, |view, _| view.snapshot.profiles.len()),
+        view.read_with(cx, |view, _| view.snapshot.instances.len()),
         1
     );
 }
@@ -1913,7 +1903,7 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
         assert!(view.shell.wizard.version_notice.is_some());
         assert!(view.shell.wizard.page.is_none());
         assert_eq!(view.snapshot.instances.len(), 1);
-        assert_eq!(view.snapshot.profiles.len(), 1);
+        assert_eq!(view.snapshot.instances.len(), 1);
     });
 }
 
@@ -1988,17 +1978,12 @@ fn compact_source_new_and_existing_paths_keep_controls_visible_and_keyboard_reac
     cx: &mut TestAppContext,
 ) {
     for language in Language::ALL {
-        for separated in [false, true] {
+        {
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
                 let mut view = crate::tests::test_view(window, cx);
                 view.preferences.reduce_motion = true;
                 view.preferences.language = Some(language);
                 view.snapshot = ready_snapshot();
-                view.snapshot.profile_mode = if separated {
-                    ProfileMode::Separated
-                } else {
-                    ProfileMode::Bundled
-                };
                 view
             });
             cx.simulate_resize(size(px(1152.), px(720.)));
@@ -2027,32 +2012,11 @@ fn compact_source_new_and_existing_paths_keep_controls_visible_and_keyboard_reac
                         && bounds.right() <= px(360.)
                         && bounds.top() >= px(0.)
                         && bounds.bottom() <= px(540.)),
-                    "{language:?}/{separated}/{selector}: {bounds:?}"
+                    "{language:?}/{selector}: {bounds:?}"
                 );
             }
             let body = crate::test_support::control_bounds(cx, "wizard-body");
             assert!(body.is_some_and(|body| body.size.height >= px(120.)));
-            if separated {
-                click(cx, "wizard-back");
-                reveal_wizard_control(&view, cx, "wizard-kind-profile");
-                click(cx, "wizard-kind-profile");
-                assert_eq!(
-                    view.read_with(cx, |view, _| view.shell.wizard.kind),
-                    CreationKind::ExistingInstance
-                );
-                assert!(
-                    crate::test_support::control_bounds(cx, "wizard-instance-instance-a").is_some()
-                );
-                for selector in ["wizard-rail", "wizard-body", "wizard-footer", "wizard-next"] {
-                    let bounds = crate::test_support::control_bounds(cx, selector);
-                    assert!(
-                        bounds.is_some_and(
-                            |bounds| bounds.right() <= px(360.) && bounds.bottom() <= px(540.)
-                        ),
-                        "{language:?}/existing/{selector}: {bounds:?}"
-                    );
-                }
-            }
         }
     }
 }
@@ -2093,169 +2057,108 @@ fn compact_wizard_entrance_settles_before_source_controls_activate(cx: &mut Test
 }
 
 #[gpui::test]
-fn submitting_an_existing_instance_saves_one_fully_configured_profile(cx: &mut TestAppContext) {
+fn submitting_a_new_instance_saves_all_settings_without_mutating_the_selected_instance(
+    cx: &mut TestAppContext,
+) {
     let result = (|| -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let unconfirmed = tempfile::tempdir()?;
         let catalog = block_launcher::catalog::Catalog::open(root.path())?;
-        let (instance, original) = catalog.create_instance(
-            "Shared".into(),
-            "1.20.6".into(),
-            None,
-            Some("20.6.144".into()),
-        )?;
-        catalog.separate_profiles()?;
+        let original = catalog.create_instance("Original".into(), "1.20.6".into(), None, None)?;
         let snapshot = catalog.snapshot()?;
-        let (engine, mut receiver) = crate::Engine::with_root(root.path().into())?;
-        let storage_before = block_launcher::storage::Locations::load(root.path())?;
-        let instance_id = instance.id;
-        let original_id = original.id.clone();
-        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+        let (engine, messages) = crate::Engine::with_root(root.path().into())?;
+        let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
-            view.preferences.reduce_motion = true;
             view.snapshot = snapshot;
             view.engine = Some(engine);
-            view.selected_instance = Some(instance_id);
-            view.selected_profile = Some(original_id);
+            view.messages = Some(messages);
+            view.selected_instance = Some(original.id.clone());
+            view.router.navigate(crate::Tab::Onboarding);
+            view.shell.first_run.enabled = true;
+            view.shell.first_run.stage = crate::first_run::Stage::GameWizard;
             view.begin_game_wizard(cx);
             view
         });
-        view.update_in(cx, |view, window, cx| {
-            // A separated catalog starts on the source page; the real kind control
-            // chooses this Instance and opens Setup.
-            view.handle(
-                crate::UiAction::WizardKind(CreationKind::ExistingInstance),
-                window,
-                cx,
-            );
-            assert_eq!(view.shell.wizard.step, WizardStep::Setup);
-            view.wizard_profile_target("neoforge-20.6.144".into());
-            if let Some(profile) = &view.shell.wizard.profile {
-                profile
-                    .name
-                    .update(cx, |field, cx| field.set_value("Creative 中文", cx));
-                profile
-                    .memory
-                    .update(cx, |field, cx| field.set_value("4", cx));
-                profile.server.update(cx, |field, cx| {
-                    field.set_value("play.example.test:25565", cx);
-                });
-                profile
-                    .width
-                    .update(cx, |field, cx| field.set_value("1600", cx));
-                profile
-                    .height
-                    .update(cx, |field, cx| field.set_value("900", cx));
-            }
-            view.wizard_profile_color(ProfileColor::Green);
-            view.wizard_profile_icon(ProfileIcon::Leaf);
-            view.shell.first_run.enabled = true;
-            view.shell.first_run.stage = crate::first_run::Stage::GameWizard;
-            view.preferences.onboarding_complete = false;
-            view.saved_preferences.onboarding_complete = false;
-            if let Some(Form::Instance(form)) = &view.form {
-                view.shell.first_run.library_draft = Some(crate::library_location::Draft {
-                    scope: crate::library_location::Scope::Game(form.directory.entity_id()),
-                    parent: unconfirmed.path().join("must-not-become-the-library"),
-                });
-            }
-            view.submit_game_wizard(cx);
-            assert!(view.busy);
-            view.submit_game_wizard(cx);
-        });
-        let runtime = tokio::runtime::Runtime::new()?;
-        let messages = runtime.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                let mut messages = Vec::new();
-                loop {
-                    let message = receiver.recv().await.ok_or_else(|| {
-                        anyhow::anyhow!("engine channel closed before save completed")
-                    })?;
-                    let inner = match &message {
-                        crate::Message::ForOperation { message, .. } => message.as_ref(),
-                        message => message,
-                    };
-                    let finished = matches!(inner, crate::Message::Finished(_));
-                    if matches!(inner, crate::Message::Created { .. }) {
-                        let snapshot = catalog.snapshot()?;
-                        assert_eq!(snapshot.profiles.len(), 2);
-                        let created = snapshot
-                            .profiles
-                            .iter()
-                            .find(|profile| profile.id != original.id);
-                        assert!(created.is_some_and(|profile| {
-                            profile.name == "Creative 中文"
-                                && profile.memory_mib == 4096
-                                && profile.target_id == "neoforge-20.6.144"
-                                && profile.appearance.icon == ProfileIcon::Leaf
-                                && profile.server.address == "play.example.test:25565"
-                                && !profile.server.connect_on_launch
-                                && profile
-                                    .game_args
-                                    .windows(2)
-                                    .any(|pair| pair[0] == "--width" && pair[1] == "1600")
-                                && profile
-                                    .game_args
-                                    .windows(2)
-                                    .any(|pair| pair[0] == "--height" && pair[1] == "900")
-                        }));
-                    }
-                    messages.push(message);
-                    if finished {
-                        return Ok::<_, anyhow::Error>(messages);
-                    }
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.shell.wizard.step = WizardStep::Setup;
+                if let Some(Form::Instance(form)) = &view.form {
+                    form.name
+                        .update(cx, |field, cx| field.set_value("Creative 中文", cx));
+                    form.version
+                        .update(cx, |field, cx| field.set_value("1.20.6", cx));
                 }
+                if let Some(draft) = &view.shell.wizard.draft {
+                    draft
+                        .memory
+                        .update(cx, |field, cx| field.set_value("4", cx));
+                    draft
+                        .width
+                        .update(cx, |field, cx| field.set_value("1600", cx));
+                    draft
+                        .height
+                        .update(cx, |field, cx| field.set_value("900", cx));
+                    draft.server.update(cx, |field, cx| {
+                        field.set_value("play.example.test:25565", cx)
+                    });
+                }
+                view.wizard_instance_color(InstanceColor::Green);
+                view.wizard_instance_icon(InstanceIcon::Leaf);
+                view.handle(crate::UiAction::SaveInstance, window, cx);
+                view.handle(crate::UiAction::SaveInstance, window, cx);
             })
-            .await?
-        })?;
-        let (sender, saved_receiver) = tokio::sync::mpsc::channel(messages.len().max(1));
-        for message in messages {
-            sender.try_send(message)?;
-        }
-        view.update(cx, |view, cx| {
-            view.messages = Some(saved_receiver);
-            view.poll(cx);
         });
-        let snapshot = catalog.snapshot()?;
-        assert_eq!(snapshot.instances.len(), 1);
-        assert_eq!(snapshot.profiles.len(), 2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while view.read_with(cx, |view, _| view.busy) && std::time::Instant::now() < deadline {
+            view.update(cx, crate::Block::poll);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let saved = catalog.snapshot()?;
+        assert_eq!(saved.instances.len(), 2);
+        let created = saved
+            .instances
+            .iter()
+            .find(|instance| instance.id != original.id)
+            .ok_or_else(|| anyhow::anyhow!("created instance missing"))?;
         assert_eq!(
-            block_launcher::storage::Locations::load(root.path())?,
-            storage_before,
-            "creating a Profile on an existing Instance must not accept a library draft"
+            (
+                created.name.as_str(),
+                created.memory_mib,
+                created.width,
+                created.height
+            ),
+            ("Creative 中文", 4096, 1600, 900)
         );
-        assert!(
-            snapshot
-                .profiles
-                .iter()
-                .any(|profile| profile.id == original.id && profile.name == original.name)
+        assert_eq!(created.appearance.icon, InstanceIcon::Leaf);
+        assert_eq!(created.server.address, "play.example.test:25565");
+        assert!(created.game_args.is_empty());
+        assert_eq!(
+            serde_json::to_value(
+                saved
+                    .instances
+                    .iter()
+                    .find(|instance| instance.id == original.id)
+            )?,
+            serde_json::to_value(Some(&original))?
         );
         assert!(!view.read_with(cx, |view, _| view.busy));
-        assert!(view.read_with(cx, |view, _| view.form.is_none()));
-        assert_ne!(
-            view.read_with(cx, |view, _| view.selected_profile.clone()),
-            Some(original.id)
-        );
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
 }
 
 #[gpui::test]
-fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mut TestAppContext) {
+fn instance_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mut TestAppContext) {
     for width in [960., 1152.] {
         let (view, cx) = crate::test_support::window(cx, |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
             view.preferences.reduce_motion = true;
             view.snapshot = ready_snapshot();
-            view.snapshot.profile_mode = ProfileMode::Separated;
             view.begin_game_wizard(cx);
             view
         });
         cx.simulate_resize(size(px(width), px(540.)));
-        click(cx, "wizard-kind-instance");
         view.update(cx, |view, cx| {
-            if let Some(profile) = &view.shell.wizard.profile {
+            if let Some(profile) = &view.shell.wizard.draft {
                 profile
                     .height
                     .update(cx, |field, cx| field.set_value("not-a-number", cx));
@@ -2286,7 +2189,7 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
         assert!(view.read_with(cx, |view, _| {
             view.shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .is_some_and(|profile| profile.options)
         }));
@@ -2299,14 +2202,14 @@ fn profile_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &mu
             "invalid input must be visible at {width}: {input:?}, {body:?}"
         );
         cx.update(|window, cx| {
-            let profile = view.read(cx).shell.wizard.profile.as_ref();
+            let profile = view.read(cx).shell.wizard.draft.as_ref();
             assert!(profile.is_some_and(|profile| {
                 profile.height.read(cx).focus_handle(cx).is_focused(window)
                     && profile.height.read(cx).value() == "not-a-number"
             }));
         });
         assert_eq!(
-            view.read_with(cx, |view, _| view.snapshot.profiles.len()),
+            view.read_with(cx, |view, _| view.snapshot.instances.len()),
             1
         );
     }
@@ -2327,7 +2230,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         if let Some(Form::Instance(form)) = &view.form {
             form.name.update(cx, |field, cx| field.set_value("", cx));
         }
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile.managed = false;
             profile
                 .java
@@ -2349,7 +2252,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         Some(WizardField::Width)
     );
     view.update(cx, |view, cx| {
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile
                 .width
                 .update(cx, |field, cx| field.set_value("1600", cx));
@@ -2369,7 +2272,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
             view.wizard_configuration_summary(cx),
             ("Custom Java · 2 GB".to_owned(), "Fullscreen".to_owned())
         );
-        let original = view.shell.wizard.profile.as_ref().map(|profile| {
+        let original = view.shell.wizard.draft.as_ref().map(|profile| {
             (
                 profile.width.entity_id(),
                 profile.width.read(cx).value(),
@@ -2377,7 +2280,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
             )
         });
         view.open_game_wizard_page(Some(WizardPage::Location), cx);
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile
                 .width
                 .update(cx, |field, cx| field.set_value("1920", cx));
@@ -2388,7 +2291,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         }
         view.cancel_component_draft(cx);
         assert_eq!(
-            view.shell.wizard.profile.as_ref().map(|profile| (
+            view.shell.wizard.draft.as_ref().map(|profile| (
                 profile.width.entity_id(),
                 profile.width.read(cx).value(),
                 profile.java.read(cx).value()
@@ -2398,7 +2301,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         assert!(
             view.shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .is_some_and(|profile| profile.fullscreen)
         );
@@ -2406,7 +2309,7 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
     });
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            if let Some(profile) = &view.shell.wizard.profile {
+            if let Some(profile) = &view.shell.wizard.draft {
                 profile.width.update(cx, |field, cx| {
                     field.replace_text_in_range(Some(0..4), "1280", window, cx);
                 });
@@ -2501,7 +2404,6 @@ fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mu
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
         view.versions = vec!["1.21.1".into()];
         view.begin_game_wizard(cx);
         if let Some(Form::Instance(form)) = &view.form {
@@ -2511,7 +2413,6 @@ fn configuration_section_pointer_cancel_discards_the_rejected_validation(cx: &mu
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-kind-instance");
     reject_relative_installation_folder(&view, cx);
     click(cx, "cancel-instance");
     assert_section_cancelled_without_stale_validation(&view, cx);
@@ -2540,7 +2441,6 @@ fn configuration_section_escape_discards_the_rejected_validation(cx: &mut TestAp
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
         view.versions = vec!["1.21.1".into()];
         view.begin_game_wizard(cx);
         if let Some(Form::Instance(form)) = &view.form {
@@ -2550,7 +2450,6 @@ fn configuration_section_escape_discards_the_rejected_validation(cx: &mut TestAp
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-kind-instance");
     reject_relative_installation_folder(&view, cx);
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
@@ -2598,36 +2497,39 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
-        view.snapshot.instances[0].minecraft_version = "unknown-fixture".into();
         view.begin_game_wizard(cx);
+        if let Some(Form::Instance(form)) = &view.form {
+            form.version
+                .update(cx, |field, cx| field.set_value("unknown-fixture", cx));
+        }
         view
     });
     cx.simulate_resize(size(px(960.), px(600.)));
-    click(cx, "wizard-kind-profile");
     view.update(cx, |view, cx| {
-        if let Some(profile) = &view.shell.wizard.profile {
+        if let Some(profile) = &view.shell.wizard.draft {
             profile.server.update(cx, |field, cx| {
                 field.set_value("play.example.test:25565", cx);
             });
         }
         cx.notify();
     });
-    reveal_wizard_control(&view, cx, "wizard-profile-connect");
-    click(cx, "wizard-profile-connect");
+    reveal_wizard_control(&view, cx, "wizard-instance-settings-options");
+    click(cx, "wizard-instance-settings-options");
+    reveal_wizard_control(&view, cx, "wizard-instance-connect");
+    click(cx, "wizard-instance-connect");
     view.read_with(cx, |view, cx| {
         assert!(
             !view
                 .shell
                 .wizard
-                .profile
+                .draft
                 .as_ref()
                 .is_some_and(|profile| profile.connect_on_launch)
         );
         let values = view
             .shell
             .wizard
-            .profile
+            .draft
             .as_ref()
             .and_then(|profile| profile.values(cx).ok());
         assert!(
@@ -2636,7 +2538,7 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
         );
     });
     view.update(cx, |view, cx| {
-        if let Some(profile) = &mut view.shell.wizard.profile {
+        if let Some(profile) = &mut view.shell.wizard.draft {
             profile.connect_on_launch = true;
         }
         cx.notify();
@@ -2651,7 +2553,7 @@ fn server_address_can_be_saved_while_unknown_quick_play_cannot_be_enabled(cx: &m
         Some(WizardField::Server)
     );
     assert_eq!(
-        view.read_with(cx, |view, _| view.snapshot.profiles.len()),
+        view.read_with(cx, |view, _| view.snapshot.instances.len()),
         1
     );
 }
@@ -2722,14 +2624,20 @@ fn automatic_connection_prefers_installed_manifests_and_the_official_catalog_fam
             // Installed official manifests are authoritative.
             let mut snapshot = ready_snapshot();
             snapshot.instances[0].minecraft_version = "1.12.2".into();
-            snapshot.instances[0].targets[0].manifest = Some(legacy_path.clone());
+            snapshot.instances[0].targets[0].source =
+                block_launcher::catalog::TargetSource::Managed {
+                    manifest: Some(legacy_path.clone()),
+                };
             view.snapshot = snapshot;
             assert_eq!(
                 view.automatic_connection("1.12.2"),
                 Some(AutomaticConnection::Legacy)
             );
             view.snapshot.instances[0].minecraft_version = "1.20.6".into();
-            view.snapshot.instances[0].targets[0].manifest = Some(modern_path.clone());
+            view.snapshot.instances[0].targets[0].source =
+                block_launcher::catalog::TargetSource::Managed {
+                    manifest: Some(modern_path.clone()),
+                };
             assert_eq!(
                 view.automatic_connection("1.20.6"),
                 Some(AutomaticConnection::QuickPlay)
@@ -2903,13 +2811,11 @@ fn loader_section_cancel_discards_the_unavailable_catalog_validation(cx: &mut Te
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
         view.snapshot = ready_snapshot();
-        view.snapshot.profile_mode = ProfileMode::Separated;
         view.versions = vec!["1.21.1".into()];
         view.begin_game_wizard(cx);
         view
     });
     cx.simulate_resize(size(px(960.), px(900.)));
-    click(cx, "wizard-kind-instance");
     click(cx, "wizard-component-loader");
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
@@ -3109,7 +3015,7 @@ fn profile_memory_validation_and_values_use_gb_with_one_to_thirty_two_gb_bounds(
     view.update(cx, |view, cx| {
         view.preferences.reduce_motion = true;
         view.begin_game_wizard(cx);
-        let Some(profile) = view.shell.wizard.profile.as_mut() else {
+        let Some(profile) = view.shell.wizard.draft.as_mut() else {
             return;
         };
         profile

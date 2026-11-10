@@ -13,7 +13,7 @@ use block_download::{Resource, Store};
 use tokio_util::sync::CancellationToken;
 
 use super::{PackInspection, descriptor::PackDescriptor};
-use crate::catalog::Instance;
+use crate::catalog::{Instance, InstanceOwnership};
 
 /// Verify the selected downloads and publish the original pack baseline.
 pub(crate) async fn prepare(
@@ -24,6 +24,10 @@ pub(crate) async fn prepare(
     cancel: &CancellationToken,
 ) -> anyhow::Result<()> {
     ensure!(
+        instance.ownership == InstanceOwnership::Managed && instance.pack.is_some(),
+        "only a managed pack Instance can prepare a baseline"
+    );
+    ensure!(
         descriptor.matches_inspection(inspection),
         "the selected archive does not match this pack; select the original pack"
     );
@@ -32,8 +36,8 @@ pub(crate) async fn prepare(
         "pack files cannot be verified from their CurseForge IDs"
     );
     ensure!(!cancel.is_cancelled(), "pack installation cancelled");
-    let directory = instance.directory.join(".block-pack");
-    crate::executor::ensure_write_path(&instance.directory, &directory)?;
+    let directory = instance.resource_directory.join(".block-pack");
+    crate::executor::ensure_write_path(&instance.resource_directory, &directory)?;
     let metadata = fs::symlink_metadata(&directory)?;
     ensure!(
         metadata.is_dir() && !metadata.file_type().is_symlink(),
