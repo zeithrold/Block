@@ -210,26 +210,7 @@ impl Executor {
             probe_java(path, &plan).await?;
         }
         plan.verify_existing_resources()?;
-        if matches!(preparation, Preparation::Installed) {
-            (self.events)(ExecutionEvent::Stage {
-                name: "Checking installed resources".into(),
-            });
-            Store::with_options(
-                self.store.root().to_owned(),
-                true,
-                Arc::new(|_| {}),
-                self.store.options().clone(),
-            )?
-            .fetch_all(&plan.resources, cancel)
-            .await?;
-        } else {
-            self.download_resources(
-                &plan,
-                cancel,
-                matches!(preparation, Preparation::Install { repair: true }),
-            )
-            .await?;
-        }
+        self.prepare_resources(&plan, cancel, preparation).await?;
         tracing::debug!(event = "preparation_phase", phase = "materialize");
         (self.events)(ExecutionEvent::Stage {
             name: "Materializing instance".into(),
@@ -268,18 +249,35 @@ impl Executor {
         })
     }
 
-    async fn download_resources(
+    async fn prepare_resources(
         &self,
         plan: &ExecutionPlan,
         cancel: &CancellationToken,
-        repair: bool,
+        preparation: Preparation,
     ) -> anyhow::Result<()> {
-        tracing::debug!(event = "preparation_phase", phase = "download", repair);
-        (self.events)(ExecutionEvent::Stage {
-            name: "Downloading verified resources".into(),
-        });
-        self.store.fetch_all(&plan.resources, cancel).await?;
-        ensure!(!cancel.is_cancelled(), "preparation cancelled");
+        match preparation {
+            Preparation::Installed => {
+                (self.events)(ExecutionEvent::Stage {
+                    name: "Checking installed resources".into(),
+                });
+                Store::with_options(
+                    self.store.root().to_owned(),
+                    true,
+                    Arc::new(|_| {}),
+                    self.store.options().clone(),
+                )?
+                .fetch_all(&plan.resources, cancel)
+                .await?;
+            }
+            Preparation::Install { repair } => {
+                tracing::debug!(event = "preparation_phase", phase = "download", repair);
+                (self.events)(ExecutionEvent::Stage {
+                    name: "Downloading verified resources".into(),
+                });
+                self.store.fetch_all(&plan.resources, cancel).await?;
+                ensure!(!cancel.is_cancelled(), "preparation cancelled");
+            }
+        }
         Ok(())
     }
 

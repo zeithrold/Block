@@ -53,6 +53,9 @@ jobs:
       SCCACHE_GHA_RW_MODE: "${{ github.event_name == 'pull_request' && 'READ_ONLY' || 'READ_WRITE' }}"
       RUSTC_WRAPPER: sccache
       CARGO_INCREMENTAL: '0'
+      # sccache expands rustc response files for its dependency scan. Shorten
+      # repeated artifact paths to stay below Windows' process command limit.
+      CARGO_TARGET_DIR: ${{ runner.os == 'Windows' && 'C:\t' || 'target' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

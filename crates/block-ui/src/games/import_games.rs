@@ -921,49 +921,7 @@ impl Block {
                 }
             }
             Action::Import | Action::Retry => {
-                if !self.shell.import_games.can_submit() {
-                    return;
-                }
-                let candidates = self.shell.import_games.pending();
-                if candidates.is_empty() {
-                    return;
-                }
-                let request = uuid::Uuid::new_v4();
-                if let Err(error) = self.saved_preferences.game.validate() {
-                    self.shell.import_games.error =
-                        Some(crate::i18n::UiText::Raw(error.to_string()));
-                    return;
-                }
-                let state = &mut self.shell.import_games;
-                state.batch = Some(request);
-                state.cancel = CancellationToken::new();
-                state.running = true;
-                state.page = Page::Progress;
-                state.motion.borrow_mut().run = None;
-                state.submitted = candidates
-                    .iter()
-                    .map(|selection| selection.candidate.id.clone())
-                    .collect();
-                for id in &state.submitted {
-                    state.outcomes.remove(id);
-                }
-                if let Some(engine) = &self.engine {
-                    tracing::info!(
-                        event = "ui.import.started",
-                        view_id = self.view_id,
-                        batch_id = %request,
-                        count = candidates.len(),
-                    );
-                    engine.import_games(
-                        request,
-                        candidates,
-                        self.saved_preferences.game.clone(),
-                        self.shell.import_games.cancel.clone(),
-                    );
-                } else {
-                    self.shell.import_games.running = false;
-                    self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
-                }
+                return self.begin_import_batch(cx);
             }
             Action::Stop => {
                 self.shell.import_games.cancel.cancel();
@@ -982,6 +940,52 @@ impl Block {
                     self.open_new_instance_setup(window, cx);
                 }
             }
+        }
+        cx.notify();
+    }
+
+    fn begin_import_batch(&mut self, cx: &mut Context<'_, Self>) {
+        if !self.shell.import_games.can_submit() {
+            return;
+        }
+        let candidates = self.shell.import_games.pending();
+        if candidates.is_empty() {
+            return;
+        }
+        let request = uuid::Uuid::new_v4();
+        if let Err(error) = self.saved_preferences.game.validate() {
+            self.shell.import_games.error = Some(crate::i18n::UiText::Raw(error.to_string()));
+            return;
+        }
+        let state = &mut self.shell.import_games;
+        state.batch = Some(request);
+        state.cancel = CancellationToken::new();
+        state.running = true;
+        state.page = Page::Progress;
+        state.motion.borrow_mut().run = None;
+        state.submitted = candidates
+            .iter()
+            .map(|selection| selection.candidate.id.clone())
+            .collect();
+        for id in &state.submitted {
+            state.outcomes.remove(id);
+        }
+        if let Some(engine) = &self.engine {
+            tracing::info!(
+                event = "ui.import.started",
+                view_id = self.view_id,
+                batch_id = %request,
+                count = candidates.len(),
+            );
+            engine.import_games(
+                request,
+                candidates,
+                self.saved_preferences.game.clone(),
+                self.shell.import_games.cancel.clone(),
+            );
+        } else {
+            self.shell.import_games.running = false;
+            self.shell.import_games.error = Some(msg!("import.error.dataDirectory"));
         }
         cx.notify();
     }
