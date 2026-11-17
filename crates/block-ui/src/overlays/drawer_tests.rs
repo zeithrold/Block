@@ -338,6 +338,15 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
         px(0.),
         "using the outer gutter must not introduce horizontal scrolling"
     );
+    let create = bounds(cx, "import-new");
+    let add = bounds(cx, "import-add");
+    assert_eq!(create.bottom() + px(8.), add.top());
+    assert_eq!((create.left(), create.right()), (add.left(), add.right()));
+    assert!(add.bottom() <= bounds(cx, "block-drawer").bottom() - px(20.));
+    focus_by_tab(cx, "import-new");
+    crate::test_support::press(cx, "tab");
+    cx.run_until_parked();
+    assert_eq!(control_node(cx, "import-add").focused(), Some(true));
 }
 
 #[gpui::test]
@@ -668,11 +677,13 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
 
 #[gpui::test]
 fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut TestAppContext) {
-    for (selected, label) in [
-        (0, "0 games"),
-        (1, "1 game"),
-        (2, "2 games"),
-        (3, "3 games"),
+    for (total, selected, label) in [
+        (1, 0, "1 game"),
+        (1, 1, "1 game"),
+        (3, 0, "0 games"),
+        (3, 1, "1 game"),
+        (3, 2, "2 games"),
+        (3, 3, "3 games"),
     ] {
         let (view, cx, _system_motion) = fixture(cx, true);
         view.update(cx, |view, cx| {
@@ -680,12 +691,15 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
             adjacent.source = SourceKind::AdjacentMinecraft;
             view.shell.import_games.report = Some(DiscoveryReport {
                 sources: Vec::new(),
-                candidates: vec![
+                candidates: [
                     import_candidate("one"),
                     import_candidate("two"),
                     import_candidate("three"),
-                    adjacent,
-                ],
+                ]
+                .into_iter()
+                .take(total)
+                .chain(std::iter::once(adjacent))
+                .collect(),
             });
             view.shell.import_games.selected = ["one", "two", "three"]
                 .into_iter()
@@ -700,13 +714,66 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
             control_node(cx, "import-view-OfficialLauncher").label(),
             Some(label)
         );
+        assert!(!control_underlines(cx, "import-view-OfficialLauncher").is_empty());
+        for id in ["import-data-one", "import-data-adjacent"] {
+            assert!(
+                cx.update(|window, _| gpui_base::test_support::find(window, &[], &id.into()))
+                    .is_none_or(|node| node.disabled() == Some(true)),
+                "source drawer {total}/{selected} must not expose an active data policy action {id}"
+            );
+        }
         click(cx, "import-view-OfficialLauncher");
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
             Page::List,
-            "partial and empty selections must retain access to all candidates"
+            "every source count must open its candidates"
         );
-        assert_import_selection_summary(cx, &format!("{selected} / 3 selected"));
+        if total == 1 {
+            assert_eq!(control_node(cx, "import-game-one").checked(), Some(true));
+            let card = bounds(cx, "import-game-one");
+            cx.simulate_click(
+                point(card.right() - px(20.), card.center().y),
+                Modifiers::none(),
+            );
+            cx.run_until_parked();
+            act(
+                &view,
+                UiAction::ImportGames(crate::import_games::Action::Toggle("one".into())),
+                cx,
+            );
+            act(
+                &view,
+                UiAction::ImportGames(crate::import_games::Action::All),
+                cx,
+            );
+            view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.shell.import_games.selected,
+                    ["one".into(), "adjacent".into()].into_iter().collect()
+                );
+            });
+            assert_eq!(control_node(cx, "import-game-one").checked(), Some(true));
+            assert!(
+                crate::test_support::control_bounds(cx, "import-select-all").is_none(),
+                "a mandatory selection has no bulk clear action"
+            );
+            click(cx, "import-data-one");
+            assert_eq!(
+                view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+                Page::DataPolicy("one".into())
+            );
+            click(cx, "import-policy-shared");
+            click(cx, "import-policy-done");
+            view.read_with(cx, |view, _| {
+                assert!(view.shell.import_games.selected.contains("one"));
+                assert_eq!(
+                    view.shell.import_games.selections["one"].data_policy,
+                    block_launcher::catalog::DataPolicy::Shared
+                );
+            });
+        } else {
+            assert_import_selection_summary(cx, &format!("{selected} / {total} selected"));
+        }
         click(cx, "import-header-back");
         assert_eq!(
             control_node(cx, "import-view-OfficialLauncher").label(),
@@ -786,6 +853,42 @@ fn import_source_count_uses_label_only_dashes_without_a_pill(cx: &mut TestAppCon
             assert!((hovered.color.a - 1.).abs() < 0.001);
         }
     }
+}
+
+#[gpui::test]
+fn import_policy_pages_slide_in_both_directions(cx: &mut TestAppContext) {
+    let (view, cx, _motion) = fixture(cx, false);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    frame(cx, 1000);
+    click(cx, "import-view-OfficialLauncher");
+    frame(cx, 1000);
+    let list = bounds(cx, "import-list-content");
+    click(cx, "import-data-one");
+    animation_frame(cx, 100);
+    let incoming = bounds(cx, "import-policy-instance-name");
+    assert!(incoming.left() > list.left() + px(20.));
+    assert!(bounds(cx, "import-list-content").left() < list.left());
+    click(cx, "import-header-back");
+    animation_frame(cx, 40);
+    assert!(bounds(cx, "import-policy-instance-name").left() > incoming.left());
+    frame(cx, 1000);
+    assert_eq!(bounds(cx, "import-list-content"), list);
+    assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
+    click(cx, "import-data-one");
+    frame(cx, 1000);
+    let policy = bounds(cx, "import-policy-instance-name");
+    click(cx, "import-policy-done");
+    animation_frame(cx, 100);
+    assert!(bounds(cx, "import-policy-instance-name").left() > policy.left());
+    frame(cx, 1000);
+    assert_eq!(bounds(cx, "import-list-content"), list);
 }
 
 #[gpui::test]
@@ -1479,12 +1582,42 @@ fn data_policy_radios_center_in_the_full_wrapped_card(cx: &mut TestAppContext) {
                 );
             });
         });
-        for appearance in [crate::Appearance::Light, crate::Appearance::Dark] {
+        for (appearance, width, name) in [
+            (crate::Appearance::Light, 360., "Vanilla"),
+            (
+                crate::Appearance::Light,
+                360.,
+                "An imported installation with a much longer display name",
+            ),
+            (
+                crate::Appearance::Dark,
+                432.,
+                "An imported installation with a much longer display name",
+            ),
+        ] {
+            cx.simulate_resize(size(px(width), px(768.)));
             view.update(cx, |view, cx| {
                 view.preferences.appearance = appearance;
+                if let Some(report) = &mut view.shell.import_games.report {
+                    for candidate in &mut report.candidates {
+                        candidate.name = name.into();
+                    }
+                }
                 cx.notify();
             });
             cx.run_until_parked();
+            let title = bounds(cx, "import-policy-instance-name");
+            let version = bounds(cx, "import-policy-instance-version");
+            let panel = bounds(cx, "block-drawer");
+            assert_eq!(title.top(), version.top());
+            assert!(title.right() + px(12.) <= version.left() + px(0.5));
+            assert_eq!(title.left(), panel.left() + px(20.));
+            assert_eq!(version.right(), panel.right() - px(20.));
+            assert_eq!(
+                control_node(cx, "import-policy-instance-version").label(),
+                Some("1.21.1 · Vanilla")
+            );
+            assert!(title.bottom() + px(12.) <= bounds(cx, "import-policy-shared").top());
             let scale = cx.update(|window, _| window.scale_factor());
             for (id, marker) in [
                 ("import-policy-shared", "import-policy-shared-indicator"),

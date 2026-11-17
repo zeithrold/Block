@@ -195,6 +195,8 @@ impl Block {
         };
         self.preferences.reduce_motion = if toast_trace {
             options.name == "toast-motion-reduced"
+        } else if options.name == "setup-import-list" {
+            false
         } else {
             !(crate::drawer::motion_trace_enabled() || crate::frame_motion::trace::enabled())
         };

@@ -53,17 +53,19 @@ struct SlideRun {
 }
 
 #[derive(Clone, Debug, Default)]
-struct SourceListMotion {
+struct PageMotion {
     position: f32,
     run: Option<SlideRun>,
+    policy: Option<(String, f32)>,
 }
 
-impl SourceListMotion {
+impl PageMotion {
     fn navigate(&mut self, page: &Page, now: Instant, reduced_motion: bool) {
         let target = match page {
             Page::Sources => Some(0.),
             Page::List => Some(1.),
-            Page::Progress | Page::Results | Page::DataPolicy(_) => None,
+            Page::DataPolicy(_) => self.policy.as_ref().map(|(_, depth)| *depth),
+            Page::Progress | Page::Results => None,
         };
         let Some(target) = target else {
             self.run = None;
@@ -107,6 +109,7 @@ impl SourceListMotion {
     fn settle(&mut self, page: &Page) {
         self.position = if *page == Page::List { 1. } else { 0. };
         self.run = None;
+        self.policy = None;
     }
 }
 
@@ -196,7 +199,7 @@ pub(super) struct State {
     pub scroll: ScrollHandle,
     pub source_scroll: ScrollHandle,
     pub list_scroll: ScrollHandle,
-    motion: RefCell<SourceListMotion>,
+    motion: RefCell<PageMotion>,
     pub error: Option<crate::i18n::UiText>,
 }
 
@@ -222,13 +225,20 @@ impl Default for State {
             scroll: ScrollHandle::new(),
             source_scroll: ScrollHandle::new(),
             list_scroll: ScrollHandle::new(),
-            motion: RefCell::new(SourceListMotion::default()),
+            motion: RefCell::new(PageMotion::default()),
             error: None,
         }
     }
 }
 
 impl State {
+    fn navigate(&mut self, page: Page, now: Instant, reduced_motion: bool) {
+        self.motion
+            .borrow_mut()
+            .navigate(&page, now, reduced_motion);
+        self.page = page;
+    }
+
     fn can_import(&self, candidate: &GameCandidate) -> bool {
         candidate.importable && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
     }
@@ -410,6 +420,9 @@ impl State {
         !eligible.is_empty() && eligible.iter().all(|id| self.selected.contains(id))
     }
     fn toggle_all(&mut self) {
+        if self.candidates(self.source).len() == 1 {
+            return;
+        }
         let eligible = self.eligible_ids();
         let clear = !eligible.is_empty() && eligible.iter().all(|id| self.selected.contains(id));
         for id in eligible {
@@ -542,6 +555,24 @@ fn source_label(source: SourceKind, language: Language) -> String {
         SourceKind::OfficialLauncher => "import.source.launcher",
     };
     tr!(language, key)
+}
+
+fn candidate_version_label(candidate: &GameCandidate, language: Language) -> String {
+    let unknown_version = tr!(language, "import.unknownVersion");
+    let version = candidate
+        .minecraft_version
+        .as_deref()
+        .unwrap_or(&unknown_version);
+    let loader = candidate.loader.as_ref().map_or_else(
+        || tr!(language, "import.status.vanilla"),
+        |loader| format!("{:?}", loader.kind),
+    );
+    tr!(
+        language,
+        "import.status.version",
+        version = version,
+        loader = loader
+    )
 }
 
 fn discovery_roots() -> DiscoveryRoots {
@@ -756,6 +787,8 @@ impl Block {
     ) {
         match action {
             Action::OpenDataPolicy(id) => {
+                let now = cx.background_executor().now();
+                let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
                 if !state.can_open_policy(&id) {
                     return;
@@ -778,7 +811,9 @@ impl Block {
                     key,
                     cx,
                 );
-                state.page = Page::DataPolicy(id);
+                let depth = if state.page == Page::Sources { 1. } else { 2. };
+                state.motion.borrow_mut().policy = Some((id.clone(), depth));
+                state.navigate(Page::DataPolicy(id), now, reduced);
                 focus.focus(window, cx);
             }
             Action::SelectDataPolicy(id, data_policy) => {
@@ -827,8 +862,11 @@ impl Block {
                 }
             }
             Action::Back => {
+                let now = cx.background_executor().now();
+                let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
-                state.page = state.policy_return.take().unwrap_or(Page::List);
+                let page = state.policy_return.take().unwrap_or(Page::List);
+                state.navigate(page, now, reduced);
                 if let Some(focus) = state.policy_focus.take() {
                     focus.focus(window, cx);
                 }
@@ -853,22 +891,14 @@ impl Block {
                 let now = cx.background_executor().now();
                 let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
-                state.source = source;
-                state
-                    .motion
-                    .borrow_mut()
-                    .navigate(&Page::List, now, reduced);
-                state.page = Page::List;
+                state.choose_source(source);
+                state.navigate(Page::List, now, reduced);
             }
             Action::Sources => {
                 let now = cx.background_executor().now();
                 let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
-                state
-                    .motion
-                    .borrow_mut()
-                    .navigate(&Page::Sources, now, reduced);
-                state.page = Page::Sources;
+                state.navigate(Page::Sources, now, reduced);
             }
             Action::Toggle(id) => {
                 let state = &mut self.shell.import_games;
@@ -877,7 +907,11 @@ impl Block {
                         && candidate.importable
                         && !matches!(state.outcomes.get(&candidate.id), Some(Outcome::Saved))
                 });
-                if eligible && !state.running && !state.selected.remove(&id) {
+                if eligible
+                    && state.candidates(state.source).len() > 1
+                    && !state.running
+                    && !state.selected.remove(&id)
+                {
                     state.selected.insert(id);
                 }
             }
@@ -1022,6 +1056,7 @@ impl Block {
             return div().into_any_element();
         };
         let language = self.language();
+        let version = candidate_version_label(candidate, language);
         let selected = state
             .selection(candidate)
             .map(|selection| selection.data_policy);
@@ -1052,7 +1087,7 @@ impl Block {
                 .map(|((key, policy, _, _), path)| components::RadioOption {
                     id: (*key).into(),
                     checked: selected == Some(*policy),
-                    disabled: path.is_err(),
+                    disabled: !state.can_edit_policy(id) || path.is_err(),
                     action: UiAction::ImportGames(Action::SelectDataPolicy(id.to_owned(), *policy)),
                 })
                 .collect(),
@@ -1078,7 +1113,7 @@ impl Block {
                         selected == Some(policy),
                         self.palette,
                         ControlState {
-                            disabled: path.is_err(),
+                            disabled: !state.can_edit_policy(&id) || path.is_err(),
                             ..Default::default()
                         },
                         cx.listener(move |view, (): &(), window, cx| {
@@ -1114,17 +1149,48 @@ impl Block {
         }
         div()
             .id("import-data-policy-page")
-            .flex_1()
+            .size_full()
             .min_h_0()
-            .mr(gpui::rems(-1.))
             .pr_4()
             .scroll_area(&state.scroll, "import.policy", self.palette, false)
             .child(
                 div()
+                    .pl(gpui::px(super::design::FOCUS_RING_SPREAD))
+                    .py(gpui::px(super::design::FOCUS_RING_SPREAD))
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child(candidate.name.clone())
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .debug_selector(|| "import-policy-instance-name".into())
+                                    .min_w_0()
+                                    .flex_1()
+                                    .text_sm()
+                                    .line_height(gpui::px(20.))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .whitespace_normal()
+                                    .child(candidate.name.clone()),
+                            )
+                            .child(
+                                note(version.clone())
+                                    .id("import-policy-instance-version")
+                                    .debug_selector(|| "import-policy-instance-version".into())
+                                    .flex_shrink_0()
+                                    .max_w(relative(0.5))
+                                    .line_height(gpui::px(20.))
+                                    .text_right()
+                                    .whitespace_normal()
+                                    .aria_label(version)
+                                    .test_support(),
+                            ),
+                    )
                     .child(cards)
                     .child(note(tr!(language, "import.policy.files_remain")))
                     .children(state.error_text(language).map(note)),
@@ -1167,16 +1233,6 @@ impl Block {
             if count == 0 {
                 continue;
             }
-            let single = {
-                let mut eligible = candidates
-                    .iter()
-                    .copied()
-                    .filter(|candidate| state.can_import(candidate));
-                match (eligible.next(), eligible.next()) {
-                    (Some(candidate), None) => Some(candidate),
-                    _ => None,
-                }
-            };
             let summary_count = if count > 1 {
                 candidates
                     .iter()
@@ -1203,19 +1259,9 @@ impl Block {
             let selected = state.source == source;
             let label = source_label(source, language);
             let accessible_label = format!("{label}. {summary}");
-            let risk = if selected {
-                single
-                    .and_then(|candidate| state.risk(candidate))
-                    .map(|risk| risk.text(language))
-            } else {
-                None
-            };
-            let detail = if single.is_some() {
-                risk
-            } else {
-                let count = state.pending_reviews(source);
-                (count > 0).then(|| tr!(language, "import.risk.pending", count = count))
-            };
+            let pending_reviews = state.pending_reviews(source);
+            let detail = (pending_reviews > 0)
+                .then(|| tr!(language, "import.risk.pending", count = pending_reviews));
             let title = div()
                 .w_full()
                 .flex()
@@ -1231,41 +1277,38 @@ impl Block {
                         .font_weight(gpui::FontWeight::BOLD)
                         .child(label),
                 )
-                .child(if interactive && count > 1 {
+                .child(
                     super::inline_action::button(
                         format!("import-view-{source:?}"),
                         summary,
                         self.palette,
-                        ControlState::default(),
+                        ControlState {
+                            disabled: !interactive,
+                            ..ControlState::default()
+                        },
                         cx.listener(move |view, (): &(), window, cx| {
                             view.handle(UiAction::ImportGames(Action::View(source)), window, cx);
                         }),
                     )
+                    .opacity(1.)
                     .block_mouse_except_scroll()
-                    .into_any_element()
-                } else {
-                    components::badge(summary, self.palette, components::BadgeVariant::Info)
-                        .into_any_element()
-                });
-            let metadata =
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_x_2()
-                    .min_h(gpui::px(24.))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .max_w_full()
-                            .text_xs()
-                            .whitespace_normal()
-                            .children(path.map(|path| path.root.display().to_string())),
-                    )
-                    .children(single.filter(|_| selected).map(|candidate| {
-                        self.import_policy_action(state, candidate, interactive, cx)
-                    }));
+                    .into_any_element(),
+                );
+            let metadata = div()
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x_2()
+                .min_h(gpui::px(24.))
+                .child(
+                    div()
+                        .min_w_0()
+                        .max_w_full()
+                        .text_xs()
+                        .whitespace_normal()
+                        .children(path.map(|path| path.root.display().to_string())),
+                );
             let mut content = div()
                 .w_full()
                 .min_w_0()
@@ -1311,11 +1354,7 @@ impl Block {
                         .child(super::selection_reveal::reveal(
                             format!("import-source-risk-{source:?}"),
                             detail,
-                            if single.is_some() {
-                                self.palette.warning
-                            } else {
-                                self.palette.foreground
-                            },
+                            self.palette.foreground,
                             self.preferences.reduce_motion,
                         )),
                 )
@@ -1411,7 +1450,9 @@ impl Block {
             } else {
                 div().into_any_element()
             })
-            .child(if interactive {
+            .child(if state.candidates(state.source).len() == 1 {
+                div().into_any_element()
+            } else if interactive {
                 self.button_with_variant(
                     "import-select-all",
                     selection_label.clone(),
@@ -1440,6 +1481,7 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let candidates = state.candidates(state.source);
+        let single = candidates.len() == 1;
         let first_pending = candidates
             .iter()
             .find(|candidate| state.risk(candidate).is_some())
@@ -1462,21 +1504,7 @@ impl Block {
             } else if let Some(reason) = &candidate.unsupported_reason {
                 tr!(language, "import.cannot_import_detail", detail = reason)
             } else {
-                let unknown_version = tr!(language, "import.unknownVersion");
-                let version = candidate
-                    .minecraft_version
-                    .as_deref()
-                    .unwrap_or(&unknown_version);
-                let loader = candidate.loader.as_ref().map_or_else(
-                    || tr!(language, "import.status.vanilla"),
-                    |loader| format!("{:?}", loader.kind),
-                );
-                tr!(
-                    language,
-                    "import.status.version",
-                    version = version,
-                    loader = loader
-                )
+                candidate_version_label(candidate, language)
             };
             let risk = state.risk(candidate).map(|risk| risk.text(language));
             let detail = if state.can_import(candidate) {
@@ -1530,7 +1558,7 @@ impl Block {
                 checked,
                 self.palette,
                 ControlState {
-                    disabled,
+                    disabled: disabled || single,
                     ..ControlState::default()
                 },
                 cx.listener(move |view, (): &(), window, cx| {
@@ -1617,29 +1645,25 @@ impl Block {
         body.into_any_element()
     }
 
-    pub(super) fn render_import_games(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn render_import_pages(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let state = &self.shell.import_games;
-        let language = self.language();
-        let selected_count = state
-            .eligible_ids()
-            .iter()
-            .filter(|id| state.selected.contains(*id))
-            .count();
         // Borrow focus paint room from the surrounding inset. Keep compensation
         // in scroll content so the outer paint remains reachable at its limits.
         let paint_outset = gpui::px(super::design::FOCUS_RING_SPREAD);
         let mut running_motion = false;
         let body = match &state.page {
-            Page::DataPolicy(id) => self.render_import_data_policy(state, id, cx),
-            Page::Sources | Page::List => {
-                let (position, running) = state.motion.borrow_mut().sample(
-                    cx.background_executor().now(),
-                    self.motion_preferences().reduced(),
-                );
+            Page::Sources | Page::List | Page::DataPolicy(_) => {
+                let (position, running, policy) = {
+                    let mut motion = state.motion.borrow_mut();
+                    let (position, running) = motion.sample(
+                        cx.background_executor().now(),
+                        self.motion_preferences().reduced(),
+                    );
+                    if !running && !matches!(state.page, Page::DataPolicy(_)) {
+                        motion.policy = None;
+                    }
+                    (position, running, motion.policy.clone())
+                };
                 running_motion = running;
                 let source = div()
                     .id("import-sources-content")
@@ -1695,7 +1719,18 @@ impl Block {
                     .mr(gpui::rems(-1.))
                     .overflow_hidden()
                     .child(page(-position, source.into_any_element()))
-                    .child(page(1. - position, list.into_any_element()))
+                    .children(
+                        policy
+                            .as_ref()
+                            .is_none_or(|(_, depth)| *depth > 1.)
+                            .then(|| page(1. - position, list.into_any_element())),
+                    )
+                    .children(policy.map(|(id, depth)| {
+                        page(
+                            depth - position,
+                            self.render_import_data_policy(state, &id, cx),
+                        )
+                    }))
                     .into_any_element()
             }
             Page::Progress | Page::Results => div()
@@ -1711,6 +1746,22 @@ impl Block {
         if running_motion {
             window.request_animation_frame();
         }
+        body
+    }
+
+    pub(super) fn render_import_games(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let state = &self.shell.import_games;
+        let language = self.language();
+        let selected_count = state
+            .eligible_ids()
+            .iter()
+            .filter(|id| state.selected.contains(*id))
+            .count();
+        let body = self.render_import_pages(window, cx);
         let mut footer = div().flex_shrink_0().pt_3().flex().flex_col().gap_2();
         if state.running {
             footer = footer
@@ -1772,6 +1823,19 @@ impl Block {
             ));
         } else {
             let n = selected_count;
+            if state.page == Page::Sources {
+                footer = footer.child(self.button_with_variant(
+                    "import-new",
+                    tr!(language, "import.footer.newGame"),
+                    UiAction::ImportGames(Action::New),
+                    if n == 0 {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Ghost
+                    },
+                    cx,
+                ));
+            }
             if n > 0 || state.page != Page::Sources {
                 footer = footer.child(components::button(
                     "import-add",
@@ -1792,19 +1856,6 @@ impl Block {
                     cx.listener(|view, (): &(), window, cx| {
                         view.handle(UiAction::ImportGames(Action::Import), window, cx);
                     }),
-                ));
-            }
-            if state.page == Page::Sources {
-                footer = footer.child(self.button_with_variant(
-                    "import-new",
-                    tr!(language, "import.footer.newGame"),
-                    UiAction::ImportGames(Action::New),
-                    if n == 0 {
-                        ButtonVariant::Primary
-                    } else {
-                        ButtonVariant::Ghost
-                    },
-                    cx,
                 ));
             }
         }
@@ -2106,7 +2157,7 @@ mod tests {
     #[test]
     fn source_list_motion_reverses_continuously_and_respects_reduced_motion() {
         let start = Instant::now();
-        let mut motion = SourceListMotion::default();
+        let mut motion = PageMotion::default();
         motion.navigate(&Page::List, start, false);
         let at_100 = motion.sample(start + Duration::from_millis(100), false).0;
         assert!(at_100 > 0. && at_100 < 1.);
