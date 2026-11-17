@@ -9,14 +9,19 @@
 )]
 
 use super::scroll_area::ScrollAreaExt as _;
-use std::fmt;
+use std::{
+    fmt,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use block_auth::{Account, AccountProvider, SignInStage};
 use gpui::{
     AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window, div,
-    point, px, rgb,
+    img, point, px, rgb,
 };
+use gpui_base::motion::{Easing, Transition, transition};
 
 use super::{
     Block, Language, Tab, UiAction, account_id,
@@ -36,6 +41,52 @@ const ACCOUNT_TYPES: [AccountProvider; 3] = [
     AccountProvider::Authlib,
     AccountProvider::Offline,
 ];
+
+static MICROSOFT_LOGO: LazyLock<Arc<gpui::Image>> = LazyLock::new(|| {
+    Arc::new(gpui::Image::from_bytes(
+        gpui::ImageFormat::Svg,
+        include_bytes!("../../assets/brands/microsoft.svg").to_vec(),
+    ))
+});
+
+/// The disclosure keeps one measured height and retargets from its current frame.
+#[derive(IntoElement)]
+struct AuthOptions {
+    expanded: bool,
+    content: gpui::AnyElement,
+}
+
+impl gpui::RenderOnce for AuthOptions {
+    fn render(self, window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+        let progress = transition(
+            "auth-options-presence",
+            f32::from(self.expanded),
+            Transition::new(Duration::from_millis(200)).easing(Easing::EaseOut),
+            window,
+            cx,
+        );
+        div()
+            .debug_selector(|| "auth-options-region".into())
+            .w_full()
+            .flex_shrink_0()
+            .children((progress > 0.).then(|| {
+                gpui_base::MotionReveal::new(
+                    "auth-options-reveal",
+                    progress,
+                    div()
+                        .pt_3()
+                        .child(
+                            div()
+                                .relative()
+                                .top(px(-6. * (1. - progress)))
+                                .opacity(progress)
+                                .child(self.content),
+                        )
+                        .into_any_element(),
+                )
+            }))
+    }
+}
 
 /// A retained account-surface message.
 ///
@@ -117,7 +168,7 @@ impl gpui::RenderOnce for ProviderPassword {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
-    /// The account page itself: the sign-in form for the selected account type.
+    /// The chooser (Microsoft default) or a third-party/offline input form.
     #[default]
     Connect,
     Preparing,
@@ -384,7 +435,7 @@ impl AuthWizard {
                 self.device_code = Some(DeviceCode {
                     user_code: "TEST-CODE".into(),
                     verification_uri: "https://microsoft.com/devicelogin".into(),
-                    expires_at: std::time::Instant::now() + std::time::Duration::from_secs(900),
+                    expires_at: std::time::Instant::now() + Duration::from_secs(900),
                 });
             }
         }
@@ -430,7 +481,12 @@ impl AuthWizard {
     }
 
     pub(super) const fn motion_key(&self) -> AuthStep {
-        self.phase.step()
+        match (self.phase, self.provider) {
+            (Phase::Connect, AccountProvider::Authlib | AccountProvider::Offline) => {
+                AuthStep::SignIn
+            }
+            _ => self.phase.step(),
+        }
     }
 
     fn transition(&mut self, phase: Phase) {
@@ -1395,19 +1451,20 @@ impl Block {
             state.error = None;
             state.save_failed = false;
             if phase == Phase::Connect {
-                // The alternatives lead back to the default Microsoft page.
+                // Input forms return to the chooser with its disclosure retained.
                 state.provider = AccountProvider::Microsoft;
             }
             state.transition(Phase::Connect);
+            state.body_scroll.set_offset(point(px(0.), px(0.)));
         }
+        self.focus_auth_form(window, cx);
         cx.notify();
     }
 
     /// Switch the Microsoft page between its two real authorization modes.
     ///
     /// The device code is a request of its own, so choosing it starts it. A
-    /// browser authorization stays the page's single primary action, so
-    /// switching back only returns the page to that state.
+    /// browser authorization also starts immediately when explicitly requested.
     pub(super) fn change_auth_method(
         &mut self,
         method: Method,
@@ -1432,9 +1489,7 @@ impl Block {
             state.save_failed = false;
             state.transition(Phase::Connect);
         }
-        if method == Method::Device {
-            self.start_auth(window, cx);
-        }
+        self.start_auth(window, cx);
         cx.notify();
     }
 
@@ -2032,94 +2087,157 @@ impl Block {
         )
     }
 
-    /// The account page: one sign-in form, with the other account types one
-    /// disclosure away and switched in place.
+    /// A provider-neutral chooser; the two input-based providers own their forms.
     fn auth_connect(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+        match state.provider {
+            AccountProvider::Authlib => return self.authlib_form(state, cx),
+            AccountProvider::Offline => return self.offline_form(state),
+            AccountProvider::Microsoft => {}
+        }
         let language = self.language();
-        let mut page = div()
+        div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(self.auth_form(state, cx))
-            .child(
-                self.auth_button(
-                    "auth-other-options",
-                    if state.other_sign_in_options {
-                        tr!(language, "accounts.auth.other.hide")
-                    } else {
-                        tr!(language, "accounts.auth.other.show")
-                    },
-                    UiAction::AuthOtherOptions,
-                    ButtonVariant::Outline,
-                    ControlState::default(),
-                    cx,
-                )
-                // The label states the action; assistive technology reads the
-                // disclosure's current state from this flag as well.
-                .aria_expanded(state.other_sign_in_options),
-            );
-        if state.other_sign_in_options {
-            page = page.child(
-                div().flex().flex_col().gap_3().children(
-                    ACCOUNT_TYPES
-                        .iter()
-                        .copied()
-                        .filter(|provider| *provider != state.provider)
-                        .map(|provider| self.provider_option(provider, cx)),
-                ),
-            );
-        }
-        page
-    }
-
-    /// One account type the page can switch its form to.
-    fn provider_option(&self, provider: AccountProvider, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        components::card(self.palette)
-            .gap_2()
-            .child(self.auth_button(
-                provider_selector(provider),
-                provider_label(language, provider),
-                UiAction::AuthProvider(provider),
-                ButtonVariant::Outline,
-                ControlState {
-                    disabled: self.busy,
-                    ..ControlState::default()
-                },
-                cx,
-            ))
-            .child(note(provider_description(language, provider)))
-    }
-
-    /// The form the selected account type signs in with.
-    fn auth_form(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
-        match state.provider {
-            AccountProvider::Microsoft => self.microsoft_form(cx),
-            AccountProvider::Authlib => self.authlib_form(state, cx),
-            AccountProvider::Offline => self.offline_form(state),
-        }
-    }
-
-    /// The default page: one browser authorization, with the device code as an
-    /// explicit action instead of a mode chosen by selecting a control.
-    fn microsoft_form(&self, cx: &Context<'_, Self>) -> gpui::Div {
-        let language = self.language();
-        components::card(self.palette)
-            .debug_selector(|| "auth-microsoft".into())
             .gap_3()
-            .child(note(tr!(language, "accounts.auth.microsoft.card_note")))
-            .child(self.auth_button(
-                "auth-device-code-action",
-                tr!(language, "accounts.auth.microsoft.device_action"),
-                UiAction::AuthMethod(Method::Device),
-                ButtonVariant::Outline,
-                ControlState {
-                    disabled: self.busy,
-                    ..ControlState::default()
-                },
-                cx,
-            ))
-            .child(note(tr!(language, "accounts.auth.microsoft.device_note")))
+            .child(self.provider_option(AccountProvider::Microsoft, false, cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        self.auth_button(
+                            "auth-other-options",
+                            if state.other_sign_in_options {
+                                tr!(language, "accounts.auth.other.hide")
+                            } else {
+                                tr!(language, "accounts.auth.other.show")
+                            },
+                            UiAction::AuthOtherOptions,
+                            ButtonVariant::Ghost,
+                            ControlState::default(),
+                            cx,
+                        )
+                        // The label states the action; assistive technology reads the
+                        // disclosure's current state from this flag as well.
+                        .aria_expanded(state.other_sign_in_options),
+                    )
+                    .child(AuthOptions {
+                        expanded: state.other_sign_in_options,
+                        content: div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .children(
+                                ACCOUNT_TYPES
+                                    .into_iter()
+                                    .filter(|provider| *provider != AccountProvider::Microsoft)
+                                    .map(|provider| {
+                                        self.provider_option(
+                                            provider,
+                                            !state.other_sign_in_options,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .into_any_element(),
+                    }),
+            )
+    }
+
+    /// A whole-card action using the same anatomy as the first-run task cards.
+    fn provider_option(
+        &self,
+        provider: AccountProvider,
+        disabled: bool,
+        cx: &Context<'_, Self>,
+    ) -> components::Control {
+        let language = self.language();
+        let (title, description, icon) = match provider {
+            AccountProvider::Microsoft => (
+                "accounts.auth.choose.microsoft.title",
+                "accounts.auth.choose.microsoft.description",
+                img(MICROSOFT_LOGO.clone()).size(px(21.)).into_any_element(),
+            ),
+            AccountProvider::Authlib => (
+                "accounts.auth.choose.authlib.title",
+                "accounts.auth.choose.authlib.description",
+                Icon::Server
+                    .render(20., self.palette.foreground)
+                    .into_any_element(),
+            ),
+            AccountProvider::Offline => (
+                "accounts.auth.choose.offline.title",
+                "accounts.auth.choose.offline.description",
+                Icon::Account
+                    .render(20., self.palette.foreground)
+                    .into_any_element(),
+            ),
+        };
+        let title = tr!(language, title);
+        let description = tr!(language, description);
+        self.auth_button(
+            provider_selector(provider),
+            "",
+            if provider == AccountProvider::Microsoft {
+                UiAction::Authenticate
+            } else {
+                UiAction::AuthProvider(provider)
+            },
+            ButtonVariant::Outline,
+            ControlState {
+                disabled: self.busy || disabled,
+                ..ControlState::default()
+            },
+            cx,
+        )
+        .aria_label(title.clone())
+        .aria_description(description.clone())
+        .flex_shrink_0()
+        .p_5()
+        .rounded_2xl()
+        .items_start()
+        .justify_start()
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_4()
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(icon)
+                        .child(
+                            if provider == AccountProvider::Microsoft {
+                                Icon::ExternalLink
+                            } else {
+                                Icon::ChevronRight
+                            }
+                            .render(16., self.palette.muted),
+                        ),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .text_lg()
+                                .line_height(px(24.))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(title),
+                        )
+                        .child(note(description)),
+                ),
+        )
     }
 
     /// A community provider signs in with its own account and password, sent to
@@ -2317,7 +2435,25 @@ impl Block {
                     .child(Icon::Error.render(24., self.palette.destructive))
                     .child(note(message)),
             )
-            .child(self.auth_form(state, cx))
+            .children(
+                (state.provider == AccountProvider::Authlib).then(|| self.authlib_form(state, cx)),
+            )
+            .children(
+                (state.provider == AccountProvider::Microsoft && state.method == Method::Browser)
+                    .then(|| {
+                        self.auth_button(
+                            "auth-use-device-code",
+                            tr!(language, "accounts.auth.microsoft.device_action"),
+                            UiAction::AuthMethod(Method::Device),
+                            ButtonVariant::Ghost,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx,
+                        )
+                    }),
+            )
     }
 
     /// The characters the provider returned; the chosen one becomes the account.
@@ -2745,28 +2881,34 @@ impl Block {
                     .flex_col()
                     .gap_2()
                     .child(exits)
-                    .child(self.auth_button(
-                        "auth-primary",
-                        label,
-                        action,
-                        ButtonVariant::Primary,
-                        ControlState {
-                            busy,
-                            disabled: state.provider_draft.is_some()
-                                || provider_blocked
-                                || settled
-                                || self.busy
-                                    && matches!(
-                                        state.phase,
-                                        Phase::Connect
-                                            | Phase::Failed
-                                            | Phase::Complete
-                                            | Phase::Characters
-                                    ),
-                            ..ControlState::default()
-                        },
-                        cx,
-                    )),
+                    .children(
+                        (state.phase != Phase::Connect
+                            || state.provider != AccountProvider::Microsoft)
+                            .then(|| {
+                                self.auth_button(
+                                    "auth-primary",
+                                    label,
+                                    action,
+                                    ButtonVariant::Primary,
+                                    ControlState {
+                                        busy,
+                                        disabled: state.provider_draft.is_some()
+                                            || provider_blocked
+                                            || settled
+                                            || self.busy
+                                                && matches!(
+                                                    state.phase,
+                                                    Phase::Connect
+                                                        | Phase::Failed
+                                                        | Phase::Complete
+                                                        | Phase::Characters
+                                                ),
+                                        ..ControlState::default()
+                                    },
+                                    cx,
+                                )
+                            }),
+                    ),
             )
     }
 
@@ -2813,8 +2955,8 @@ fn auth_heading_keys(state: &AuthWizard) -> (&'static str, &'static str) {
                 "accounts.auth.info.description.authlib",
             ),
             AccountProvider::Microsoft => (
-                "accounts.auth.info.title.microsoft",
-                "accounts.auth.info.description.microsoft",
+                "accounts.auth.choose.title",
+                "accounts.auth.choose.description",
             ),
         },
         Phase::Preparing => (
@@ -2949,16 +3091,6 @@ pub(super) fn provider_label(language: Language, provider: AccountProvider) -> S
         AccountProvider::Microsoft => "accounts.provider.microsoft",
         AccountProvider::Authlib => "accounts.provider.authlib",
         AccountProvider::Offline => "accounts.provider.offline",
-    };
-    tr!(language, key)
-}
-
-/// What signing in with an account type means, in the reader's language.
-fn provider_description(language: Language, provider: AccountProvider) -> String {
-    let key = match provider {
-        AccountProvider::Microsoft => "accounts.auth.provider.microsoft.description",
-        AccountProvider::Authlib => "accounts.auth.provider.authlib.description",
-        AccountProvider::Offline => "accounts.auth.provider.offline.description",
     };
     tr!(language, key)
 }
@@ -3553,6 +3685,7 @@ mod tests {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
+                view.preferences.reduce_motion = true;
                 view.router.navigate(Tab::Onboarding);
                 view.open_auth_wizard(window, cx);
             });
@@ -3597,7 +3730,83 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_account_page_switches_its_form_in_place_behind_one_disclosure(cx: &mut TestAppContext) {
+    fn other_accounts_reveal_downward_and_reverse_without_jumping(cx: &mut TestAppContext) {
+        use anyhow::Context as _;
+        use std::time::Duration;
+
+        let result = (|| -> anyhow::Result<()> {
+            let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+            cx.update(|window, cx| {
+                view.update(cx, |view, cx| {
+                    view.preferences.reduce_motion = false;
+                    view.router.navigate(Tab::Accounts);
+                    view.handle(crate::UiAction::SignIn, window, cx);
+                });
+            });
+            let frame = |cx: &mut gpui::VisualTestContext, millis| {
+                cx.executor().advance_clock(Duration::from_millis(millis));
+                cx.update(|window, _| window.refresh());
+                cx.run_until_parked();
+            };
+            frame(cx, 0);
+            frame(cx, 500);
+            click(cx, "auth-other-options");
+            // Base measures the newly mounted cards on their first frame.
+            frame(cx, 16);
+            frame(cx, 64);
+            let entering = cx
+                .debug_bounds("auth-options-region")
+                .context("entering region")?;
+            let card =
+                crate::test_support::control_bounds(cx, "auth-authlib").context("entering card")?;
+            assert!(entering.size.height > px(0.));
+            frame(cx, 200);
+            let settled = cx
+                .debug_bounds("auth-options-region")
+                .context("expanded region")?;
+            let settled_card =
+                crate::test_support::control_bounds(cx, "auth-authlib").context("expanded card")?;
+            assert!(entering.size.height < settled.size.height);
+            let travel = settled_card.top() - card.top();
+            assert!(travel > px(0.) && travel < px(6.), "{travel:?}");
+            assert_eq!(settled_card.size, card.size);
+
+            click(cx, "auth-other-options");
+            frame(cx, 70);
+            let exiting = cx
+                .debug_bounds("auth-options-region")
+                .context("exiting region")?;
+            assert!(
+                exiting.size.height > px(0.) && exiting.size.height < settled.size.height,
+                "exiting {exiting:?}, settled {settled:?}, expanded {}",
+                view.read_with(cx, |view, _| view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .is_some_and(|auth| auth.other_sign_in_options))
+            );
+            assert_eq!(control_node(cx, "auth-authlib").disabled(), Some(true));
+            click(cx, "auth-other-options");
+            let reversed = cx
+                .debug_bounds("auth-options-region")
+                .context("reversed region")?;
+            assert!((f32::from(reversed.size.height - exiting.size.height)).abs() < 0.5);
+            frame(cx, 250);
+            assert_eq!(cx.debug_bounds("auth-options-region"), Some(settled));
+            assert_ne!(control_node(cx, "auth-authlib").disabled(), Some(true));
+            click(cx, "auth-other-options");
+            frame(cx, 250);
+            assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
+            assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
+            Ok(())
+        })();
+        assert!(result.is_ok(), "{result:#?}");
+    }
+
+    #[gpui::test]
+    fn account_forms_return_to_the_chooser_with_disclosure_and_drafts_retained(
+        cx: &mut TestAppContext,
+    ) {
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -3609,13 +3818,15 @@ mod tests {
         cx.simulate_resize(size(px(360.), px(720.)));
         cx.run_until_parked();
         let body = crate::test_support::control_bounds(cx, "auth-body");
-        // The Accounts entry is the Microsoft form itself, with the device code
-        // as an action on it and the other account types collapsed.
+        // Both entry points begin with a chooser, before authorization starts.
         assert!(
             view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
-                |state| state.phase == Phase::Connect
-                    && state.provider == block_auth::AccountProvider::Microsoft
-                    && !state.other_sign_in_options
+                |state| (state.phase, state.provider, state.other_sign_in_options)
+                    == (
+                        Phase::Connect,
+                        block_auth::AccountProvider::Microsoft,
+                        false
+                    )
             ))
         );
         assert_eq!(
@@ -3623,7 +3834,8 @@ mod tests {
             Some(Tab::Accounts)
         );
         assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
-        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-primary").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
@@ -3640,7 +3852,7 @@ mod tests {
                 .is_some_and(|state| state.provider == block_auth::AccountProvider::Microsoft)
         }));
 
-        // Choosing one swaps the form on this page instead of opening a step.
+        // Choosing a provider enters its own form, without sibling entry cards.
         assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-offline")));
         click(cx, "auth-offline");
         assert!(view.read_with(cx, |view, _| {
@@ -3650,8 +3862,8 @@ mod tests {
             })
         }));
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
-        // Microsoft is now an alternative, listed by the same disclosure.
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_none());
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 if let Some(field) = view
@@ -3665,15 +3877,17 @@ mod tests {
             });
         });
 
-        // Collapsing hides the alternatives and keeps the form in use with its
-        // typed draft intact.
-        assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-other-options")));
+        // Back restores the expanded chooser; collapsing never discards a draft.
+        click(cx, "auth-back");
+        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
         assert!(
             view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
-                |state| state.provider == block_auth::AccountProvider::Offline
+                |state| state.provider == block_auth::AccountProvider::Microsoft
                     && state
                         .username
                         .as_ref()
@@ -3681,23 +3895,33 @@ mod tests {
             ))
         );
 
-        // Back returns the page to its default Microsoft form and keeps both the
-        // disclosure state and the draft for the next visit.
+        // Back at the chooser is a no-op and retains the non-sensitive draft.
         cx.update(|window, cx| {
             view.update(cx, |view, cx| view.auth_back(window, cx));
         });
         cx.run_until_parked();
-        assert!(
-            view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
-                |state| state.phase == Phase::Connect
-                    && state.provider == block_auth::AccountProvider::Microsoft
-                    && !state.other_sign_in_options
-                    && state
-                        .username
-                        .as_ref()
-                        .is_some_and(|field| field.read(cx).value() == "Local_Draft")
-            ))
-        );
+        view.read_with(cx, |view, cx| {
+            assert_eq!(
+                view.shell.auth.as_ref().map(|state| (
+                    state.phase,
+                    state.provider,
+                    state.other_sign_in_options
+                )),
+                Some((
+                    Phase::Connect,
+                    block_auth::AccountProvider::Microsoft,
+                    false
+                ))
+            );
+            assert_eq!(
+                view.shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.username.as_ref())
+                    .map(|field| field.read(cx).value().to_string()),
+                Some("Local_Draft".into())
+            );
+        });
         assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
     }
 
@@ -3728,8 +3952,9 @@ mod tests {
         // control, so no browser/device selection control exists.
         assert!(crate::test_support::control_bounds(cx, "auth-method-browser").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-method-device").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_some());
-        assert!(crate::test_support::control_bounds(cx, "auth-primary").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-primary").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
         assert!(
             view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
                 |state| state.method == super::Method::Browser && state.device_code.is_none()
@@ -3738,7 +3963,7 @@ mod tests {
         // Activating the page asks the backend for a browser authorization; the
         // network-free fixture has no backend, so it reports that instead of
         // falling back to a device code or claiming a session.
-        click(cx, "auth-primary");
+        click(cx, "auth-microsoft");
         assert!(view.read_with(cx, |view, _| {
             view.shell.auth.as_ref().is_some_and(|state| {
                 state.phase == Phase::Failed
@@ -4037,6 +4262,10 @@ mod tests {
                     assert!(footer.bottom() <= px(height));
                     for selector in ["auth-cancel", "auth-primary"] {
                         let action = cx.debug_bounds(selector);
+                        if selector == "auth-primary" && phase == Phase::Connect {
+                            assert!(action.is_none(), "the chooser acts through its cards");
+                            continue;
+                        }
                         if selector == "auth-cancel" && phase.committed() {
                             assert!(action.is_none(), "committed save must not offer cancel");
                             continue;
@@ -4160,7 +4389,13 @@ mod tests {
         });
         assert!(
             view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
-                |state| state.phase == Phase::Connect
+                // Switching explicitly starts browser authorization; the fixture
+                // has no backend, so it fails without accepting stale results.
+                |state| state.phase == Phase::Failed
+                    && state.error
+                        == Some(super::AccountMessage::product(
+                            "accounts.auth.error.microsoft_start"
+                        ))
                     && state.method == super::Method::Browser
                     && state.device_code.is_none()
                     && state.prepared_account.is_none()
@@ -4634,12 +4869,8 @@ mod tests {
                 cx.notify();
             });
         });
-        // Switching back and forth keeps the draft and starts each form afresh.
-        assert!(
-            scroll_into_view(cx, body, "auth-microsoft"),
-            "the Microsoft row must be reachable"
-        );
-        click(cx, "auth-microsoft");
+        // Returning through Back keeps the draft and starts the chooser afresh.
+        click(cx, "auth-back");
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 let state = view.shell.auth.as_ref();
@@ -4689,6 +4920,7 @@ mod tests {
                 );
             });
         });
+        click(cx, "auth-back");
         assert!(
             scroll_into_view(cx, body, "auth-authlib"),
             "the community account type must be reachable"
@@ -4745,14 +4977,10 @@ mod tests {
                 view.open_auth_wizard(window, cx);
             });
         });
-        // The default page starts the browser: its single primary action.
+        // The card, disclosure and alternate providers resolve in the view language.
         assert_eq!(
-            control_node(cx, "auth-primary").label(),
-            Some("ブラウザーを開く")
-        );
-        assert_eq!(
-            control_node(cx, "auth-device-code-action").label(),
-            Some("デバイスコードで続行")
+            control_node(cx, "auth-microsoft").label(),
+            Some("Microsoft でサインイン")
         );
         assert_eq!(
             control_node(cx, "auth-other-options").label(),
@@ -4763,7 +4991,7 @@ mod tests {
         });
         assert_eq!(
             control_node(cx, "auth-offline").label(),
-            Some("オフラインモード")
+            Some("オフラインアカウントを使用")
         );
 
         // A classified failure is retained as its semantic key, so the same

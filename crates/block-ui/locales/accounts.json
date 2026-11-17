@@ -15,6 +15,46 @@
     "zh-Hans": "离线模式",
     "ja": "オフラインモード"
   },
+  "accounts.auth.choose.title": {
+    "en": "Add account",
+    "zh-Hans": "添加账户",
+    "ja": "アカウントを追加"
+  },
+  "accounts.auth.choose.description": {
+    "en": "Choose a sign-in method",
+    "zh-Hans": "选择一种登录方式",
+    "ja": "サインイン方法を選択"
+  },
+  "accounts.auth.choose.microsoft.title": {
+    "en": "Sign in with Microsoft",
+    "zh-Hans": "使用 Microsoft 登录",
+    "ja": "Microsoft でサインイン"
+  },
+  "accounts.auth.choose.microsoft.description": {
+    "en": "Sign in to your Minecraft account in your browser",
+    "zh-Hans": "在浏览器中登录你的 Minecraft 账户",
+    "ja": "ブラウザーで Minecraft アカウントにサインイン"
+  },
+  "accounts.auth.choose.authlib.title": {
+    "en": "Sign in with a third-party account",
+    "zh-Hans": "使用第三方账户登录",
+    "ja": "サードパーティのアカウントでサインイン"
+  },
+  "accounts.auth.choose.authlib.description": {
+    "en": "Connect through an Authlib-injector provider",
+    "zh-Hans": "通过 Authlib-injector 服务登录",
+    "ja": "Authlib-injector プロバイダー経由で接続"
+  },
+  "accounts.auth.choose.offline.title": {
+    "en": "Use an offline account",
+    "zh-Hans": "使用离线账户",
+    "ja": "オフラインアカウントを使用"
+  },
+  "accounts.auth.choose.offline.description": {
+    "en": "Choose a player name to play offline",
+    "zh-Hans": "设置玩家名称，离线游玩",
+    "ja": "プレイヤー名を設定してオフラインでプレイ"
+  },
   "accounts.auth.error.drop_wayland": {
     "en": "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.",
     "zh-Hans": "拖放不可用：此版本不支持 Wayland 窗口；请使用 X11 会话。",

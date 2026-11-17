@@ -195,7 +195,10 @@ impl Block {
         };
         self.preferences.reduce_motion = if toast_trace {
             options.name == "toast-motion-reduced"
-        } else if options.name == "setup-import-list" {
+        } else if matches!(
+            options.name.as_str(),
+            "setup-import-list" | "setup-account" | "auth-choose"
+        ) {
             false
         } else {
             !(crate::drawer::motion_trace_enabled() || crate::frame_motion::trace::enabled())
@@ -650,7 +653,7 @@ impl Block {
             "setup-account" => {
                 self.open_auth_wizard(window, cx);
                 if let Some(auth) = &mut self.shell.auth {
-                    auth.scenario("auth-choose", None, cx);
+                    auth.scenario("auth-information", None, cx);
                 }
             }
             "setup-game" => {

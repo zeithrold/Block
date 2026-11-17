@@ -14,6 +14,11 @@
       "asset": "block-1024.png",
       "source": "Native/Block-Icon/icon-v4-1024.png",
       "sha256": "df8f446c4aa94a688718997d9e77ec9a48c86cbd46dc86592f49754bf9f4ec6d"
+    },
+    {
+      "asset": "brands/microsoft.svg",
+      "source": "https://learn.microsoft.com/en-us/entra/identity-platform/media/howto-add-branding-in-apps/ms-symbollockup_mssymbol_19.svg",
+      "sha256": "728188ec11382baae324df0296655058f003c44646d2c0deadeaddeb203b35b2"
     }
   ]
 }
