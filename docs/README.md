@@ -30,6 +30,7 @@ These documents explain feature decisions and implementation scope. Consult
 [next tasks](next-tasks.md) for which remaining work is currently scheduled.
 
 - [UI refinement plan](ui-refinement-plan.md): the first Milestone III interaction package.
+- [Product design preferences](product-design-preferences.md): M3 design decisions, the reasoning inferred from corrections, and questions for future design reviews.
 - [UI and crate boundaries](ui-architecture-proposal.md): manifest ownership, typed navigation and shared page layouts.
 - [Home and management frame](home-management-frame.md): dimensions, navigation and shell transitions.
 - [Task composition research](ui-task-composition-research.md): complex workflows, settings alternatives and reassessment of window geometry.
