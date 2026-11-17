@@ -12,6 +12,64 @@ use gpui::{AssetSource, BoxShadow, Hsla, SharedString, Styled as _, Svg, point, 
 
 pub(super) const FONT_FAMILY: &str = "Inter";
 
+/// Available CJK sans families, cached within one application text system.
+pub(super) struct Typography {
+    chinese: Option<gpui::FontFallbacks>,
+    japanese: Option<gpui::FontFallbacks>,
+}
+
+impl gpui::Global for Typography {}
+
+impl Typography {
+    pub(super) fn new(text_system: &gpui::TextSystem) -> Self {
+        Self::from_names(&text_system.all_font_names())
+    }
+
+    fn from_names(names: &[String]) -> Self {
+        let mut available = ["Noto Sans CJK SC", "Noto Sans CJK JP"]
+            .into_iter()
+            .filter(|family| names.iter().any(|name| name.as_str() == *family))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let chinese =
+            (!available.is_empty()).then(|| gpui::FontFallbacks::from_fonts(available.clone()));
+        available.reverse();
+        let japanese = (!available.is_empty()).then(|| gpui::FontFallbacks::from_fonts(available));
+        Self { chinese, japanese }
+    }
+
+    fn fallbacks(&self, language: crate::Language) -> Option<gpui::FontFallbacks> {
+        match language {
+            crate::Language::English | crate::Language::SimplifiedChinese => self.chinese.clone(),
+            crate::Language::Japanese => self.japanese.clone(),
+        }
+    }
+}
+
+/// Apply product typography without changing a surface's weight or text features.
+pub(super) fn ui_text<E: gpui::Styled>(
+    mut element: E,
+    language: crate::Language,
+    cx: &gpui::App,
+) -> E {
+    let style = element.text_style();
+    style.font_family = Some(FONT_FAMILY.into());
+    style.font_fallbacks = cx.global::<Typography>().fallbacks(language);
+    element
+}
+
+/// Keep diagnostic text's own monospace fallback instead of the UI sans chain.
+pub(super) fn monospace_text<E: gpui::Styled>(mut element: E, family: SharedString) -> E {
+    let style = element.text_style();
+    style.font_family = Some(family);
+    style.font_fallbacks = Some(gpui::FontFallbacks::default());
+    element
+}
+
+#[cfg(test)]
+#[path = "font_tests.rs"]
+mod font_tests;
+
 /// The same licensed Latin font as the prototype, converted to a native font
 /// container once. The operating system supplies CJK and emoji fallbacks.
 ///

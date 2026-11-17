@@ -55,11 +55,12 @@ fn control_state(control: Control, state: ControlState) -> Control {
     control
 }
 
-fn interactive_control(
+pub(super) fn interactive_control(
     id: impl Into<SharedString>,
     label: SharedString,
     state: ControlState,
     role: gpui::Role,
+    hover: u32,
     on_activate: impl Fn(&(), &mut Window, &mut App) + 'static,
 ) -> Control {
     let id = id.into();
@@ -70,6 +71,7 @@ fn interactive_control(
             label,
             role,
             !state.interactive(),
+            hover,
             move |_, window, cx| {
                 on_activate(&(), window, cx);
             },
@@ -84,7 +86,6 @@ pub(super) enum ButtonVariant {
     Primary,
     #[default]
     Secondary,
-    Info,
     Outline,
     Ghost,
     Destructive,
@@ -191,12 +192,6 @@ fn styled_control(
             palette.secondary,
             mix(palette.secondary, palette.foreground, 95),
         ),
-        ButtonVariant::Info => (
-            palette.info_background,
-            palette.info,
-            palette.info_background,
-            mix(palette.info_background, palette.info, 90),
-        ),
         ButtonVariant::Outline => (
             palette.background,
             palette.foreground,
@@ -227,7 +222,7 @@ fn styled_control(
     } else {
         role
     };
-    let control = interactive_control(id, label.clone(), state, role, on_activate);
+    let control = interactive_control(id, label.clone(), state, role, hover, on_activate);
     let _ = selected;
     let mut control = control
         .flex()
@@ -254,7 +249,6 @@ fn styled_control(
     if state.interactive() {
         control = control
             .hover(move |style| {
-                let style = style.bg(rgb(hover));
                 if variant == ButtonVariant::Link {
                     style.underline()
                 } else {
@@ -899,10 +893,15 @@ fn choice(
                     progress,
                     palette,
                 ))
-                .children(
-                    (!label.is_empty())
-                        .then(|| div().min_w_0().flex_1().whitespace_normal().child(label)),
-                )
+                .children((!label.is_empty()).then(|| {
+                    let title = div().min_w_0().flex_1().whitespace_normal();
+                    let title = if round || row {
+                        title.font_weight(FontWeight::BOLD)
+                    } else {
+                        title
+                    };
+                    title.child(label)
+                }))
         }),
         children: Vec::new(),
     }))
@@ -1291,6 +1290,10 @@ pub(super) fn progress_ring(state: ProgressState, palette: Palette) -> Div {
         .size_full(),
     )
 }
+
+#[cfg(test)]
+#[path = "button_motion_tests.rs"]
+mod button_motion_tests;
 
 #[cfg(test)]
 mod tests {

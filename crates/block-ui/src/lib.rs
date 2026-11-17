@@ -66,6 +66,8 @@ mod game_wizard;
 mod global_config;
 #[path = "games/import_games.rs"]
 mod import_games;
+#[path = "controls/inline_action.rs"]
+mod inline_action;
 #[path = "games/instance_editor.rs"]
 mod instance_editor;
 #[cfg(test)]
@@ -192,6 +194,7 @@ pub fn initialize(cx: &mut gpui::App) {
     // Component initialization already registers Base's key bindings.
     gpui_component::init(cx);
     ProductRoot::register_plugin(cx, feedback::ToastLayer::new);
+    cx.set_global(design::Typography::new(cx.text_system()));
     cx.set_global(LauncherWindows::default());
     cx.set_global(UiInitialized);
 }

@@ -46,6 +46,10 @@ const BACKDROP_EASING: Easing = Easing::CubicBezier {
 };
 
 #[cfg(all(test, target_os = "linux"))]
+#[path = "drawer_font_tests.rs"]
+mod font_tests;
+
+#[cfg(all(test, target_os = "linux"))]
 #[path = "cjk_wrapping_tests.rs"]
 mod cjk_wrapping_tests;
 
@@ -625,10 +629,9 @@ impl DrawerLayer {
                 .trace
                 .map(|sample| drawer_trace::probe("backdrop", sample)),
         );
-        div()
+        super::design::ui_text(div(), frame.language, cx)
             .absolute()
             .inset_0()
-            .font_family(super::design::FONT_FAMILY)
             .text_color(rgb(frame.palette.foreground))
             .child(
                 gpui::canvas(|_, _, _| {}, {

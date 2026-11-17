@@ -5,28 +5,42 @@
 )]
 
 use gpui::{
-    AppContext as _, Context, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Window, rgb,
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Window, rgb,
 };
 
 pub(super) fn trigger<E: gpui::StatefulInteractiveElement, T: 'static>(
     control: E,
     text: impl Into<SharedString>,
-    _: &Context<'_, T>,
+    language: fn(&T) -> crate::Language,
+    cx: &Context<'_, T>,
 ) -> E {
     let text = text.into();
-    control.tooltip(move |_, cx| cx.new(|_| Tip(text.clone())).into())
+    let owner = cx.entity();
+    control.tooltip(move |_, cx| {
+        cx.new(|_| Tip {
+            text: text.clone(),
+            owner: owner.clone(),
+            language,
+        })
+        .into()
+    })
 }
 
-struct Tip(SharedString);
+struct Tip<T> {
+    text: SharedString,
+    owner: Entity<T>,
+    language: fn(&T) -> crate::Language,
+}
 
-impl Render for Tip {
+impl<T: 'static> Render for Tip<T> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let palette = cx
             .try_global::<super::Palette>()
             .copied()
             .unwrap_or(super::Palette::LIGHT);
-        gpui_base::Tooltip::new("product-tooltip")
+        let language = (self.language)(self.owner.read(cx));
+        super::design::ui_text(gpui_base::Tooltip::new("product-tooltip"), language, cx)
             .max_w(gpui::px(320.))
             .px_3()
             .py(gpui::px(6.))
@@ -34,6 +48,6 @@ impl Render for Tip {
             .bg(rgb(palette.foreground))
             .text_color(rgb(palette.background))
             .text_xs()
-            .child(self.0.clone())
+            .child(self.text.clone())
     }
 }

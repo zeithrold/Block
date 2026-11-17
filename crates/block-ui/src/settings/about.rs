@@ -291,6 +291,7 @@ impl Block {
                         )
                         .child(Icon::Copy.render(14., self.palette.muted)),
                         tr!(language, "about.copy_build_information"),
+                        Block::language,
                         cx,
                     )),
             )

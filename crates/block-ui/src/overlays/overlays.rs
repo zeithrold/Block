@@ -288,6 +288,7 @@ impl Overlays {
                 let body_chrome = matches!(kind, Surface::AuthProviderAdd);
                 let draft_exit = matches!(kind, Surface::SettingsExit(_) | Surface::EditorExit(_));
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
+                let language = view.read(dialog_cx).language();
                 let body = body.clone();
                 let footer = footer.clone();
                 let close = close.clone();
@@ -295,8 +296,7 @@ impl Overlays {
                 let confirm = build_owner.clone();
                 let dismiss = build_owner.clone();
                 let title_owner = build_owner.clone();
-                dialog
-                    .font_family(super::design::FONT_FAMILY)
+                super::design::ui_text(dialog, language, dialog_cx)
                     .w(dialog_width)
                     .px(px(0.))
                     .pt(px(0.))

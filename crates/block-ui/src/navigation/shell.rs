@@ -224,7 +224,7 @@ impl Block {
     ) -> impl IntoElement + use<> {
         let home = self.router.tab() == Tab::Home && self.form.is_none();
         let content = self.render_frame_body(window, cx);
-        let mut root = div()
+        let mut root = super::design::ui_text(div(), self.language(), cx)
             .id("block-shell")
             .debug_selector(|| "block-shell".into())
             .key_context("LauncherForm")
@@ -276,7 +276,6 @@ impl Block {
             .bg(rgb(self.palette.background))
             .text_color(rgb(self.palette.foreground))
             .text_size(px(14.))
-            .font_family(super::design::FONT_FAMILY)
             .child(div().flex_shrink_0().child(self.chrome(window, home, cx)))
             .child(div().flex_1().min_h_0().child(content));
         root = root.children(self.render_popups(false, window, cx));
@@ -423,6 +422,7 @@ impl Block {
                         cx,
                     ),
                     text,
+                    Block::language,
                     cx,
                 )
                 .into_any_element()
@@ -448,6 +448,7 @@ impl Block {
                         cx,
                     ),
                     text,
+                    Block::language,
                     cx,
                 )
                 .into_any_element()
@@ -462,6 +463,7 @@ impl Block {
                         cx,
                     ),
                     text,
+                    Block::language,
                     cx,
                 )
                 .into_any_element()
@@ -522,6 +524,7 @@ impl Block {
                                     ),
                                 ),
                                 text,
+                                Block::language,
                                 cx,
                             )
                         }))
@@ -693,7 +696,12 @@ impl Block {
                 .mt_3()
                 .h(px(80.))
                 .flex_shrink_0()
-                .child(super::tooltip::trigger(primary, tooltip, cx))
+                .child(super::tooltip::trigger(
+                    primary,
+                    tooltip,
+                    Block::language,
+                    cx,
+                ))
                 .child(
                     self.button(
                         "home-instances",
@@ -897,6 +905,7 @@ impl Block {
             .child(super::tooltip::trigger(
                 avatar,
                 tr!(self.language(), "action.switch_account"),
+                Block::language,
                 cx,
             ))
     }
@@ -1327,10 +1336,7 @@ impl Block {
                                     .debug_selector(|| "setup-language-search".into())
                                     .flex_1()
                                     .min_w_0()
-                                    .child(super::components::field(
-                                        tr!(self.language(), "setup.language.search"),
-                                        field,
-                                    )),
+                                    .child(field.clone()),
                             )
                             .children((!field.read(cx).value().is_empty()).then(|| {
                                 super::components::button(

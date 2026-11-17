@@ -116,6 +116,31 @@ fn control_quads(cx: &mut VisualTestContext, selector: &'static str) -> Vec<gpui
     })
 }
 
+fn control_underlines(cx: &mut VisualTestContext, selector: &'static str) -> Vec<gpui::Underline> {
+    let bounds = bounds(cx, selector);
+    cx.update(|window, _| {
+        let scale = window.scale_factor();
+        let mut lines = window
+            .painted_underlines()
+            .into_iter()
+            .filter(|line| {
+                line.bounds.left().0 >= f32::from(bounds.left()) * scale - 0.5
+                    && line.bounds.right().0 <= f32::from(bounds.right()) * scale + 0.5
+                    && line.bounds.top().0 >= f32::from(bounds.top()) * scale - 0.5
+                    && line.bounds.bottom().0 <= f32::from(bounds.bottom()) * scale + 0.5
+            })
+            .collect::<Vec<_>>();
+        lines.sort_by(|left, right| {
+            left.content_mask
+                .bounds
+                .left()
+                .0
+                .total_cmp(&right.content_mask.bounds.left().0)
+        });
+        lines
+    })
+}
+
 fn matches_rgb(actual: gpui::Rgba, expected: u32) -> bool {
     let expected = gpui::rgb(expected);
     (actual.r - expected.r).abs() < 0.001
@@ -268,6 +293,7 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
             && f32::from(title.center().y - view_button.center().y).abs() <= 0.5,
         "the independent View button belongs beside the source card title"
     );
+    assert_eq!(view_button.left() - title.right(), px(8.));
     cx.simulate_click(
         point(source.left() + px(24.), source.bottom() - px(24.)),
         Modifiers::none(),
@@ -642,7 +668,12 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
 
 #[gpui::test]
 fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut TestAppContext) {
-    for (selected, label) in [(0, "0 games"), (1, "1 game"), (2, "2 games")] {
+    for (selected, label) in [
+        (0, "0 games"),
+        (1, "1 game"),
+        (2, "2 games"),
+        (3, "3 games"),
+    ] {
         let (view, cx, _system_motion) = fixture(cx, true);
         view.update(cx, |view, cx| {
             let mut adjacent = import_candidate("adjacent");
@@ -685,7 +716,7 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
 }
 
 #[gpui::test]
-fn import_source_count_button_stays_distinct_from_the_selected_card(cx: &mut TestAppContext) {
+fn import_source_count_uses_label_only_dashes_without_a_pill(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, true);
     view.update(cx, |view, cx| {
         view.shell.import_games.report = Some(DiscoveryReport {
@@ -708,20 +739,140 @@ fn import_source_count_button_stays_distinct_from_the_selected_card(cx: &mut Tes
         cx.simulate_mouse_move(point(px(0.), px(0.)), None, Modifiers::none());
         cx.run_until_parked();
         assert_selection_surface(&view, cx, "import-source-OfficialLauncher", true);
-        assert_control_color(cx, "import-view-OfficialLauncher", palette.info_background);
-        let position = bounds(cx, "import-view-OfficialLauncher").center();
-        cx.simulate_mouse_move(position, None, Modifiers::none());
-        cx.run_until_parked();
+        let button = bounds(cx, "import-view-OfficialLauncher");
+        let lines = control_underlines(cx, "import-view-OfficialLauncher");
+        assert!(!lines.is_empty(), "the count label paints its underline");
+        let (scale, left) = cx.update(|window, _| {
+            let scale = window.scale_factor();
+            (scale, f32::from(window.pixel_snap(button.left())) * scale)
+        });
+        let dash = (2. * scale).round().max(1.);
+        let mut next = left;
+        let mut end = left;
+        for line in &lines {
+            assert!((line.bounds.left().0 - f32::from(button.left()) * scale).abs() <= 1.);
+            assert!(
+                (line.bounds.right().0 - (f32::from(button.right()) - 14.) * scale).abs() <= 1.,
+                "underline excludes the 2px gap and 12px chevron"
+            );
+            let span = line.bounds.intersect(&line.content_mask.bounds);
+            assert!((span.left().0 - next).abs() < 0.01);
+            assert!((span.right().0 - (next + dash).min(line.bounds.right().0)).abs() < 0.01);
+            assert!((line.color.a - 0.55).abs() < 0.001);
+            assert!(matches_rgb(line.color.to_rgb(), palette.foreground));
+            next += 2. * dash;
+            end = line.bounds.right().0;
+        }
+        assert!(next >= end, "every dash must be painted");
         assert!(
             control_quads(cx, "import-view-OfficialLauncher")
                 .iter()
-                .any(|quad| {
-                    quad.background.as_solid().is_some_and(|color| {
-                        !matches_rgb(color.to_rgb(), palette.accent)
-                            && !matches_rgb(color.to_rgb(), palette.info_background)
-                    })
+                .all(|quad| {
+                    quad.background
+                        .as_solid()
+                        .is_none_or(|color| color.a.abs() < f32::EPSILON)
                 }),
-            "hover feedback must stay distinct from the selected card and idle button"
+            "the inline count must not paint a filled pill"
+        );
+        let position = bounds(cx, "import-view-OfficialLauncher").center();
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(bounds(cx, "import-view-OfficialLauncher"), button);
+        let hovered = control_underlines(cx, "import-view-OfficialLauncher");
+        assert_eq!(hovered.len(), lines.len());
+        for (hovered, idle) in hovered.iter().zip(&lines) {
+            assert_eq!(hovered.bounds, idle.bounds);
+            assert_eq!(hovered.content_mask.bounds, idle.content_mask.bounds);
+            assert!((hovered.color.a - 1.).abs() < 0.001);
+        }
+    }
+}
+
+#[gpui::test]
+fn import_data_mode_keeps_unchecked_selection_and_restores_focus(cx: &mut TestAppContext) {
+    let (view, cx, _motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![import_candidate("one"), import_candidate("two")],
+        });
+        view.shell.import_games.selected = ["two".into()].into_iter().collect();
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+    let language = view.read_with(cx, |view, _| view.language());
+    let temporary = tr!(language, "import.mode.temporary_isolated");
+    assert!(
+        control_node(cx, "import-data-one")
+            .label()
+            .is_some_and(|label| label.starts_with(&temporary))
+    );
+    click(cx, "import-data-one");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.page, Page::DataPolicy("one".into()));
+        assert_eq!(
+            view.shell.import_games.selected,
+            ["two".into()].into_iter().collect()
+        );
+    });
+    click(cx, "import-header-back");
+    assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
+    assert!(
+        control_node(cx, "import-data-one")
+            .label()
+            .is_some_and(|label| label.starts_with(&temporary)),
+        "Back must not turn a provisional default into a confirmed mode"
+    );
+    crate::test_support::press(cx, "enter");
+    cx.run_until_parked();
+    assert_eq!(
+        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        Page::DataPolicy("one".into())
+    );
+    click(cx, "import-policy-done");
+    let isolated = tr!(language, "import.mode.isolated");
+    assert!(
+        control_node(cx, "import-data-one")
+            .label()
+            .is_some_and(|label| label.starts_with(&isolated))
+    );
+    assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.shell.import_games.page, Page::List);
+        assert_eq!(
+            view.shell.import_games.selected,
+            ["two".into()].into_iter().collect()
+        );
+    });
+}
+
+#[gpui::test]
+fn import_mode_action_wraps_after_long_metadata_inside_the_card(cx: &mut TestAppContext) {
+    let (view, cx, _motion) = fixture(cx, true);
+    view.update(cx, |view, cx| {
+        let mut long = import_candidate("one");
+        long.minecraft_version = Some("custom-version-identifier-".repeat(12));
+        view.shell.import_games.report = Some(DiscoveryReport {
+            sources: Vec::new(),
+            candidates: vec![long, import_candidate("two")],
+        });
+        view.shell.import_games.selected = ["one".into(), "two".into()].into_iter().collect();
+        cx.notify();
+    });
+    act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
+    click(cx, "import-view-OfficialLauncher");
+    for width in [360., 432.] {
+        cx.simulate_resize(size(px(width), px(768.)));
+        cx.run_until_parked();
+        let card = bounds(cx, "import-game-one");
+        let action = bounds(cx, "import-data-one");
+        assert_eq!(action.size.height, px(24.));
+        assert_eq!(action.left(), card.left() + px(16.));
+        assert!(action.right() <= card.right() - px(44.) + px(0.5));
+        assert!(
+            action.top() >= card.top() + px(16. + 20. + 4. + 2. * 18.),
+            "long version text must wrap before the intact mode action"
         );
     }
 }

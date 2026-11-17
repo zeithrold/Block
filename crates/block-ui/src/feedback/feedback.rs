@@ -897,7 +897,7 @@ impl Render for ToastLayer {
                 );
             }
         }
-        div()
+        super::design::ui_text(div(), self.language, cx)
             .absolute()
             .top(px(super::design::CHROME_HEIGHT))
             .bottom(self.bottom)

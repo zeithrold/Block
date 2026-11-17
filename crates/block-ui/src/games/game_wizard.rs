@@ -2763,6 +2763,7 @@ impl Block {
                 "wizard.card.tooltip",
                 &[("title", title), ("value", value), ("detail", detail)],
             ),
+            Block::language,
             cx,
         )
         .into_any_element()

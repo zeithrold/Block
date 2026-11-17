@@ -678,7 +678,12 @@ impl Block {
         .w(px(28.))
         .p_0()
         .child(Icon::Help.render(16., self.palette.muted));
-        super::tooltip::trigger(control, tr!(self.language(), "games.browser.help"), cx)
+        super::tooltip::trigger(
+            control,
+            tr!(self.language(), "games.browser.help"),
+            Block::language,
+            cx,
+        )
     }
 
     fn browser_row(
@@ -741,7 +746,7 @@ impl Block {
                 .child(
                     div()
                         .truncate()
-                        .font_weight(FontWeight::MEDIUM)
+                        .font_weight(FontWeight::BOLD)
                         .child(record.title.clone()),
                 )
                 .child(

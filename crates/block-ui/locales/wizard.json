@@ -1051,10 +1051,10 @@
     "zh-Hans": "无法继续导入。请检查来源文件和 Block 设置后重试。",
     "ja": "インポートを続行できませんでした。元のファイルと Block の設定を確認して再試行してください。"
   },
-  "import.mode.shared": {"en": "Shared", "zh-Hans": "共享", "ja": "共有"},
-  "import.mode.isolated": {"en": "Isolated", "zh-Hans": "隔离", "ja": "隔離"},
+  "import.mode.shared": {"en": "Shared data", "zh-Hans": "共享数据", "ja": "共有データ"},
+  "import.mode.isolated": {"en": "Isolated data", "zh-Hans": "隔离数据", "ja": "隔離データ"},
+  "import.mode.temporary_isolated": {"en": "Temporarily isolated", "zh-Hans": "暂用隔离", "ja": "仮の隔離データ"},
   "import.mode.unavailable": {"en": "Choose data location", "zh-Hans": "请选择数据位置", "ja": "保存先を選択"},
-  "import.risk.adjust": {"en": "Adjust", "zh-Hans": "调整", "ja": "変更"},
   "import.risk.adjust_for": {"en": "Adjust the data location for %{name}", "zh-Hans": "调整 %{name} 的数据位置", "ja": "%{name} のデータ保存先を変更"},
   "import.risk.pending": {"en": "%{count} to review", "zh-Hans": "%{count} 项待确认", "ja": "要確認 %{count} 件"},
   "import.risk.pending_detail": {"en": "%{count} instances need their data location reviewed", "zh-Hans": "%{count} 个实例的数据位置待确认", "ja": "%{count} 件のインスタンスのデータ保存先を確認してください"},

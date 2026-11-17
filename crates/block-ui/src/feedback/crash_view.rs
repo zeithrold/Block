@@ -714,8 +714,10 @@ impl CrashView {
         )
         .aria_label(label.clone())
         .child(icon.render(16., palette.foreground));
-        self.body_focus
-            .control(super::tooltip::trigger(control, label, cx), action)
+        self.body_focus.control(
+            super::tooltip::trigger(control, label, |view| view.language, cx),
+            action,
+        )
     }
 
     fn details(
@@ -875,15 +877,15 @@ impl CrashView {
                         .w_full()
                         .min_w_0()
                         .child(
-                            Textarea::new(&source.reader)
-                                .readonly(true)
-                                .aria_label(tr!(self.language, "crash.logs_details"))
-                                .font_family(
-                                    gpui_component::Theme::global(cx).mono_font_family.clone(),
-                                )
-                                .text_size(px(super::design::BODY_FONT_SIZE))
-                                .h(px(if short { 128. } else { 240. }))
-                                .w_full(),
+                            super::design::monospace_text(
+                                Textarea::new(&source.reader),
+                                gpui_component::Theme::global(cx).mono_font_family.clone(),
+                            )
+                            .readonly(true)
+                            .aria_label(tr!(self.language, "crash.logs_details"))
+                            .text_size(px(super::design::BODY_FONT_SIZE))
+                            .h(px(if short { 128. } else { 240. }))
+                            .w_full(),
                         ),
                     source.reader.focus_handle(cx),
                 ),
@@ -967,12 +969,12 @@ impl CrashView {
                             .id(("crash-evidence-text", index))
                             .debug_selector(move || format!("crash-evidence-text-{index}"))
                             .children(diagnosis.evidence.iter().map(|evidence| {
-                                div()
-                                    .font_family(
-                                        gpui_component::Theme::global(cx).mono_font_family.clone(),
-                                    )
-                                    .text_color(rgb(palette.muted))
-                                    .child(evidence.clone())
+                                super::design::monospace_text(
+                                    div(),
+                                    gpui_component::Theme::global(cx).mono_font_family.clone(),
+                                )
+                                .text_color(rgb(palette.muted))
+                                .child(evidence.clone())
                             })),
                     );
                 }
@@ -1255,7 +1257,7 @@ impl Render for CrashView {
         let body = self.content(palette, window, cx);
         let header = self.header(palette, cx);
         let footer = self.footer(palette, cx);
-        div()
+        super::design::ui_text(div(), self.language, cx)
             .key_context("CrashHelp")
             .track_focus(&self.focus)
             .on_mouse_up(
@@ -1293,7 +1295,6 @@ impl Render for CrashView {
             .text_color(rgb(palette.foreground))
             .text_size(px(super::design::BODY_FONT_SIZE))
             .line_height(px(super::design::BODY_LINE_HEIGHT))
-            .font_family(super::design::FONT_FAMILY)
             .child(header)
             .child(body.flex_1().min_h_0())
             .child(footer)

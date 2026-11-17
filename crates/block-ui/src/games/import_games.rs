@@ -27,7 +27,6 @@ use gpui_base::{
 use super::{
     Block, UiAction,
     components::{self, ButtonVariant, ControlState},
-    design::Icon,
     note,
     scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
@@ -260,6 +259,24 @@ impl State {
             .entry(id.into())
             .or_insert_with(|| cx.focus_handle())
             .clone()
+    }
+
+    fn data_mode_label(&self, candidate: &GameCandidate, language: Language) -> String {
+        let key = match self
+            .selection(candidate)
+            .map(|selection| selection.data_policy)
+        {
+            Some(DataPolicy::Shared) => "import.mode.shared",
+            Some(DataPolicy::Isolated)
+                if candidate.data == GameDataEvidence::Unknown
+                    && !self.is_confirmed(&candidate.id) =>
+            {
+                "import.mode.temporary_isolated"
+            }
+            Some(DataPolicy::Isolated) => "import.mode.isolated",
+            None => "import.mode.unavailable",
+        };
+        tr!(language, key)
     }
 
     fn risk(&self, candidate: &GameCandidate) -> Option<DataRisk> {
@@ -960,11 +977,11 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> gpui::AnyElement {
         let id = candidate.id.clone();
-        components::button(
+        let mode = state.data_mode_label(candidate, self.language());
+        super::inline_action::button(
             format!("import-data-{id}"),
-            tr!(self.language(), "import.risk.adjust"),
+            mode.clone(),
             self.palette,
-            ButtonVariant::Ghost,
             ControlState {
                 disabled: !interactive || !state.can_open_policy(&candidate.id),
                 ..ControlState::default()
@@ -977,20 +994,16 @@ impl Block {
                 );
             }),
         )
-        .aria_label(tr!(
-            self.language(),
-            "import.risk.adjust_for",
-            name = &candidate.name
+        .aria_label(format!(
+            "{mode}. {}",
+            tr!(
+                self.language(),
+                "import.risk.adjust_for",
+                name = &candidate.name
+            )
         ))
         .track_focus(&state.policy_action_focus(&candidate.id, cx))
         .block_mouse_except_scroll()
-        .w(gpui::px(56.))
-        .h(gpui::px(24.))
-        .px_1()
-        .py_0()
-        .text_xs()
-        .font_weight(gpui::FontWeight::NORMAL)
-        .flex_shrink_0()
         .into_any_element()
     }
 
@@ -1206,8 +1219,10 @@ impl Block {
             let title = div()
                 .w_full()
                 .flex()
+                .flex_wrap()
                 .items_center()
-                .gap_1()
+                .gap_x_2()
+                .gap_y_1()
                 .child(
                     div()
                         .min_w_0()
@@ -1217,51 +1232,40 @@ impl Block {
                         .child(label),
                 )
                 .child(if interactive && count > 1 {
-                    self.button_with_variant(
+                    super::inline_action::button(
                         format!("import-view-{source:?}"),
                         summary,
-                        UiAction::ImportGames(Action::View(source)),
-                        ButtonVariant::Info,
-                        cx,
+                        self.palette,
+                        ControlState::default(),
+                        cx.listener(move |view, (): &(), window, cx| {
+                            view.handle(UiAction::ImportGames(Action::View(source)), window, cx);
+                        }),
                     )
-                    .h(gpui::px(24.))
-                    .flex_shrink_0()
-                    .px_2()
-                    .py_0()
-                    .rounded_full()
-                    .text_xs()
-                    .line_height(gpui::px(16.))
-                    .gap_1()
                     .block_mouse_except_scroll()
-                    .child(Icon::ChevronRight.render(12., self.palette.info))
                     .into_any_element()
                 } else {
                     components::badge(summary, self.palette, components::BadgeVariant::Info)
                         .into_any_element()
                 });
-            let metadata = div()
-                .w_full()
-                .flex()
-                .items_center()
-                .gap_1()
-                .min_h(gpui::px(24.))
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .text_xs()
-                        .whitespace_normal()
-                        .children(path.map(|path| path.root.display().to_string())),
-                )
-                .child(if let Some(candidate) = single.filter(|_| selected) {
-                    self.import_policy_action(state, candidate, interactive, cx)
-                } else {
-                    div()
-                        .w(gpui::px(56.))
-                        .h(gpui::px(24.))
-                        .flex_shrink_0()
-                        .into_any_element()
-                });
+            let metadata =
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_x_2()
+                    .min_h(gpui::px(24.))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .max_w_full()
+                            .text_xs()
+                            .whitespace_normal()
+                            .children(path.map(|path| path.root.display().to_string())),
+                    )
+                    .children(single.filter(|_| selected).map(|candidate| {
+                        self.import_policy_action(state, candidate, interactive, cx)
+                    }));
             let mut content = div()
                 .w_full()
                 .min_w_0()
@@ -1467,46 +1471,40 @@ impl Block {
                     || tr!(language, "import.status.vanilla"),
                     |loader| format!("{:?}", loader.kind),
                 );
-                let version = tr!(
+                tr!(
                     language,
                     "import.status.version",
                     version = version,
                     loader = loader
-                );
-                let mode = state.selection(candidate).map_or_else(
-                    || tr!(language, "import.mode.unavailable"),
-                    |selection| {
-                        tr!(
-                            language,
-                            match selection.data_policy {
-                                DataPolicy::Shared => "import.mode.shared",
-                                DataPolicy::Isolated => "import.mode.isolated",
-                            }
-                        )
-                    },
-                );
-                format!("{version} · {mode}")
+                )
             };
             let risk = state.risk(candidate).map(|risk| risk.text(language));
+            let detail = if state.can_import(candidate) {
+                format!("{status}. {}", state.data_mode_label(candidate, language))
+            } else {
+                status.clone()
+            };
             let description = risk
                 .as_ref()
-                .map_or_else(|| status.clone(), |risk| format!("{status}. {risk}"));
+                .map_or_else(|| detail.clone(), |risk| format!("{detail}. {risk}"));
             let metadata = div()
                 .w_full()
                 .flex()
+                .flex_wrap()
                 .items_center()
-                .gap_1()
+                .gap_x_2()
                 .min_h(gpui::px(24.))
-                .child(note(status).min_w_0().flex_1())
-                .child(if state.can_import(candidate) {
-                    self.import_policy_action(state, candidate, interactive, cx)
-                } else {
-                    div()
-                        .w(gpui::px(56.))
-                        .h(gpui::px(24.))
-                        .flex_shrink_0()
-                        .into_any_element()
-                });
+                .child(
+                    note(status)
+                        .min_w_0()
+                        .max_w_full()
+                        .line_height(gpui::px(18.)),
+                )
+                .children(
+                    state
+                        .can_import(candidate)
+                        .then(|| self.import_policy_action(state, candidate, interactive, cx)),
+                );
             let mut content = div()
                 .min_w_0()
                 .flex()

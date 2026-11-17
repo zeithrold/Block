@@ -7,18 +7,86 @@
     reason = "Controls are private to Block's shared design system."
 )]
 
+use std::time::Duration;
+
 use gpui::{
-    AnyElement, App, ClickEvent, FocusHandle, InteractiveElement, Interactivity, IntoElement,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, Window,
+    AnyElement, App, ClickEvent, Fill, FocusHandle, Hsla, InteractiveElement, Interactivity,
+    IntoElement, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Styled, Window, rgb,
 };
+use gpui_base::motion::{Easing, Transition, transition};
 
 #[derive(IntoElement)]
 pub(super) enum Control {
-    Button(Box<gpui_base::Button>),
+    Button(Box<ButtonPresentation>),
     Checkbox(Box<gpui_base::Checkbox>),
     Radio(Box<gpui_base::Radio>),
     Selection(Box<super::selection_motion::SelectionPresentation>),
+}
+
+pub(super) struct ButtonPresentation {
+    control: gpui_base::Button,
+    id: SharedString,
+    hover: Hsla,
+    disabled: bool,
+}
+
+impl ButtonPresentation {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> gpui_base::Button {
+        let hovered = window.use_keyed_state(
+            gpui::ElementId::NamedChild(
+                gpui::ElementId::from(self.id.clone()).into(),
+                "hover".into(),
+            ),
+            cx,
+            |_, _| false,
+        );
+        let progress = transition(
+            (self.id, "hover-fill"),
+            f32::from(!self.disabled && *hovered.read(cx)),
+            Transition::new(if self.disabled {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(100)
+            })
+            .easing(Easing::CubicBezier {
+                x1: 0.4,
+                y1: 1.,
+                x2: 0.6,
+                y2: 1.,
+            }),
+            window,
+            cx,
+        );
+        // Read the final consumer style, including transparent/custom fills.
+        // Native active/focus styles still refine over this animated base fill.
+        if let Some(background) = self
+            .control
+            .style()
+            .background
+            .as_ref()
+            .and_then(Fill::color)
+            .and_then(|background| background.as_solid())
+        {
+            let background = background.to_rgb();
+            let hover = self.hover.to_rgb();
+            let alpha = background.a + (hover.a - background.a) * progress;
+            let weight = if alpha > 0. {
+                hover.a * progress / alpha
+            } else {
+                0.
+            };
+            self.control = self
+                .control
+                .bg(background.blend(hover.alpha(weight)).alpha(alpha));
+        }
+        self.control.on_hover(move |is_hovered, _, cx| {
+            hovered.update(cx, |hovered, cx| {
+                *hovered = *is_hovered;
+                cx.notify();
+            });
+        })
+    }
 }
 
 /// The supplied label is the control's accessible name. It is applied through
@@ -43,18 +111,24 @@ impl Control {
         label: SharedString,
         role: Role,
         disabled: bool,
+        hover: u32,
         on_activate: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        Self::Button(Box::new(named(
-            gpui_base::Button::new(id)
-                .role(role)
-                .disabled(disabled)
-                .on_click(move |event, window, cx| {
-                    on_activate(event, window, cx);
-                    cx.stop_propagation();
-                }),
-            label,
-        )))
+        Self::Button(Box::new(ButtonPresentation {
+            control: named(
+                gpui_base::Button::new(id.clone())
+                    .role(role)
+                    .disabled(disabled)
+                    .on_click(move |event, window, cx| {
+                        on_activate(event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                label,
+            ),
+            id,
+            hover: rgb(hover).into(),
+            disabled,
+        }))
     }
 
     pub(super) fn checkbox(
@@ -107,7 +181,10 @@ impl Control {
     // be overwritten by their default keyed focus state at render time.
     pub(super) fn track_focus(self, handle: &FocusHandle) -> Self {
         match self {
-            Self::Button(control) => Self::Button(Box::new((*control).track_focus(handle))),
+            Self::Button(mut control) => {
+                control.control = control.control.track_focus(handle);
+                Self::Button(control)
+            }
             Self::Checkbox(control) => Self::Checkbox(Box::new((*control).track_focus(handle))),
             Self::Radio(control) => Self::Radio(Box::new((*control).track_focus(handle))),
             Self::Selection(mut presentation) => {
@@ -119,7 +196,10 @@ impl Control {
 
     pub(super) fn tab_stop(self, tab_stop: bool) -> Self {
         match self {
-            Self::Button(control) => Self::Button(Box::new((*control).tab_stop(tab_stop))),
+            Self::Button(mut control) => {
+                control.control = control.control.tab_stop(tab_stop);
+                Self::Button(control)
+            }
             Self::Checkbox(control) => Self::Checkbox(Box::new((*control).tab_stop(tab_stop))),
             Self::Radio(control) => Self::Radio(Box::new((*control).tab_stop(tab_stop))),
             Self::Selection(mut presentation) => {
@@ -131,8 +211,9 @@ impl Control {
 
     pub(super) fn tab_index(self, index: isize) -> Self {
         match self {
-            Self::Button(control) => {
-                Self::Button(Box::new((*control).tab_index(index).tab_stop(index >= 0)))
+            Self::Button(mut control) => {
+                control.control = control.control.tab_index(index).tab_stop(index >= 0);
+                Self::Button(control)
             }
             Self::Checkbox(control) => {
                 Self::Checkbox(Box::new((*control).tab_index(index).tab_stop(index >= 0)))
@@ -151,7 +232,7 @@ impl Control {
 impl Styled for Control {
     fn style(&mut self) -> &mut StyleRefinement {
         match self {
-            Self::Button(control) => control.style(),
+            Self::Button(control) => control.control.style(),
             Self::Checkbox(control) => control.style(),
             Self::Radio(control) => control.style(),
             Self::Selection(presentation) => presentation.control.style(),
@@ -162,7 +243,7 @@ impl Styled for Control {
 impl ParentElement for Control {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         match self {
-            Self::Button(control) => control.extend(elements),
+            Self::Button(control) => control.control.extend(elements),
             Self::Checkbox(control) => control.extend(elements),
             Self::Radio(control) => control.extend(elements),
             Self::Selection(presentation) => presentation.children.extend(elements),
@@ -173,7 +254,7 @@ impl ParentElement for Control {
 impl InteractiveElement for Control {
     fn interactivity(&mut self) -> &mut Interactivity {
         match self {
-            Self::Button(control) => control.interactivity(),
+            Self::Button(control) => control.control.interactivity(),
             Self::Checkbox(control) => control.interactivity(),
             Self::Radio(control) => control.interactivity(),
             Self::Selection(presentation) => presentation.control.interactivity(),
@@ -186,7 +267,7 @@ impl StatefulInteractiveElement for Control {}
 impl RenderOnce for Control {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         match self {
-            Self::Button(control) => (*control).into_any_element(),
+            Self::Button(control) => (*control).render(window, cx).into_any_element(),
             Self::Checkbox(control) => (*control).into_any_element(),
             Self::Radio(control) => (*control).into_any_element(),
             Self::Selection(presentation) => (*presentation).render(window, cx).into_any_element(),
