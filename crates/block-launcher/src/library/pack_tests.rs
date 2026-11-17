@@ -30,11 +30,11 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 
 use super::Library;
 #[cfg(unix)]
-use crate::catalog::DataPolicy;
+use crate::catalog::{DataPolicy, TargetSource};
 #[cfg(unix)]
 use crate::recipe::RuntimeSelection;
 use crate::{
-    catalog::{InstallStatus, Instance, InstanceConfiguration, PackStatus, TargetSource},
+    catalog::{InstallStatus, Instance, InstanceConfiguration, PackStatus},
     modpack::{self, PackSelection},
     session::OfflineSession,
 };

@@ -1,10 +1,9 @@
 use super::super::classification::classify_version;
 use super::super::discovery::make_candidate;
-use super::super::metadata::{latest_version, read_json_bounded};
+use super::super::metadata::latest_version;
 use super::super::{LoaderKind, SourceKind, looks_like_minecraft_version};
 use super::write_json;
 use std::fs;
-const MAX_VERSION_BYTES: u64 = 8 * 1024 * 1024;
 
 #[test]
 fn concrete_versions_include_year_releases_without_accepting_custom_components() {
@@ -138,7 +137,9 @@ fn detects_loader_ids_but_missing_metadata_is_not_importable() -> anyhow::Result
 #[cfg(unix)]
 #[test]
 fn bounded_json_reader_rejects_metadata_symlinks() -> anyhow::Result<()> {
+    use super::super::metadata::read_json_bounded;
     use std::os::unix::fs::symlink;
+    const MAX_VERSION_BYTES: u64 = 8 * 1024 * 1024;
     let temp = tempfile::tempdir()?;
     let target = temp.path().join("real.json");
     let link = temp.path().join("linked.json");
