@@ -3734,6 +3734,7 @@ mod tests {
         use anyhow::Context as _;
         use std::time::Duration;
 
+        let _system_motion = crate::platform::test_system_motion(false);
         let result = (|| -> anyhow::Result<()> {
             let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
             cx.update(|window, cx| {
