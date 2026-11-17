@@ -509,6 +509,9 @@ async fn abnormal_exit_collects_only_fresh_sanitized_evidence_and_retains_unread
     }
     assert!(!serde_json::to_string(&report)?.contains(TOKEN));
     assert!(!fixture.game.join(".block-session.json").exists());
+    // Concurrent process spawns can briefly inherit this file before exec.
+    // Release the lock even while an inherited file description still exists.
+    fs2::FileExt::unlock(&presentation)?;
     drop(presentation);
     assert!(session_host::claim_help(&fixture.root, &id)?.is_some());
     assert!(!directory.join("seen.json").exists());
