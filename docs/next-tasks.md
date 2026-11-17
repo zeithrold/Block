@@ -231,6 +231,24 @@ Exit criterion: full tasks remain readable in both themes and fitted windows, re
 
 ## Test hosts (addresses in `.env`)
 
+As of 2026-11-17, the rebuilt Linux ARM64 VM is the current test host;
+the user retired all previous test VMs. Their inventory and overlay/service
+arrangements below are historical and must not be used as current access instructions.
+Retirement does not record deletion of any VM or its data.
+
+| Current host | Observed environment |
+| --- | --- |
+| Linux ARM64 `LINUX_ARM64_SSH` | Debian 13, KDE Wayland with Xwayland, 4 CPUs, 3.8 GiB RAM, 228 GiB available disk. SSH, Git, Python, Spectacle, Noto CJK fonts and Secret Service packages are installed. Vulkan enumerates llvmpipe software rendering; native Block execution and credential-backend availability have not been tested. |
+
+The rebuilt VM has no Rust toolchain, `just`, project checkout or Java command.
+Install stable Rust with `rustfmt` and `clippy`, `just`, and the Linux desktop
+development packages listed in the [CI workflow](../.github/workflows/check.yml)
+before building. `pkg-config` is also missing; `xdotool` and `libsecret-tools`
+are useful for interaction and credential-backend checks. Existing screenshot
+and graphics tools have only been inventoried, not verified in native Block use.
+
+### Retired host inventory
+
 | Host | Notes |
 | --- | --- |
 | WireGuard overlay | Mac hub `10.77.0.1/24` on UDP 51820 at the fixed Mac LAN address; peers `10.77.0.11` (Windows AMD64), `10.77.0.12` (Windows ARM64), `10.77.0.21` (Linux ARM64), `10.77.0.22` (Linux AMD64). Configs/keys outside the repo under `~/block-wireguard`. The Mac must forward between peers (`net.inet.ip.forwarding=1`) |
