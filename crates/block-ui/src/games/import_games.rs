@@ -2112,7 +2112,7 @@ mod tests {
             source,
             source_root: "/synthetic/root".into(),
             name: id.into(),
-            resource_directory: format!("/synthetic/{id}").into(),
+            resource_directory: std::env::temp_dir().join("block-import-fixture").join(id),
             version_id: Some("1.21.1".into()),
             data: GameDataEvidence::Unknown,
             configured_version: Some("1.21.1".into()),

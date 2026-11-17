@@ -207,7 +207,7 @@ fn import_candidate(id: &str) -> GameCandidate {
         source: SourceKind::OfficialLauncher,
         source_root: "/synthetic/launcher".into(),
         name: id.into(),
-        resource_directory: format!("/synthetic/{id}").into(),
+        resource_directory: std::env::temp_dir().join("block-import-fixture").join(id),
         version_id: Some("1.20.6".into()),
         data: block_launcher::game_import::GameDataEvidence::Unknown,
         configured_version: Some("1.20.6".into()),
