@@ -25,6 +25,7 @@ use gpui_base::motion::{Easing, Transition, transition};
 
 use super::{
     Block, Language, Tab, UiAction, account_id,
+    alert::AlertVariant,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState, ProgressState},
     design::Icon,
     note, patterns,
@@ -495,6 +496,14 @@ impl AuthWizard {
             self.body_scroll.set_offset(point(px(0.), px(0.)));
         }
         self.phase = phase;
+    }
+
+    fn missing_client_id(&self) -> bool {
+        self.phase == Phase::Failed
+            && self.error
+                == Some(AccountMessage::product(
+                    "accounts.auth.error.missing_client_id",
+                ))
     }
 
     fn failed(&mut self, error: AccountMessage) {
@@ -1787,7 +1796,8 @@ impl Block {
         }
     }
 
-    pub(super) fn auth_finished(&mut self, result: &Result<crate::i18n::UiText, String>) {
+    /// Returns whether the visible wizard took ownership of a failed operation's message.
+    pub(super) fn auth_finished(&mut self, result: &Result<crate::i18n::UiText, String>) -> bool {
         let saving = self
             .shell
             .auth
@@ -1818,7 +1828,10 @@ impl Block {
                     "accounts.auth.error.ended_without_identity",
                 )),
             }
+            return result.is_err()
+                && self.page_spec().page == crate::navigation::Page::Authentication;
         }
+        false
     }
 
     pub(super) fn cancel_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -2050,6 +2063,12 @@ impl Block {
     /// The localized heading for the state the page is in.
     fn auth_heading(&self, state: &AuthWizard) -> (String, String) {
         let language = self.language();
+        if state.missing_client_id() {
+            return (
+                tr!(language, "accounts.auth.info.title.microsoft"),
+                String::new(),
+            );
+        }
         let (title, description) = auth_heading_keys(state);
         (tr!(language, title), tr!(language, description))
     }
@@ -2296,11 +2315,15 @@ impl Block {
         {
             card = card.child(
                 div()
-                    .p_3()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(rgb(self.palette.destructive))
-                    .child(note(tr!(language, "accounts.auth.provider.http_warning")))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(AlertVariant::Warning.render(
+                        "auth-http-warning",
+                        None,
+                        tr!(language, "accounts.auth.provider.http_warning"),
+                        self.palette,
+                    ))
                     .child(components::checkbox(
                         "auth-http-consent",
                         tr!(language, "accounts.auth.http_consent"),
@@ -2398,52 +2421,43 @@ impl Block {
             || tr!(language, "accounts.auth.error.fallback"),
             |error| error.render(language),
         );
+        let title = state
+            .missing_client_id()
+            .then(|| tr!(language, "accounts.auth.failed.unconfigured.title").into());
+        let alert = AlertVariant::Error.render("auth-error", title, message, self.palette);
         if state.provider == AccountProvider::Offline {
             return div()
                 .flex()
                 .flex_col()
                 .gap_3()
                 .child(self.offline_form(state))
-                .child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap_2()
-                        .text_sm()
-                        .text_color(rgb(self.palette.destructive))
-                        .child(Icon::Error.render(14., self.palette.destructive))
-                        .child(div().min_w_0().flex_1().whitespace_normal().child(message)),
-                );
+                .child(alert);
         }
         div()
             .flex()
             .flex_col()
             .gap_4()
-            .child(
-                components::card(self.palette)
-                    .border_color(rgb(self.palette.destructive))
-                    .gap_2()
-                    .child(Icon::Error.render(24., self.palette.destructive))
-                    .child(note(message)),
-            )
+            .child(alert)
             .children(
                 (state.provider == AccountProvider::Authlib).then(|| self.authlib_form(state, cx)),
             )
             .children(
-                (state.provider == AccountProvider::Microsoft && state.method == Method::Browser)
-                    .then(|| {
-                        self.auth_button(
-                            "auth-use-device-code",
-                            tr!(language, "accounts.auth.microsoft.device_action"),
-                            UiAction::AuthMethod(Method::Device),
-                            ButtonVariant::Ghost,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx,
-                        )
-                    }),
+                (state.provider == AccountProvider::Microsoft
+                    && state.method == Method::Browser
+                    && !state.missing_client_id())
+                .then(|| {
+                    self.auth_button(
+                        "auth-use-device-code",
+                        tr!(language, "accounts.auth.microsoft.device_action"),
+                        UiAction::AuthMethod(Method::Device),
+                        ButtonVariant::Ghost,
+                        ControlState {
+                            disabled: self.busy,
+                            ..ControlState::default()
+                        },
+                        cx,
+                    )
+                }),
             )
     }
 
@@ -2853,8 +2867,9 @@ impl Block {
                     .gap_2()
                     .children(cancel)
                     .children(
-                        (state.phase != Phase::Connect
-                            || state.provider != AccountProvider::Microsoft)
+                        (!state.missing_client_id()
+                            && (state.phase != Phase::Connect
+                                || state.provider != AccountProvider::Microsoft))
                             .then(|| {
                                 self.auth_button(
                                     "auth-primary",
@@ -3016,6 +3031,8 @@ fn sign_in_error(error: &str) -> AccountMessage {
         AccountMessage::product("accounts.auth.error.family")
     } else if lower.contains("different microsoft application registration") {
         AccountMessage::product("accounts.auth.error.registration_other")
+    } else if lower.contains("configure a public microsoft application client id") {
+        AccountMessage::product("accounts.auth.error.missing_client_id")
     } else if lower.contains("application registration") || lower.contains("client id") {
         AccountMessage::product("accounts.auth.error.registration")
     } else if lower.contains("secure credential store is unavailable or locked") {
@@ -3154,6 +3171,10 @@ mod tests {
             (
                 "This provider uses a different Microsoft application registration",
                 "accounts.auth.error.registration_other",
+            ),
+            (
+                "Configure a public Microsoft application client ID before signing in.",
+                "accounts.auth.error.missing_client_id",
             ),
             (
                 "Engine unavailable",
@@ -4529,6 +4550,11 @@ mod tests {
                         && state.save_failed
                         && state.prepared_account.is_none()
                 }) && view.accounts.is_empty()
+                    && !view
+                        .shell
+                        .toast
+                        .as_ref()
+                        .is_some_and(|toast| toast.message.key() == Some("runtime.failed"))
             }));
             assert_eq!(
                 control_node(cx, "auth-primary").label(),

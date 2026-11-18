@@ -170,15 +170,20 @@
     "zh-Hans": "使用 1–16 个 ASCII 字母、数字或下划线。已保存的账户不会改变。",
     "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。保存済みのアカウントは変更されません。"
   },
+  "accounts.auth.failed.unconfigured.title": {
+    "en": "Microsoft sign-in isn’t configured",
+    "zh-Hans": "Microsoft 登录尚未配置",
+    "ja": "Microsoft サインインが未設定です"
+  },
   "accounts.auth.failed.title": {
     "en": "Sign-in needs your attention",
     "zh-Hans": "登录需要处理",
     "ja": "サインインの対応が必要です"
   },
   "accounts.auth.failed.description": {
-    "en": "Your existing saved accounts are kept. You can try again.",
-    "zh-Hans": "已保存的现有账户会保留。你可以重试。",
-    "ja": "既存の保存済みアカウントは保持されます。もう一度お試しください。"
+    "en": "Your saved accounts are unchanged.",
+    "zh-Hans": "已保存的账户不受影响。",
+    "ja": "保存済みのアカウントはそのままです。"
   },
   "accounts.auth.complete.title": {
     "en": "Your account is ready",
@@ -684,6 +689,11 @@
     "en": "This player is saved under another Microsoft application registration. Remove that saved account first, then sign in again.",
     "zh-Hans": "此玩家已保存在另一个 Microsoft 应用程序注册下。请先移除该已保存账户，然后重新登录。",
     "ja": "このプレイヤーは別の Microsoft アプリケーション登録で保存されています。先にその保存済みアカウントを削除してから、サインインし直してください。"
+  },
+  "accounts.auth.error.missing_client_id": {
+    "en": "Set MICROSOFT_CLIENT_ID in the launcher environment, then restart Block.",
+    "zh-Hans": "请在启动环境中设置 MICROSOFT_CLIENT_ID，然后重启 Block。",
+    "ja": "起動環境で MICROSOFT_CLIENT_ID を設定し、Block を再起動してください。"
   },
   "accounts.auth.error.registration": {
     "en": "The Microsoft application rejected this sign-in method. Check its public-client and personal-account settings; browser sign-in also needs its desktop redirect URI.",

@@ -7,12 +7,12 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Context, EntityId, InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions,
-    StatefulInteractiveElement as _, Styled as _, div, rgb,
+    Context, EntityId, IntoElement, ParentElement as _, PathPromptOptions, Styled as _, div,
 };
 
 use super::{
     Block, Form, UiAction,
+    alert::AlertVariant,
     components::ButtonVariant,
     first_run,
     game_wizard::{CreationKind, WizardStep},
@@ -336,12 +336,12 @@ impl Block {
                     .as_ref()
                     .filter(|(owner, _)| interactive && owner == &scope)
                     .map(|(_, error)| {
-                        super::note(error.text(self.language()))
-                            .id("setup-library-error")
-                            .role(gpui::Role::Alert)
-                            .text_color(rgb(self.palette.destructive))
-                            .w_full()
-                            .whitespace_normal()
+                        AlertVariant::Error.render(
+                            "setup-library-error",
+                            None,
+                            error.text(self.language()),
+                            self.palette,
+                        )
                     }),
             )
             .children(
@@ -350,7 +350,14 @@ impl Block {
                     .library_saved
                     .as_ref()
                     .filter(|owner| interactive && *owner == &scope)
-                    .map(|_| super::note(tr!(self.language(), "setup.library.saved"))),
+                    .map(|_| {
+                        AlertVariant::Success.render(
+                            "setup-library-saved",
+                            None,
+                            tr!(self.language(), "setup.library.saved"),
+                            self.palette,
+                        )
+                    }),
             )
             .children(
                 self.shell
@@ -362,7 +369,14 @@ impl Block {
                         !(matches!(scope, Scope::Pack(..))
                             && self.shell.pack_import.instance.is_some())
                     })
-                    .map(|_| super::note(tr!(self.language(), "setup.library.pending"))),
+                    .map(|_| {
+                        AlertVariant::Info.render(
+                            "setup-library-pending",
+                            None,
+                            tr!(self.language(), "setup.library.pending"),
+                            self.palette,
+                        )
+                    }),
             )
             .into_any_element()
     }

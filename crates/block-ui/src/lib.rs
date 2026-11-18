@@ -23,6 +23,8 @@ mod i18n;
 mod about;
 #[path = "navigation/actions.rs"]
 mod actions;
+#[path = "controls/alert.rs"]
+mod alert;
 #[path = "settings/appearance.rs"]
 mod appearance;
 #[path = "accounts/authentication.rs"]
@@ -1084,6 +1086,10 @@ impl Block {
 
     fn report(&mut self, error: UiText) {
         self.push_toast(error.clone(), feedback::ToastKind::Error);
+        self.record_error(error);
+    }
+
+    fn record_error(&mut self, error: UiText) {
         if self.router.tab() == Tab::Onboarding && self.shell.first_run.enabled {
             self.shell.first_run.error = Some(error.clone());
             if self.shell.first_run.stage == first_run::Stage::GameWizard {

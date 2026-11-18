@@ -322,7 +322,7 @@ impl Block {
         if scoped && operation == Some(crate::ui_logging::Operation::SaveInstance) {
             self.instance_edit_finished(&result, cx);
         }
-        self.auth_finished(&result);
+        let auth_error_visible = self.auth_finished(&result);
         self.busy = self.active_run.is_some();
         self.operation_cancellable = false;
         let succeeded = result.is_ok();
@@ -335,7 +335,12 @@ impl Block {
                 self.status = msg!("runtime.cancelled");
             }
             Err(error) => {
-                self.report(msg!("runtime.failed", error = error));
+                let message = msg!("runtime.failed", error = error);
+                if auth_error_visible {
+                    self.record_error(message);
+                } else {
+                    self.report(message);
+                }
             }
         }
         if scoped
