@@ -49,7 +49,7 @@ static MICROSOFT_LOGO: LazyLock<Arc<gpui::Image>> = LazyLock::new(|| {
     ))
 });
 
-/// The disclosure keeps one measured height and retargets from its current frame.
+/// The cards occupy their full height throughout the fade and slide.
 #[derive(IntoElement)]
 struct AuthOptions {
     expanded: bool,
@@ -61,7 +61,7 @@ impl gpui::RenderOnce for AuthOptions {
         let progress = transition(
             "auth-options-presence",
             f32::from(self.expanded),
-            Transition::new(Duration::from_millis(200)).easing(Easing::EaseOut),
+            Transition::new(Duration::from_millis(120)).easing(Easing::EaseOut),
             window,
             cx,
         );
@@ -69,21 +69,13 @@ impl gpui::RenderOnce for AuthOptions {
             .debug_selector(|| "auth-options-region".into())
             .w_full()
             .flex_shrink_0()
-            .children((progress > 0.).then(|| {
-                gpui_base::MotionReveal::new(
-                    "auth-options-reveal",
-                    progress,
-                    div()
-                        .pt_3()
-                        .child(
-                            div()
-                                .relative()
-                                .top(px(-6. * (1. - progress)))
-                                .opacity(progress)
-                                .child(self.content),
-                        )
-                        .into_any_element(),
-                )
+            .children((self.expanded || progress > 0.).then(|| {
+                div()
+                    .pt_3()
+                    .relative()
+                    .top(px(-6. * (1. - progress)))
+                    .opacity(progress)
+                    .child(self.content)
             }))
     }
 }
@@ -2776,11 +2768,14 @@ impl Block {
 
     fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
         let language = self.language();
-        let mut exits = div().w_full().flex().flex_col().gap_2();
         // A save in flight already authorizes the write, so no exit presents
         // itself as revoking it.
-        if !state.phase.committed() {
-            exits = exits
+        let exits = (!state.phase.committed()).then(|| {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap_2()
                 .child(self.auth_button(
                     "auth-cancel",
                     if state.phase.pending() {
@@ -2802,8 +2797,8 @@ impl Block {
                         ControlState::default(),
                         cx,
                     )
-                }));
-        }
+                }))
+        });
         let (label, action, busy) = match state.phase {
             Phase::Connect => (
                 match state.provider {
@@ -2868,6 +2863,7 @@ impl Block {
         patterns::management_footer(self.palette)
             .id("auth-footer")
             .debug_selector(|| "auth-footer".into())
+            .justify_center()
             .h_auto()
             .min_h(px(super::design::MANAGEMENT_FOOTER))
             .px_4()
@@ -2880,7 +2876,7 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(exits)
+                    .children(exits)
                     .children(
                         (state.phase != Phase::Connect
                             || state.provider != AccountProvider::Microsoft)
@@ -3730,7 +3726,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn other_accounts_reveal_downward_and_reverse_without_jumping(cx: &mut TestAppContext) {
+    fn other_accounts_move_at_full_height_and_reverse_without_jumping(cx: &mut TestAppContext) {
         use anyhow::Context as _;
         use std::time::Duration;
 
@@ -3752,51 +3748,43 @@ mod tests {
             frame(cx, 0);
             frame(cx, 500);
             click(cx, "auth-other-options");
-            // Base measures the newly mounted cards on their first frame.
-            frame(cx, 16);
-            frame(cx, 64);
+            frame(cx, 32);
             let entering = cx
                 .debug_bounds("auth-options-region")
                 .context("entering region")?;
             let card =
                 crate::test_support::control_bounds(cx, "auth-authlib").context("entering card")?;
             assert!(entering.size.height > px(0.));
-            frame(cx, 200);
+            frame(cx, 88);
             let settled = cx
                 .debug_bounds("auth-options-region")
                 .context("expanded region")?;
             let settled_card =
                 crate::test_support::control_bounds(cx, "auth-authlib").context("expanded card")?;
-            assert!(entering.size.height < settled.size.height);
+            assert_eq!(entering, settled);
             let travel = settled_card.top() - card.top();
             assert!(travel > px(0.) && travel < px(6.), "{travel:?}");
             assert_eq!(settled_card.size, card.size);
 
             click(cx, "auth-other-options");
-            frame(cx, 70);
+            frame(cx, 48);
             let exiting = cx
                 .debug_bounds("auth-options-region")
                 .context("exiting region")?;
-            assert!(
-                exiting.size.height > px(0.) && exiting.size.height < settled.size.height,
-                "exiting {exiting:?}, settled {settled:?}, expanded {}",
-                view.read_with(cx, |view, _| view
-                    .shell
-                    .auth
-                    .as_ref()
-                    .is_some_and(|auth| auth.other_sign_in_options))
-            );
+            assert_eq!(exiting, settled);
+            let exiting_card =
+                crate::test_support::control_bounds(cx, "auth-authlib").context("exiting card")?;
+            assert!(exiting_card.top() < settled_card.top());
             assert_eq!(control_node(cx, "auth-authlib").disabled(), Some(true));
             click(cx, "auth-other-options");
-            let reversed = cx
-                .debug_bounds("auth-options-region")
-                .context("reversed region")?;
-            assert!((f32::from(reversed.size.height - exiting.size.height)).abs() < 0.5);
-            frame(cx, 250);
+            let reversed_card =
+                crate::test_support::control_bounds(cx, "auth-authlib").context("reversed card")?;
+            assert!((reversed_card.top() - exiting_card.top()).abs() < px(0.5));
+            frame(cx, 120);
             assert_eq!(cx.debug_bounds("auth-options-region"), Some(settled));
             assert_ne!(control_node(cx, "auth-authlib").disabled(), Some(true));
             click(cx, "auth-other-options");
-            frame(cx, 250);
+            frame(cx, 120);
             assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
             assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
             Ok(())
@@ -4280,6 +4268,16 @@ mod tests {
                             }),
                             "{selector} outside {width}×{height}: {action:?}"
                         );
+                        if phase == Phase::Connect || phase.committed() {
+                            assert!(
+                                action.is_some_and(|action| {
+                                    let above = action.top() - footer.top();
+                                    let below = footer.bottom() - action.bottom();
+                                    (above - below).abs() <= px(1.)
+                                }),
+                                "{phase:?} single action must be centered: {action:?} in {footer:?}"
+                            );
+                        }
                     }
                 }
             }
