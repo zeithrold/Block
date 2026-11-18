@@ -2204,14 +2204,7 @@ impl Block {
                         .items_center()
                         .justify_between()
                         .child(icon)
-                        .child(
-                            if provider == AccountProvider::Microsoft {
-                                Icon::ExternalLink
-                            } else {
-                                Icon::ChevronRight
-                            }
-                            .render(16., self.palette.muted),
-                        ),
+                        .child(Icon::ChevronRight.render(16., self.palette.muted)),
                 )
                 .child(
                     div()
