@@ -3788,6 +3788,13 @@ mod tests {
         assert!(result.is_ok(), "{result:#?}");
     }
 
+    fn assert_collapsed_auth_chooser(cx: &mut gpui::VisualTestContext) {
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
+    }
+
     #[gpui::test]
     fn account_forms_return_to_the_chooser_with_disclosure_and_drafts_retained(
         cx: &mut TestAppContext,
@@ -3818,12 +3825,9 @@ mod tests {
             view.read_with(cx, |view, _| view.router.auth_return()),
             Some(Tab::Accounts)
         );
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert_collapsed_auth_chooser(cx);
         assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-primary").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
-        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
 
         // One expansion reveals both alternatives without changing the form.
         assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-other-options")));
@@ -3876,9 +3880,7 @@ mod tests {
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         click(cx, "auth-other-options");
-        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert_collapsed_auth_chooser(cx);
         assert!(
             view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
                 |state| state.provider == block_auth::AccountProvider::Microsoft
