@@ -67,12 +67,19 @@ pub struct MicrosoftAuth {
 pub struct PreparedMicrosoftSignIn {
     session: AuthenticatedSession,
     refresh_token: SecretString,
+    skin: Option<crate::SkinTexture>,
 }
 
 impl PreparedMicrosoftSignIn {
     #[must_use]
     pub const fn account(&self) -> &Account {
         &self.session.account
+    }
+
+    /// The active official texture from the verified Minecraft profile, if available.
+    #[must_use]
+    pub const fn skin(&self) -> Option<&crate::SkinTexture> {
+        self.skin.as_ref()
     }
 
     #[must_use]
@@ -224,12 +231,13 @@ impl MicrosoftAuth {
             .await?;
         let refresh = microsoft.refresh_token.ok_or(AuthError::SignInRequired)?;
         validate_secret(&refresh, "Microsoft authorization")?;
-        let session = self
+        let (session, skin) = self
             .minecraft_session(&microsoft.access_token, cancellation)
             .await?;
         Ok(PreparedMicrosoftSignIn {
             session,
             refresh_token: refresh,
+            skin,
         })
     }
 
@@ -325,12 +333,13 @@ impl MicrosoftAuth {
         self.stage(SignInStage::MicrosoftAuthorization);
         let refresh_token = tokens.refresh_token.ok_or(AuthError::SignInRequired)?;
         validate_secret(&refresh_token, "Microsoft authorization")?;
-        let session = self
+        let (session, skin) = self
             .minecraft_session(&tokens.access_token, cancellation)
             .await?;
         Ok(PreparedMicrosoftSignIn {
             session,
             refresh_token,
+            skin,
         })
     }
 
@@ -501,7 +510,7 @@ impl MicrosoftAuth {
             validate_secret(&rotated, "Microsoft refresh")?;
             credentials::save(account.credential_ref.clone(), rotated).await?;
         }
-        let session = self
+        let (session, _) = self
             .minecraft_session(&microsoft.access_token, cancellation)
             .await?;
         if session.account.reference != account.reference {
@@ -532,36 +541,7 @@ impl MicrosoftAuth {
                 cancellation,
             )
             .await?;
-        let Some(skin) = profile
-            .skins
-            .into_iter()
-            .find(|skin| skin.state.eq_ignore_ascii_case("ACTIVE"))
-        else {
-            return Ok(None);
-        };
-        let Ok(url) = url::Url::parse(&skin.url) else {
-            return Ok(None);
-        };
-        if (url.scheme() != "https" && url.scheme() != "http")
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.host_str() != Some("textures.minecraft.net")
-        {
-            return Ok(None);
-        }
-        let variant = if skin
-            .variant
-            .as_deref()
-            .is_some_and(|variant| variant.eq_ignore_ascii_case("slim"))
-        {
-            crate::SkinVariant::Slim
-        } else {
-            crate::SkinVariant::Classic
-        };
-        Ok(Some(crate::SkinTexture {
-            url: url.to_string(),
-            variant,
-        }))
+        Ok(active_skin(profile.skins))
     }
 
     /// Delete this app's refresh credential. Remove metadata only after success.
@@ -605,7 +585,7 @@ impl MicrosoftAuth {
         &self,
         microsoft: &SecretString,
         cancellation: &CancellationToken,
-    ) -> Result<AuthenticatedSession> {
+    ) -> Result<(AuthenticatedSession, Option<crate::SkinTexture>)> {
         validate_secret(microsoft, "Microsoft authorization")?;
         let user: XboxTokens = self.request(self.client.post(self.endpoint(XBOX)).header("x-xbl-contract-version", "1").json(&json!({
             "Properties": { "AuthMethod": "RPS", "SiteName": "user.auth.xboxlive.com", "RpsTicket": format!("d={}", microsoft.expose()) },
@@ -663,6 +643,9 @@ impl MicrosoftAuth {
             )
             .await?;
         let player_id = profile.validate()?;
+        let skin = serde_json::from_value(profile.skins)
+            .ok()
+            .and_then(active_skin);
         let account = Account {
             reference: AccountRef { player_id },
             provider: AccountProvider::Microsoft,
@@ -671,12 +654,15 @@ impl MicrosoftAuth {
             credential_ref: credential_ref(&self.client_id, player_id),
             authlib: None,
         };
-        Ok(AuthenticatedSession {
-            account,
-            expires_at,
-            access_token: minecraft.access_token,
-            user_properties: SecretString::new("{}".into()),
-        })
+        Ok((
+            AuthenticatedSession {
+                account,
+                expires_at,
+                access_token: minecraft.access_token,
+                user_properties: SecretString::new("{}".into()),
+            },
+            skin,
+        ))
     }
 
     async fn request<T: DeserializeOwned>(
@@ -879,10 +865,40 @@ struct MinecraftSkin {
     variant: Option<String>,
 }
 
+fn active_skin(skins: Vec<MinecraftSkin>) -> Option<crate::SkinTexture> {
+    let skin = skins
+        .into_iter()
+        .find(|skin| skin.state.eq_ignore_ascii_case("ACTIVE"))?;
+    let url = url::Url::parse(&skin.url).ok()?;
+    if (url.scheme() != "https" && url.scheme() != "http")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.host_str() != Some("textures.minecraft.net")
+    {
+        return None;
+    }
+    let variant = if skin
+        .variant
+        .as_deref()
+        .is_some_and(|variant| variant.eq_ignore_ascii_case("slim"))
+    {
+        crate::SkinVariant::Slim
+    } else {
+        crate::SkinVariant::Classic
+    };
+    Some(crate::SkinTexture {
+        url: url.to_string(),
+        variant,
+    })
+}
+
 #[derive(Deserialize)]
 struct MinecraftProfile {
     id: String,
     name: String,
+    // Malformed cosmetic metadata must not invalidate a verified identity.
+    #[serde(default)]
+    skins: serde_json::Value,
 }
 impl MinecraftProfile {
     fn validate(&self) -> Result<Uuid> {
@@ -988,7 +1004,8 @@ mod tests {
         assert!(
             MinecraftProfile {
                 id: "not-uuid".into(),
-                name: "../escape".into()
+                name: "../escape".into(),
+                skins: serde_json::Value::Null,
             }
             .validate()
             .is_err()
@@ -1177,7 +1194,7 @@ mod tests {
             ),
             (
                 200,
-                r#"{"id":"00112233445566778899aabbccddeeff","name":"SyntheticUser"}"#,
+                r#"{"id":"00112233445566778899aabbccddeeff","name":"SyntheticUser","skins":[{"state":"ACTIVE","url":123}]}"#,
             ),
         ])
         .await?;
@@ -1191,7 +1208,7 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(stage);
         }));
-        let session = auth
+        let (session, skin) = auth
             .minecraft_session(
                 &SecretString::new("synthetic-microsoft".into()),
                 &CancellationToken::new(),
@@ -1210,6 +1227,7 @@ mod tests {
             ]
         );
         assert_eq!(session.account.player_name, "SyntheticUser");
+        assert!(skin.is_none());
         assert_eq!(session.expose_access_token(), "synthetic-minecraft");
         assert!(!session.needs_refresh());
         assert!(!format!("{session:?}").contains("synthetic-minecraft"));
@@ -1555,7 +1573,7 @@ mod tests {
             (200, r#"{"items":[{"name":"game_minecraft"}]}"#),
             (
                 200,
-                r#"{"id":"00112233445566778899aabbccddeeff","name":"SyntheticUser"}"#,
+                r#"{"id":"00112233445566778899aabbccddeeff","name":"SyntheticUser","skins":[{"state":"ACTIVE","url":"https://textures.minecraft.net/texture/verified","variant":"SLIM"}]}"#,
             ),
         ])
         .await?;
@@ -1565,6 +1583,11 @@ mod tests {
         let pending = device_fixture_io(auth.request_device_code(&cancel)).await?;
         let prepared = device_fixture_io(auth.complete_device_sign_in(pending, &cancel)).await?;
         assert_eq!(prepared.account().player_name, "SyntheticUser");
+        let skin = prepared
+            .skin()
+            .ok_or("verified profile has an active skin")?;
+        assert_eq!(skin.url, "https://textures.minecraft.net/texture/verified");
+        assert_eq!(skin.variant, crate::SkinVariant::Slim);
         assert!(!prepared.is_expired());
         let formatted = format!("{prepared:?}");
         assert!(!formatted.contains("synthetic-refresh"));
