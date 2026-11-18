@@ -3259,7 +3259,10 @@ mod tests {
             click_selector(cx, "cancel-instance");
             assert!(view.read_with(cx, |view, _| view.form.is_some()
                 && view.shell.wizard.page.is_none()));
-            click_selector(cx, "cancel-instance");
+            click_selector(cx, "wizard-component-version");
+            click_selector(cx, "wizard-back");
+            click_selector(cx, "wizard-back");
+            click_selector(cx, "task-close");
             click_selector(cx, "discard-game-confirm");
             assert!(
                 view.read_with(cx, |view, _| view.form.is_none()),

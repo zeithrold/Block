@@ -241,9 +241,14 @@ pub(crate) struct AuthProviderDraft {
 }
 
 impl AuthWizard {
+    pub(super) fn reviewing_identity(&self) -> bool {
+        self.phase == Phase::Complete
+    }
+
     pub(super) fn can_go_back(&self) -> bool {
         match self.phase {
             Phase::Connect => self.provider != AccountProvider::Microsoft,
+            Phase::Failed => !self.requires_external_setup(),
             Phase::Complete | Phase::Saving | Phase::Saved => false,
             _ => true,
         }
@@ -300,6 +305,7 @@ impl AuthWizard {
 
 #[derive(Default)]
 pub(super) struct AuthWizard {
+    microsoft_unavailable: bool,
     phase: Phase,
     provider: AccountProvider,
     pub(super) username: Option<gpui::Entity<super::TextInput>>,
@@ -319,6 +325,7 @@ pub(super) struct AuthWizard {
     other_sign_in_options: bool,
     browser_url: Option<String>,
     prepared_account: Option<Account>,
+    prepared_avatar: Option<components::AccountAvatar>,
     error: Option<AccountMessage>,
     /// The last attempt failed while persisting an already verified identity.
     /// Its credential is spent, so recovery starts a fresh sign-in.
@@ -454,6 +461,7 @@ impl AuthWizard {
         body_scroll.set_offset(self.body_scroll.offset());
         Self {
             phase: self.phase,
+            microsoft_unavailable: self.microsoft_unavailable,
             provider: self.provider,
             username: self.username.clone(),
             login: self.login.clone(),
@@ -473,6 +481,7 @@ impl AuthWizard {
             other_sign_in_options: self.other_sign_in_options,
             browser_url: None,
             prepared_account: self.prepared_account.clone(),
+            prepared_avatar: self.prepared_avatar.clone(),
             error: self.error.clone(),
             save_failed: self.save_failed,
             return_window: self.return_window,
@@ -491,6 +500,9 @@ impl AuthWizard {
     }
 
     fn transition(&mut self, phase: Phase) {
+        if phase.step() != AuthStep::Complete {
+            self.prepared_avatar = None;
+        }
         if self.phase.step() != phase.step() {
             self.revision = self.revision.wrapping_add(1);
             self.body_scroll.set_offset(point(px(0.), px(0.)));
@@ -504,6 +516,16 @@ impl AuthWizard {
                 == Some(AccountMessage::product(
                     "accounts.auth.error.missing_client_id",
                 ))
+    }
+
+    fn requires_external_setup(&self) -> bool {
+        self.missing_client_id()
+            || [
+                "accounts.auth.error.store_unsupported",
+                "accounts.auth.error.engine_unavailable",
+            ]
+            .into_iter()
+            .any(|key| self.error == Some(AccountMessage::product(key)))
     }
 
     fn failed(&mut self, error: AccountMessage) {
@@ -1587,6 +1609,7 @@ impl Block {
         )
         .detach();
         let wizard = AuthWizard {
+            microsoft_unavailable: super::engine::microsoft_client_id().trim().is_empty(),
             username: Some(super::input(
                 "",
                 &tr!(language, "accounts.auth.offline.name.placeholder"),
@@ -1621,6 +1644,16 @@ impl Block {
     }
 
     pub(super) fn start_auth(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.shell.auth.as_ref().is_some_and(|state| {
+            state.provider == AccountProvider::Microsoft && state.microsoft_unavailable
+        }) {
+            self.push_toast(
+                msg!("accounts.auth.error.missing_client_id"),
+                super::feedback::ToastKind::Error,
+            );
+            cx.notify();
+            return;
+        }
         if self.busy
             || self.shell.auth.as_ref().is_none_or(|state| {
                 matches!(state.phase, Phase::Complete | Phase::Saving | Phase::Saved)
@@ -1774,7 +1807,11 @@ impl Block {
     }
 
     /// Authentication is verified; Finish starts the durable save.
-    pub(super) fn auth_prepared(&mut self, account: Account) {
+    pub(super) fn auth_prepared(
+        &mut self,
+        account: Account,
+        avatar: Option<components::AccountAvatar>,
+    ) {
         if let Some(state) = &mut self.shell.auth
             && state.provider == account.provider
             && (account.provider != AccountProvider::Authlib
@@ -1791,6 +1828,7 @@ impl Block {
             state.browser_url = None;
             state.device_code = None;
             state.prepared_account = Some(account);
+            state.prepared_avatar = avatar;
             state.error = None;
             state.transition(Phase::Complete);
         }
@@ -2004,7 +2042,7 @@ impl Block {
                 // the slot, and this page has no sidebar to put in it.
                 rail: div().into_any_element(),
                 body: self.render_auth_transition_body(cx),
-                footer: self.auth_footer(state, cx).into_any_element(),
+                footer: self.auth_footer(state, cx),
             },
             super::page_host::WizardLayout::Authentication,
             window,
@@ -2192,6 +2230,12 @@ impl Block {
         };
         let title = tr!(language, title);
         let description = tr!(language, description);
+        let unavailable = provider == AccountProvider::Microsoft
+            && self
+                .shell
+                .auth
+                .as_ref()
+                .is_some_and(|state| state.microsoft_unavailable);
         self.auth_button(
             provider_selector(provider),
             "",
@@ -2208,7 +2252,11 @@ impl Block {
             cx,
         )
         .aria_label(title.clone())
-        .aria_description(description.clone())
+        .aria_description(if unavailable {
+            tr!(language, "accounts.auth.error.missing_client_id")
+        } else {
+            description.clone()
+        })
         .flex_shrink_0()
         .p_5()
         .rounded_2xl()
@@ -2229,7 +2277,18 @@ impl Block {
                         .items_center()
                         .justify_between()
                         .child(icon)
-                        .child(Icon::ChevronRight.render(16., self.palette.muted)),
+                        .child(if unavailable {
+                            components::badge(
+                                tr!(language, "wizard.setup.unavailable"),
+                                self.palette,
+                                BadgeVariant::Error,
+                            )
+                            .into_any_element()
+                        } else {
+                            Icon::ChevronRight
+                                .render(16., self.palette.muted)
+                                .into_any_element()
+                        }),
                 )
                 .child(
                     div()
@@ -2241,6 +2300,11 @@ impl Block {
                         .child(
                             div()
                                 .text_lg()
+                                .text_color(rgb(if unavailable {
+                                    self.palette.muted
+                                } else {
+                                    self.palette.foreground
+                                }))
                                 .line_height(px(24.))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .child(title),
@@ -2392,9 +2456,7 @@ impl Block {
     /// the page saves and selects it without another confirmation.
     fn offline_form(&self, state: &AuthWizard) -> gpui::Div {
         let language = self.language();
-        let mut card = components::card(self.palette)
-            .debug_selector(|| "auth-offline".into())
-            .child(note(tr!(language, "accounts.auth.offline.card_note")));
+        let mut card = components::card(self.palette).debug_selector(|| "auth-offline".into());
         if let Some(field) = &state.username {
             card = card.child(
                 components::field_with(
@@ -2411,6 +2473,7 @@ impl Block {
             );
         }
         card.child(note(tr!(language, "accounts.auth.offline.name.rule")))
+            .child(note(tr!(language, "accounts.auth.offline.card_note")))
     }
 
     /// The failure of the attempt this page started, with the form it started
@@ -2726,32 +2789,50 @@ impl Block {
                 .child(note(tr!(language, "accounts.auth.complete.waiting")));
         };
         components::card(self.palette)
-            .child(components::account_avatar(
-                &account.player_name,
-                self.account_avatars.get(&account.identity_key()),
-                self.palette,
-                64.,
-                AvatarState::Fallback,
-            ))
-            .child(div().text_xl().child(account.player_name.clone()))
-            .child(components::badge(
-                self.account_authority(account),
-                self.palette,
-                BadgeVariant::Secondary,
-            ))
+            .items_center()
+            .text_center()
+            .child(
+                components::account_avatar(
+                    &account.player_name,
+                    state
+                        .prepared_avatar
+                        .as_ref()
+                        .or_else(|| self.account_avatars.get(&account.identity_key())),
+                    self.palette,
+                    super::design::PLAYER_AVATAR_SIZE,
+                    AvatarState::Fallback,
+                )
+                .rounded(px(0.)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .child(account.player_name.clone()),
+                    )
+                    .child(components::badge(
+                        self.account_authority(account),
+                        self.palette,
+                        BadgeVariant::Secondary,
+                    )),
+            )
             .children(
                 self.account_provider(account)
                     .map(|provider| note(provider.api_url.clone())),
             )
-            .child(components::badge(
-                if state.phase == Phase::Saved {
-                    tr!(language, "accounts.auth.complete.badge.saved")
-                } else {
-                    tr!(language, "accounts.auth.complete.badge.ready")
-                },
-                self.palette,
-                BadgeVariant::Success,
-            ))
+            .children((state.phase == Phase::Saved).then(|| {
+                components::badge(
+                    tr!(language, "accounts.auth.complete.badge.saved"),
+                    self.palette,
+                    BadgeVariant::Success,
+                )
+            }))
             .children(
                 (state.phase == Phase::Saved)
                     .then(|| note(tr!(language, "accounts.auth.complete.note.saved"))),
@@ -2763,25 +2844,20 @@ impl Block {
     /// A missing engine and a system without any secure credential store are
     /// settled, so the page offers neither as a retry.
     fn can_retry(&self, state: &AuthWizard) -> bool {
-        self.engine.is_some()
-            && state.error.as_ref()
-                != Some(&AccountMessage::product(
-                    "accounts.auth.error.store_unsupported",
-                ))
+        self.engine.is_some() && !state.requires_external_setup()
     }
 
-    fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Stateful<gpui::Div> {
+    fn auth_footer(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> Option<gpui::AnyElement> {
+        if state.missing_client_id()
+            || state.phase == Phase::Connect && state.provider == AccountProvider::Microsoft
+        {
+            return None;
+        }
         let language = self.language();
-        // A save in flight already authorizes the write, so no exit presents
-        // itself as revoking it.
-        let cancel = (!state.phase.committed()).then(|| {
+        let cancel = state.phase.pending().then(|| {
             self.auth_button(
                 "auth-cancel",
-                if state.phase.pending() {
-                    tr!(language, "accounts.auth.footer.cancel_sign_in")
-                } else {
-                    tr!(language, "common.close")
-                },
+                tr!(language, "accounts.auth.footer.cancel_sign_in"),
                 UiAction::AuthCancel,
                 ButtonVariant::Ghost,
                 ControlState::default(),
@@ -2849,7 +2925,7 @@ impl Block {
                             && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
                 });
         let settled = state.phase == Phase::Failed && !self.can_retry(state);
-        patterns::management_footer(self.palette)
+        let footer = patterns::management_footer(self.palette)
             .id("auth-footer")
             .debug_selector(|| "auth-footer".into())
             .justify_center()
@@ -2866,36 +2942,31 @@ impl Block {
                     .flex_col()
                     .gap_2()
                     .children(cancel)
-                    .children(
-                        (!state.missing_client_id()
-                            && (state.phase != Phase::Connect
-                                || state.provider != AccountProvider::Microsoft))
-                            .then(|| {
-                                self.auth_button(
-                                    "auth-primary",
-                                    label,
-                                    action,
-                                    ButtonVariant::Primary,
-                                    ControlState {
-                                        busy,
-                                        disabled: state.provider_draft.is_some()
-                                            || provider_blocked
-                                            || settled
-                                            || self.busy
-                                                && matches!(
-                                                    state.phase,
-                                                    Phase::Connect
-                                                        | Phase::Failed
-                                                        | Phase::Complete
-                                                        | Phase::Characters
-                                                ),
-                                        ..ControlState::default()
-                                    },
-                                    cx,
-                                )
-                            }),
-                    ),
+                    .child(self.auth_button(
+                        "auth-primary",
+                        label,
+                        action,
+                        ButtonVariant::Primary,
+                        ControlState {
+                            busy,
+                            disabled: state.provider_draft.is_some()
+                                || provider_blocked
+                                || settled
+                                || self.busy
+                                    && matches!(
+                                        state.phase,
+                                        Phase::Connect
+                                            | Phase::Failed
+                                            | Phase::Complete
+                                            | Phase::Characters
+                                    ),
+                            ..ControlState::default()
+                        },
+                        cx,
+                    )),
             )
+            .into_any_element();
+        Some(footer)
     }
 
     fn auth_button(
@@ -3477,7 +3548,7 @@ mod tests {
                 });
                 account.client_id.clear();
                 account.credential_ref = account.identity_key();
-                view.auth_prepared(account.clone());
+                view.auth_prepared(account.clone(), None);
                 assert!(
                     view.shell
                         .auth
@@ -3488,7 +3559,7 @@ mod tests {
                     link.provider_id = uuid::Uuid::from_u128(1);
                 }
                 account.credential_ref = account.identity_key();
-                view.auth_prepared(account.clone());
+                view.auth_prepared(account.clone(), None);
                 assert!(
                     view.shell
                         .auth
@@ -3503,7 +3574,7 @@ mod tests {
                 );
                 view.cancel_auth(window, cx);
                 view.auth_characters(profiles);
-                view.auth_prepared(account);
+                view.auth_prepared(account, None);
                 assert!(view.shell.auth.is_none());
             })
         });
@@ -3867,16 +3938,12 @@ mod tests {
         });
 
         // Back restores the expanded chooser; collapsing never discards a draft.
-        let back = crate::test_support::control_bounds(cx, "auth-back");
-        let close = crate::test_support::control_bounds(cx, "task-close");
-        assert!(
-            back.zip(close).is_some_and(|(back, close)| {
-                back.right() <= close.left() && back.center().y == close.center().y
-            }),
-            "step back belongs immediately left of the wizard exit"
-        );
+        click(cx, "window-title");
+        assert!(crate::test_support::control_bounds(cx, "auth-back").is_some());
+        assert!(crate::test_support::control_bounds(cx, "task-close").is_none());
         click(cx, "auth-back");
         assert!(crate::test_support::control_bounds(cx, "auth-back").is_none());
+        assert!(crate::test_support::control_bounds(cx, "task-close").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         click(cx, "auth-other-options");
@@ -3959,6 +4026,30 @@ mod tests {
         // Activating the page asks the backend for a browser authorization; the
         // network-free fixture has no backend, so it reports that instead of
         // falling back to a device code or claiming a session.
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                if let Some(state) = &mut view.shell.auth {
+                    state.microsoft_unavailable = true;
+                }
+                cx.notify();
+            })
+        });
+        click(cx, "auth-microsoft");
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
+                .auth
+                .as_ref()
+                .is_some_and(|state| state.phase == Phase::Connect && state.attempt.is_none())
+                && !view.busy
+        }));
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                if let Some(state) = &mut view.shell.auth {
+                    state.microsoft_unavailable = false;
+                }
+                cx.notify();
+            })
+        });
         click(cx, "auth-microsoft");
         assert!(view.read_with(cx, |view, _| {
             view.shell.auth.as_ref().is_some_and(|state| {
@@ -4016,7 +4107,7 @@ mod tests {
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {
                     view.open_auth_wizard(window, cx);
-                    view.auth_prepared(account.clone());
+                    view.auth_prepared(account.clone(), None);
                     view.auth_finished(&Ok("late completion".into()));
                 });
             });
@@ -4191,12 +4282,13 @@ mod tests {
                     simulate_started_attempt(view, Phase::Waiting);
                     view.busy = true;
                     view.accounts.clear();
-                    view.auth_prepared(account);
+                    view.auth_prepared(account, None);
                     view.messages = Some(receiver);
                 });
             });
             let operation = view.read_with(cx, |view, _| view.operation_revision);
-            click(cx, "auth-cancel");
+            cx.simulate_keystrokes("escape");
+            cx.run_until_parked();
             sender.try_send(crate::engine::Message::ForOperation {
                 operation,
                 message: Box::new(crate::engine::Message::Finished(Ok(
@@ -4221,22 +4313,28 @@ mod tests {
         let result = (|| -> anyhow::Result<()> {
             let account = test_account()?;
             for (width, height) in [(360., 720.), (1152., 720.), (960., 600.)] {
-                for phase in [
-                    Phase::Connect,
-                    Phase::Preparing,
-                    Phase::Waiting,
-                    Phase::Verifying,
-                    Phase::Characters,
-                    Phase::Failed,
-                    Phase::Complete,
-                    Phase::Saving,
-                    Phase::Saved,
+                for (phase, missing_client_id) in [
+                    (Phase::Connect, false),
+                    (Phase::Preparing, false),
+                    (Phase::Waiting, false),
+                    (Phase::Verifying, false),
+                    (Phase::Characters, false),
+                    (Phase::Failed, false),
+                    (Phase::Failed, true),
+                    (Phase::Complete, false),
+                    (Phase::Saving, false),
+                    (Phase::Saved, false),
                 ] {
                     let (_view, cx) = crate::test_support::window(cx, |window, cx| {
                         let mut view = crate::tests::test_view(window, cx);
                         view.preferences.reduce_motion = true;
                         view.shell.auth = Some(AuthWizard {
                             phase,
+                            error: missing_client_id.then(|| {
+                                super::AccountMessage::product(
+                                    "accounts.auth.error.missing_client_id",
+                                )
+                            }),
                             prepared_account: matches!(phase, Phase::Complete | Phase::Saved)
                                 .then(|| account.clone()),
                             ..AuthWizard::default()
@@ -4250,20 +4348,21 @@ mod tests {
                     cx.run_until_parked();
                     let body = crate::test_support::control_bounds(cx, "auth-body");
                     let footer = crate::test_support::control_bounds(cx, "auth-footer");
-                    assert!(body.is_some() && footer.is_some());
+                    assert!(body.is_some_and(|body| body.size.height > px(0.)));
+                    if phase == Phase::Connect || missing_client_id {
+                        assert!(footer.is_none(), "{phase:?} has no footer actions");
+                        continue;
+                    }
+                    assert!(footer.is_some());
                     let (Some(body), Some(footer)) = (body, footer) else {
                         continue;
                     };
-                    assert!(body.size.height > px(0.) && body.bottom() <= footer.top());
+                    assert!(body.bottom() <= footer.top());
                     assert!(footer.bottom() <= px(height));
                     for selector in ["auth-cancel", "auth-primary"] {
                         let action = cx.debug_bounds(selector);
-                        if selector == "auth-primary" && phase == Phase::Connect {
-                            assert!(action.is_none(), "the chooser acts through its cards");
-                            continue;
-                        }
-                        if selector == "auth-cancel" && phase.committed() {
-                            assert!(action.is_none(), "committed save must not offer cancel");
+                        if selector == "auth-cancel" && !phase.pending() {
+                            assert!(action.is_none(), "only in-flight sign-in offers Cancel");
                             continue;
                         }
                         assert!(
@@ -4275,7 +4374,7 @@ mod tests {
                             }),
                             "{selector} outside {width}×{height}: {action:?}"
                         );
-                        if phase == Phase::Connect || phase.committed() {
+                        if !phase.pending() {
                             assert!(
                                 action.is_some_and(|action| {
                                     let above = action.top() - footer.top();
@@ -4368,6 +4467,7 @@ mod tests {
                 view.open_auth_wizard(window, cx);
                 simulate_started_attempt(view, Phase::Preparing);
                 if let Some(state) = &mut view.shell.auth {
+                    state.microsoft_unavailable = false;
                     state.method = super::Method::Device;
                 }
                 view.auth_device_code(
@@ -4389,7 +4489,7 @@ mod tests {
                 let account = test_account();
                 assert!(account.is_ok());
                 if let Ok(account) = account {
-                    view.auth_prepared(account);
+                    view.auth_prepared(account, None);
                 }
             });
         });
@@ -5027,7 +5127,7 @@ mod tests {
             ))
         );
         assert_eq!(control_node(cx, "auth-primary").label(), Some("重试"));
-        assert_eq!(control_node(cx, "auth-cancel").label(), Some("关闭"));
+        assert!(crate::test_support::control_bounds(cx, "auth-cancel").is_none());
         assert_eq!(
             super::AccountMessage::product("accounts.auth.error.expired")
                 .render(crate::Language::SimplifiedChinese),

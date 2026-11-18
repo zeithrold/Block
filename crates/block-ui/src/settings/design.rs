@@ -95,6 +95,7 @@ pub(super) const SMALL_FONT_SIZE: f32 = 12.;
 pub(super) const BODY_LINE_HEIGHT: f32 = 20.;
 pub(super) const MANAGEMENT_FOOTER: f32 = 72.;
 pub(super) const SIDEBAR_WIDTH: f32 = 360.;
+pub(super) const PLAYER_AVATAR_SIZE: f32 = (SIDEBAR_WIDTH - 48.) * 0.45;
 pub(super) const CHROME_HEIGHT: f32 = 56.;
 
 pub(super) fn focus_ring(color: u32) -> Vec<BoxShadow> {

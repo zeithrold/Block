@@ -6,6 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
 gpui.workspace = true
 gpui-base.workspace = true
 gpui_platform.workspace = true

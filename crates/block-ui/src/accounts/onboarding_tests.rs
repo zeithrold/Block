@@ -350,7 +350,7 @@ fn cancelling_first_run_account_setup_leaves_no_account_behind(cx: &mut TestAppC
                 assert!(view.shell.auth.is_none());
                 assert!(!view.first_run_account_ready());
                 if let Ok(account) = crate::engine::offline_account("Cancelled_Player") {
-                    view.auth_prepared(account);
+                    view.auth_prepared(account, None);
                 }
                 assert!(view.shell.auth.is_none());
                 assert!(!view.first_run_account_ready());

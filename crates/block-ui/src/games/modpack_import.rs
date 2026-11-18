@@ -2697,23 +2697,14 @@ impl Block {
                 false,
             ),
         };
-        let cancel = (state.phase != Phase::Complete).then(|| {
+        let back = self.game_wizard_has_step_back().then(|| {
             self.button(
-                "cancel-instance",
-                tr!(language, "common.cancel"),
-                UiAction::CancelForm,
+                "wizard-back",
+                tr!(language, "wizard.footer.back"),
+                UiAction::WizardBack,
                 cx,
             )
         });
-        let back =
-            (state.phase != Phase::Installing && state.phase != Phase::Complete).then(|| {
-                self.button(
-                    "wizard-back",
-                    tr!(language, "wizard.footer.back"),
-                    UiAction::WizardBack,
-                    cx,
-                )
-            });
         let primary = self.modpack_action_button(id, label, action, variant, disabled, cx);
         let primary = if state.phase == Phase::Complete {
             primary.track_focus(&self.shell.surfaces.trigger_focus("modpack-done", cx))
@@ -2728,7 +2719,6 @@ impl Block {
             .flex()
             .flex_col()
             .gap_2()
-            .children(cancel.map(|button| button.w_full()))
             .children(back.map(|button| button.w_full()))
             .child(primary.w_full())
             .into_any_element()
@@ -3020,7 +3010,7 @@ mod tests {
                 })
                 .ok_or_else(|| anyhow::anyhow!("missing first-run draft"))?;
             name.update(cx, |field, cx| field.set_value("Edited parent", cx));
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             click_pack(cx, "setup-game")?;
             assert!(!view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
             click_pack(cx, "setup-import-pack")?;
@@ -3367,6 +3357,8 @@ mod tests {
                 view
             });
             cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
+            assert!(crate::test_support::control_bounds(cx, "wizard-back").is_none());
+            assert!(crate::test_support::control_bounds(cx, "cancel-instance").is_none());
             click_pack(cx, "modpack-stop")?;
             assert!(view.read_with(cx, |view, _| view.shell.pack_import.cancel.is_cancelled()));
             assert!(cx.update(|window, _| {
@@ -3443,7 +3435,7 @@ mod tests {
                 !cancel.is_cancelled(),
                 "repeated entry cannot reset a live task"
             );
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             assert!(view.read_with(cx, |view, _| {
                 matches!(view.shell.surfaces.top().map(|layer| &layer.kind),
                     Some(Surface::StopPackImport { request: current, .. }) if *current == request)
@@ -3458,7 +3450,7 @@ mod tests {
             }));
             let restored = cx.update(|window, cx| window.focused(cx));
             assert!(restored.is_some(), "the trigger regains focus");
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             click_pack(cx, "pack-leave-cancel")?;
             assert_eq!(cx.update(|window, cx| window.focused(cx)), restored);
             assert!(!cancel.is_cancelled());
@@ -3509,7 +3501,7 @@ mod tests {
             let cancel = view.read_with(cx, |view, _| view.shell.pack_import.cancel.clone());
             for _ in 0..12 {
                 let focused = cx.update(|window, _| {
-                    gpui_base::test_support::find(window, &[], &"cancel-instance".into())
+                    gpui_base::test_support::find(window, &[], &"task-close".into())
                         .and_then(|node| node.focused())
                         == Some(true)
                 });
@@ -3521,13 +3513,13 @@ mod tests {
             }
             assert!(
                 cx.update(|window, _| {
-                    gpui_base::test_support::find(window, &[], &"cancel-instance".into())
+                    gpui_base::test_support::find(window, &[], &"task-close".into())
                         .and_then(|node| node.focused())
                         == Some(true)
                 }),
-                "the installation Cancel control has focus"
+                "the installation exit control has focus"
             );
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             view.update(cx, |view, cx| view.finish_pack_import(request, Ok(()), cx));
             cx.run_until_parked();
             for _ in 0..3 {
@@ -3568,7 +3560,7 @@ mod tests {
                 view
             });
             cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             view.update(cx, |view, cx| view.finish_pack_import(old, Ok(()), cx));
             cx.run_until_parked();
             view.update(cx, |view, cx| {
@@ -3577,7 +3569,7 @@ mod tests {
                 view.shell.pack_import.completed_request = None;
                 cx.notify();
             });
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             for _ in 0..3 {
                 cx.update(|window, cx| window.simulate_next_frame(cx));
                 cx.run_until_parked();
@@ -3741,7 +3733,7 @@ mod tests {
                 view
             });
             cx.simulate_resize(gpui::size(gpui::px(1152.), gpui::px(720.)));
-            click_pack(cx, "cancel-instance")?;
+            click_pack(cx, "task-close")?;
             let cancel = CancellationToken::new();
             view.update(cx, |view, cx| {
                 view.shell.pack_import.request = Some(replacement);
@@ -4392,7 +4384,10 @@ mod tests {
                             "a visual snapshot must not take the live draft"
                         );
                     });
-                    click_pack(cx, "cancel-instance")?;
+                    assert!(cx.debug_bounds("task-close").is_none());
+                    cx.update(|window, cx| {
+                        view.update(cx, |view, cx| view.handle(UiAction::CancelForm, window, cx));
+                    });
                     assert!(
                         view.read_with(cx, |view, cx| {
                             view.shell.first_run.stage == Stage::GameChoice
@@ -4559,7 +4554,10 @@ mod tests {
                     Tab::Home
                 };
                 assert_eq!(view.read_with(cx, |view, _| view.router.tab()), tab);
-                click_pack(cx, "cancel-instance")?;
+                assert!(cx.debug_bounds("task-close").is_none());
+                cx.update(|window, cx| {
+                    view.update(cx, |view, cx| view.handle(UiAction::CancelForm, window, cx));
+                });
                 assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()
                     && view.router.tab() == tab
                     && !view.pack_wizard_active()));

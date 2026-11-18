@@ -1876,7 +1876,7 @@ impl Block {
                     rail: self.wizard_step_rail(&steps, current),
                     body,
                     footer: if self.pack_wizard_active() {
-                        self.modpack_wizard_footer(language, cx)
+                        Some(self.modpack_wizard_footer(language, cx))
                     } else {
                         self.game_wizard_footer(language, cx)
                     },
@@ -1887,13 +1887,31 @@ impl Block {
             ))
     }
 
-    /// The source page offers direct actions; a section applies its local draft
-    /// and the setup page creates the game or Profile.
-    fn game_wizard_footer(&self, language: Language, cx: &Context<'_, Self>) -> gpui::AnyElement {
+    /// Whether the current game wizard page has a previous step. First-run
+    /// setup starts directly on Setup, but its sections can still step back.
+    pub(super) fn game_wizard_has_step_back(&self) -> bool {
+        if self.pack_wizard_active() {
+            return !matches!(
+                self.shell.pack_import.phase,
+                modpack_import::Phase::Installing | modpack_import::Phase::Complete
+            );
+        }
+        self.wizard_outer_page().is_some()
+            || self.shell.wizard.step != WizardStep::GetStarted
+                && self.router.tab() != Tab::Onboarding
+    }
+
+    /// A section applies its local draft and Setup creates the game or Profile.
+    fn game_wizard_footer(
+        &self,
+        language: Language,
+        cx: &Context<'_, Self>,
+    ) -> Option<gpui::AnyElement> {
         let state = &self.shell.wizard;
+        if state.step == WizardStep::GetStarted {
+            return None;
+        }
         let page = self.wizard_outer_page();
-        let source = state.step == WizardStep::GetStarted;
-        let show_back = page.is_some() || !source && self.router.tab() != Tab::Onboarding;
         let next_label = if page.is_some() {
             tr!(language, "common.apply_draft")
         } else {
@@ -1908,13 +1926,15 @@ impl Block {
         } else {
             UiAction::SaveInstance
         };
-        let cancel = self.button(
-            "cancel-instance",
-            tr!(language, "common.cancel"),
-            UiAction::CancelForm,
-            cx,
-        );
-        let back = show_back.then(|| {
+        let cancel = page.is_some().then(|| {
+            self.button(
+                "cancel-instance",
+                tr!(language, "common.cancel"),
+                UiAction::CancelForm,
+                cx,
+            )
+        });
+        let back = self.game_wizard_has_step_back().then(|| {
             self.button(
                 "wizard-back",
                 tr!(language, "wizard.footer.back"),
@@ -1922,9 +1942,6 @@ impl Block {
                 cx,
             )
         });
-        if source {
-            return div().w_full().child(cancel).into_any_element();
-        }
         let primary = self.button("wizard-next", next_label, next_action, cx);
         let consequence = page.is_none().then(|| {
             note(tr!(
@@ -1937,7 +1954,7 @@ impl Block {
             ))
             .whitespace_normal()
         });
-        div()
+        let footer = div()
             .w_full()
             .flex()
             .flex_col()
@@ -1949,11 +1966,12 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(cancel.w_full())
+                    .children(cancel.map(|button| button.w_full()))
                     .children(back.map(|button| button.w_full()))
                     .child(primary.w_full()),
             )
-            .into_any_element()
+            .into_any_element();
+        Some(footer)
     }
 
     fn pack_wizard_rail_progress(&self, language: Language) -> (Vec<(String, String)>, usize) {

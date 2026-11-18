@@ -414,7 +414,9 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
                 }
             });
         }
-        click(cx, "cancel-instance");
+        assert!(cx.debug_bounds("task-close").is_none());
+        click(cx, "wizard-back");
+        click(cx, "task-close");
         if changed {
             assert!(view.read_with(cx, |view, _| {
                 view.shell.surfaces.top().is_some_and(|layer| {
@@ -425,7 +427,7 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
             assert!(view.read_with(cx, |view, cx| {
                 matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Keep me")
             }));
-            click(cx, "cancel-instance");
+            click(cx, "task-close");
             click(cx, "discard-game-confirm");
         }
         assert!(view.read_with(cx, |view, _| view.form.is_none()
@@ -1179,6 +1181,9 @@ fn expanded_setup_scrolls_all_fields_above_the_fixed_footer(cx: &mut TestAppCont
     });
     cx.run_until_parked();
     assert_setup_tail_scrolls_above_the_footer(&view, cx, "first-run Setup at 1152x664");
+    assert!(crate::test_support::control_bounds(cx, "wizard-next").is_some());
+    assert!(crate::test_support::control_bounds(cx, "wizard-back").is_none());
+    assert!(crate::test_support::control_bounds(cx, "cancel-instance").is_none());
 }
 
 #[gpui::test]
@@ -1626,7 +1631,8 @@ fn new_instance_draft_preserves_home_selection_until_submission(cx: &mut TestApp
         assert_eq!(view.snapshot.instances.len(), 1);
         cx.notify();
     });
-    click(cx, "cancel-instance");
+    click(cx, "wizard-back");
+    click(cx, "task-close");
     click(cx, "discard-game-confirm");
     assert!(view.read_with(cx, |view, _| view.form.is_none()));
     assert_eq!(
@@ -1929,6 +1935,7 @@ fn wizard_keeps_step_rail_and_actions_within_the_client(cx: &mut TestAppContext)
         }
         let footer = crate::test_support::control_bounds(cx, "wizard-footer");
         assert!(footer.is_some_and(|bounds| bounds.size.height >= px(72.)));
+        assert!(crate::test_support::control_bounds(cx, "cancel-instance").is_none());
         let rail = crate::test_support::control_bounds(cx, "wizard-rail");
         assert_eq!(rail.map(|bounds| bounds.size.width), Some(px(360.)));
         assert!(rail.is_some_and(|bounds| bounds.size.height < px(80.)));
@@ -1999,6 +2006,7 @@ fn compact_source_new_and_existing_paths_keep_controls_visible_and_keyboard_reac
                 WizardStep::GetStarted
             );
             assert!(crate::test_support::control_bounds(cx, "wizard-copy-games").is_some());
+            assert!(crate::test_support::control_bounds(cx, "wizard-footer").is_none());
             click(cx, "wizard-kind-instance");
             assert_eq!(
                 view.read_with(cx, |view, _| view.shell.wizard.step),
@@ -3076,7 +3084,7 @@ fn wizard_footer_labels(
                 .and_then(|control| control.label())
                 .map(str::to_owned)
         };
-        (label("wizard-next"), label("cancel-instance"))
+        (label("wizard-next"), label("wizard-back"))
     })
 }
 
@@ -3084,7 +3092,7 @@ fn wizard_footer_labels(
 fn wizard_footer_copy_is_chinese_for_a_chinese_view(cx: &mut TestAppContext) {
     assert_eq!(
         wizard_footer_labels(cx, Language::SimplifiedChinese),
-        (Some("创建并准备".to_owned()), Some("取消".to_owned()))
+        (Some("创建并准备".to_owned()), Some("返回".to_owned()))
     );
 }
 
@@ -3092,10 +3100,7 @@ fn wizard_footer_copy_is_chinese_for_a_chinese_view(cx: &mut TestAppContext) {
 fn wizard_footer_copy_is_japanese_for_a_japanese_view(cx: &mut TestAppContext) {
     assert_eq!(
         wizard_footer_labels(cx, Language::Japanese),
-        (
-            Some("作成して準備".to_owned()),
-            Some("キャンセル".to_owned())
-        )
+        (Some("作成して準備".to_owned()), Some("戻る".to_owned()))
     );
 }
 

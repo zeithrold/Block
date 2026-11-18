@@ -21,7 +21,7 @@ pub(super) struct ContentSlots {
 pub(super) struct WizardSlots {
     pub rail: AnyElement,
     pub body: AnyElement,
-    pub footer: AnyElement,
+    pub footer: Option<AnyElement>,
 }
 
 pub(super) enum WizardLayout {
@@ -164,7 +164,7 @@ impl Block {
                             .flex()
                             .flex_col()
                             .child(div().flex_1().min_h_0().flex().flex_col().child(body))
-                            .child(
+                            .children(slots.footer.map(|footer| {
                                 self.action_footer(
                                     super::patterns::management_footer(self.palette)
                                         .id("wizard-footer")
@@ -179,32 +179,36 @@ impl Block {
                                                 .mx_auto()
                                                 .flex()
                                                 .flex_col()
-                                                .child(slots.footer),
+                                                .child(footer),
                                         ),
-                                ),
-                            ),
+                                )
+                            })),
                     ),
                 )
                 .into_any_element(),
-            WizardLayout::Authentication => div()
-                .size_full()
-                .min_h_0()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(
-                    self.frame_detail(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(body),
-                    ),
-                )
-                .child(self.action_footer(div().w_full().flex_shrink_0().child(slots.footer)))
-                .into_any_element(),
+            WizardLayout::Authentication => {
+                div()
+                    .size_full()
+                    .min_h_0()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        self.frame_detail(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(body),
+                        ),
+                    )
+                    .children(slots.footer.map(|footer| {
+                        self.action_footer(div().w_full().flex_shrink_0().child(footer))
+                    }))
+                    .into_any_element()
+            }
         }
     }
 }

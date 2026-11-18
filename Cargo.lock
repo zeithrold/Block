@@ -858,6 +858,7 @@ dependencies = [
  "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "rust-i18n",

@@ -21,6 +21,7 @@ use block_launcher::manifest::{
 };
 use block_launcher::{
     CancellationToken, Store,
+    avatars::{ImageCache, ImageFetch, SkinImage},
     catalog::{
         Catalog, DataPolicy, InstanceAppearance, InstanceConfiguration, LoaderKind, Snapshot,
     },
@@ -146,10 +147,10 @@ pub(crate) enum Message {
     },
     Catalog(Result<Snapshot, String>),
     Accounts(Result<Vec<Account>, String>),
-    AccountImages(Vec<(String, block_launcher::avatars::SkinImage)>),
+    AccountImages(Vec<(String, SkinImage)>),
     ProviderImages(Vec<(String, block_launcher::avatars::ProviderIcon)>),
     AuthlibCharacters(Vec<block_auth::AuthlibProfile>),
-    AuthPrepared(Account),
+    AuthPrepared(Account, Option<SkinImage>),
     SignedIn(Account),
     DeviceCode {
         user_code: String,
@@ -969,6 +970,25 @@ impl Engine {
                 let account = prepared.account().clone();
                 // Validate registration conflicts before offering final confirmation.
                 merge_signed_in_account(accounts, &account)?;
+                // The cosmetic preview must not stall identity confirmation.
+                let skin = if let Some(skin) = prepared.skin()
+                    && let Ok(fetch) = ImageFetch::new()
+                {
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        cached_account_skin(
+                            (&ImageCache::new(&root), &fetch),
+                            &account.identity_key(),
+                            (&skin.url, &["textures.minecraft.net".to_owned()]),
+                            &cancel,
+                        ),
+                    )
+                    .await
+                    .ok()
+                    .flatten()
+                } else {
+                    None
+                };
                 {
                     let mut pending = pending_account
                         .lock()
@@ -976,7 +996,7 @@ impl Engine {
                     ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
                     *pending = Some((cancel.clone(), prepared));
                 }
-                let _ = sender.send(Message::AuthPrepared(account)).await;
+                let _ = sender.send(Message::AuthPrepared(account, skin)).await;
                 Ok(msg!("completion.identity_verified"))
             }
             .await;
@@ -1052,7 +1072,7 @@ impl Engine {
                         ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
                         *slot = Some((cancel.clone(), prepared));
                     }
-                    let _ = sender.send(Message::AuthPrepared(account)).await;
+                    let _ = sender.send(Message::AuthPrepared(account, None)).await;
                     Ok(msg!("completion.external_identity"))
                 } else {
                     let profiles = pending.profiles().to_vec();
@@ -1118,7 +1138,7 @@ impl Engine {
                         slot.take();
                     }
                 }
-                let _ = sender.send(Message::AuthPrepared(account)).await;
+                let _ = sender.send(Message::AuthPrepared(account, None)).await;
                 Ok(msg!("completion.external_character"))
             }
             .await;
@@ -1457,12 +1477,15 @@ impl Engine {
     }
 }
 
-fn auth() -> anyhow::Result<MicrosoftAuth> {
-    let client = std::env::var("MICROSOFT_CLIENT_ID")
+pub(super) fn microsoft_client_id() -> String {
+    std::env::var("MICROSOFT_CLIENT_ID")
         .ok()
         .or_else(|| option_env!("MICROSOFT_CLIENT_ID").map(str::to_owned))
-        .unwrap_or_default();
-    Ok(MicrosoftAuth::new(&client)?)
+        .unwrap_or_default()
+}
+
+fn auth() -> anyhow::Result<MicrosoftAuth> {
+    Ok(MicrosoftAuth::new(&microsoft_client_id())?)
 }
 
 #[derive(Debug)]
@@ -1770,31 +1793,41 @@ fn load_accounts(root: &Path) -> anyhow::Result<Vec<Account>> {
 async fn account_images(
     root: &Path,
     cancel: &CancellationToken,
-) -> anyhow::Result<Vec<(String, block_launcher::avatars::SkinImage)>> {
+) -> anyhow::Result<Vec<(String, SkinImage)>> {
     let accounts = load_accounts(root)?;
     // Avatars are display-only: a damaged configuration must not prevent the
     // UI from rendering, so this path uses the lenient loader instead of the
     // strict account/provider readers.
     let providers = global_config::load(root).providers;
-    let fetch = block_launcher::avatars::ImageFetch::new()?;
-    let cache = block_launcher::avatars::ImageCache::new(root);
+    let fetch = ImageFetch::new()?;
+    let cache = ImageCache::new(root);
     let mut images = Vec::new();
     for account in accounts {
         let identity = account.identity_key();
         let Some((url, domains)) = skin_source(&account, &providers, cancel).await else {
             continue;
         };
-        if let Some(image) = cache.skin(&identity, &url) {
+        if let Some(image) =
+            cached_account_skin((&cache, &fetch), &identity, (&url, &domains), cancel).await
+        {
             images.push((identity, image));
-            continue;
         }
-        let Ok(image) = fetch.skin(&url, &domains, cancel).await else {
-            continue;
-        };
-        let _ = cache.store_skin(&identity, &url, &image);
-        images.push((identity, image));
     }
     Ok(images)
+}
+
+async fn cached_account_skin(
+    (cache, fetch): (&ImageCache, &ImageFetch),
+    identity: &str,
+    (url, domains): (&str, &[String]),
+    cancel: &CancellationToken,
+) -> Option<SkinImage> {
+    if let Some(image) = cache.skin(identity, url) {
+        return Some(image);
+    }
+    let image = fetch.skin(url, domains, cancel).await.ok()?;
+    let _ = cache.store_skin(identity, url, &image);
+    Some(image)
 }
 
 async fn skin_source(
@@ -1829,8 +1862,8 @@ async fn provider_images(
     cancel: &CancellationToken,
 ) -> anyhow::Result<Vec<(String, block_launcher::avatars::ProviderIcon)>> {
     let providers = load_providers(root)?;
-    let fetch = block_launcher::avatars::ImageFetch::new()?;
-    let cache = block_launcher::avatars::ImageCache::new(root);
+    let fetch = ImageFetch::new()?;
+    let cache = ImageCache::new(root);
     let mut icons = Vec::new();
     for provider in providers {
         let id = provider.id.to_string();

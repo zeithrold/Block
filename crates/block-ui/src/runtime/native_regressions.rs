@@ -143,7 +143,10 @@ fn game_wizard_subpages_keep_scrolling_content_above_the_action_rail(cx: &mut Te
         let body = inside_viewport(cx, "wizard-body");
         let footer = inside_viewport(cx, "wizard-footer");
         assert!(body.bottom() <= footer.top());
-        for selector in ["cancel-instance", "wizard-next"] {
+        for selector in ["wizard-back", "wizard-next"]
+            .into_iter()
+            .chain(page.map(|_| "cancel-instance"))
+        {
             let action = inside_viewport(cx, selector);
             assert!(
                 action.top() >= footer.top() && action.bottom() <= footer.bottom(),

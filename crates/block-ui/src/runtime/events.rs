@@ -10,7 +10,7 @@ use block_launcher::{
     game_import::DiscoveryReport,
     recipe::LaunchRecipe,
 };
-use gpui::{Context, Image, ImageFormat};
+use gpui::{Context, Image};
 use uuid::Uuid;
 
 use crate::{Block, PendingCrash, Tab, account_id, browser, components, engine::Message, feedback};
@@ -124,7 +124,12 @@ impl Block {
                         self.auth_browser(url, cx);
                     }
                 }
-                Message::AuthPrepared(account) => self.auth_prepared(account),
+                Message::AuthPrepared(account, skin) => {
+                    self.auth_prepared(
+                        account,
+                        skin.and_then(components::AccountAvatar::from_skin),
+                    );
+                }
                 Message::AuthlibCharacters(characters) => self.auth_characters(characters),
                 Message::SignedIn(account) => self.auth_saved(account, cx),
                 Message::DeviceCode {
@@ -247,15 +252,8 @@ impl Block {
     fn store_account_images(&mut self, images: Vec<(String, SkinImage)>) {
         self.account_avatars = images
             .into_iter()
-            .map(|(identity, skin)| {
-                (
-                    identity,
-                    components::AccountAvatar {
-                        image: std::sync::Arc::new(Image::from_bytes(ImageFormat::Png, skin.bytes)),
-                        width: skin.width,
-                        height: skin.height,
-                    },
-                )
+            .filter_map(|(identity, skin)| {
+                components::AccountAvatar::from_skin(skin).map(|avatar| (identity, avatar))
             })
             .collect();
     }

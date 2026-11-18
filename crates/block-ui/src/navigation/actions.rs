@@ -53,6 +53,7 @@ pub(super) enum UiAction {
     ResetPreferences,
     WizardNext,
     WizardBack,
+    ExitGameWizard,
     WizardSnapshots,
     WizardOptiFineFile,
     WizardOptiFineRemove,
@@ -153,6 +154,7 @@ fn motion_direction(action: &UiAction) -> motion::Direction {
     if matches!(
         action,
         UiAction::CancelForm
+            | UiAction::ExitGameWizard
             | UiAction::NavigationBack
             | UiAction::SettingsBack
             | UiAction::WizardBack
@@ -309,6 +311,12 @@ impl Block {
             UiAction::InstancePageDone => self.finish_instance_page(false, window, cx),
             UiAction::InstancePageCancel => self.finish_instance_page(true, window, cx),
             UiAction::CancelForm => self.cancel_or_finish_form(window, cx),
+            UiAction::ExitGameWizard => {
+                if self.shell.wizard.page.is_some() {
+                    self.back_game_wizard(cx);
+                }
+                self.cancel_or_finish_form(window, cx);
+            }
             UiAction::DeleteInstanceId(id) => self.request_instance_delete(id, window, cx),
             UiAction::ConfirmDelete => self.confirm_instance_delete(window, cx),
             UiAction::InstanceTarget(target) => self.edit_instance_draft(|form| {
@@ -623,6 +631,7 @@ impl Block {
             action,
             UiAction::SaveInstance
                 | UiAction::WizardNext
+                | UiAction::ExitGameWizard
                 | UiAction::NavigationBack
                 | UiAction::CancelForm
                 | UiAction::Tab(_)
@@ -747,6 +756,7 @@ impl Block {
             return false;
         }
         let leaving = match action {
+            UiAction::ExitGameWizard => self.router.game_wizard(),
             UiAction::CancelForm | UiAction::NavigationBack => {
                 self.pack_wizard_active()
                     || self.router.game_wizard()
@@ -827,7 +837,9 @@ impl Block {
             let returns_to_source = self.pack_shortcut_preserves_current_draft()
                 && matches!(
                     action,
-                    UiAction::CancelForm | UiAction::FirstRun(first_run::Action::Back)
+                    UiAction::CancelForm
+                        | UiAction::ExitGameWizard
+                        | UiAction::FirstRun(first_run::Action::Back)
                 );
             if returns_to_source || !self.game_wizard_changed(cx) {
                 return None;

@@ -191,9 +191,9 @@
     "ja": "アカウントの準備ができました"
   },
   "accounts.auth.complete.description.online": {
-    "en": "Your identity is verified. Saving stores this account securely on this device and selects it; closing discards this sign-in.",
-    "zh-Hans": "你的身份已验证。保存会在此设备上安全保存此账户并将其选中；关闭会丢弃此登录。",
-    "ja": "ID は確認済みです。「保存」でこのアカウントをこのデバイスに安全に保存して選択します。閉じるとこのサインインは破棄されます。"
+    "en": "Make sure this is the Minecraft account you want to use.",
+    "zh-Hans": "确认这是你要使用的 Minecraft 账号。",
+    "ja": "使用する Minecraft アカウントであることを確認してください。"
   },
   "accounts.auth.saving.title": {
     "en": "Saving your account",
@@ -459,11 +459,6 @@
     "en": "Account saved",
     "zh-Hans": "账户已保存",
     "ja": "アカウントを保存しました"
-  },
-  "accounts.auth.complete.badge.ready": {
-    "en": "Ready to save",
-    "zh-Hans": "可以保存",
-    "ja": "保存の準備完了"
   },
   "accounts.auth.complete.note.saved": {
     "en": "The account has been saved and is ready to use.",

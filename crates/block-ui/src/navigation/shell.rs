@@ -370,6 +370,27 @@ impl Block {
             .child(icon)
     }
 
+    fn show_wizard_exit(&self) -> bool {
+        self.shell.auth.as_ref().map_or_else(
+            || !self.router.game_wizard() || !self.game_wizard_has_step_back(),
+            |auth| !auth.can_go_back() && !auth.reviewing_identity(),
+        )
+    }
+
+    fn wizard_exit_action(&self, first_run: bool) -> UiAction {
+        if self.shell.auth.is_some() {
+            UiAction::AuthCancel
+        } else if self.pack_shortcut_preserves_current_draft() {
+            UiAction::CancelForm
+        } else if first_run {
+            UiAction::FirstRun(super::first_run::Action::Back)
+        } else if self.router.game_wizard() && self.shell.wizard.page.is_some() {
+            UiAction::ExitGameWizard
+        } else {
+            UiAction::CancelForm
+        }
+    }
+
     fn chrome(
         &self,
         _window: &Window,
@@ -425,73 +446,73 @@ impl Block {
                         )
                     }),
             )
-            .child(if task {
-                let action = if self.shell.auth.is_some() {
-                    UiAction::AuthCancel
-                } else if first_run {
-                    UiAction::FirstRun(super::first_run::Action::Back)
-                } else {
-                    UiAction::CancelForm
-                };
-                let text = tr!(language, "chrome.close_setup");
-                super::tooltip::trigger(
-                    self.chrome_icon_button(
-                        "task-close",
-                        action,
-                        super::design::Icon::ChevronDown.render(16., self.palette.muted),
-                        text.clone(),
+            .child({
+                if task && !self.show_wizard_exit() {
+                    div().into_any_element()
+                } else if task {
+                    let action = self.wizard_exit_action(first_run);
+                    let text = tr!(language, "chrome.close_setup");
+                    super::tooltip::trigger(
+                        self.chrome_icon_button(
+                            "task-close",
+                            action,
+                            super::design::Icon::ChevronDown.render(16., self.palette.muted),
+                            text.clone(),
+                            cx,
+                        ),
+                        text,
+                        Block::language,
                         cx,
-                    ),
-                    text,
-                    Block::language,
-                    cx,
-                )
-                .into_any_element()
-            } else if first_run && self.shell.first_run.stage == super::first_run::Stage::Overview {
-                div().into_any_element()
-            } else if first_run {
-                div().w(px(32.)).into_any_element()
-            } else if self.router.tab() == Tab::Settings {
-                let text = tr!(
-                    language,
-                    if self.shell.settings_page.is_some() {
-                        "settings.back.settings"
-                    } else {
-                        "settings.back.home"
-                    }
-                );
-                super::tooltip::trigger(
-                    self.chrome_icon_button(
-                        "settings-back",
-                        UiAction::SettingsBack,
-                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
-                        text.clone(),
-                        cx,
-                    ),
-                    text,
-                    Block::language,
-                    cx,
-                )
-                .into_any_element()
-            } else if !home {
-                let text = tr!(language, "common.back");
-                super::tooltip::trigger(
-                    self.chrome_icon_button(
-                        "navigation-back",
-                        UiAction::NavigationBack,
-                        super::design::Icon::ChevronLeft.render(16., self.palette.muted),
-                        text.clone(),
-                        cx,
-                    ),
-                    text,
-                    Block::language,
-                    cx,
-                )
-                .into_any_element()
-            } else {
-                self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
-                    .child(super::design::Icon::Menu.render(18., self.palette.muted))
+                    )
                     .into_any_element()
+                } else if first_run
+                    && self.shell.first_run.stage == super::first_run::Stage::Overview
+                {
+                    div().into_any_element()
+                } else if first_run {
+                    div().w(px(32.)).into_any_element()
+                } else if self.router.tab() == Tab::Settings {
+                    let text = tr!(
+                        language,
+                        if self.shell.settings_page.is_some() {
+                            "settings.back.settings"
+                        } else {
+                            "settings.back.home"
+                        }
+                    );
+                    super::tooltip::trigger(
+                        self.chrome_icon_button(
+                            "settings-back",
+                            UiAction::SettingsBack,
+                            super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                            text.clone(),
+                            cx,
+                        ),
+                        text,
+                        Block::language,
+                        cx,
+                    )
+                    .into_any_element()
+                } else if !home {
+                    let text = tr!(language, "common.back");
+                    super::tooltip::trigger(
+                        self.chrome_icon_button(
+                            "navigation-back",
+                            UiAction::NavigationBack,
+                            super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                            text.clone(),
+                            cx,
+                        ),
+                        text,
+                        Block::language,
+                        cx,
+                    )
+                    .into_any_element()
+                } else {
+                    self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
+                        .child(super::design::Icon::Menu.render(18., self.palette.muted))
+                        .into_any_element()
+                }
             })
             .child(
                 div()
@@ -865,7 +886,6 @@ impl Block {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
         let palette = self.palette;
-        let avatar_size = (super::design::SIDEBAR_WIDTH - 48.) * 0.45;
         let (hover, hover_running) = self
             .shell
             .home
@@ -892,7 +912,7 @@ impl Block {
                     name,
                     avatar,
                     palette,
-                    avatar_size,
+                    super::design::PLAYER_AVATAR_SIZE,
                     super::components::AvatarState::Fallback,
                 )
                 .rounded_2xl()

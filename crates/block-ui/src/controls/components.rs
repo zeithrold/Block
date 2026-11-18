@@ -474,6 +474,7 @@ pub(super) enum BadgeVariant {
     Info,
     Success,
     Warning,
+    Error,
 }
 
 /// Human memory label: whole GiB stays whole, otherwise one decimal place.
@@ -542,6 +543,11 @@ pub(super) fn badge(
 ) -> Div {
     let (background, foreground, border) = match variant {
         BadgeVariant::Secondary => (palette.secondary, palette.foreground, palette.secondary),
+        BadgeVariant::Error => (
+            palette.destructive_background,
+            palette.destructive,
+            palette.destructive_background,
+        ),
         BadgeVariant::Outline => (palette.background, palette.foreground, palette.border),
         BadgeVariant::Info => (
             palette.info_background,
@@ -962,21 +968,46 @@ pub(super) fn avatar_fallback(name: &str, palette: Palette, size: f32, state: Av
     }
 }
 
-/// A real account skin, cached in memory as the source PNG the renderer draws.
-#[derive(Clone)]
+/// Composite the Minecraft face and hat once, then cache a nearest-neighbor raster
+/// at each device size requested by the UI.
+#[derive(Clone, Debug)]
 pub(super) struct AccountAvatar {
-    pub image: Arc<Image>,
-    pub width: u32,
-    pub height: u32,
+    face: Rc<image::RgbaImage>,
+    sizes: Rc<RefCell<HashMap<u32, Arc<gpui::RenderImage>>>>,
 }
 
-impl std::fmt::Debug for AccountAvatar {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("AccountAvatar")
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .finish_non_exhaustive()
+impl AccountAvatar {
+    pub(super) fn from_skin(skin: block_launcher::avatars::SkinImage) -> Option<Self> {
+        let skin = image::load_from_memory_with_format(&skin.bytes, image::ImageFormat::Png)
+            .ok()?
+            .into_rgba8();
+        let side = skin.width() / 8;
+        let mut face = image::imageops::crop_imm(&skin, side, side, side, side).to_image();
+        let hat = image::imageops::crop_imm(&skin, 5 * side, side, side, side);
+        image::imageops::overlay(&mut face, &*hat, 0, 0);
+        Some(Self {
+            face: Rc::new(face),
+            sizes: Default::default(),
+        })
+    }
+
+    fn raster(&self, side: u32) -> Arc<gpui::RenderImage> {
+        self.sizes
+            .borrow_mut()
+            .entry(side)
+            .or_insert_with(|| {
+                let mut pixels = image::imageops::resize(
+                    &*self.face,
+                    side,
+                    side,
+                    image::imageops::FilterType::Nearest,
+                );
+                for pixel in pixels.pixels_mut() {
+                    pixel.0.swap(0, 2);
+                }
+                Arc::new(gpui::RenderImage::new(vec![image::Frame::new(pixels)]))
+            })
+            .clone()
     }
 }
 
@@ -994,46 +1025,7 @@ impl std::fmt::Debug for ProviderBadge {
     }
 }
 
-/// The head's front face on the 64-unit skin grid.
-const SKIN_FACE: (f32, f32) = (8., 8.);
-/// The head's outer layer, drawn over the face. Classic 64×32 skins carry it in
-/// the same place as the modern 64×64 grid.
-const SKIN_HAT: (f32, f32) = (40., 8.);
-/// One head region is 8 units square, so exactly one region fills the avatar.
-const HEAD_UNITS: f32 = 8.;
-/// Avatar border width. A crop sized for the border box would sit one pixel low
-/// and lose the far edge, so region edits use the inset content box.
-const AVATAR_BORDER: f32 = 1.;
-
-/// Where the whole skin image sits inside a square content box so that one
-/// 8-unit head region covers it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct SkinCrop {
-    /// Scaled size of the complete skin image.
-    image: (f32, f32),
-    /// Image offset that brings the face region to the content box's top-left.
-    face: (f32, f32),
-    /// Image offset that brings the hat region to the same corner.
-    hat: (f32, f32),
-}
-
-fn skin_crop(width: u32, height: u32, inner: f32) -> SkinCrop {
-    let units = inner / HEAD_UNITS;
-    let factor = width as f32 / 64.;
-    let scale = units / factor;
-    let offset = |region: (f32, f32)| (-(region.0 * factor * scale), -(region.1 * factor * scale));
-    SkinCrop {
-        image: (width as f32 * scale, height as f32 * scale),
-        face: offset(SKIN_FACE),
-        hat: offset(SKIN_HAT),
-    }
-}
-
-/// Draw the face plus hat layer from the real skin, or the initials fallback.
-///
-/// The whole validated skin is drawn once per layer and the avatar's clipped
-/// 8-unit window selects the region, so classic, 64×32 and HD grids share one
-/// rule and no image service is involved.
+/// Paint the pixel-art head at its physical display resolution.
 pub(super) fn account_avatar(
     name: &str,
     avatar: Option<&AccountAvatar>,
@@ -1041,23 +1033,8 @@ pub(super) fn account_avatar(
     size: f32,
     state: AvatarState,
 ) -> Div {
-    let Some(avatar) = avatar.filter(|_| state != AvatarState::Loading) else {
+    let Some(avatar) = avatar.filter(|_| state != AvatarState::Loading).cloned() else {
         return avatar_fallback(name, palette, size, state);
-    };
-    let inner = (size - 2. * AVATAR_BORDER).max(1.);
-    let crop = skin_crop(avatar.width, avatar.height, inner);
-    let layer = |offset: (f32, f32), selector: &'static str| {
-        div()
-            .absolute()
-            .left(px(offset.0))
-            .top(px(offset.1))
-            .size(px(inner))
-            .child(
-                img(avatar.image.clone())
-                    .debug_selector(move || selector.to_owned())
-                    .w(px(crop.image.0))
-                    .h(px(crop.image.1)),
-            )
     };
     div()
         .size(px(size))
@@ -1065,11 +1042,36 @@ pub(super) fn account_avatar(
         .relative()
         .overflow_hidden()
         .rounded_full()
-        .border(px(AVATAR_BORDER))
+        .border_1()
         .border_color(rgb(palette.border))
         .bg(rgb(palette.secondary))
-        .child(layer(crop.face, "account-avatar-face"))
-        .child(layer(crop.hat, "account-avatar-hat"))
+        .child(
+            div()
+                .debug_selector(|| "account-avatar-face".into())
+                .size_full()
+                .child(
+                    gpui::canvas(
+                        |_, _, _| (),
+                        move |bounds, (), window, _| {
+                            let side = (f32::from(bounds.size.width) * window.scale_factor())
+                                .round() as u32;
+                            if side > 0
+                                && let Err(error) = window.paint_image(
+                                    bounds,
+                                    bounds,
+                                    Default::default(),
+                                    avatar.raster(side),
+                                    0,
+                                    false,
+                                )
+                            {
+                                tracing::warn!(%error, "Could not paint account avatar");
+                            }
+                        },
+                    )
+                    .size_full(),
+                ),
+        )
 }
 
 /// Map a validated provider-icon kind to the renderer's image format.
@@ -1567,29 +1569,41 @@ mod tests {
     }
 
     #[test]
-    fn skin_crop_geometry_covers_classic_and_hd_skins() {
-        // The face and hat offsets are measured on the 64-unit grid, so an
-        // 8-unit head region must fill a 40 px content box whatever the source
-        // resolution.
-        for (width, height) in [(64, 64), (64, 32), (128, 128), (128, 64)] {
-            let crop = super::skin_crop(width, height, 40.);
-            assert_eq!(crop.face, (-40., -40.), "{width}×{height} face");
-            assert_eq!(crop.hat, (-200., -40.), "{width}×{height} hat");
-            assert_eq!(
-                crop.image.0, 320.,
-                "{width}×{height} scaled skin width: 8 avatar widths"
-            );
-            assert_eq!(
-                crop.image.1,
-                320. * height as f32 / width as f32,
-                "{width}×{height} scaled skin height"
-            );
+    fn avatar_composites_hat_and_scales_without_interpolating() -> anyhow::Result<()> {
+        for (width, height) in [(64, 32), (64, 64), (128, 128)] {
+            let side = width / 8;
+            let mut skin = image::RgbaImage::new(width, height);
+            for x in 0..side {
+                for y in 0..side {
+                    skin.put_pixel(side + x, side + y, image::Rgba([255, 0, 0, 255]));
+                    if x >= side / 2 {
+                        skin.put_pixel(side * 5 + x, side + y, image::Rgba([0, 0, 255, 255]));
+                    }
+                }
+            }
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            skin.write_to(&mut bytes, image::ImageFormat::Png)?;
+            let avatar = super::AccountAvatar::from_skin(block_launcher::avatars::validate_skin(
+                bytes.get_ref(),
+            )?)
+            .ok_or_else(|| anyhow::anyhow!("skin failed to decode"))?;
+            let raster = avatar.raster(78);
+            let bytes = raster
+                .as_bytes(0)
+                .ok_or_else(|| anyhow::anyhow!("missing avatar frame"))?;
+            assert_eq!(bytes.len(), 78 * 78 * 4);
+            for (i, &pixel) in bytes.as_chunks::<4>().0.iter().enumerate() {
+                assert_eq!(
+                    pixel,
+                    if i % 78 < 39 {
+                        [0, 0, 255, 255]
+                    } else {
+                        [255, 0, 0, 255]
+                    }
+                );
+            }
         }
-        // The hat region is inside every accepted grid, including 64×32.
-        for (width, height) in [(64, 32), (64, 64)] {
-            let crop = super::skin_crop(width, height, 40.);
-            assert!(-crop.hat.1 + 40. <= crop.image.1, "{width}×{height} hat");
-        }
+        Ok(())
     }
 
     #[test]
@@ -1607,15 +1621,9 @@ mod tests {
 
     impl Render for AvatarFixture {
         fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
-            // Layout is what the crop rule controls here. The bytes stay empty
-            // because the renderer owns decoding, not the geometry assertions.
-            let avatar = self.skin.map(|(width, height)| super::AccountAvatar {
-                image: std::sync::Arc::new(gpui::Image::from_bytes(
-                    gpui::ImageFormat::Png,
-                    Vec::new(),
-                )),
-                width,
-                height,
+            let avatar = self.skin.map(|_| super::AccountAvatar {
+                face: std::rc::Rc::new(image::RgbaImage::new(8, 8)),
+                sizes: Default::default(),
             });
             div()
                 .id("avatar-host")
@@ -1642,21 +1650,15 @@ mod tests {
         cx.run_until_parked();
         let host = cx.debug_bounds("avatar-host");
         let face = cx.debug_bounds("account-avatar-face");
-        let hat = cx.debug_bounds("account-avatar-hat");
-        assert!(host.is_some() && face.is_some() && hat.is_some());
-        if let (Some(host), Some(face), Some(hat)) = (host, face, hat) {
-            assert_eq!(host.size.width, px(40.));
-            // The avatar's 1 px border insets the crop: the drawn skin is eight
-            // content widths across and shifted so its 8-unit face region fills
-            // the content box, and the hat region starts four widths further
-            // left because it begins at x = 40 of 64 units.
-            let inner = 38.;
-            assert_eq!(face.size.width, px(inner * 8.));
-            assert_eq!(face.origin.x, host.origin.x + px(1.) - px(inner));
-            assert_eq!(face.origin.y, host.origin.y + px(1.) - px(inner));
-            assert_eq!(hat.origin.x, host.origin.x + px(1.) - px(inner * 5.));
-            assert_eq!(hat.origin.y, host.origin.y + px(1.) - px(inner));
-        }
+        assert!(
+            host.zip(face).is_some_and(|(host, face)| {
+                face.size.width == px(38.)
+                    && face.size.height == px(38.)
+                    && face.origin.x == host.origin.x + px(1.)
+                    && face.origin.y == host.origin.y + px(1.)
+            }),
+            "composite face must fill the avatar's inset bounds"
+        );
     }
 
     #[gpui::test]
