@@ -475,10 +475,10 @@
     "zh-Hans": "取消登录",
     "ja": "サインインをキャンセル"
   },
-  "accounts.auth.footer.back": {
-    "en": "Back",
-    "zh-Hans": "返回",
-    "ja": "戻る"
+  "accounts.auth.back": {
+    "en": "Back to previous step",
+    "zh-Hans": "返回上一步",
+    "ja": "前のステップに戻る"
   },
   "accounts.auth.footer.continue": {
     "en": "Continue",

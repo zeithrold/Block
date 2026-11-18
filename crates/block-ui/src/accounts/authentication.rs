@@ -240,6 +240,14 @@ pub(crate) struct AuthProviderDraft {
 }
 
 impl AuthWizard {
+    pub(super) fn can_go_back(&self) -> bool {
+        match self.phase {
+            Phase::Connect => self.provider != AccountProvider::Microsoft,
+            Phase::Complete | Phase::Saving | Phase::Saved => false,
+            _ => true,
+        }
+    }
+
     pub(super) fn refresh_placeholders(
         &self,
         language: Language,
@@ -1396,9 +1404,7 @@ impl Block {
         let phase = state.phase;
         // A verified identity is either saved or closed, and a save in flight
         // has no earlier page to return to.
-        if matches!(phase, Phase::Complete | Phase::Saving | Phase::Saved)
-            || phase == Phase::Connect && state.provider == AccountProvider::Microsoft
-        {
+        if !state.can_go_back() {
             return;
         }
         let drafting = state.provider_draft.is_some();
@@ -2738,15 +2744,6 @@ impl Block {
             )
     }
 
-    /// Whether the page has an earlier state to return to.
-    fn can_go_back(state: &AuthWizard) -> bool {
-        match state.phase {
-            Phase::Connect => state.provider != AccountProvider::Microsoft,
-            Phase::Complete | Phase::Saving | Phase::Saved => false,
-            _ => true,
-        }
-    }
-
     /// Whether acting on this failure can change its outcome in this process.
     ///
     /// A missing engine and a system without any secure credential store are
@@ -2763,34 +2760,19 @@ impl Block {
         let language = self.language();
         // A save in flight already authorizes the write, so no exit presents
         // itself as revoking it.
-        let exits = (!state.phase.committed()).then(|| {
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(self.auth_button(
-                    "auth-cancel",
-                    if state.phase.pending() {
-                        tr!(language, "accounts.auth.footer.cancel_sign_in")
-                    } else {
-                        tr!(language, "common.close")
-                    },
-                    UiAction::AuthCancel,
-                    ButtonVariant::Ghost,
-                    ControlState::default(),
-                    cx,
-                ))
-                .children(Self::can_go_back(state).then(|| {
-                    self.auth_button(
-                        "auth-back",
-                        tr!(language, "accounts.auth.footer.back"),
-                        UiAction::AuthBack,
-                        ButtonVariant::Ghost,
-                        ControlState::default(),
-                        cx,
-                    )
-                }))
+        let cancel = (!state.phase.committed()).then(|| {
+            self.auth_button(
+                "auth-cancel",
+                if state.phase.pending() {
+                    tr!(language, "accounts.auth.footer.cancel_sign_in")
+                } else {
+                    tr!(language, "common.close")
+                },
+                UiAction::AuthCancel,
+                ButtonVariant::Ghost,
+                ControlState::default(),
+                cx,
+            )
         });
         let (label, action, busy) = match state.phase {
             Phase::Connect => (
@@ -2869,7 +2851,7 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .children(exits)
+                    .children(cancel)
                     .children(
                         (state.phase != Phase::Connect
                             || state.provider != AccountProvider::Microsoft)
@@ -3860,7 +3842,16 @@ mod tests {
         });
 
         // Back restores the expanded chooser; collapsing never discards a draft.
+        let back = crate::test_support::control_bounds(cx, "auth-back");
+        let close = crate::test_support::control_bounds(cx, "task-close");
+        assert!(
+            back.zip(close).is_some_and(|(back, close)| {
+                back.right() <= close.left() && back.center().y == close.center().y
+            }),
+            "step back belongs immediately left of the wizard exit"
+        );
         click(cx, "auth-back");
+        assert!(crate::test_support::control_bounds(cx, "auth-back").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         click(cx, "auth-other-options");

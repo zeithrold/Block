@@ -404,6 +404,27 @@ impl Block {
                     .h(px(1.))
                     .bg(rgb(self.palette.border)),
             )
+            .children(
+                self.shell
+                    .auth
+                    .as_ref()
+                    .filter(|auth| auth.can_go_back())
+                    .map(|_| {
+                        let label = tr!(language, "accounts.auth.back");
+                        super::tooltip::trigger(
+                            self.chrome_icon_button(
+                                "auth-back",
+                                UiAction::AuthBack,
+                                super::design::Icon::ChevronLeft.render(16., self.palette.muted),
+                                label.clone(),
+                                cx,
+                            ),
+                            label,
+                            Block::language,
+                            cx,
+                        )
+                    }),
+            )
             .child(if task {
                 let action = if self.shell.auth.is_some() {
                     UiAction::AuthCancel
