@@ -3788,6 +3788,13 @@ mod tests {
         assert!(result.is_ok(), "{result:#?}");
     }
 
+    fn assert_collapsed_auth_chooser(cx: &mut gpui::VisualTestContext) {
+        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
+        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
+        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
+    }
+
     #[gpui::test]
     fn account_forms_return_to_the_chooser_with_disclosure_and_drafts_retained(
         cx: &mut TestAppContext,
@@ -3803,55 +3810,46 @@ mod tests {
         cx.simulate_resize(size(px(360.), px(720.)));
         cx.run_until_parked();
         let body = crate::test_support::control_bounds(cx, "auth-body");
-        // The wizard begins at the chooser, before authorization starts.
-        assert_eq!(
-            view.read_with(cx, |view, _| view.shell.auth.as_ref().map(|state| (
-                state.phase,
-                state.provider,
-                state.other_sign_in_options
-            ))),
-            Some((
-                Phase::Connect,
-                block_auth::AccountProvider::Microsoft,
-                false
+        // Both entry points begin with a chooser, before authorization starts.
+        assert!(
+            view.read_with(cx, |view, _| view.shell.auth.as_ref().is_some_and(
+                |state| (state.phase, state.provider, state.other_sign_in_options)
+                    == (
+                        Phase::Connect,
+                        block_auth::AccountProvider::Microsoft,
+                        false
+                    )
             ))
         );
         assert_eq!(
             view.read_with(cx, |view, _| view.router.auth_return()),
             Some(Tab::Accounts)
         );
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
+        assert_collapsed_auth_chooser(cx);
         assert!(crate::test_support::control_bounds(cx, "auth-device-code-action").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-primary").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_some());
-        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
 
         // One expansion reveals both alternatives without changing the form.
         assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-other-options")));
         click(cx, "auth-other-options");
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
-        assert_eq!(
-            view.read_with(cx, |view, _| view
-                .shell
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
                 .auth
                 .as_ref()
-                .map(|state| state.provider)),
-            Some(block_auth::AccountProvider::Microsoft)
-        );
+                .is_some_and(|state| state.provider == block_auth::AccountProvider::Microsoft)
+        }));
 
         // Choosing a provider enters its own form, without sibling entry cards.
         assert!(body.is_some_and(|body| scroll_into_view(cx, body, "auth-offline")));
         click(cx, "auth-offline");
-        assert_eq!(
-            view.read_with(cx, |view, _| view
-                .shell
-                .auth
-                .as_ref()
-                .map(|state| (state.phase, state.provider))),
-            Some((Phase::Connect, block_auth::AccountProvider::Offline))
-        );
+        assert!(view.read_with(cx, |view, _| {
+            view.shell.auth.as_ref().is_some_and(|state| {
+                state.phase == Phase::Connect
+                    && state.provider == block_auth::AccountProvider::Offline
+            })
+        }));
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_none());
         assert!(crate::test_support::control_bounds(cx, "auth-other-options").is_none());
@@ -3882,22 +3880,16 @@ mod tests {
         assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_some());
         assert!(crate::test_support::control_bounds(cx, "auth-offline").is_some());
         click(cx, "auth-other-options");
-        assert!(crate::test_support::control_bounds(cx, "auth-authlib").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-offline").is_none());
-        assert!(crate::test_support::control_bounds(cx, "auth-microsoft").is_some());
-        view.read_with(cx, |view, cx| {
-            let state = view.shell.auth.as_ref();
-            assert_eq!(
-                state.map(|state| state.provider),
-                Some(block_auth::AccountProvider::Microsoft)
-            );
-            assert_eq!(
-                state
-                    .and_then(|state| state.username.as_ref())
-                    .map(|field| field.read(cx).value().to_string()),
-                Some("Local_Draft".into())
-            );
-        });
+        assert_collapsed_auth_chooser(cx);
+        assert!(
+            view.read_with(cx, |view, cx| view.shell.auth.as_ref().is_some_and(
+                |state| state.provider == block_auth::AccountProvider::Microsoft
+                    && state
+                        .username
+                        .as_ref()
+                        .is_some_and(|field| field.read(cx).value() == "Local_Draft")
+            ))
+        );
 
         // Back at the chooser is a no-op and retains the non-sensitive draft.
         cx.update(|window, cx| {
