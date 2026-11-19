@@ -725,6 +725,27 @@ impl AuthlibProvider {
         cancel: &CancellationToken,
     ) -> Result<Self> {
         validate_name(name)?;
+        Self::discover_identity(id, Some(name), address, allow_http, cancel).await
+    }
+
+    /// Detect the server's own identity without requiring a local display name.
+    /// # Errors
+    /// Reports the same address, transport and metadata errors as [`Self::discover`].
+    pub async fn detect(
+        address: &str,
+        allow_http: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Self> {
+        Self::discover_identity(Uuid::new_v4(), None, address, allow_http, cancel).await
+    }
+
+    async fn discover_identity(
+        id: Uuid,
+        name: Option<&str>,
+        address: &str,
+        allow_http: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Self> {
         if id.is_nil() {
             return Err(AuthError::ProviderMetadata);
         }
@@ -837,7 +858,7 @@ fn validate_name(name: &str) -> Result<()> {
 
 async fn discover_inner(
     id: Uuid,
-    name: &str,
+    name: Option<&str>,
     address: &str,
     allow_http: bool,
 ) -> Result<AuthlibProvider> {
@@ -924,12 +945,17 @@ async fn discover_inner(
             bytes.extend_from_slice(&chunk);
         }
         let json = String::from_utf8(bytes).map_err(|_| AuthError::ProviderMetadata)?;
+        let metadata = metadata(&json, &url)?;
+        let name = name
+            .or(metadata.server_name.as_deref())
+            .or_else(|| url.host_str())
+            .ok_or(AuthError::InvalidProviderAddress)?;
         let provider = AuthlibProvider {
             id,
             name: name.to_owned(),
             api_url: url.to_string(),
             allow_http: url.scheme() == "http" && allow_http,
-            metadata: metadata(&json, &url)?,
+            metadata,
             metadata_json: json,
         };
         provider.validate()?;
@@ -2032,14 +2058,23 @@ mod tests {
     #[tokio::test]
     async fn discovery_accepts_absolute_ali_on_a_different_server_without_credentials()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let (api, api_task) = server(vec![(200, String::new(), document())]).await?;
+        let mut metadata: serde_json::Value = serde_json::from_str(&document())?;
+        metadata["meta"] = serde_json::json!({});
+        let (api, api_task) = server(vec![(200, String::new(), metadata.to_string())]).await?;
         let (landing, landing_task) = server(vec![(
             404,
             format!("X-Authlib-Injector-API-Location: {api}\r\n"),
             String::new(),
         )])
         .await?;
-        assert_eq!(discover(&landing).await?.api_url, api);
+        let provider = AuthlibProvider::detect(
+            &landing.replace("127.0.0.1", "localhost"),
+            true,
+            &CancellationToken::new(),
+        )
+        .await?;
+        assert_eq!(provider.api_url, api);
+        assert_eq!(provider.name, "127.0.0.1", "use the final API host");
         assert_eq!(api_task.await??.len(), 1);
         landing_task.await??;
         Ok(())

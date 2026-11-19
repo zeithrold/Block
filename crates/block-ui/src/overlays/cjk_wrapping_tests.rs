@@ -55,6 +55,7 @@ fn policy_notes_keep_cjk_punctuation_with_native_shaping(cx: &mut gpui::TestAppC
                 width: drawer_size.width,
                 height: drawer_size.height,
                 panel_height: 652.,
+                fit: None,
                 translation: 0.,
                 scrim: 1.,
                 dragging: false,

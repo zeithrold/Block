@@ -96,7 +96,6 @@ impl gpui::RenderOnce for AuthOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AccountMessage {
     Product(&'static str),
-    Detail(&'static str, String),
     Diagnostic(String),
 }
 
@@ -109,14 +108,9 @@ impl AccountMessage {
         Self::Diagnostic(text.into())
     }
 
-    pub(crate) fn detail(key: &'static str, text: impl Into<String>) -> Self {
-        Self::Detail(key, text.into())
-    }
-
     pub(crate) fn render(&self, language: Language) -> String {
         match self {
             Self::Product(key) => tr!(language, *key),
-            Self::Detail(key, detail) => tr!(language, *key, detail = detail),
             Self::Diagnostic(text) => tr!(language, "common.diagnostic_detail", detail = text),
         }
     }
@@ -234,18 +228,9 @@ struct DeviceCode {
     expires_at: std::time::Instant,
 }
 
-#[derive(Debug)]
-pub(crate) struct AuthProviderDraft {
-    id: uuid::Uuid,
-    pub(crate) name: gpui::Entity<super::TextInput>,
-    pub(crate) address: gpui::Entity<super::TextInput>,
-    pub(crate) observed_address: String,
-    pub(crate) accepted_http: Option<String>,
-    pub(crate) error: Option<AccountMessage>,
-    attempt: Option<(u64, block_launcher::CancellationToken)>,
-    saved: Option<uuid::Uuid>,
-    scroll: ScrollHandle,
-}
+#[path = "provider_drawer.rs"]
+mod provider_drawer;
+use provider_drawer::AuthProviderDraft;
 
 impl AuthWizard {
     fn waiting_for_browser(&self) -> bool {
@@ -297,27 +282,16 @@ impl AuthWizard {
             });
         }
         if let Some(draft) = &self.provider_draft {
-            for (input, key) in [
-                (&draft.name, "accounts.auth.provider_add.name.placeholder"),
-                (
-                    &draft.address,
-                    "accounts.auth.provider_add.address.placeholder",
-                ),
-            ] {
-                let placeholder = tr!(language, key);
-                input.update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
-            }
+            let placeholder = tr!(language, "accounts.auth.provider_add.address.placeholder");
+            draft
+                .address
+                .update(cx, |input, cx| input.set_placeholder(&placeholder, cx));
         }
     }
 
-    /// Whether the Add-provider page currently owns a draft (drop-zone lifetime).
+    #[cfg(test)]
     pub(super) fn is_provider_drafting(&self) -> bool {
         self.provider_draft.is_some()
-    }
-
-    /// Mutable access to the draft for drop-payload handoff.
-    pub(super) fn provider_draft_mut(&mut self) -> Option<&mut AuthProviderDraft> {
-        self.provider_draft.as_mut()
     }
 }
 
@@ -331,10 +305,9 @@ pub(super) struct AuthWizard {
     password: Option<gpui::Entity<gpui_base::input::InputState>>,
     external_provider: Option<uuid::Uuid>,
     external_api: Option<String>,
-    accepted_http: Option<String>,
     characters: Vec<block_auth::AuthlibProfile>,
     character: Option<uuid::Uuid>,
-    provider_draft: Option<AuthProviderDraft>,
+    pub(crate) provider_draft: Option<AuthProviderDraft>,
     method: Method,
     device_code: Option<DeviceCode>,
     attempt: Option<(u64, block_launcher::CancellationToken)>,
@@ -486,7 +459,6 @@ impl AuthWizard {
             password: None,
             external_provider: self.external_provider,
             external_api: self.external_api.clone(),
-            accepted_http: self.accepted_http.clone(),
             characters: self.characters.clone(),
             character: self.character,
             provider_draft: None,
@@ -565,502 +537,31 @@ impl AuthWizard {
 }
 
 impl Block {
+    fn external_auth_provider(
+        &self,
+        state: &AuthWizard,
+    ) -> Result<&block_auth::AuthlibProvider, &'static str> {
+        let provider = self
+            .shell
+            .providers
+            .records
+            .iter()
+            .find(|provider| Some(provider.id) == state.external_provider)
+            .ok_or("accounts.auth.error.choose_provider")?;
+        if state.external_api.as_deref() != Some(provider.api_url.as_str()) {
+            return Err("accounts.auth.provider.address_changed");
+        }
+        if provider.api_url.starts_with("http:") && !provider.allow_http {
+            return Err("accounts.auth.error.provider_http_before_send");
+        }
+        Ok(provider)
+    }
+
     pub(super) fn auth_save_pending(&self) -> bool {
         self.shell
             .auth
             .as_ref()
             .is_some_and(|auth| auth.phase == Phase::Saving)
-    }
-    pub(super) fn open_auth_provider_add(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if self
-            .shell
-            .auth
-            .as_ref()
-            .is_some_and(|state| state.provider_draft.is_some())
-        {
-            self.shell
-                .surfaces
-                .open(super::shell::Surface::AuthProviderAdd, window, cx);
-            return;
-        }
-        if self.busy
-            || self.shell.auth.as_ref().is_none_or(|s| {
-                s.provider != AccountProvider::Authlib
-                    || !matches!(s.phase, Phase::Connect | Phase::Failed)
-            })
-        {
-            return;
-        }
-        if self
-            .shell
-            .auth
-            .as_ref()
-            .is_some_and(|s| s.provider_draft.is_none())
-        {
-            let language = self.language();
-            let address = super::input(
-                "",
-                &tr!(language, "accounts.auth.provider_add.address.placeholder"),
-                cx,
-            );
-            cx.observe(&address, |view, field, cx| {
-                let value = field.read(cx).value();
-                if let Some(draft) = view
-                    .shell
-                    .auth
-                    .as_mut()
-                    .and_then(|s| s.provider_draft.as_mut())
-                    && draft.address == field
-                    && draft.observed_address != value
-                {
-                    draft.observed_address = value;
-                    draft.accepted_http = None;
-                    draft.error = None;
-                    cx.notify();
-                }
-            })
-            .detach();
-            let draft = AuthProviderDraft {
-                id: uuid::Uuid::new_v4(),
-                name: super::input(
-                    "",
-                    &tr!(language, "accounts.auth.provider_add.name.placeholder"),
-                    cx,
-                ),
-                address,
-                observed_address: String::new(),
-                accepted_http: None,
-                error: None,
-                attempt: None,
-                saved: None,
-                scroll: ScrollHandle::new(),
-            };
-            if let Some(state) = &mut self.shell.auth {
-                state.provider_draft = Some(draft);
-            }
-        }
-        self.shell
-            .surfaces
-            .open(super::shell::Surface::AuthProviderAdd, window, cx);
-        cx.notify();
-    }
-
-    pub(super) fn cancel_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
-        if let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.take())
-            && let Some((revision, cancel)) = draft.attempt
-        {
-            cancel.cancel();
-            self.abandon_operation(revision);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn identify_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
-        if self.busy {
-            return;
-        }
-        if let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.as_mut())
-        {
-            match block_auth::ProviderAddress::parse(&draft.address.read(cx).value()) {
-                Ok(address) => {
-                    if draft.name.read(cx).value().trim().is_empty() {
-                        draft
-                            .name
-                            .update(cx, |field, cx| field.set_value(&address.suggested_name, cx));
-                    }
-                    draft
-                        .address
-                        .update(cx, |field, cx| field.set_value(&address.url, cx));
-                    draft.observed_address = address.url;
-                    draft.accepted_http = None;
-                    draft.error = None;
-                }
-                Err(error) => draft.error = Some(AccountMessage::diagnostic(error.to_string())),
-            }
-        }
-        cx.notify();
-    }
-
-    pub(super) fn consent_auth_provider(&mut self, cx: &mut Context<'_, Self>) {
-        if self.busy {
-            return;
-        }
-        if let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.as_mut())
-            && let Ok(address) = block_auth::ProviderAddress::parse(&draft.address.read(cx).value())
-            && address.insecure
-        {
-            draft.accepted_http = if draft.accepted_http.as_deref() == Some(address.url.as_str()) {
-                None
-            } else {
-                Some(address.url)
-            };
-            draft.error = None;
-        }
-        cx.notify();
-    }
-
-    pub(super) fn save_auth_provider(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy {
-            return;
-        }
-        let Some(draft) = self
-            .shell
-            .auth
-            .as_ref()
-            .and_then(|s| s.provider_draft.as_ref())
-        else {
-            return;
-        };
-        let address = match block_auth::ProviderAddress::parse(&draft.address.read(cx).value()) {
-            Ok(address) => address,
-            Err(error) => {
-                if let Some(draft) = self
-                    .shell
-                    .auth
-                    .as_mut()
-                    .and_then(|s| s.provider_draft.as_mut())
-                {
-                    draft.error = Some(AccountMessage::diagnostic(error.to_string()));
-                }
-                cx.notify();
-                return;
-            }
-        };
-        if let Some(provider) = self
-            .shell
-            .providers
-            .records
-            .iter()
-            .find(|p| p.api_url == address.url)
-        {
-            self.use_auth_provider(provider.id, window, cx);
-            return;
-        }
-        let name = draft.name.read(cx).value().trim().to_owned();
-        let accepted = draft.accepted_http.as_deref() == Some(address.url.as_str());
-        if name.is_empty() || address.insecure && !accepted {
-            if let Some(draft) = self
-                .shell
-                .auth
-                .as_mut()
-                .and_then(|s| s.provider_draft.as_mut())
-            {
-                draft.error = Some(if name.is_empty() {
-                    AccountMessage::product("accounts.auth.error.provider_display_name")
-                } else {
-                    AccountMessage::product("accounts.auth.error.provider_http_confirm")
-                });
-            }
-            cx.notify();
-            return;
-        }
-        self.begin_cancellable(
-            msg!("accounts.auth.status.discovering_provider"),
-            super::ui_logging::Operation::DiscoverAuthProvider,
-        );
-        self.operation_kind = super::OperationKind::Account;
-        if let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.as_mut())
-        {
-            draft.error = None;
-            draft.saved = None;
-            draft.attempt = Some((self.operation_revision, self.cancel.clone()));
-            for field in [&draft.name, &draft.address] {
-                field.update(cx, |field, cx| field.set_read_only(true, cx));
-            }
-        }
-        if let Some(engine) = &self.engine {
-            engine.save_provider(None, name, address.url, accepted, self.cancel.clone());
-        } else {
-            self.fail_auth_provider(
-                AccountMessage::product("accounts.auth.error.provider_setup_unavailable"),
-                cx,
-            );
-        }
-        cx.notify();
-    }
-
-    fn use_auth_provider(
-        &mut self,
-        id: uuid::Uuid,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let Some(api) = self
-            .shell
-            .providers
-            .records
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.api_url.clone())
-        else {
-            return;
-        };
-        if let Some(state) = &mut self.shell.auth {
-            if let Some(field) = &state.password {
-                field.update(cx, |field, cx| field.set_value("", window, cx));
-            }
-            state.external_provider = Some(id);
-            state.external_api = Some(api);
-            state.accepted_http = None;
-            state.error = None;
-            state.provider_draft = None;
-            state.transition(Phase::Connect);
-        }
-        self.shell.surfaces.close(window, &self.focus, cx);
-        cx.notify();
-    }
-
-    pub(super) fn auth_provider_finished(
-        &mut self,
-        result: &Result<crate::i18n::UiText, String>,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if let Err(error) = result {
-            self.fail_auth_provider(AccountMessage::diagnostic(error.clone()), cx);
-        }
-    }
-
-    /// Release the Add-provider draft after its attempt failed.
-    fn fail_auth_provider(&mut self, error: AccountMessage, cx: &mut Context<'_, Self>) {
-        let revision = self.operation_revision;
-        let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.as_mut())
-        else {
-            return;
-        };
-        if draft
-            .attempt
-            .as_ref()
-            .is_some_and(|(attempt, _)| *attempt == revision)
-        {
-            draft.error = Some(error);
-            draft.attempt = None;
-            for field in [&draft.name, &draft.address] {
-                field.update(cx, |field, cx| field.set_read_only(false, cx));
-            }
-        }
-    }
-
-    pub(super) fn auth_provider_saved(&mut self, id: &str, cx: &mut Context<'_, Self>) -> bool {
-        let Ok(id) = id.parse::<uuid::Uuid>() else {
-            return false;
-        };
-        let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|s| s.provider_draft.as_mut())
-        else {
-            return false;
-        };
-        if draft.attempt.as_ref().is_none_or(|(revision, cancel)| {
-            *revision != self.operation_revision || cancel.is_cancelled()
-        }) {
-            return false;
-        }
-        draft.saved = Some(id);
-        let draft_id = draft.id;
-        let handle = self
-            .shell
-            .auth
-            .as_ref()
-            .and_then(|state| state.return_window);
-        if let Some(handle) = handle {
-            let owner = cx.entity();
-            cx.defer(move |cx| {
-                let _ = handle.update(cx, |_, window, cx| {
-                    owner.update(cx, |view, cx| {
-                        if view
-                            .shell
-                            .auth
-                            .as_ref()
-                            .and_then(|s| s.provider_draft.as_ref())
-                            .is_none_or(|draft| draft.id != draft_id || draft.saved != Some(id))
-                        {
-                            return;
-                        }
-                        view.use_auth_provider(id, window, cx);
-                    })
-                });
-            });
-        }
-        true
-    }
-
-    pub(super) fn render_auth_provider_add(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
-        let Some(draft) = self
-            .shell
-            .auth
-            .as_ref()
-            .and_then(|s| s.provider_draft.as_ref())
-        else {
-            return div().into_any_element();
-        };
-        let parsed = block_auth::ProviderAddress::parse(&draft.address.read(cx).value()).ok();
-        let existing = parsed.as_ref().and_then(|a| {
-            self.shell
-                .providers
-                .records
-                .iter()
-                .find(|p| p.api_url == a.url)
-        });
-        let language = self.language();
-        let mut form = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(super::attach_provider_drop_bounds(
-                div().child(
-                    div()
-                        .id("provider-drop-zone")
-                        .debug_selector(|| "provider-drop-zone".into())
-                        .w_full()
-                        .p_4()
-                        .rounded_lg()
-                        .border_1()
-                        .border_dashed()
-                        .border_color(rgb(self.palette.border))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_1()
-                        .child(Icon::ExternalLink.render(20., self.palette.muted))
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(tr!(language, "accounts.auth.provider_add.drop")),
-                        )
-                        .child(note(tr!(language, "accounts.auth.provider_add.drop_note"))),
-                ),
-                cx.entity().downgrade(),
-            ))
-            .child(components::field_with(
-                tr!(language, "accounts.auth.provider_add.name.label"),
-                &draft.name,
-                self.palette,
-                components::FieldOptions {
-                    required: true,
-                    ..Default::default()
-                },
-            ))
-            .child(components::field_with(
-                tr!(language, "accounts.auth.provider_add.address.label"),
-                &draft.address,
-                self.palette,
-                components::FieldOptions {
-                    required: true,
-                    ..Default::default()
-                },
-            ))
-            .child(self.auth_button(
-                "auth-provider-identify",
-                tr!(language, "accounts.auth.provider_add.identify"),
-                UiAction::AuthProviderIdentify,
-                ButtonVariant::Outline,
-                ControlState {
-                    disabled: self.busy,
-                    ..Default::default()
-                },
-                cx,
-            ));
-        if let Some(provider) = existing {
-            form = form.child(note(tr!(
-                language,
-                "accounts.auth.provider_add.existing",
-                name = provider.name
-            )));
-        }
-        if let Some(address) = &parsed
-            && address.insecure
-        {
-            form = form
-                .child(note(tr!(language, "accounts.auth.provider_add.http_note")))
-                .child(components::checkbox(
-                    "auth-provider-http",
-                    tr!(language, "accounts.auth.http_consent"),
-                    draft.accepted_http.as_deref() == Some(address.url.as_str()),
-                    self.palette,
-                    ControlState {
-                        disabled: self.busy,
-                        ..Default::default()
-                    },
-                    cx.listener(|view, (), window, cx| {
-                        view.handle(UiAction::AuthProviderConsent, window, cx)
-                    }),
-                ));
-        }
-        let form = form.children(
-            draft
-                .error
-                .as_ref()
-                .map(|error| note(error.render(language))),
-        );
-        let footer = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(self.auth_button(
-                "auth-provider-cancel",
-                tr!(language, "common.cancel"),
-                UiAction::AuthProviderCancel,
-                ButtonVariant::Ghost,
-                ControlState::default(),
-                cx,
-            ))
-            .child(self.auth_button(
-                "auth-provider-save",
-                if existing.is_some() {
-                    tr!(language, "accounts.auth.provider_add.use_saved")
-                } else {
-                    tr!(language, "accounts.auth.provider_add.add")
-                },
-                UiAction::AuthProviderSave,
-                ButtonVariant::Primary,
-                ControlState {
-                    busy: draft.attempt.is_some(),
-                    disabled: self.busy
-                        || existing.is_none()
-                            && parsed.as_ref().is_some_and(|a| {
-                                a.insecure && draft.accepted_http.as_deref() != Some(a.url.as_str())
-                            }),
-                    ..Default::default()
-                },
-                cx,
-            ));
-        super::drawer_page::DrawerPage::new(
-            "authlib-add-page",
-            super::drawer_page::scroll_body(
-                "authlib-add-body",
-                &draft.scroll,
-                self.palette,
-                form.into_any_element(),
-            ),
-            footer.into_any_element(),
-        )
-        .render()
     }
 
     pub(super) fn account_provider(
@@ -1092,46 +593,19 @@ impl Block {
         if state.provider_draft.is_some() {
             return;
         }
-        let Some(provider) = self
-            .shell
-            .providers
-            .records
-            .iter()
-            .find(|p| Some(p.id) == state.external_provider)
-            .cloned()
-        else {
-            if let Some(state) = &mut self.shell.auth {
-                state.failed(AccountMessage::product(
-                    "accounts.auth.error.choose_provider",
-                ));
-            }
-            cx.notify();
-            return;
-        };
-        if state.external_api.as_deref() != Some(provider.api_url.as_str()) {
-            if let Some(state) = &mut self.shell.auth {
-                if let Some(field) = &state.password {
-                    field.update(cx, |input, cx| input.set_value("", window, cx));
+        let provider = match self.external_auth_provider(state) {
+            Ok(provider) => provider.clone(),
+            Err(key) => {
+                if let Some(state) = &mut self.shell.auth {
+                    if let Some(field) = &state.password {
+                        field.update(cx, |input, cx| input.set_value("", window, cx));
+                    }
+                    state.failed(AccountMessage::product(key));
                 }
-                state.accepted_http = None;
-                state.failed(AccountMessage::product(
-                    "accounts.auth.provider.address_changed",
-                ));
+                cx.notify();
+                return;
             }
-            cx.notify();
-            return;
-        }
-        if provider.api_url.starts_with("http:")
-            && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
-        {
-            if let Some(state) = &mut self.shell.auth {
-                state.failed(AccountMessage::product(
-                    "accounts.auth.error.provider_http_before_send",
-                ));
-            }
-            cx.notify();
-            return;
-        }
+        };
         if state.phase == Phase::Characters {
             let Some(character) = state
                 .character
@@ -1272,7 +746,6 @@ impl Block {
             {
                 state.external_provider = Some(id);
                 state.external_api = Some(api);
-                state.accepted_http = None;
                 state.characters.clear();
                 state.character = None;
                 if let Some(field) = &state.password {
@@ -1289,30 +762,6 @@ impl Block {
             {
                 self.shell.surfaces.close(window, &self.focus, cx);
             }
-            cx.notify();
-        }
-    }
-
-    pub(super) fn consent_external_auth(&mut self, cx: &mut Context<'_, Self>) {
-        if self.busy {
-            return;
-        }
-        if let Some(state) = &mut self.shell.auth
-            && matches!(state.phase, Phase::Connect | Phase::Failed)
-            && let Some(provider) = self
-                .shell
-                .providers
-                .records
-                .iter()
-                .find(|p| Some(p.id) == state.external_provider)
-        {
-            state.accepted_http =
-                if state.accepted_http.as_deref() == Some(provider.api_url.as_str()) {
-                    None
-                } else {
-                    Some(provider.api_url.clone())
-                };
-            state.error = None;
             cx.notify();
         }
     }
@@ -2384,31 +1833,12 @@ impl Block {
         if let Some(provider) = provider
             && provider.api_url.starts_with("http:")
         {
-            card = card.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(AlertVariant::Warning.render(
-                        "auth-http-warning",
-                        None,
-                        tr!(language, "accounts.auth.provider.http_warning"),
-                        self.palette,
-                    ))
-                    .child(components::checkbox(
-                        "auth-http-consent",
-                        tr!(language, "accounts.auth.http_consent"),
-                        state.accepted_http.as_deref() == Some(provider.api_url.as_str()),
-                        self.palette,
-                        ControlState {
-                            disabled: self.busy,
-                            ..ControlState::default()
-                        },
-                        cx.listener(|view, (), window, cx| {
-                            view.handle(UiAction::AuthHttpConsent, window, cx);
-                        }),
-                    )),
-            );
+            card = card.child(AlertVariant::Warning.render(
+                "auth-http-warning",
+                None,
+                tr!(language, "accounts.auth.provider.http_warning"),
+                self.palette,
+            ));
         }
         let mut fields = div().flex().flex_col().gap_4();
         if let Some(login) = &state.login {
@@ -2857,17 +2287,7 @@ impl Block {
         };
         let provider_blocked = state.provider == AccountProvider::Authlib
             && matches!(state.phase, Phase::Connect | Phase::Failed)
-            && self
-                .shell
-                .providers
-                .records
-                .iter()
-                .find(|p| Some(p.id) == state.external_provider)
-                .is_none_or(|provider| {
-                    state.external_api.as_deref() != Some(provider.api_url.as_str())
-                        || provider.api_url.starts_with("http:")
-                            && state.accepted_http.as_deref() != Some(provider.api_url.as_str())
-                });
+            && self.external_auth_provider(state).is_err();
         let settled = state.phase == Phase::Failed && !self.can_retry(state);
         let footer = patterns::management_footer(self.palette)
             .id("auth-footer")
@@ -3269,14 +2689,11 @@ mod tests {
                     .as_mut()
                     .and_then(|state| state.provider_draft.as_mut())
                 {
-                    draft
-                        .name
-                        .update(cx, |field, cx| field.set_value("New provider", cx));
                     draft.address.update(cx, |field, cx| {
                         field.set_value("http://new.example.test/api/", cx)
                     });
                 }
-                view.save_auth_provider(window, cx);
+                view.identify_auth_provider(window, cx);
                 assert!(
                     view.shell
                         .auth
@@ -3306,7 +2723,7 @@ mod tests {
                         .address
                         .update(cx, |field, cx| field.set_value(&provider.api_url, cx));
                 }
-                view.save_auth_provider(window, cx);
+                view.identify_auth_provider(window, cx);
                 assert_eq!(view.shell.providers.records.len(), 1);
                 assert_eq!(password.read(cx).value().as_ref(), "");
                 assert!(
@@ -3339,9 +2756,11 @@ mod tests {
     }
 
     #[gpui::test]
-    fn external_provider_changes_clear_sensitive_drafts_and_rebind_http_consent(
+    fn external_sign_in_uses_saved_http_consent_only_for_the_selected_endpoint(
         cx: &mut TestAppContext,
     ) {
+        use super::AccountMessage;
+
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -3376,19 +2795,15 @@ mod tests {
                 assert!(!format!("{:?}", view.shell.auth).contains("SYNTHETIC_PASSWORD"));
                 view.choose_external_provider(uuid::Uuid::from_u128(2), window, cx);
                 assert_eq!(password.read(cx).value().as_ref(), "");
-                assert!(
+                view.start_auth(window, cx);
+                assert_eq!(
                     view.shell
                         .auth
                         .as_ref()
-                        .is_some_and(|state| state.accepted_http.is_none())
-                );
-                view.consent_external_auth(cx);
-                assert!(
-                    view.shell
-                        .auth
-                        .as_ref()
-                        .is_some_and(|state| state.accepted_http.as_deref()
-                            == Some("http://community.example.test/api/"))
+                        .and_then(|state| state.error.as_ref()),
+                    Some(&AccountMessage::product(
+                        "accounts.auth.error.provider_credentials"
+                    ))
                 );
                 password.update(cx, |input, cx| {
                     input.set_value("SECOND_SYNTHETIC_PASSWORD", window, cx)
@@ -3399,11 +2814,10 @@ mod tests {
                 assert_eq!(password.read(cx).value().as_ref(), "");
                 assert!(view.shell.auth.as_ref().is_some_and(|state| {
                     state.phase == Phase::Failed
-                        && state.error.as_ref().is_some_and(|error| {
-                            error
-                                .render(crate::Language::English)
-                                .contains("provider address changed")
-                        })
+                        && state.error
+                            == Some(AccountMessage::product(
+                                "accounts.auth.provider.address_changed",
+                            ))
                 }));
                 view.auth_back(window, cx);
                 assert_eq!(password.read(cx).value().as_ref(), "");
@@ -3413,6 +2827,20 @@ mod tests {
                     state.phase == Phase::Connect
                         && state.provider == block_auth::AccountProvider::Authlib
                 }));
+                // Reselecting the new URL cannot grant HTTP permission on its own.
+                view.shell.providers.records[1].allow_http = false;
+                view.choose_external_provider(uuid::Uuid::from_u128(2), window, cx);
+                view.start_auth(window, cx);
+                assert_eq!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .and_then(|state| state.error.as_ref()),
+                    Some(&AccountMessage::product(
+                        "accounts.auth.error.provider_http_before_send"
+                    ))
+                );
+                view.auth_back(window, cx);
                 view.auth_back(window, cx);
                 // The alternatives lead back to the default Microsoft page.
                 assert!(view.shell.auth.as_ref().is_some_and(|state| {

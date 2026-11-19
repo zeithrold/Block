@@ -100,6 +100,10 @@ impl InstanceDraftValues {
 pub(crate) enum Message {
     Providers(Result<Vec<block_auth::AuthlibProvider>, String>),
     ProviderSaved(String),
+    ProviderDetected(
+        Box<block_auth::AuthlibProvider>,
+        Option<block_launcher::avatars::ProviderIcon>,
+    ),
     ForOperation {
         operation: u64,
         message: Box<Self>,
@@ -287,6 +291,9 @@ pub(crate) struct Engine {
 type PendingAuthlib = (CancellationToken, Arc<block_auth::PendingAuthlibSignIn>);
 type MicrosoftSignInSlot = Arc<Mutex<Option<(CancellationToken, PreparedMicrosoftSignIn)>>>;
 type AuthlibSignInSlot = Arc<Mutex<Option<(CancellationToken, block_auth::PreparedAuthlibSignIn)>>>;
+
+#[path = "provider_setup.rs"]
+mod provider_setup;
 
 impl Engine {
     pub(super) fn default_root() -> anyhow::Result<PathBuf> {
@@ -1181,53 +1188,6 @@ impl Engine {
                 Ok(msg!("completion.external_saved", name = name))
             }.await;
             finish(&sender,result).await;
-        });
-    }
-
-    pub(super) fn save_provider(
-        &self,
-        original: Option<block_auth::AuthlibProvider>,
-        name: String,
-        address: String,
-        allow_http: bool,
-        cancel: CancellationToken,
-    ) {
-        let root = self.root.clone();
-        let sender = self.sender.clone();
-        self.runtime.spawn(async move {
-            let result = async {
-                let address = block_auth::ProviderAddress::parse(&address)?;
-                let provider = if let Some(provider) = &original
-                    && address.url == provider.api_url
-                    && (!address.insecure || allow_http)
-                {
-                    let mut provider = provider.clone();
-                    provider.name = name;
-                    provider.validate()?;
-                    provider
-                } else {
-                    block_auth::AuthlibProvider::discover(
-                        original.as_ref().map_or_else(uuid::Uuid::new_v4, |p| p.id),
-                        &name,
-                        &address.url,
-                        allow_http,
-                        &cancel,
-                    )
-                    .await?
-                };
-                ensure!(!cancel.is_cancelled(), "Provider setup was cancelled.");
-                persist_provider(&root, original.as_ref(), &provider)?;
-                let _ = sender
-                    .unscoped()
-                    .send(Message::Providers(Ok(load_providers(&root)?)))
-                    .await;
-                let _ = sender
-                    .send(Message::ProviderSaved(provider.id.to_string()))
-                    .await;
-                Ok(msg!("completion.provider_saved", name = provider.name))
-            }
-            .await;
-            finish(&sender, result).await;
         });
     }
 
@@ -2905,7 +2865,7 @@ mod tests {
         })
     }
 
-    fn fixture_engine(
+    pub(super) fn fixture_engine(
         root: &std::path::Path,
     ) -> anyhow::Result<(
         super::Engine,

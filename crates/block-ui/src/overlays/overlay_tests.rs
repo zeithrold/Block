@@ -1489,7 +1489,7 @@ fn auth_provider_drawer_dismissals_discard_the_draft_and_restore_the_trigger(
 ) {
     #[derive(Debug)]
     enum Dismissal {
-        Cancel,
+        Close,
         Escape,
         Backdrop,
         Drag,
@@ -1506,7 +1506,7 @@ fn auth_provider_drawer_dismissals_discard_the_draft_and_restore_the_trigger(
         view.shell.surfaces.trigger_focus("auth-provider-add", cx)
     });
     for dismissal in [
-        Dismissal::Cancel,
+        Dismissal::Close,
         Dismissal::Escape,
         Dismissal::Backdrop,
         Dismissal::Drag,
@@ -1516,7 +1516,10 @@ fn auth_provider_drawer_dismissals_discard_the_draft_and_restore_the_trigger(
         let panel = crate::test_support::control_bounds(cx, "block-drawer")
             .expect("the provider form paints in the native drawer");
         match dismissal {
-            Dismissal::Cancel => click(cx, "auth-provider-cancel"),
+            Dismissal::Close => {
+                assert!(crate::test_support::control_bounds(cx, "auth-provider-cancel").is_none());
+                click(cx, "drawer-close");
+            }
             Dismissal::Escape => crate::test_support::press(cx, "escape"),
             Dismissal::Backdrop => {
                 cx.simulate_click(
@@ -1585,14 +1588,28 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
         }
         crate::test_support::press(cx, "escape");
         cx.run_until_parked();
+        cx.simulate_resize(size(px(360.), px(320.)));
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.handle(UiAction::CancelForm, window, cx);
                 view.handle(UiAction::SignIn, window, cx);
                 view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
                 view.handle(UiAction::AuthProviderAdd, window, cx);
+                if let Some(draft) = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|s| s.provider_draft.as_ref())
+                {
+                    draft
+                        .address
+                        .update(cx, |input, cx| input.set_value("http://localhost/", cx));
+                }
             });
         });
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(300));
         cx.run_until_parked();
         let viewport = crate::test_support::control_bounds(cx, "authlib-add-body");
         assert!(
@@ -1603,17 +1620,17 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
             return;
         };
         assert!(viewport.left() >= px(0.) && viewport.right() <= px(360.));
-        assert!(viewport.bottom() <= px(540.));
-        let save = crate::test_support::control_bounds(cx, "auth-provider-save");
+        assert!(viewport.bottom() <= px(320.));
+        let save = crate::test_support::control_bounds(cx, "auth-provider-identify");
         assert!(
-            save.is_some_and(|save| save.top() >= viewport.bottom() && save.bottom() <= px(540.)),
-            "{language:?}: Save starts inside the pinned footer: {save:?}"
+            save.is_some_and(|save| save.top() >= viewport.bottom() && save.bottom() <= px(320.)),
+            "{language:?}: Detect starts inside the pinned footer: {save:?}"
         );
         let position = viewport.center();
-        let drop_zone = crate::test_support::control_bounds(cx, "provider-drop-zone");
+        let identify = crate::test_support::control_bounds(cx, "auth-provider-http");
         assert!(
-            drop_zone.is_some(),
-            "{language:?}: quick-link zone is present"
+            identify.is_some(),
+            "{language:?}: address consent is present"
         );
         cx.simulate_mouse_move(position, None, Modifiers::none());
         cx.simulate_event(gpui::ScrollEvent {
@@ -1623,14 +1640,14 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
         });
         cx.run_until_parked();
         assert_ne!(
-            crate::test_support::control_bounds(cx, "provider-drop-zone"),
-            drop_zone,
+            crate::test_support::control_bounds(cx, "auth-provider-http"),
+            identify,
             "{language:?}: wheel input must scroll the provider fields"
         );
         assert_eq!(
-            crate::test_support::control_bounds(cx, "auth-provider-save"),
+            crate::test_support::control_bounds(cx, "auth-provider-identify"),
             save,
-            "{language:?}: scrolling the provider form must not move Save"
+            "{language:?}: scrolling the provider form must not move Detect"
         );
     }
 }

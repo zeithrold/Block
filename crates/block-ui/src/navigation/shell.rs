@@ -1285,37 +1285,39 @@ impl Block {
             .into_any_element()
     }
 
-    /// Fixed content height for each sheet.
-    pub(super) fn surface_sheet_chrome(&self, kind: &Surface) -> (String, String, f32) {
+    pub(super) fn surface_sheet_chrome(
+        &self,
+        kind: &Surface,
+    ) -> (String, String, crate::drawer_page::DrawerHeight) {
+        use crate::drawer_page::DrawerHeight::Fixed;
         let language = self.language();
         match kind {
-            Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(language),
-            Surface::AuthProviderAdd => (
-                tr!(language, "accounts.auth.provider_add.title"),
-                tr!(language, "accounts.auth.provider_add.description"),
-                560.,
-            ),
+            Surface::Drawer(Drawer::ImportGames) => {
+                let (title, description, height) = self.shell.import_games.chrome(language);
+                (title, description, Fixed(height))
+            }
+            Surface::AuthProviderAdd => self.provider_chrome(),
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
-                540.,
+                Fixed(540.),
             ),
             Surface::Drawer(Drawer::Instances) => (
                 tr!(language, "sheet.instances_title"),
                 tr!(language, "sheet.instances_description"),
-                540.,
+                Fixed(540.),
             ),
             Surface::Drawer(Drawer::Accounts) => (
                 tr!(language, "sheet.accounts_title"),
                 tr!(language, "sheet.accounts_description"),
-                540.,
+                Fixed(540.),
             ),
             Surface::Drawer(Drawer::Downloads) => (
                 tr!(language, "surface.downloads"),
                 tr!(language, "sheet.downloads_description"),
-                440.,
+                Fixed(440.),
             ),
-            _ => (String::new(), String::new(), 440.),
+            _ => (String::new(), String::new(), Fixed(440.)),
         }
     }
 
@@ -1328,7 +1330,7 @@ impl Block {
     ) -> AnyElement {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
-            Surface::AuthProviderAdd => self.render_auth_provider_add(cx),
+            Surface::AuthProviderAdd => self.render_auth_provider_add(window, cx),
             Surface::Drawer(Drawer::Language) => {
                 let search = self.shell.first_run.language_search.as_ref();
                 let query = search

@@ -15,6 +15,15 @@ use uuid::Uuid;
 
 use crate::{Block, PendingCrash, Tab, account_id, browser, components, engine::Message, feedback};
 
+fn provider_badge(icon: ProviderIcon) -> components::ProviderBadge {
+    components::ProviderBadge {
+        image: std::sync::Arc::new(Image::from_bytes(
+            components::icon_image_format(icon.kind),
+            icon.bytes,
+        )),
+    }
+}
+
 impl Block {
     /// Drain the engine channel and apply every message that still belongs to the
     /// current operation.
@@ -101,6 +110,9 @@ impl Block {
                     if let Some(engine) = &self.engine {
                         engine.load_images();
                     }
+                }
+                Message::ProviderDetected(provider, icon) => {
+                    self.auth_provider_detected(provider, icon.map(provider_badge), cx)
                 }
                 Message::ProviderSaved(id) => {
                     if !self.auth_provider_saved(&id, cx) {
@@ -261,17 +273,7 @@ impl Block {
     fn store_provider_images(&mut self, icons: Vec<(String, ProviderIcon)>) {
         self.provider_icons = icons
             .into_iter()
-            .map(|(provider, icon)| {
-                (
-                    provider,
-                    components::ProviderBadge {
-                        image: std::sync::Arc::new(Image::from_bytes(
-                            components::icon_image_format(icon.kind),
-                            icon.bytes,
-                        )),
-                    },
-                )
-            })
+            .map(|(id, icon)| (id, provider_badge(icon)))
             .collect();
     }
 
@@ -326,7 +328,9 @@ impl Block {
         let succeeded = result.is_ok();
         match result {
             Ok(status) => {
-                self.push_toast(status.clone(), feedback::ToastKind::Success);
+                if operation != Some(crate::ui_logging::Operation::DiscoverAuthProvider) {
+                    self.push_toast(status.clone(), feedback::ToastKind::Success);
+                }
                 self.status = status;
             }
             Err(_) if self.cancel.is_cancelled() => {

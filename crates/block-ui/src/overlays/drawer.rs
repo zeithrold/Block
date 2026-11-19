@@ -12,7 +12,10 @@ use gpui::{
 };
 use gpui_base::{
     Root, RootPlugin, Sheet,
-    motion::{Easing, Presence, PresencePhase, Spring, Transition, spring},
+    motion::{
+        Easing, MotionStatus, Presence, PresencePhase, Spring, Transition, spring,
+        transition_with_status,
+    },
 };
 
 use super::{
@@ -21,18 +24,26 @@ use super::{
     components::{self, ButtonSize, ButtonVariant, ControlState},
     design::CONTROL_HEIGHT,
     drawer_gestures::DrawerDrag,
-    drawer_page::{HeaderAction, HeaderSlots},
+    drawer_page::{DrawerFit, DrawerHeight, HeaderAction, HeaderSlots},
     shell::Surface,
 };
 use gpui_component::WindowExt as _;
 
 const DURATION: Duration = Duration::from_millis(450);
+const FIT_RESIZE_DURATION: Duration = Duration::from_millis(300);
+const FIT_RESIZE_EASING: Easing = Easing::CubicBezier {
+    x1: 0.55,
+    y1: 0.,
+    x2: 0.30,
+    y2: 1.,
+};
 /// A full-height panel stops this far below the product title bar, so its top
 /// corners have page behind them instead of the window edge.
 const TITLE_BAR_GAP: f32 = 12.;
 /// The panel's top corners are the part that still reads as a drawer when it
 /// grows tall.
 const PANEL_RADIUS: f32 = 20.;
+const BODY_BOTTOM: f32 = 20.;
 const PANEL_EASING: Easing = Easing::CubicBezier {
     x1: 0.22,
     y1: 1.,
@@ -237,6 +248,7 @@ struct DrawerFrame {
     width: Pixels,
     height: Pixels,
     panel_height: f32,
+    fit: Option<DrawerFit>,
     translation: f32,
     scrim: f32,
     dragging: bool,
@@ -275,18 +287,53 @@ impl DrawerFrame {
                 view.motion_preferences().reduced(),
             )
         };
-        let panel_height = spring(
-            ElementId::NamedInteger("block-drawer-height".into(), revision as u64),
-            desired_height.min(available_height),
-            Spring::new(if reduced {
-                Duration::ZERO
-            } else {
-                Duration::from_millis(260)
-            }),
-            window,
-            cx,
-        )
-        .max(0.);
+        let height_id = ElementId::NamedInteger("block-drawer-height".into(), revision as u64);
+        let (panel_height, fit) = match desired_height {
+            DrawerHeight::Fixed(height) => (
+                spring(
+                    height_id,
+                    height.min(available_height),
+                    Spring::new(if reduced {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_millis(260)
+                    }),
+                    window,
+                    cx,
+                )
+                .max(0.),
+                None,
+            ),
+            DrawerHeight::Content(fit) => {
+                let height = fit.natural().map_or_else(
+                    || active.height.min(available_height),
+                    |height| {
+                        let sample = transition_with_status(
+                            height_id,
+                            height.min(available_height),
+                            Transition::new(if reduced {
+                                Duration::ZERO
+                            } else {
+                                FIT_RESIZE_DURATION
+                            })
+                            .easing(FIT_RESIZE_EASING),
+                            window,
+                            cx,
+                        );
+                        fit.set_settled(
+                            !active.closing
+                                && matches!(
+                                    sample.status,
+                                    MotionStatus::Idle | MotionStatus::Finished
+                                ),
+                        );
+                        sample.value.clamp(0., available_height)
+                    },
+                );
+                (height, Some(fit))
+            }
+            DrawerHeight::Retain => (active.height.min(available_height).max(0.), None),
+        };
         active.height = panel_height;
         let offset = spring(
             ElementId::NamedInteger("block-drawer-offset".into(), revision as u64),
@@ -328,6 +375,7 @@ impl DrawerFrame {
             width,
             height,
             panel_height,
+            fit,
             translation,
             scrim,
             dragging: active.drag.is_some(),
@@ -433,10 +481,6 @@ impl DrawerLayer {
                     .bg(rgb(palette.border)),
             );
         let dismiss = frame.owner.clone();
-        let import = matches!(
-            frame.kind,
-            Surface::Drawer(super::shell::Drawer::ImportGames)
-        );
         let close = components::button(
             "drawer-close",
             "",
@@ -473,14 +517,14 @@ impl DrawerLayer {
                 )
                 .size(px(16.)),
             );
-        let slots = if import {
-            owner
+        let slots = match frame.kind {
+            Surface::Drawer(super::shell::Drawer::ImportGames) => owner
                 .read(cx)
                 .shell
                 .import_games
-                .header_slots(frame.language)
-        } else {
-            HeaderSlots::default()
+                .header_slots(frame.language),
+            Surface::AuthProviderAdd => owner.read(cx).provider_header(),
+            _ => HeaderSlots::default(),
         };
         let button = |slot: HeaderAction| {
             let target = frame.owner.clone();
@@ -512,7 +556,6 @@ impl DrawerLayer {
         };
         let closing = frame.closing;
         let panel = div()
-            .id("block-drawer")
             .debug_selector(|| "block-drawer".into())
             .absolute()
             .left_0()
@@ -567,7 +610,7 @@ impl DrawerLayer {
                     .flex_1()
                     .min_h_0()
                     .px(px(20.))
-                    .pb(px(20.))
+                    .pb(px(BODY_BOTTOM))
                     .flex()
                     .flex_col()
                     .child(body),
@@ -578,7 +621,11 @@ impl DrawerLayer {
                 .trace
                 .map(|sample| drawer_trace::probe("panel", sample)),
         );
-        panel.into_any_element()
+        let panel = match &frame.fit {
+            Some(fit) => fit.panel(panel, px(1. + BODY_BOTTOM)),
+            None => panel,
+        };
+        panel.id("block-drawer").into_any_element()
     }
 
     /// The library sheet: full-window scrim, focus trap and dismissal around the

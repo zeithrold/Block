@@ -17,6 +17,10 @@ use crate::{
     scroll_area::ScrollAreaExt as _,
 };
 
+#[path = "drawer_fit.rs"]
+mod fit;
+pub(crate) use fit::{DrawerFit, DrawerHeight, reserve};
+
 #[derive(Default)]
 pub(super) struct HeaderSlots {
     pub leading: Option<HeaderAction>,
@@ -43,37 +47,24 @@ impl DrawerPage {
     }
 
     pub(super) fn render(self) -> AnyElement {
-        div()
-            .id(self.id)
+        self.render_with(None)
+    }
+
+    pub(crate) fn render_with(self, fit: Option<&DrawerFit>) -> AnyElement {
+        let page = div()
             .size_full()
             .min_h_0()
             .min_w_0()
             .flex()
             .flex_col()
             .child(self.body)
-            .child(div().flex_shrink_0().pt_3().child(self.footer))
-            .into_any_element()
+            .child(div().flex_shrink_0().pt_3().child(self.footer));
+        let page = match fit {
+            Some(fit) => fit.page(page),
+            None => page,
+        };
+        page.id(self.id).into_any_element()
     }
-}
-
-/// Single-page body with the scrollbar in the outer gutter; its handle
-/// belongs to the caller, never to a transient render.
-pub(super) fn scroll_body(
-    id: &'static str,
-    scroll: &ScrollHandle,
-    palette: Palette,
-    content: AnyElement,
-) -> AnyElement {
-    viewport()
-        .child(
-            ScrollPage {
-                id,
-                scroll,
-                active: true,
-            }
-            .body(palette, content),
-        )
-        .into_any_element()
 }
 
 pub(super) struct ScrollPage<'a> {
@@ -84,8 +75,28 @@ pub(super) struct ScrollPage<'a> {
 
 impl ScrollPage<'_> {
     pub(super) fn body(self, palette: Palette, content: AnyElement) -> AnyElement {
+        self.body_with(palette, content, None)
+    }
+
+    pub(crate) fn body_with(
+        self,
+        palette: Palette,
+        content: AnyElement,
+        fit: Option<&DrawerFit>,
+    ) -> AnyElement {
         let id = self.id;
         let outset = px(FOCUS_RING_SPREAD);
+        let inner = div()
+            .w_full()
+            .pl(outset)
+            .py(outset)
+            .flex()
+            .flex_col()
+            .child(content);
+        let inner = match fit.filter(|_| self.active) {
+            Some(fit) => fit.content(inner.flex_shrink_0()),
+            None => inner,
+        };
         div()
             .id(id)
             .debug_selector(move || id.into())
@@ -94,15 +105,7 @@ impl ScrollPage<'_> {
             .pr_4()
             .scroll_area(self.scroll, id, palette, false)
             .tab_stop(self.active)
-            .child(
-                div()
-                    .w_full()
-                    .pl(outset)
-                    .py(outset)
-                    .flex()
-                    .flex_col()
-                    .child(content),
-            )
+            .child(inner)
             .into_any_element()
     }
 }

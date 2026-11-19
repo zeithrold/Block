@@ -67,6 +67,7 @@ fn all_drawer_titles_keep_latin_and_use_available_sans_cjk(cx: &mut gpui::TestAp
                     width: px(360.),
                     height: px(720.),
                     panel_height: 652.,
+                    fit: None,
                     translation: 0.,
                     scrim: 1.,
                     dragging: false,

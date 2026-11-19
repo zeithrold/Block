@@ -121,12 +121,11 @@ pub(super) enum UiAction {
     AuthMethod(authentication::Method),
     AuthProvider(block_auth::AccountProvider),
     AuthExternalProvider(uuid::Uuid),
-    AuthHttpConsent,
     AuthProviderAdd,
     AuthProviderIdentify,
+    AuthProviderBack,
     AuthProviderConsent,
     AuthProviderSave,
-    AuthProviderCancel,
     AuthCharacter(uuid::Uuid),
     CopyDeviceCode,
     AuthCancel,
@@ -350,12 +349,11 @@ impl Block {
             UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
             UiAction::AuthBack => self.auth_back(window, cx),
             UiAction::AuthExternalProvider(id) => self.choose_external_provider(id, window, cx),
-            UiAction::AuthHttpConsent => self.consent_external_auth(cx),
             UiAction::AuthProviderAdd => self.open_auth_provider_add(window, cx),
-            UiAction::AuthProviderIdentify => self.identify_auth_provider(cx),
+            UiAction::AuthProviderIdentify => self.identify_auth_provider(window, cx),
+            UiAction::AuthProviderBack => self.back_auth_provider(window, cx),
             UiAction::AuthProviderConsent => self.consent_auth_provider(cx),
             UiAction::AuthProviderSave => self.save_auth_provider(window, cx),
-            UiAction::AuthProviderCancel => self.close_auth_provider_add(window, cx),
             UiAction::AuthCharacter(id) => self.choose_auth_character(id, cx),
             UiAction::AuthMethod(method) => self.change_auth_method(method, window, cx),
             UiAction::CopyDeviceCode => self.copy_device_code(cx),
@@ -890,7 +888,6 @@ impl Block {
                 | UiAction::DownloadFiles(_)
                 | UiAction::Drawer(_)
                 | UiAction::AuthCancel
-                | UiAction::AuthProviderCancel
                 | UiAction::AuthReopen
                 | UiAction::MinimizeWindow
                 | UiAction::CloseWindow

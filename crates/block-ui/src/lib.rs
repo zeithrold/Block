@@ -284,13 +284,11 @@ use block_launcher::{
     session_host::{self, RunRecord, RunState},
 };
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
-    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Pixels, Render, SharedString,
+    AppContext as _, Context, Entity, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, KeyBinding, ParentElement as _, PathPromptOptions, Render, SharedString,
     Styled as _, WeakEntity, Window, div, px, rgb,
 };
 use gpui_component::WindowExt as _;
-#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-use raw_window_handle::RawWindowHandle;
 use tokio::sync::mpsc::Receiver;
 
 use actions::UiAction;
@@ -451,10 +449,6 @@ pub struct Block {
     show_command: bool,
     recipe: Option<LaunchRecipe>,
     recipe_load: RecipeLoadState,
-    /// Owned native drop target (OLE on Windows, AppKit on macOS, XDND on
-    /// Linux X11) over the rendered provider drop zone.
-    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-    provider_drop: Option<ProviderDrop>,
     /// A Play requested while another operation was running, started on completion.
     pending_play: bool,
 }
@@ -480,13 +474,6 @@ impl RecipeLoadState {
             .take()
             .is_some_and(|launch| launch && success)
     }
-}
-
-/// Owns the native child window that receives provider quick-link drops.
-#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-#[derive(Debug)]
-struct ProviderDrop {
-    target: block_drop::DropTarget,
 }
 
 impl Drop for Block {
@@ -780,8 +767,6 @@ impl Block {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-            provider_drop: None,
             pending_play: false,
         };
         view.initialize_browsers(cx);
@@ -1774,7 +1759,6 @@ impl Render for Block {
             cx.background_executor().now(),
         );
         self.prepare_crash_help(window, cx);
-        self.sync_provider_drop(window, cx);
         feedback::ToastLayer::set_language(self.language(), window, cx);
         feedback::ToastLayer::enqueue(std::mem::take(&mut self.shell.pending_toasts), window, cx);
         if let Some(help) = &self.crash_help {
@@ -1793,171 +1777,6 @@ impl Render for Block {
         window.set_window_title(&self.native_window_title());
         self.render_shell(window, cx).into_any_element()
     }
-}
-
-impl Block {
-    /// Attach or release the owned native drop target as the provider draft
-    /// appears or disappears. Platforms without a drop backend keep this a no-op.
-    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-    fn sync_provider_drop(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        let drafting = self
-            .shell
-            .auth
-            .as_ref()
-            .is_some_and(|state| state.is_provider_drafting());
-        if !drafting {
-            self.provider_drop = None;
-            return;
-        }
-        if self.provider_drop.is_some() {
-            return;
-        }
-        let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
-            return;
-        };
-        let parent = match handle.as_raw() {
-            #[cfg(windows)]
-            RawWindowHandle::Win32(win32) => Some(win32.hwnd.get()),
-            #[cfg(target_os = "linux")]
-            RawWindowHandle::Xcb(xcb) => isize::try_from(xcb.window.get()).ok(),
-            #[cfg(target_os = "linux")]
-            RawWindowHandle::Xlib(xlib) => isize::try_from(xlib.window).ok(),
-            #[cfg(target_os = "linux")]
-            RawWindowHandle::Wayland(_) => None,
-            #[cfg(target_os = "macos")]
-            RawWindowHandle::AppKit(appkit) => Some(appkit.ns_view.as_ptr() as isize),
-            _ => None,
-        };
-        let Some(parent) = parent else {
-            if let Some(draft) = self
-                .shell
-                .auth
-                .as_mut()
-                .and_then(|state| state.provider_draft_mut())
-                && draft.error.is_none()
-            {
-                draft.error = Some(authentication::AccountMessage::product(
-                    if cfg!(target_os = "linux") {
-                        "accounts.auth.error.drop_wayland"
-                    } else {
-                        "accounts.auth.error.drop_unsupported"
-                    },
-                ));
-            }
-            return;
-        };
-        let (sender, receiver) = async_channel::bounded::<String>(4);
-        let zone = block_drop::DropZone::new(0.0, 0.0, 0.0, 0.0, window.scale_factor());
-        match block_drop::DropTarget::attach(parent, zone, sender) {
-            Ok(target) => {
-                self.provider_drop = Some(ProviderDrop { target });
-                cx.spawn(async move |view, cx| {
-                    while let Ok(payload) = receiver.recv().await {
-                        let _ = view.update(cx, |view, cx| {
-                            view.apply_provider_drop(payload, cx);
-                        });
-                    }
-                })
-                .detach();
-            }
-            Err(error) => {
-                if let Some(draft) = self
-                    .shell
-                    .auth
-                    .as_mut()
-                    .and_then(|state| state.provider_draft_mut())
-                    && draft.error.is_none()
-                {
-                    draft.error = Some(authentication::AccountMessage::detail(
-                        "accounts.auth.error.drop_failed",
-                        error.to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    /// Keep the owned native drop surface aligned with the rendered zone.
-    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-    fn position_provider_drop(&mut self, bounds: &[Bounds<Pixels>], scale: f32) {
-        let Some(first) = bounds.first() else {
-            return;
-        };
-        let mut left = first.left();
-        let mut top = first.top();
-        let mut right = first.right();
-        let mut bottom = first.bottom();
-        for bounds in &bounds[1..] {
-            left = left.min(bounds.left());
-            top = top.min(bounds.top());
-            right = right.max(bounds.right());
-            bottom = bottom.max(bounds.bottom());
-        }
-        if let Some(drop) = &self.provider_drop {
-            drop.target.set_zone(block_drop::DropZone::new(
-                f32::from(left),
-                f32::from(top),
-                f32::from(right - left),
-                f32::from(bottom - top),
-                scale,
-            ));
-        }
-    }
-
-    /// Feed an accepted quick link through the same recognise/normalise path as
-    /// pasting it and pressing "Recognize address".
-    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-    fn apply_provider_drop(&mut self, payload: String, cx: &mut Context<'_, Self>) {
-        if let Some(draft) = self
-            .shell
-            .auth
-            .as_mut()
-            .and_then(|state| state.provider_draft_mut())
-        {
-            draft
-                .address
-                .update(cx, |field, cx| field.set_value(&payload, cx));
-            draft.error = None;
-        }
-        self.identify_auth_provider(cx);
-        cx.notify();
-    }
-
-    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-    fn sync_provider_drop(&mut self, _window: &Window, _cx: &mut Context<'_, Self>) {}
-
-    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-    #[expect(
-        dead_code,
-        reason = "the drop zone only drives real bounds and payloads where a native target exists"
-    )]
-    fn position_provider_drop(&mut self, _bounds: &[Bounds<Pixels>], _scale: f32) {}
-
-    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-    #[expect(
-        dead_code,
-        reason = "quick-link drops need an owned native target; the stub platforms have none"
-    )]
-    fn apply_provider_drop(&mut self, _payload: String, _cx: &mut Context<'_, Self>) {}
-}
-
-/// Subscribe the rendered drop zone to its real window bounds (Windows, macOS
-/// and X11).
-#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-fn attach_provider_drop_bounds(zone: gpui::Div, view: WeakEntity<Block>) -> gpui::Div {
-    zone.on_children_prepainted(move |bounds, window, cx| {
-        if let Some(view) = view.upgrade() {
-            let scale = window.scale_factor();
-            view.update(cx, |view, _| {
-                view.position_provider_drop(&bounds, scale);
-            });
-        }
-    })
-}
-
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-fn attach_provider_drop_bounds(zone: gpui::Div, _view: WeakEntity<Block>) -> gpui::Div {
-    zone
 }
 
 /// Whether a queued Play may start now that the previous operation ended.
@@ -2313,8 +2132,6 @@ mod tests {
             show_command: false,
             recipe: None,
             recipe_load: RecipeLoadState::default(),
-            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-            provider_drop: None,
             pending_play: false,
         }
     }

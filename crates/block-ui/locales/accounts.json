@@ -55,21 +55,6 @@
     "zh-Hans": "设置玩家名称，离线游玩",
     "ja": "プレイヤー名を設定してオフラインでプレイ"
   },
-  "accounts.auth.error.drop_wayland": {
-    "en": "Drag and drop is unavailable: Wayland windows are not supported by this build; use an X11 session.",
-    "zh-Hans": "拖放不可用：此版本不支持 Wayland 窗口；请使用 X11 会话。",
-    "ja": "ドラッグ＆ドロップを利用できません。このビルドは Wayland ウィンドウに対応していません。X11 セッションを使用してください。"
-  },
-  "accounts.auth.error.drop_unsupported": {
-    "en": "Drag and drop is unavailable: unsupported windowing system.",
-    "zh-Hans": "拖放不可用：不支持此窗口系统。",
-    "ja": "ドラッグ＆ドロップを利用できません。ウィンドウシステムに対応していません。"
-  },
-  "accounts.auth.error.drop_failed": {
-    "en": "Drag and drop is unavailable: %{detail}",
-    "zh-Hans": "拖放不可用：%{detail}",
-    "ja": "ドラッグ＆ドロップを利用できません: %{detail}"
-  },
   "accounts.auth.info.title.offline": {
     "en": "Your local player",
     "zh-Hans": "你的本地玩家",
@@ -306,9 +291,9 @@
     "ja": "認証サーバーのアドレスが変更されました。もう一度選択し、パスワードを再入力してください。"
   },
   "accounts.auth.provider.http_warning": {
-    "en": "This provider uses HTTP. Your password and tokens are sent without encryption. Continue only if you trust this address and network.",
-    "zh-Hans": "此验证服务器使用 HTTP。你的密码和令牌将不加密发送。仅当你信任此地址和网络时才继续。",
-    "ja": "この認証サーバーは HTTP を使用しています。パスワードとトークンは暗号化されずに送信されます。このアドレスとネットワークを信頼する場合のみ続行してください。"
+    "en": "HTTP connection. Your password and tokens are sent without encryption.",
+    "zh-Hans": "HTTP 连接。密码和令牌将不加密发送。",
+    "ja": "HTTP 接続です。パスワードとトークンは暗号化されずに送信されます。"
   },
   "accounts.auth.http_consent": {
     "en": "I accept the HTTP risk for this address",
@@ -556,29 +541,39 @@
     "ja": "認証サーバーを追加"
   },
   "accounts.auth.provider_add.description": {
-    "en": "Enter the server details or paste an Authlib quick link.",
-    "zh-Hans": "输入服务器详细信息，或粘贴 Authlib 快速链接。",
-    "ja": "サーバーの詳細を入力するか、Authlib のクイックリンクを貼り付けてください。"
+    "en": "Enter the server address or paste an Authlib quick link.",
+    "zh-Hans": "输入服务器地址，或粘贴 Authlib 快速链接。",
+    "ja": "サーバーのアドレスを入力するか、Authlib のクイックリンクを貼り付けてください。"
   },
-  "accounts.auth.provider_add.drop": {
-    "en": "Drop an Authlib quick link here",
-    "zh-Hans": "将 Authlib 快速链接拖到此处",
-    "ja": "Authlib のクイックリンクをここにドロップ"
+  "accounts.auth.provider_add.confirm": {
+    "en": "Confirm server",
+    "zh-Hans": "确认服务器",
+    "ja": "サーバーを確認"
   },
-  "accounts.auth.provider_add.drop_note": {
-    "en": "You can also paste the link into the server address field.",
-    "zh-Hans": "你也可以将链接粘贴到服务器地址字段。",
-    "ja": "リンクをサーバーアドレス欄に貼り付けることもできます。"
+  "accounts.auth.provider_add.review_hint": {
+    "en": "Check that this is the server you want to add.",
+    "zh-Hans": "请确认这是你要添加的服务器。",
+    "ja": "追加するサーバーかどうかを確認してください。"
   },
-  "accounts.auth.provider_add.name.label": {
-    "en": "Display name",
-    "zh-Hans": "显示名称",
-    "ja": "表示名"
+  "accounts.auth.provider_add.alias": {
+    "en": "Alias (optional)",
+    "zh-Hans": "别名（可选）",
+    "ja": "別名（任意）"
   },
-  "accounts.auth.provider_add.name.placeholder": {
-    "en": "Your community server",
-    "zh-Hans": "你的社区服务器",
-    "ja": "コミュニティサーバー"
+  "accounts.auth.provider_add.alias_hint": {
+    "en": "An alias only changes how this server appears in Block.",
+    "zh-Hans": "别名只会更改此服务器在 Block 中的显示名称。",
+    "ja": "別名は Block 内での表示にのみ使われます。"
+  },
+  "accounts.auth.provider_add.detected": {
+    "en": "Server detected",
+    "zh-Hans": "已检测到服务器",
+    "ja": "サーバーを検出しました"
+  },
+  "accounts.auth.provider_add.saving": {
+    "en": "Saving provider…",
+    "zh-Hans": "正在保存验证服务器…",
+    "ja": "認証サーバーを保存中…"
   },
   "accounts.auth.provider_add.address.label": {
     "en": "Server API address",
@@ -591,9 +586,9 @@
     "ja": "サーバー API アドレスまたは Authlib クイックリンク"
   },
   "accounts.auth.provider_add.identify": {
-    "en": "Recognize address",
-    "zh-Hans": "识别地址",
-    "ja": "アドレスを認識"
+    "en": "Detect server",
+    "zh-Hans": "检测服务器",
+    "ja": "サーバーを検出"
   },
   "accounts.auth.provider_add.existing": {
     "en": "Already saved as %{name}. Select it without creating a duplicate.",
@@ -795,20 +790,15 @@
     "zh-Hans": "无法设置验证服务器：引擎不可用",
     "ja": "認証サーバーの設定は利用できません：エンジンが利用できません"
   },
-  "accounts.auth.error.provider_display_name": {
-    "en": "Enter a provider display name.",
-    "zh-Hans": "请输入验证服务器的显示名称。",
-    "ja": "認証サーバーの表示名を入力してください。"
-  },
   "accounts.auth.error.provider_http_confirm": {
     "en": "Confirm the HTTP warning for this address.",
     "zh-Hans": "请确认此地址的 HTTP 警告。",
     "ja": "このアドレスの HTTP 警告を確認してください。"
   },
   "accounts.auth.error.provider_http_before_send": {
-    "en": "Confirm the HTTP warning for this provider before sending your password.",
-    "zh-Hans": "在发送密码前，请确认此验证服务器的 HTTP 警告。",
-    "ja": "パスワードを送信する前に、この認証サーバーの HTTP 警告を確認してください。"
+    "en": "HTTP has not been approved for this provider. Check its settings before signing in.",
+    "zh-Hans": "此验证服务器尚未获准使用 HTTP。请检查服务器设置后再登录。",
+    "ja": "この認証サーバーで HTTP の使用が許可されていません。設定を確認してからサインインしてください。"
   },
   "accounts.auth.status.preparing": {
     "en": "Preparing secure Microsoft sign-in",
