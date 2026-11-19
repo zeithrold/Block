@@ -12,6 +12,10 @@ use super::scroll_area::ScrollAreaExt as _;
 
 #[path = "browser_wait.rs"]
 mod browser_wait;
+#[path = "verification.rs"]
+mod verification;
+#[path = "wait_ring.rs"]
+mod wait_ring;
 use std::{
     fmt,
     sync::{Arc, LazyLock},
@@ -254,6 +258,11 @@ impl AuthWizard {
         self.phase == Phase::Complete
     }
 
+    fn cancel_only_footer(&self) -> bool {
+        self.waiting_for_browser()
+            || (self.provider == AccountProvider::Microsoft && self.phase == Phase::Verifying)
+    }
+
     pub(super) fn can_go_back(&self) -> bool {
         match self.phase {
             Phase::Connect => self.provider != AccountProvider::Microsoft,
@@ -367,9 +376,8 @@ impl AuthWizard {
             "auth-authlib-characters" => Phase::Characters,
             "auth-authlib-complete" | "auth-complete" => Phase::Complete,
             "auth-offline-error" | "auth-error" => Phase::Failed,
-            "auth-device-preparing" => Phase::Preparing,
+            "auth-device-preparing" | "auth-verifying" => Phase::Preparing,
             "auth-device-waiting" | "auth-waiting" => Phase::Waiting,
-            "auth-verifying" => Phase::Verifying,
             "auth-saving" | "auth-offline-saving" => Phase::Saving,
             _ => Phase::Connect,
         };
@@ -1784,6 +1792,9 @@ impl Block {
         if state.provider != AccountProvider::Microsoft {
             return;
         }
+        if progress >= SignInStage::SaveCredential && state.phase != Phase::Saving {
+            return;
+        }
         if state
             .attempt
             .as_ref()
@@ -2565,6 +2576,9 @@ impl Block {
 
     fn auth_waiting(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
+        if state.provider == AccountProvider::Microsoft && state.phase == Phase::Verifying {
+            return self.microsoft_verification(state);
+        }
         if state.provider == AccountProvider::Authlib {
             return self.authlib_waiting(state, language);
         }
@@ -2716,53 +2730,9 @@ impl Block {
         if let Some(stage) = state.stage {
             card = card
                 .child(note(tr!(language, auth_stage_key(stage))))
-                .children(self.stage_boundary_rows(stage, language));
+                .children(self.preparing_step_rows(language));
         }
         card
-    }
-
-    /// One row per stage boundary, marked once the attempt reaches it.
-    fn stage_boundary_rows(&self, stage: SignInStage, language: Language) -> Vec<gpui::Div> {
-        [
-            (
-                SignInStage::Ownership,
-                tr!(language, "accounts.auth.waiting.boundary.microsoft_xbox"),
-            ),
-            (
-                SignInStage::PlayerProfile,
-                tr!(language, "accounts.auth.waiting.boundary.ownership"),
-            ),
-            (
-                SignInStage::SaveCredential,
-                tr!(language, "accounts.auth.waiting.boundary.profile"),
-            ),
-            (
-                SignInStage::SaveMetadata,
-                tr!(language, "accounts.auth.waiting.boundary.credential"),
-            ),
-        ]
-        .into_iter()
-        .map(|(boundary, label)| self.stage_boundary_row(stage >= boundary, &label, language))
-        .collect()
-    }
-
-    fn stage_boundary_row(&self, verified: bool, label: &str, language: Language) -> gpui::Div {
-        let (icon, color) = if verified {
-            (Icon::Check, self.palette.success)
-        } else {
-            (Icon::Info, self.palette.muted)
-        };
-        let text = if verified {
-            tr!(language, "accounts.auth.waiting.verified", label = label)
-        } else {
-            tr!(language, "accounts.auth.waiting.pending", label = label)
-        };
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(icon.render(14., color))
-            .child(note(text))
     }
 
     fn auth_complete(&self, state: &AuthWizard) -> gpui::Div {
@@ -2929,7 +2899,7 @@ impl Block {
                     .flex_col()
                     .gap_2()
                     .children(cancel)
-                    .when(!state.waiting_for_browser(), |buttons| {
+                    .when(!state.cancel_only_footer(), |buttons| {
                         buttons.child(self.auth_button(
                             "auth-primary",
                             label,
@@ -4363,8 +4333,10 @@ mod tests {
                     }
                     for selector in ["auth-cancel", "auth-primary"] {
                         let action = cx.debug_bounds(selector);
-                        if phase == Phase::Waiting && selector == "auth-primary" {
-                            assert!(action.is_none(), "browser waiting has no primary action");
+                        if matches!(phase, Phase::Waiting | Phase::Verifying)
+                            && selector == "auth-primary"
+                        {
+                            assert!(action.is_none(), "{phase:?} has no primary action");
                             continue;
                         }
                         if selector == "auth-cancel" && !phase.pending() {
@@ -4380,7 +4352,7 @@ mod tests {
                             }),
                             "{selector} outside {width}×{height}: {action:?}"
                         );
-                        if !phase.pending() || phase == Phase::Waiting {
+                        if !phase.pending() || matches!(phase, Phase::Waiting | Phase::Verifying) {
                             assert!(
                                 action.is_some_and(|action| {
                                     let above = action.top() - footer.top();
@@ -4401,6 +4373,9 @@ mod tests {
     fn observed_stages_enter_verification_without_fabricating_or_reviving_success(
         cx: &mut TestAppContext,
     ) {
+        use super::verification::{StepStatus::*, step_statuses};
+        use block_auth::SignInStage;
+
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -4409,7 +4384,7 @@ mod tests {
                     state.phase = Phase::Waiting;
                     state.browser_url = Some("https://example.invalid/transient".into());
                 }
-                view.auth_stage(block_auth::SignInStage::Ownership);
+                view.auth_stage(SignInStage::MicrosoftAuthorization);
                 assert!(
                     view.shell
                         .auth
@@ -4418,19 +4393,49 @@ mod tests {
                             && state.browser_url.is_none()
                             && state.prepared_account.is_none())
                 );
-                view.auth_stage(block_auth::SignInStage::MicrosoftAuthorization);
-                assert!(
-                    view.shell.auth.as_ref().is_some_and(
-                        |state| state.stage == Some(block_auth::SignInStage::Ownership)
-                    )
-                );
+                for (stage, expected) in [
+                    (
+                        SignInStage::MinecraftAuthentication,
+                        [Active, Pending, Pending, Pending],
+                    ),
+                    (SignInStage::Ownership, [Complete, Active, Pending, Pending]),
+                    (
+                        SignInStage::MicrosoftAuthorization,
+                        [Complete, Active, Pending, Pending],
+                    ),
+                    (
+                        SignInStage::PlayerProfile,
+                        [Complete, Complete, Active, Pending],
+                    ),
+                    (
+                        SignInStage::SaveCredential,
+                        [Complete, Complete, Active, Pending],
+                    ),
+                    (
+                        SignInStage::SaveMetadata,
+                        [Complete, Complete, Active, Pending],
+                    ),
+                ] {
+                    view.auth_stage(stage);
+                    let state = view.shell.auth.as_ref();
+                    assert!(
+                        state.is_some_and(|state| state.phase == Phase::Verifying
+                            && state.prepared_account.is_none()),
+                        "after {stage:?}"
+                    );
+                    assert_eq!(
+                        step_statuses(state.and_then(|state| state.stage)),
+                        expected,
+                        "after {stage:?}"
+                    );
+                }
                 view.auth_finished(&Err("Ownership verification failed".into()));
-                view.auth_stage(block_auth::SignInStage::SaveMetadata);
+                view.auth_stage(SignInStage::SaveMetadata);
                 assert!(view.shell.auth.as_ref().is_some_and(
                     |state| state.phase == Phase::Failed && state.prepared_account.is_none()
                 ));
                 view.cancel_auth(window, cx);
-                view.auth_stage(block_auth::SignInStage::SaveMetadata);
+                view.auth_stage(SignInStage::SaveMetadata);
                 assert!(view.shell.auth.is_none());
             });
         });

@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use block_auth::{Account, AccountProvider, AccountRef};
+use block_auth::{Account, AccountProvider, AccountRef, SignInStage};
 use block_launcher::{
     DownloadEvent,
     catalog::{
@@ -197,7 +197,11 @@ impl Block {
             options.name == "toast-motion-reduced"
         } else if matches!(
             options.name.as_str(),
-            "setup-import-list" | "setup-account" | "auth-choose" | "auth-waiting"
+            "setup-import-list"
+                | "setup-account"
+                | "auth-choose"
+                | "auth-waiting"
+                | "auth-verifying"
         ) {
             false
         } else {
@@ -470,6 +474,9 @@ impl Block {
                     },
                     cx,
                 );
+            }
+            if name == "auth-verifying" {
+                self.auth_stage(SignInStage::Ownership);
             }
             if name == "auth-authlib-provider-add" {
                 self.open_auth_provider_add(window, cx);

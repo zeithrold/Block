@@ -131,7 +131,15 @@ _add(
     "Use a device code instead",
     "Cancel",
 )
-_add("auth-verifying", "Verifying your account", "Block is checking Java Edition ownership")
+_add(
+    "auth-verifying",
+    "Verifying your account",
+    "review your player profile",
+    "Microsoft and Xbox authorization",
+    "Java Edition ownership",
+    "Player profile",
+    "Secure credential storage",
+)
 _add("auth-complete", "Your account is ready", "Zeithrold", "Save and use")
 _add("auth-saving", "Saving your account", "Block is saving the refresh credential")
 _add("auth-error", "Sign-in needs your attention", "Authorization expired. Start sign-in again to request a fresh session.")

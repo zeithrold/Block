@@ -1,39 +1,28 @@
 //! The Microsoft browser handoff's status and recovery actions.
 
-use std::{f32::consts::TAU, time::Duration};
-
 use gpui::{
-    Animation, AnimationExt as _, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, PathBuilder, RenderOnce, Role, StatefulInteractiveElement as _,
-    Styled as _, canvas, div, point, px, rgb,
+    Context, InteractiveElement as _, ParentElement as _, Role, StatefulInteractiveElement as _,
+    Styled as _, div, px,
 };
 
-use super::{AuthWizard, Block, ControlState, Method, UiAction, note, patterns};
-use crate::{
-    Palette,
-    action_list::{ActionAppearance, ActionCopy, ActionDestination, ActionListCard, ActionRow},
+use super::{
+    AuthWizard, Block, ControlState, Method, UiAction, note, patterns, wait_ring::WaitRing,
+};
+use crate::action_list::{
+    ActionAppearance, ActionCopy, ActionDestination, ActionListCard, ActionRow,
 };
 
 impl Block {
     pub(super) fn browser_wait_heading(&self, state: &AuthWizard) -> gpui::Div {
         let language = self.language();
         let status = tr!(language, "accounts.auth.waiting.browser.status");
-        let ring = WaitRing {
-            palette: self.palette,
-            phase: 0.,
-        };
         // Outgoing auth snapshots intentionally do not retain authorization URLs.
         // Only the live browser handoff needs a repeating frame request.
-        let ring = if state.browser_url.is_some() && !self.preferences.reduce_motion {
-            ring.with_animation(
-                "auth-browser-wait-ring",
-                Animation::new(Duration::from_millis(1600)).repeat(),
-                |ring, phase| WaitRing { phase, ..ring },
-            )
-            .into_any_element()
-        } else {
-            ring.into_any_element()
-        };
+        let ring = WaitRing::element(
+            self.palette,
+            "auth-browser-wait-ring",
+            state.browser_url.is_some() && !self.preferences.reduce_motion,
+        );
         div()
             .flex()
             .flex_col()
@@ -95,46 +84,5 @@ impl Block {
             }),
         );
         ActionListCard::render(self.palette, [reopen, device]).mt(px(12.))
-    }
-}
-
-#[derive(IntoElement)]
-struct WaitRing {
-    palette: Palette,
-    phase: f32,
-}
-
-impl RenderOnce for WaitRing {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
-        div()
-            .relative()
-            .size(px(14.))
-            .flex_shrink_0()
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .rounded_full()
-                    .border(px(1.6))
-                    .border_color(rgb(self.palette.border)),
-            )
-            .child(
-                canvas(
-                    |_, _, _| (),
-                    move |bounds, (), window, _| {
-                        let (sin, cos) = (self.phase * TAU - TAU * 0.375).sin_cos();
-                        let center = bounds.center();
-                        let radius = px(6.2);
-                        let offset = point(radius * cos, radius * sin);
-                        let mut arc = PathBuilder::stroke(px(1.6));
-                        arc.move_to(center + offset);
-                        arc.arc_to(point(radius, radius), px(0.), false, true, center - offset);
-                        if let Ok(path) = arc.build() {
-                            window.paint_path(path, rgb(self.palette.foreground));
-                        }
-                    },
-                )
-                .size_full(),
-            )
     }
 }

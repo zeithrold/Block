@@ -136,9 +136,9 @@
     "ja": "サインインが完了すると、Block は自動的に次へ進みます。"
   },
   "accounts.auth.waiting.browser.status": {
-    "en": "Block is waiting for you to sign in.",
-    "zh-Hans": "Block 正在等待登录结果。",
-    "ja": "Block はサインインの完了を待っています。"
+    "en": "Block is waiting for you to sign in. Once you finish in your browser, Block will verify your account automatically.",
+    "zh-Hans": "Block 正在等待登录结果。在浏览器中完成登录后，Block 会自动验证账户，无需额外操作。",
+    "ja": "Block はサインインの完了を待っています。ブラウザーでサインインすると、Block が自動でアカウントを確認します。"
   },
   "accounts.auth.verifying.title": {
     "en": "Verifying your account",
@@ -151,9 +151,9 @@
     "ja": "Block は認証サーバーを通じて選択したキャラクターを割り当てています。"
   },
   "accounts.auth.verifying.description.microsoft": {
-    "en": "Block is checking Java Edition ownership and resolving your player profile.",
-    "zh-Hans": "Block 正在检查 Java 版所有权并解析你的玩家档案。",
-    "ja": "Block は Java Edition の所有権を確認し、プレイヤープロフィールを取得しています。"
+    "en": "Once verification is complete, you can review your player profile before saving the account.",
+    "zh-Hans": "验证完成后，你可以核对玩家信息，再保存账户。",
+    "ja": "確認が完了したら、プレイヤー情報を確認してからアカウントを保存できます。"
   },
   "accounts.auth.characters.title": {
     "en": "Choose your character",
@@ -435,10 +435,20 @@
     "zh-Hans": "安全凭据存储",
     "ja": "安全な資格情報ストレージ"
   },
-  "accounts.auth.waiting.verified": {
-    "en": "%{label} · Verified",
-    "zh-Hans": "%{label} · 已验证",
-    "ja": "%{label} · 確認済み"
+  "accounts.auth.verification.step.complete": {
+    "en": "Verified",
+    "zh-Hans": "已验证",
+    "ja": "確認済み"
+  },
+  "accounts.auth.verification.step.active": {
+    "en": "In progress",
+    "zh-Hans": "进行中",
+    "ja": "確認中"
+  },
+  "accounts.auth.verification.step.pending": {
+    "en": "Pending",
+    "zh-Hans": "待处理",
+    "ja": "未開始"
   },
   "accounts.auth.waiting.pending": {
     "en": "%{label} · Pending",
