@@ -4396,25 +4396,16 @@ mod tests {
                 for (stage, expected) in [
                     (
                         SignInStage::MinecraftAuthentication,
-                        [Active, Pending, Pending, Pending],
+                        [Active, Pending, Pending],
                     ),
-                    (SignInStage::Ownership, [Complete, Active, Pending, Pending]),
+                    (SignInStage::Ownership, [Complete, Active, Pending]),
                     (
                         SignInStage::MicrosoftAuthorization,
-                        [Complete, Active, Pending, Pending],
+                        [Complete, Active, Pending],
                     ),
-                    (
-                        SignInStage::PlayerProfile,
-                        [Complete, Complete, Active, Pending],
-                    ),
-                    (
-                        SignInStage::SaveCredential,
-                        [Complete, Complete, Active, Pending],
-                    ),
-                    (
-                        SignInStage::SaveMetadata,
-                        [Complete, Complete, Active, Pending],
-                    ),
+                    (SignInStage::PlayerProfile, [Complete, Complete, Active]),
+                    (SignInStage::SaveCredential, [Complete, Complete, Active]),
+                    (SignInStage::SaveMetadata, [Complete, Complete, Active]),
                 ] {
                     view.auth_stage(stage);
                     let state = view.shell.auth.as_ref();

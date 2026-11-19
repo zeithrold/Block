@@ -430,11 +430,6 @@
     "zh-Hans": "玩家档案",
     "ja": "プレイヤープロフィール"
   },
-  "accounts.auth.waiting.boundary.credential": {
-    "en": "Secure credential storage",
-    "zh-Hans": "安全凭据存储",
-    "ja": "安全な資格情報ストレージ"
-  },
   "accounts.auth.verification.step.complete": {
     "en": "Verified",
     "zh-Hans": "已验证",

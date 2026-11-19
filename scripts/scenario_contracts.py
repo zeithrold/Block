@@ -138,7 +138,6 @@ _add(
     "Microsoft and Xbox authorization",
     "Java Edition ownership",
     "Player profile",
-    "Secure credential storage",
 )
 _add("auth-complete", "Your account is ready", "Zeithrold", "Save and use")
 _add("auth-saving", "Saving your account", "Block is saving the refresh credential")

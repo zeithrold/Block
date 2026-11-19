@@ -21,16 +21,10 @@ enum Step {
     Authorization,
     Ownership,
     Profile,
-    Credential,
 }
 
 impl Step {
-    const ALL: [Self; 4] = [
-        Self::Authorization,
-        Self::Ownership,
-        Self::Profile,
-        Self::Credential,
-    ];
+    const ALL: [Self; 3] = [Self::Authorization, Self::Ownership, Self::Profile];
 
     const fn status(self, stage: Option<SignInStage>) -> StepStatus {
         use SignInStage as Stage;
@@ -52,17 +46,16 @@ impl Step {
                 | Stage::MinecraftAuthentication,
             ) => match self {
                 Self::Authorization => Active,
-                Self::Ownership | Self::Profile | Self::Credential => Pending,
+                Self::Ownership | Self::Profile => Pending,
             },
             Some(Stage::Ownership) => match self {
                 Self::Authorization => Complete,
                 Self::Ownership => Active,
-                Self::Profile | Self::Credential => Pending,
+                Self::Profile => Pending,
             },
             Some(Stage::PlayerProfile) => match self {
                 Self::Authorization | Self::Ownership => Complete,
                 Self::Profile => Active,
-                Self::Credential => Pending,
             },
         }
     }
@@ -72,12 +65,11 @@ impl Step {
             Self::Authorization => "accounts.auth.waiting.boundary.microsoft_xbox",
             Self::Ownership => "accounts.auth.waiting.boundary.ownership",
             Self::Profile => "accounts.auth.waiting.boundary.profile",
-            Self::Credential => "accounts.auth.waiting.boundary.credential",
         }
     }
 }
 
-pub(super) fn step_statuses(stage: Option<SignInStage>) -> [StepStatus; 4] {
+pub(super) fn step_statuses(stage: Option<SignInStage>) -> [StepStatus; 3] {
     Step::ALL.map(|step| step.status(stage))
 }
 
