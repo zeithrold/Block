@@ -126,14 +126,19 @@
     "ja": "このデバイスまたは別のデバイスで Microsoft のサイトを開き、以下のコードを入力してください。"
   },
   "accounts.auth.waiting.browser.title": {
-    "en": "Continue in your browser",
-    "zh-Hans": "在浏览器中继续",
-    "ja": "ブラウザーで続行"
+    "en": "Finish Microsoft sign-in in your browser",
+    "zh-Hans": "在浏览器中完成 Microsoft 登录",
+    "ja": "ブラウザーで Microsoft サインインを完了"
   },
   "accounts.auth.waiting.browser.description": {
-    "en": "Complete Microsoft sign-in and return here. This window can stay open.",
-    "zh-Hans": "完成 Microsoft 登录后返回此处。此窗口可以保持打开。",
-    "ja": "Microsoft のサインインを完了して、ここに戻ってください。このウィンドウは開いたままにできます。"
+    "en": "Block will continue automatically after you sign in.",
+    "zh-Hans": "登录后，Block 会自动继续。",
+    "ja": "サインインが完了すると、Block は自動的に次へ進みます。"
+  },
+  "accounts.auth.waiting.browser.status": {
+    "en": "Block is waiting for you to sign in.",
+    "zh-Hans": "Block 正在等待登录结果。",
+    "ja": "Block はサインインの完了を待っています。"
   },
   "accounts.auth.verifying.title": {
     "en": "Verifying your account",
@@ -441,14 +446,24 @@
     "ja": "%{label} · 保留中"
   },
   "accounts.auth.waiting.reopen": {
-    "en": "Open browser again",
-    "zh-Hans": "再次打开浏览器",
-    "ja": "ブラウザーを再度開く"
+    "en": "Reopen the sign-in page",
+    "zh-Hans": "重新打开登录页",
+    "ja": "サインインページを開き直す"
   },
   "accounts.auth.waiting.reopen_note": {
-    "en": "If the browser did not open, try again. Block cannot tell whether you closed an external browser window.",
-    "zh-Hans": "如果浏览器没有打开，请重试。Block 无法判断你是否关闭了外部浏览器窗口。",
-    "ja": "ブラウザーが開かなかった場合は、もう一度お試しください。外部ブラウザーのウィンドウを閉じたかどうかを Block は判別できません。"
+    "en": "If the Microsoft sign-in page didn't open automatically or was closed, open it again here.",
+    "zh-Hans": "如果 Microsoft 登录页没有自动打开，或已被关闭，点这里再次打开。",
+    "ja": "Microsoft のサインインページが自動で開かなかった場合や閉じてしまった場合は、ここから開き直せます。"
+  },
+  "accounts.auth.waiting.switch_to_device": {
+    "en": "Use a device code instead",
+    "zh-Hans": "改用设备代码",
+    "ja": "デバイスコードでサインイン"
+  },
+  "accounts.auth.waiting.switch_to_device_note": {
+    "en": "Enter a code on your phone or another computer to sign in.",
+    "zh-Hans": "换用手机或另一台电脑，输入代码登录。",
+    "ja": "スマートフォンや別のパソコンでコードを入力してサインインします。"
   },
   "accounts.auth.complete.waiting": {
     "en": "Waiting for a verified identity.",

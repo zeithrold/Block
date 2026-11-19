@@ -123,7 +123,14 @@ _add("auth-offline-error", "Check your player name", "Use 1–16 ASCII letters, 
 _add("auth-offline-saving", "Saving your account", "Block is saving the local identity.")
 _add("auth-device-preparing", "Preparing secure sign-in", "Block is requesting a real Microsoft authorization session.")
 _add("auth-device-waiting", "Approve your device code", "TEST-CODE")
-_add("auth-waiting", "Continue in your browser", "Open browser again")
+_add(
+    "auth-waiting",
+    "Finish Microsoft sign-in",
+    "Block is waiting for you to sign in.",
+    "Reopen the sign-in page",
+    "Use a device code instead",
+    "Cancel",
+)
 _add("auth-verifying", "Verifying your account", "Block is checking Java Edition ownership")
 _add("auth-complete", "Your account is ready", "Zeithrold", "Save and use")
 _add("auth-saving", "Saving your account", "Block is saving the refresh credential")

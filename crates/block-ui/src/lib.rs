@@ -21,6 +21,8 @@ mod i18n;
 
 #[path = "settings/about.rs"]
 mod about;
+#[path = "controls/action_list.rs"]
+mod action_list;
 #[path = "navigation/actions.rs"]
 mod actions;
 #[path = "controls/alert.rs"]

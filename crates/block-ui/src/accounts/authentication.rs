@@ -9,6 +9,9 @@
 )]
 
 use super::scroll_area::ScrollAreaExt as _;
+
+#[path = "browser_wait.rs"]
+mod browser_wait;
 use std::{
     fmt,
     sync::{Arc, LazyLock},
@@ -19,7 +22,7 @@ use block_auth::{Account, AccountProvider, SignInStage};
 use gpui::{
     AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window, div,
-    img, point, px, rgb,
+    img, point, prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_base::motion::{Easing, Transition, transition};
 
@@ -241,6 +244,12 @@ pub(crate) struct AuthProviderDraft {
 }
 
 impl AuthWizard {
+    fn waiting_for_browser(&self) -> bool {
+        self.provider == AccountProvider::Microsoft
+            && self.method == Method::Browser
+            && self.phase == Phase::Waiting
+    }
+
     pub(super) fn reviewing_identity(&self) -> bool {
         self.phase == Phase::Complete
     }
@@ -2113,13 +2122,13 @@ impl Block {
 
     fn auth_body(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let (title, description) = self.auth_heading(state);
-        let mut body = div()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(patterns::wizard_heading(title, description));
+        let heading = if state.waiting_for_browser() {
+            self.browser_wait_heading(state)
+        } else {
+            let (title, description) = self.auth_heading(state);
+            patterns::wizard_heading(title, description)
+        };
+        let mut body = div().min_w_0().flex().flex_col().gap_4().child(heading);
         body = match state.phase {
             Phase::Connect => body.child(self.auth_connect(state, cx)),
             // Waiting and verification happen on the page the attempt started
@@ -2681,13 +2690,16 @@ impl Block {
             ))
     }
 
-    /// The browser sign-in card, which reports the observed stage and offers a reopen control.
+    /// The browser handoff needs actions, not progress until verification starts.
     fn browser_waiting(
         &self,
         state: &AuthWizard,
         language: Language,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
+        if state.waiting_for_browser() {
+            return self.browser_wait_actions(state, cx);
+        }
         let mut card = components::card(self.palette)
             .child(Icon::ExternalLink.render(32., self.palette.foreground))
             .child(note(tr!(language, "accounts.auth.waiting.ownership_note")))
@@ -2705,35 +2717,6 @@ impl Block {
             card = card
                 .child(note(tr!(language, auth_stage_key(stage))))
                 .children(self.stage_boundary_rows(stage, language));
-        }
-        if state.phase == Phase::Waiting && (state.browser_url.is_some() || self.visual_only) {
-            card = card
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(self.auth_button(
-                            "auth-reopen",
-                            tr!(language, "accounts.auth.waiting.reopen"),
-                            UiAction::AuthReopen,
-                            ButtonVariant::Outline,
-                            ControlState::default(),
-                            cx,
-                        ))
-                        .child(self.auth_button(
-                            "auth-use-device-code",
-                            tr!(language, "accounts.auth.microsoft.device_action"),
-                            UiAction::AuthMethod(Method::Device),
-                            ButtonVariant::Outline,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx,
-                        )),
-                )
-                .child(note(tr!(language, "accounts.auth.waiting.reopen_note")));
         }
         card
     }
@@ -2857,7 +2840,11 @@ impl Block {
         let cancel = state.phase.pending().then(|| {
             self.auth_button(
                 "auth-cancel",
-                tr!(language, "accounts.auth.footer.cancel_sign_in"),
+                if state.waiting_for_browser() {
+                    tr!(language, "common.cancel")
+                } else {
+                    tr!(language, "accounts.auth.footer.cancel_sign_in")
+                },
                 UiAction::AuthCancel,
                 ButtonVariant::Ghost,
                 ControlState::default(),
@@ -2942,28 +2929,30 @@ impl Block {
                     .flex_col()
                     .gap_2()
                     .children(cancel)
-                    .child(self.auth_button(
-                        "auth-primary",
-                        label,
-                        action,
-                        ButtonVariant::Primary,
-                        ControlState {
-                            busy,
-                            disabled: state.provider_draft.is_some()
-                                || provider_blocked
-                                || settled
-                                || self.busy
-                                    && matches!(
-                                        state.phase,
-                                        Phase::Connect
-                                            | Phase::Failed
-                                            | Phase::Complete
-                                            | Phase::Characters
-                                    ),
-                            ..ControlState::default()
-                        },
-                        cx,
-                    )),
+                    .when(!state.waiting_for_browser(), |buttons| {
+                        buttons.child(self.auth_button(
+                            "auth-primary",
+                            label,
+                            action,
+                            ButtonVariant::Primary,
+                            ControlState {
+                                busy,
+                                disabled: state.provider_draft.is_some()
+                                    || provider_blocked
+                                    || settled
+                                    || self.busy
+                                        && matches!(
+                                            state.phase,
+                                            Phase::Connect
+                                                | Phase::Failed
+                                                | Phase::Complete
+                                                | Phase::Characters
+                                        ),
+                                ..ControlState::default()
+                            },
+                            cx,
+                        ))
+                    }),
             )
             .into_any_element();
         Some(footer)
@@ -4359,8 +4348,25 @@ mod tests {
                     };
                     assert!(body.bottom() <= footer.top());
                     assert!(footer.bottom() <= px(height));
+                    if phase == Phase::Waiting {
+                        for selector in ["auth-reopen", "auth-use-device-code"] {
+                            assert!(
+                                cx.debug_bounds(selector).is_some_and(|action| {
+                                    action.left() >= body.left()
+                                        && action.right() <= body.right()
+                                        && action.top() >= body.top()
+                                        && action.bottom() <= body.bottom()
+                                }),
+                                "{selector} outside browser waiting body at {width}×{height}"
+                            );
+                        }
+                    }
                     for selector in ["auth-cancel", "auth-primary"] {
                         let action = cx.debug_bounds(selector);
+                        if phase == Phase::Waiting && selector == "auth-primary" {
+                            assert!(action.is_none(), "browser waiting has no primary action");
+                            continue;
+                        }
                         if selector == "auth-cancel" && !phase.pending() {
                             assert!(action.is_none(), "only in-flight sign-in offers Cancel");
                             continue;
@@ -4374,7 +4380,7 @@ mod tests {
                             }),
                             "{selector} outside {width}×{height}: {action:?}"
                         );
-                        if !phase.pending() {
+                        if !phase.pending() || phase == Phase::Waiting {
                             assert!(
                                 action.is_some_and(|action| {
                                     let above = action.top() - footer.top();

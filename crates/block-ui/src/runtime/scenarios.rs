@@ -197,7 +197,7 @@ impl Block {
             options.name == "toast-motion-reduced"
         } else if matches!(
             options.name.as_str(),
-            "setup-import-list" | "setup-account" | "auth-choose"
+            "setup-import-list" | "setup-account" | "auth-choose" | "auth-waiting"
         ) {
             false
         } else {
