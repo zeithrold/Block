@@ -1226,7 +1226,7 @@ impl Block {
     pub(super) fn render_surface_dialog_body(
         &self,
         revision: usize,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         let kind = self
@@ -1238,30 +1238,15 @@ impl Block {
         let Some(kind) = kind else {
             return div().into_any_element();
         };
-        let (content, _section) = match &kind {
-            Surface::DownloadFiles(group) => (
-                div()
-                    .px(px(24.))
-                    .child(self.render_download_files_body(*group)),
-                false,
-            ),
-            Surface::GamesHelp => (div().px(px(24.)).child(self.render_games_help(cx)), false),
-            Surface::AuthProviderAdd => (
-                div()
-                    .px(px(24.))
-                    .pb(px(24.))
-                    .child(self.render_auth_provider_add(window, cx)),
-                true,
-            ),
-            _ => (
-                div()
-                    .px(px(24.))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
-                false,
-            ),
+        let content = match &kind {
+            Surface::DownloadFiles(group) => div()
+                .px(px(24.))
+                .child(self.render_download_files_body(*group)),
+            Surface::GamesHelp => div().px(px(24.)).child(self.render_games_help(cx)),
+            _ => div()
+                .px(px(24.))
+                .gap_2()
+                .children(self.surface_dialog_notes(&kind).into_iter().map(note)),
         };
         content.w_full().flex().flex_col().into_any_element()
     }
@@ -1281,9 +1266,6 @@ impl Block {
         else {
             return div().into_any_element();
         };
-        if matches!(kind, Surface::AuthProviderAdd) {
-            return div().into_any_element();
-        }
         let buttons = if matches!(kind, Surface::SettingsExit(_)) {
             self.settings_exit_actions(cx)
         } else if matches!(kind, Surface::EditorExit(_)) {
@@ -1308,6 +1290,11 @@ impl Block {
         let language = self.language();
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.shell.import_games.chrome(language),
+            Surface::AuthProviderAdd => (
+                tr!(language, "accounts.auth.provider_add.title"),
+                tr!(language, "accounts.auth.provider_add.description"),
+                560.,
+            ),
             Surface::Drawer(Drawer::Language) => (
                 tr!(language, "setup.language.label"),
                 tr!(language, "setup.language.description"),
@@ -1332,8 +1319,7 @@ impl Block {
         }
     }
 
-    /// The sheet body for a home drawer. The sheet host owns the title,
-    /// description, scrim, dismissal and focus; this renders the product list.
+    /// Product content inside the sheet host's header, dismissal and focus trap.
     pub(super) fn render_surface_sheet_body(
         &self,
         kind: &Surface,
@@ -1342,6 +1328,7 @@ impl Block {
     ) -> AnyElement {
         match kind {
             Surface::Drawer(Drawer::ImportGames) => self.render_import_games(window, cx),
+            Surface::AuthProviderAdd => self.render_auth_provider_add(cx),
             Surface::Drawer(Drawer::Language) => {
                 let search = self.shell.first_run.language_search.as_ref();
                 let query = search

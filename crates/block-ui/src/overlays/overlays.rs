@@ -10,7 +10,7 @@ use super::{
     shell::{Drawer, OverlayPresentation, Surface},
 };
 use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
     div, px,
 };
@@ -241,7 +241,6 @@ impl Overlays {
             }
             SurfaceDialogClose { owner: close_owner }
         });
-        let body_close = matches!(kind, Surface::AuthProviderAdd).then(|| close.clone());
         let body = cx.new(|cx| {
             if let Some(owner) = observer.upgrade() {
                 cx.observe(&owner, |_, _, cx| cx.notify()).detach();
@@ -249,7 +248,6 @@ impl Overlays {
             SurfaceOverlayBody {
                 owner: observer,
                 revision,
-                close: body_close,
                 footer: false,
             }
         });
@@ -261,7 +259,6 @@ impl Overlays {
             SurfaceOverlayBody {
                 owner: footer_owner,
                 revision,
-                close: None,
                 footer: true,
             }
         });
@@ -285,7 +282,6 @@ impl Overlays {
                 let dialog_width = (content_size.width - px(32.)).max(px(0.)).min(px(520.));
                 let dialog_height =
                     (content_size.height - px(super::design::CHROME_HEIGHT + 24.)).max(px(0.));
-                let body_chrome = matches!(kind, Surface::AuthProviderAdd);
                 let draft_exit = matches!(kind, Surface::SettingsExit(_) | Surface::EditorExit(_));
                 let title = view.read(dialog_cx).surface_dialog_title(&kind);
                 let language = view.read(dialog_cx).language();
@@ -304,7 +300,7 @@ impl Overlays {
                     .close_button(false)
                     .content(move |content, _window, _cx| {
                         let title_owner = title_owner.clone();
-                        let header = (!body_chrome).then(|| {
+                        let header = {
                             div()
                                 .debug_selector(|| "surface-dialog-title".into())
                                 .px(px(24.))
@@ -325,7 +321,7 @@ impl Overlays {
                                         .child(title.clone()),
                                 )
                                 .child(close.clone())
-                        });
+                        };
                         // Keep the whole product surface within its content budget.
                         // Only the middle region scrolls; title and actions cannot
                         // be pushed beyond the compact window by a long note.
@@ -333,7 +329,7 @@ impl Overlays {
                             .min_h_0()
                             .max_h((dialog_height - px(2.)).max(px(0.)))
                             .overflow_hidden()
-                            .children(header)
+                            .child(header)
                             .child(
                                 div()
                                     .id("surface-dialog-scroll")
@@ -343,12 +339,12 @@ impl Overlays {
                                     .overflow_y_scroll()
                                     .child(body.clone()),
                             )
-                            .children((!body_chrome).then(|| {
+                            .child(
                                 div()
                                     .debug_selector(|| "surface-dialog-footer".into())
                                     .flex_shrink_0()
-                                    .child(footer.clone())
-                            }))
+                                    .child(footer.clone()),
+                            )
                     })
                     .on_cancel(move |_, _, cx| {
                         gate.upgrade().is_some_and(|view| {
@@ -440,7 +436,6 @@ impl Overlays {
 struct SurfaceOverlayBody {
     owner: WeakEntity<Block>,
     revision: usize,
-    close: Option<Entity<SurfaceDialogClose>>,
     footer: bool,
 }
 
@@ -472,13 +467,6 @@ impl Render for SurfaceOverlayBody {
                 settings_dialog_back(&body.owner, revision, event, window, cx);
             }))
             .child(body)
-            .children(self.close.as_ref().map(|close| {
-                div()
-                    .absolute()
-                    .top(px(8.))
-                    .right(px(8.))
-                    .child(close.clone())
-            }))
     }
 }
 
@@ -687,10 +675,10 @@ impl Surface {
                 | Drawer::Downloads
                 | Drawer::ImportGames
                 | Drawer::Language,
-            ) => Some(OverlayPresentation::Sheet),
+            )
+            | Self::AuthProviderAdd => Some(OverlayPresentation::Sheet),
             Self::DownloadFiles(_)
             | Self::GamesHelp
-            | Self::AuthProviderAdd
             | Self::DeleteInstance(_)
             | Self::RemoveAccount(_)
             | Self::RemoveProvider(_)

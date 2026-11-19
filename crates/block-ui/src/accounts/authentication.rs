@@ -910,18 +910,14 @@ impl Block {
         true
     }
 
-    pub(super) fn render_auth_provider_add(
-        &self,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
+    pub(super) fn render_auth_provider_add(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let Some(draft) = self
             .shell
             .auth
             .as_ref()
             .and_then(|s| s.provider_draft.as_ref())
         else {
-            return div();
+            return div().into_any_element();
         };
         let parsed = block_auth::ProviderAddress::parse(&draft.address.read(cx).value()).ok();
         let existing = parsed.as_ref().and_then(|a| {
@@ -936,10 +932,6 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            .child(patterns::wizard_heading(
-                tr!(language, "accounts.auth.provider_add.title"),
-                tr!(language, "accounts.auth.provider_add.description"),
-            ))
             .child(super::attach_provider_drop_bounds(
                 div().child(
                     div()
@@ -1020,63 +1012,55 @@ impl Block {
                     }),
                 ));
         }
-        let form = form
-            .children(
-                draft
-                    .error
-                    .as_ref()
-                    .map(|error| note(error.render(language))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(self.auth_button(
-                        "auth-provider-cancel",
-                        tr!(language, "common.cancel"),
-                        UiAction::AuthProviderCancel,
-                        ButtonVariant::Ghost,
-                        ControlState::default(),
-                        cx,
-                    ))
-                    .child(self.auth_button(
-                        "auth-provider-save",
-                        if existing.is_some() {
-                            tr!(language, "accounts.auth.provider_add.use_saved")
-                        } else {
-                            tr!(language, "accounts.auth.provider_add.add")
-                        },
-                        UiAction::AuthProviderSave,
-                        ButtonVariant::Primary,
-                        ControlState {
-                            busy: draft.attempt.is_some(),
-                            disabled: self.busy
-                                || existing.is_none()
-                                    && parsed.as_ref().is_some_and(|a| {
-                                        a.insecure
-                                            && draft.accepted_http.as_deref()
-                                                != Some(a.url.as_str())
-                                    }),
-                            ..Default::default()
-                        },
-                        cx,
-                    )),
-            );
-        let max_height = (window.viewport_size().height - px(80.)).max(px(0.));
-        div().w_full().child(
-            div()
-                .id("auth-provider-scroll")
-                .debug_selector(|| "auth-provider-scroll".into())
-                .max_h(max_height)
-                .scroll_area(
-                    &draft.scroll,
-                    "accounts.auth.provider_add",
-                    self.palette,
-                    false,
-                )
-                .child(form),
+        let form = form.children(
+            draft
+                .error
+                .as_ref()
+                .map(|error| note(error.render(language))),
+        );
+        let footer = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.auth_button(
+                "auth-provider-cancel",
+                tr!(language, "common.cancel"),
+                UiAction::AuthProviderCancel,
+                ButtonVariant::Ghost,
+                ControlState::default(),
+                cx,
+            ))
+            .child(self.auth_button(
+                "auth-provider-save",
+                if existing.is_some() {
+                    tr!(language, "accounts.auth.provider_add.use_saved")
+                } else {
+                    tr!(language, "accounts.auth.provider_add.add")
+                },
+                UiAction::AuthProviderSave,
+                ButtonVariant::Primary,
+                ControlState {
+                    busy: draft.attempt.is_some(),
+                    disabled: self.busy
+                        || existing.is_none()
+                            && parsed.as_ref().is_some_and(|a| {
+                                a.insecure && draft.accepted_http.as_deref() != Some(a.url.as_str())
+                            }),
+                    ..Default::default()
+                },
+                cx,
+            ));
+        super::drawer_page::DrawerPage::new(
+            "authlib-add-page",
+            super::drawer_page::scroll_body(
+                "authlib-add-body",
+                &draft.scroll,
+                self.palette,
+                form.into_any_element(),
+            ),
+            footer.into_any_element(),
         )
+        .render()
     }
 
     pub(super) fn account_provider(
@@ -2363,17 +2347,20 @@ impl Block {
                         super::select::ProductChoice::AuthProvider,
                         cx,
                     )))
-                    .child(self.auth_button(
-                        "auth-provider-add",
-                        tr!(language, "accounts.providers.add"),
-                        UiAction::AuthProviderAdd,
-                        ButtonVariant::Outline,
-                        ControlState {
-                            disabled: self.busy,
-                            ..ControlState::default()
-                        },
-                        cx,
-                    )),
+                    .child(
+                        self.auth_button(
+                            "auth-provider-add",
+                            tr!(language, "accounts.providers.add"),
+                            UiAction::AuthProviderAdd,
+                            ButtonVariant::Outline,
+                            ControlState {
+                                disabled: self.busy,
+                                ..ControlState::default()
+                            },
+                            cx,
+                        )
+                        .track_focus(&self.shell.surfaces.trigger_focus("auth-provider-add", cx)),
+                    ),
             )
             // The address that receives the account and password stays visible.
             .children(provider.map(|p| note(p.api_url.clone())));
@@ -2384,7 +2371,7 @@ impl Block {
             card = card.child(note(tr!(language, "accounts.auth.provider.none")));
         }
         if state.provider_draft.is_some() {
-            card = card.child(note(tr!(language, "accounts.auth.provider.dialog_open")));
+            card = card.child(note(tr!(language, "accounts.auth.provider.drawer_open")));
         }
         if provider.is_some_and(|provider| {
             state.external_api.as_deref() != Some(provider.api_url.as_str())

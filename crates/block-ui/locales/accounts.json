@@ -295,10 +295,10 @@
     "zh-Hans": "尚未保存验证服务器。使用 + 添加你的服务器或导入其快速链接。",
     "ja": "保存済みの認証サーバーはありません。「+」でサーバーを追加するか、クイックリンクをインポートしてください。"
   },
-  "accounts.auth.provider.dialog_open": {
-    "en": "Finish or close the provider dialog before signing in.",
-    "zh-Hans": "请先完成或关闭服务器对话框，然后再登录。",
-    "ja": "サインインする前に、認証サーバーのダイアログを完了または閉じてください。"
+  "accounts.auth.provider.drawer_open": {
+    "en": "Finish adding the provider or close the drawer before signing in.",
+    "zh-Hans": "请先完成添加服务器，或关闭抽屉，然后再登录。",
+    "ja": "サインインする前に、認証サーバーの追加を完了するか、ドロワーを閉じてください。"
   },
   "accounts.auth.provider.address_changed": {
     "en": "The provider address changed. Choose it again and re-enter your password.",

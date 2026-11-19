@@ -51,6 +51,8 @@ mod downloads;
 mod drawer;
 #[path = "overlays/drawer_gestures.rs"]
 mod drawer_gestures;
+#[path = "overlays/drawer_page.rs"]
+mod drawer_page;
 #[path = "runtime/engine.rs"]
 mod engine;
 #[path = "runtime/events.rs"]

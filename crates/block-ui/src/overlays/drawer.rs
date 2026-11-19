@@ -18,9 +18,10 @@ use gpui_base::{
 use super::{
     Block,
     appearance::Palette,
-    components::{self, ButtonSize, ButtonVariant, Control, ControlState},
-    design::{CONTROL_HEIGHT, Icon},
+    components::{self, ButtonSize, ButtonVariant, ControlState},
+    design::CONTROL_HEIGHT,
     drawer_gestures::DrawerDrag,
+    drawer_page::{HeaderAction, HeaderSlots},
     shell::Surface,
 };
 use gpui_component::WindowExt as _;
@@ -438,11 +439,7 @@ impl DrawerLayer {
         );
         let close = components::button(
             "drawer-close",
-            if import {
-                String::new()
-            } else {
-                tr!(frame.language, "common.close")
-            },
+            "",
             palette,
             ButtonVariant::Ghost,
             ControlState::default(),
@@ -452,56 +449,67 @@ impl DrawerLayer {
                 });
             },
         );
-        let close = close.aria_label(tr!(frame.language, "common.close"));
-        let close = if import {
-            close
-                .w(px(32.))
-                .h(px(32.))
-                .px_0()
-                .child(Icon::Close.render(16., palette.foreground))
+        let foreground = palette.foreground;
+        let close = close
+            .aria_label(tr!(frame.language, "common.close"))
+            .w(px(32.))
+            .h(px(32.))
+            .px_0()
+            .child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |bounds, (), window, _| {
+                        let center = bounds.center();
+                        let mut cross = gpui::PathBuilder::stroke(px(1.5));
+                        for dy in [-4.5, 4.5] {
+                            let offset = gpui::point(px(4.5), px(dy));
+                            cross.move_to(center - offset);
+                            cross.line_to(center + offset);
+                        }
+                        if let Ok(path) = cross.build() {
+                            window.paint_path(path, rgb(foreground));
+                        }
+                    },
+                )
+                .size(px(16.)),
+            );
+        let slots = if import {
+            owner
+                .read(cx)
+                .shell
+                .import_games
+                .header_slots(frame.language)
         } else {
-            close
+            HeaderSlots::default()
         };
-        let refresh = (import
-            && matches!(
-                owner.read(cx).shell.import_games.page,
-                super::import_games::Page::Sources | super::import_games::Page::List
-            ))
-        .then(|| {
+        let button = |slot: HeaderAction| {
             let target = frame.owner.clone();
-            let state = &owner.read(cx).shell.import_games;
             components::button_sized(
-                "import-rescan",
+                slot.id,
                 "",
                 palette,
                 ButtonVariant::Ghost,
                 ButtonSize::Icon,
                 ControlState {
-                    disabled: state.running || state.discovery.is_some(),
-                    ..ControlState::default()
+                    disabled: slot.disabled,
+                    ..Default::default()
                 },
                 move |_, window, cx| {
                     let _ = target.update(cx, |view, cx| {
-                        if view.shell.surfaces.top().is_some_and(|layer| {
-                            layer.revision == revision
-                                && matches!(
-                                    layer.kind,
-                                    Surface::Drawer(super::shell::Drawer::ImportGames)
-                                )
-                        }) {
-                            view.handle(
-                                super::UiAction::ImportGames(super::import_games::Action::Rescan),
-                                window,
-                                cx,
-                            );
+                        if view
+                            .shell
+                            .surfaces
+                            .top()
+                            .is_some_and(|layer| layer.revision == revision)
+                        {
+                            view.handle(slot.action.clone(), window, cx);
                         }
                     });
                 },
             )
-            .aria_label(tr!(frame.language, "setup.import.retry"))
-            .child(Icon::Refresh.render(16., palette.foreground))
-        });
-        let import_back = self.import_header_back(frame, owner, cx);
+            .aria_label(slot.label)
+            .child(slot.icon.render(16., palette.foreground))
+        };
         let closing = frame.closing;
         let panel = div()
             .id("block-drawer")
@@ -541,9 +549,9 @@ impl DrawerLayer {
                             .flex()
                             .items_center()
                             .gap(px(8.))
-                            .children(import_back)
+                            .children(slots.leading.map(button))
                             .child(frame.title_row())
-                            .children(refresh)
+                            .children(slots.trailing.map(button))
                             .child(close),
                     )
                     .child(
@@ -571,38 +579,6 @@ impl DrawerLayer {
                 .map(|sample| drawer_trace::probe("panel", sample)),
         );
         panel.into_any_element()
-    }
-
-    /// Import pages keep one layer and expose Back only when there is a parent page.
-    fn import_header_back(
-        &self,
-        frame: &DrawerFrame,
-        owner: &Entity<Block>,
-        cx: &App,
-    ) -> Option<Control> {
-        (matches!(
-            frame.kind,
-            Surface::Drawer(super::shell::Drawer::ImportGames)
-        ) && matches!(
-            &owner.read(cx).shell.import_games.page,
-            super::import_games::Page::List | super::import_games::Page::DataPolicy(_)
-        ))
-        .then(|| {
-            let target = owner.downgrade();
-            components::button_sized(
-                "import-header-back",
-                "",
-                frame.palette,
-                ButtonVariant::Ghost,
-                ButtonSize::Icon,
-                ControlState::default(),
-                move |_, window, cx| {
-                    let _ = target.update(cx, |view, cx| view.import_header_back(window, cx));
-                },
-            )
-            .aria_label(tr!(frame.language, "action.back"))
-            .child(Icon::ChevronLeft.render(16., frame.palette.foreground))
-        })
     }
 
     /// The library sheet: full-window scrim, focus trap and dismissal around the

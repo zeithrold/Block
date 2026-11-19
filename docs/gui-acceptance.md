@@ -112,8 +112,8 @@ Apply these to the actual controls reached in each journey, not just screenshots
 | UI-10 | Accounts: loading/failure/retry, empty/search-empty, inspect another account, Use account, removal Cancel and confirmed removal using a disposable offline identity, including the last account. | Inspection does not change current identity; confirmation captures the intended identity; removal reconciles current selection and empty state. |
 | UI-11 | Add Offline account: invalid name, valid name, Back/edit, review, save; use a controlled save failure and retry. | Validation identifies the field; draft survives failure; only confirmed save persists, once, across restart. |
 | UI-12 | Microsoft: Browser and Device Code paths, preparing/waiting, reopen/copy, expiry/failure/retry, method switch and cancel; optionally complete a real sign-in with the user. | Clear progress/recovery, expired data not reused, cancelled/old attempts cannot finish the new one. Fixture layout approval does not count as live authentication success. |
-| UI-13 | Authlib: provider choice, long HTTP consent, inline Add-provider dialog, account/password, character list, verification failure, Back/cancel and save failure. | Warning and actions fit compact windows; Escape/focus respects nested ownership; provider changes invalidate sensitive drafts; failed verification preserves the intended character selection. |
-| UI-14 | Providers: loading/error/retry, empty/search-empty, recognize/paste URL, duplicate reuse, HTTP consent after address edits, save/discovery error, editing and removal. Native drop is tested in UI-13's inline Add-provider dialog. | Correct provider/address binding; no duplicate creation or forbidden removal; draft and recovery remain available. Check rename/restart and both linked/unlinked records as detailed below. |
+| UI-13 | Authlib: provider choice, long HTTP consent, Add-provider drawer, account/password, character list, verification failure, Back/cancel and save failure. | The drawer body scrolls and its actions stay reachable in compact windows; dismissal returns focus to Add provider; provider changes invalidate sensitive drafts; failed verification preserves the intended character selection. |
+| UI-14 | Providers: loading/error/retry, empty/search-empty, recognize/paste URL, duplicate reuse, HTTP consent after address edits, save/discovery error, editing and removal. Native drop is tested in UI-13's Add-provider drawer. | Correct provider/address binding; no duplicate creation or forbidden removal; draft and recovery remain available. Check rename/restart and both linked/unlinked records as detailed below. |
 
 ## D. Games, creation and editing
 
@@ -190,7 +190,7 @@ ID, with separate presentation, persistence and service outcomes.
    environment, those branches remain Blocked.
 
 4. **UI-13/14 — Provider lifecycle and real drop entry.** In the authentication
-   wizard's inline Add-provider dialog, drop a valid quick link, reject
+    wizard's Add-provider drawer, drop a valid quick link, reject
    unsupported content and verify that closing the dialog removes its target.
    The Providers management page is not the drop entry. In management, rename
    an existing Provider and verify after restart; a linked Provider's address

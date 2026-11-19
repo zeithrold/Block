@@ -1200,8 +1200,7 @@ impl Block {
             .top()
             .is_some_and(|entry| matches!(entry.kind, Surface::AuthProviderAdd))
         {
-            self.cancel_auth_provider(cx);
-            self.shell.surfaces.close(window, &self.focus, cx);
+            self.close_auth_provider_add(window, cx);
         } else {
             self.shell.surfaces.close(window, &self.focus, cx);
         }
@@ -1513,8 +1512,15 @@ impl Block {
     }
 
     fn close_auth_provider_add(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.cancel_auth_provider(cx);
-        self.shell.surfaces.close(window, &self.focus, cx);
+        if let Some(revision) = self
+            .shell
+            .surfaces
+            .top()
+            .filter(|entry| matches!(entry.kind, Surface::AuthProviderAdd))
+            .map(|entry| entry.revision)
+        {
+            self.dismiss_surface_overlay(revision, window, cx);
+        }
     }
 
     /// Move the wizard forward, then settle focus on the page it opened.

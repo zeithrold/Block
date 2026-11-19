@@ -4,9 +4,11 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
-    time::{Duration, Instant},
 };
 
+use crate::drawer_page::{
+    DrawerPage, DrawerPages, HeaderAction, HeaderSlots, MotionTime, ScrollPage,
+};
 use block_launcher::{
     CancellationToken,
     catalog::DataPolicy,
@@ -19,16 +21,12 @@ use gpui::{
     Context, InteractiveElement as _, IntoElement as _, ParentElement as _, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Window, div, relative, rgb,
 };
-use gpui_base::{
-    TestSupportExt as _,
-    motion::{Easing, Interpolate as _, Timing},
-};
+use gpui_base::TestSupportExt as _;
 
 use super::{
     Block, UiAction,
     components::{self, ButtonVariant, ControlState},
     note,
-    scroll_area::ScrollAreaExt as _,
     shell::{Drawer, Surface},
 };
 use crate::Language;
@@ -43,76 +41,6 @@ pub(super) enum Page {
     DataPolicy(String),
 }
 
-const PAGE_SLIDE_DURATION: Duration = Duration::from_millis(280);
-
-#[derive(Clone, Copy, Debug)]
-struct SlideRun {
-    from: f32,
-    to: f32,
-    started: Instant,
-}
-
-#[derive(Clone, Debug, Default)]
-struct PageMotion {
-    position: f32,
-    run: Option<SlideRun>,
-    policy: Option<(String, f32)>,
-}
-
-impl PageMotion {
-    fn navigate(&mut self, page: &Page, now: Instant, reduced_motion: bool) {
-        let target = match page {
-            Page::Sources => Some(0.),
-            Page::List => Some(1.),
-            Page::DataPolicy(_) => self.policy.as_ref().map(|(_, depth)| *depth),
-            Page::Progress | Page::Results => None,
-        };
-        let Some(target) = target else {
-            self.run = None;
-            return;
-        };
-        let (position, _) = self.sample(now, reduced_motion);
-        self.position = position;
-        if reduced_motion || (position - target).abs() < f32::EPSILON {
-            self.position = target;
-            self.run = None;
-        } else {
-            self.run = Some(SlideRun {
-                from: position,
-                to: target,
-                started: now,
-            });
-        }
-    }
-
-    fn sample(&mut self, now: Instant, reduced_motion: bool) -> (f32, bool) {
-        let Some(run) = self.run else {
-            return (self.position, false);
-        };
-        if reduced_motion {
-            self.position = run.to;
-            self.run = None;
-            return (self.position, false);
-        }
-        let progress = Timing::new(PAGE_SLIDE_DURATION)
-            .ease(Easing::Ease)
-            .sample(now.saturating_duration_since(run.started));
-        if progress.finished {
-            self.position = run.to;
-            self.run = None;
-        } else {
-            self.position = run.from.interpolate(&run.to, progress.directed_progress);
-        }
-        (self.position, self.run.is_some())
-    }
-
-    fn settle(&mut self, page: &Page) {
-        self.position = if *page == Page::List { 1. } else { 0. };
-        self.run = None;
-        self.policy = None;
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(super) enum Action {
     OpenDataPolicy(String),
@@ -121,7 +49,6 @@ pub(super) enum Action {
     Back,
     Source(SourceKind),
     View(SourceKind),
-    Sources,
     Toggle(String),
     All,
     Import,
@@ -183,12 +110,12 @@ pub(super) struct State {
     pub report: Option<DiscoveryReport>,
     pub discovery: Option<uuid::Uuid>,
     pub batch: Option<uuid::Uuid>,
-    pub page: Page,
+    pub(super) pages: DrawerPages<Page>,
     pub source: SourceKind,
     pub selected: BTreeSet<String>,
     pub selections: BTreeMap<String, ImportSelection>,
     confirmed: BTreeMap<String, DataConfirmation>,
-    policy_return: Option<Page>,
+
     policy_focus: Option<gpui::FocusHandle>,
     radio_focus: RefCell<std::collections::HashMap<String, gpui::FocusHandle>>,
     adjust_focus: RefCell<BTreeMap<String, gpui::FocusHandle>>,
@@ -199,7 +126,7 @@ pub(super) struct State {
     pub scroll: ScrollHandle,
     pub source_scroll: ScrollHandle,
     pub list_scroll: ScrollHandle,
-    motion: RefCell<PageMotion>,
+
     pub error: Option<crate::i18n::UiText>,
 }
 
@@ -209,12 +136,12 @@ impl Default for State {
             report: None,
             discovery: None,
             batch: None,
-            page: Page::Sources,
+            pages: DrawerPages::new(Page::Sources),
             source: SourceKind::AdjacentMinecraft,
             selected: BTreeSet::new(),
             selections: BTreeMap::new(),
             confirmed: BTreeMap::new(),
-            policy_return: None,
+
             policy_focus: None,
             radio_focus: RefCell::new(std::collections::HashMap::new()),
             adjust_focus: RefCell::new(BTreeMap::new()),
@@ -225,27 +152,20 @@ impl Default for State {
             scroll: ScrollHandle::new(),
             source_scroll: ScrollHandle::new(),
             list_scroll: ScrollHandle::new(),
-            motion: RefCell::new(PageMotion::default()),
+
             error: None,
         }
     }
 }
 
 impl State {
-    fn navigate(&mut self, page: Page, now: Instant, reduced_motion: bool) {
-        self.motion
-            .borrow_mut()
-            .navigate(&page, now, reduced_motion);
-        self.page = page;
-    }
-
     fn can_import(&self, candidate: &GameCandidate) -> bool {
         candidate.importable && !matches!(self.outcomes.get(&candidate.id), Some(Outcome::Saved))
     }
 
     fn can_open_policy(&self, id: &str) -> bool {
         !self.running
-            && matches!(self.page, Page::Sources | Page::List)
+            && matches!(self.pages.active(), Page::Sources | Page::List)
             && self
                 .candidates(self.source)
                 .into_iter()
@@ -253,7 +173,8 @@ impl State {
     }
 
     fn can_edit_policy(&self, id: &str) -> bool {
-        !self.running && matches!(&self.page, Page::DataPolicy(current) if current.as_str() == id)
+        !self.running
+            && matches!(self.pages.active(), Page::DataPolicy(current) if current.as_str() == id)
     }
 
     fn is_confirmed(&self, id: &str) -> bool {
@@ -511,8 +432,29 @@ impl State {
         }
         self.report = Some(report);
     }
+    pub(super) fn header_slots(&self, language: Language) -> HeaderSlots {
+        HeaderSlots {
+            leading: self.pages.can_back().then(|| HeaderAction {
+                id: "import-header-back",
+                label: tr!(language, "action.back"),
+                icon: crate::design::Icon::ChevronLeft,
+                action: UiAction::ImportGames(Action::Back),
+                disabled: self.running,
+            }),
+            trailing: matches!(self.pages.active(), Page::Sources | Page::List).then(|| {
+                HeaderAction {
+                    id: "import-rescan",
+                    label: tr!(language, "setup.import.retry"),
+                    icon: crate::design::Icon::Refresh,
+                    action: UiAction::ImportGames(Action::Rescan),
+                    disabled: self.running || self.discovery.is_some(),
+                }
+            }),
+        }
+    }
+
     pub(super) fn chrome(&self, language: Language) -> (String, String, f32) {
-        match &self.page {
+        match self.pages.active() {
             Page::Sources => (
                 tr!(language, "surface.import_games"),
                 tr!(language, "import.header.choose"),
@@ -622,7 +564,6 @@ impl Block {
                 Action::Done
                 | Action::New
                 | Action::Source(_)
-                | Action::Sources
                 | Action::View(_)
                 | Action::All
                 | Action::OpenDataPolicy(_)
@@ -640,12 +581,7 @@ impl Block {
             self.begin_import_discovery();
         }
         if !self.shell.import_games.running {
-            self.shell.import_games.page = Page::Sources;
-            self.shell
-                .import_games
-                .motion
-                .borrow_mut()
-                .settle(&Page::Sources);
+            self.shell.import_games.pages = DrawerPages::new(Page::Sources);
         }
         self.shell
             .surfaces
@@ -668,8 +604,7 @@ impl Block {
         let request = uuid::Uuid::new_v4();
         let state = &mut self.shell.import_games;
         state.discovery = Some(request);
-        state.page = Page::Sources;
-        state.motion.borrow_mut().settle(&Page::Sources);
+        state.pages = DrawerPages::new(Page::Sources);
         state.error = None;
         let Some(engine) = &self.engine else {
             self.shell.import_games.discovery = None;
@@ -761,7 +696,7 @@ impl Block {
                 );
             }
         }
-        state.page = Page::Results;
+        state.pages = DrawerPages::new(Page::Results);
     }
 
     /// Closing the sheet is not skipping setup. Only the work owned by the
@@ -793,7 +728,7 @@ impl Block {
                 if !state.can_open_policy(&id) {
                     return;
                 }
-                state.policy_return = Some(state.page.clone());
+
                 state.policy_focus = Some(state.policy_action_focus(&id, cx));
                 let policy = state
                     .candidates(state.source)
@@ -811,9 +746,9 @@ impl Block {
                     key,
                     cx,
                 );
-                let depth = if state.page == Page::Sources { 1. } else { 2. };
-                state.motion.borrow_mut().policy = Some((id.clone(), depth));
-                state.navigate(Page::DataPolicy(id), now, reduced);
+                state
+                    .pages
+                    .push(Page::DataPolicy(id), MotionTime { now, reduced });
                 focus.focus(window, cx);
             }
             Action::SelectDataPolicy(id, data_policy) => {
@@ -865,8 +800,7 @@ impl Block {
                 let now = cx.background_executor().now();
                 let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
-                let page = state.policy_return.take().unwrap_or(Page::List);
-                state.navigate(page, now, reduced);
+                state.pages.back(MotionTime { now, reduced });
                 if let Some(focus) = state.policy_focus.take() {
                     focus.focus(window, cx);
                 }
@@ -892,14 +826,9 @@ impl Block {
                 let reduced = self.motion_preferences().reduced();
                 let state = &mut self.shell.import_games;
                 state.choose_source(source);
-                state.navigate(Page::List, now, reduced);
+                state.pages.push(Page::List, MotionTime { now, reduced });
             }
-            Action::Sources => {
-                let now = cx.background_executor().now();
-                let reduced = self.motion_preferences().reduced();
-                let state = &mut self.shell.import_games;
-                state.navigate(Page::Sources, now, reduced);
-            }
+
             Action::Toggle(id) => {
                 let state = &mut self.shell.import_games;
                 let eligible = state.candidates(state.source).into_iter().any(|candidate| {
@@ -961,8 +890,7 @@ impl Block {
         state.batch = Some(request);
         state.cancel = CancellationToken::new();
         state.running = true;
-        state.page = Page::Progress;
-        state.motion.borrow_mut().run = None;
+        state.pages = DrawerPages::new(Page::Progress);
         state.submitted = candidates
             .iter()
             .map(|selection| selection.candidate.id.clone())
@@ -1152,53 +1080,44 @@ impl Block {
             );
         }
         div()
-            .id("import-data-policy-page")
-            .size_full()
-            .min_h_0()
-            .pr_4()
-            .scroll_area(&state.scroll, "import.policy", self.palette, false)
+            .id(format!("import-policy-{id}"))
+            .flex()
+            .flex_col()
+            .gap_3()
             .child(
                 div()
-                    .pl(gpui::px(super::design::FOCUS_RING_SPREAD))
-                    .py(gpui::px(super::design::FOCUS_RING_SPREAD))
+                    .w_full()
                     .flex()
-                    .flex_col()
+                    .items_start()
+                    .justify_between()
                     .gap_3()
                     .child(
                         div()
-                            .w_full()
-                            .flex()
-                            .items_start()
-                            .justify_between()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .debug_selector(|| "import-policy-instance-name".into())
-                                    .min_w_0()
-                                    .flex_1()
-                                    .text_sm()
-                                    .line_height(gpui::px(20.))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .whitespace_normal()
-                                    .child(candidate.name.clone()),
-                            )
-                            .child(
-                                note(version.clone())
-                                    .id("import-policy-instance-version")
-                                    .debug_selector(|| "import-policy-instance-version".into())
-                                    .flex_shrink_0()
-                                    .max_w(relative(0.5))
-                                    .line_height(gpui::px(20.))
-                                    .text_right()
-                                    .whitespace_normal()
-                                    .aria_label(version)
-                                    .test_support(),
-                            ),
+                            .debug_selector(|| "import-policy-instance-name".into())
+                            .min_w_0()
+                            .flex_1()
+                            .text_sm()
+                            .line_height(gpui::px(20.))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .whitespace_normal()
+                            .child(candidate.name.clone()),
                     )
-                    .child(cards)
-                    .child(note(tr!(language, "import.policy.files_remain")))
-                    .children(state.error_text(language).map(note)),
+                    .child(
+                        note(version.clone())
+                            .id("import-policy-instance-version")
+                            .debug_selector(|| "import-policy-instance-version".into())
+                            .flex_shrink_0()
+                            .max_w(relative(0.5))
+                            .line_height(gpui::px(20.))
+                            .text_right()
+                            .whitespace_normal()
+                            .aria_label(version)
+                            .test_support(),
+                    ),
             )
+            .child(cards)
+            .child(note(tr!(language, "import.policy.files_remain")))
+            .children(state.error_text(language).map(note))
             .into_any_element()
     }
 
@@ -1651,106 +1570,38 @@ impl Block {
 
     fn render_import_pages(&self, window: &Window, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let state = &self.shell.import_games;
-        // Borrow focus paint room from the surrounding inset. Keep compensation
-        // in scroll content so the outer paint remains reachable at its limits.
-        let paint_outset = gpui::px(super::design::FOCUS_RING_SPREAD);
-        let mut running_motion = false;
-        let body = match &state.page {
-            Page::Sources | Page::List | Page::DataPolicy(_) => {
-                let (position, running, policy) = {
-                    let mut motion = state.motion.borrow_mut();
-                    let (position, running) = motion.sample(
-                        cx.background_executor().now(),
-                        self.motion_preferences().reduced(),
-                    );
-                    if !running && !matches!(state.page, Page::DataPolicy(_)) {
-                        motion.policy = None;
-                    }
-                    (position, running, motion.policy.clone())
+        state.pages.render(
+            MotionTime {
+                now: cx.background_executor().now(),
+                reduced: self.motion_preferences().reduced(),
+            },
+            window,
+            |page, active| {
+                let (id, scroll, content) = match page {
+                    Page::Sources => (
+                        "import-sources-content",
+                        &state.source_scroll,
+                        self.render_sources(state, active, cx),
+                    ),
+                    Page::List => (
+                        "import-list-content",
+                        &state.list_scroll,
+                        self.render_list(state, active, cx),
+                    ),
+                    Page::DataPolicy(id) => (
+                        "import-data-policy-page",
+                        &state.scroll,
+                        self.render_import_data_policy(state, id, cx),
+                    ),
+                    Page::Progress | Page::Results => (
+                        "import-games-body",
+                        &state.scroll,
+                        self.render_progress_results(state),
+                    ),
                 };
-                running_motion = running;
-                let source = div()
-                    .id("import-sources-content")
-                    .debug_selector(|| "import-sources-content".into())
-                    .size_full()
-                    .pr_4()
-                    .scroll_area(&state.source_scroll, "import.sources", self.palette, false)
-                    .child(
-                        div()
-                            .w_full()
-                            .pl(paint_outset)
-                            .py(paint_outset)
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(self.render_sources(state, state.page == Page::Sources, cx)),
-                    );
-                let list = div()
-                    .id("import-list-content")
-                    .debug_selector(|| "import-list-content".into())
-                    .size_full()
-                    .pr_4()
-                    .scroll_area(&state.list_scroll, "import.list", self.palette, false)
-                    .child(
-                        div()
-                            .w_full()
-                            .pl(paint_outset)
-                            .py(paint_outset)
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(self.render_list(state, state.page == Page::List, cx)),
-                    );
-                let page = |offset: f32, content: gpui::AnyElement| {
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(relative(offset))
-                        .w(relative(1.))
-                        .min_h_0()
-                        .overflow_hidden()
-                        .child(content)
-                };
-                div()
-                    .id("import-games-body")
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .ml(-paint_outset)
-                    .mt(-paint_outset)
-                    .mb(-paint_outset)
-                    .mr(gpui::rems(-1.))
-                    .overflow_hidden()
-                    .child(page(-position, source.into_any_element()))
-                    .children(
-                        policy
-                            .as_ref()
-                            .is_none_or(|(_, depth)| *depth > 1.)
-                            .then(|| page(1. - position, list.into_any_element())),
-                    )
-                    .children(policy.map(|(id, depth)| {
-                        page(
-                            depth - position,
-                            self.render_import_data_policy(state, &id, cx),
-                        )
-                    }))
-                    .into_any_element()
-            }
-            Page::Progress | Page::Results => div()
-                .id("import-games-body")
-                .flex_1()
-                .min_h_0()
-                .mr(gpui::rems(-1.))
-                .pr_4()
-                .scroll_area(&state.scroll, "import.results", self.palette, false)
-                .child(self.render_progress_results(state))
-                .into_any_element(),
-        };
-        if running_motion {
-            window.request_animation_frame();
-        }
-        body
+                ScrollPage { id, scroll, active }.body(self.palette, content)
+            },
+        )
     }
 
     pub(super) fn render_import_games(
@@ -1766,7 +1617,7 @@ impl Block {
             .filter(|id| state.selected.contains(*id))
             .count();
         let body = self.render_import_pages(window, cx);
-        let mut footer = div().flex_shrink_0().pt_3().flex().flex_col().gap_2();
+        let mut footer = div().flex().flex_col().gap_2();
         if state.running {
             footer = footer
                 .child(self.button(
@@ -1776,7 +1627,7 @@ impl Block {
                     cx,
                 ))
                 .child(note(tr!(language, "import.footer.completedStay")));
-        } else if let Page::DataPolicy(id) = &state.page {
+        } else if let Page::DataPolicy(id) = state.pages.active() {
             let policy_id = id.clone();
             let can_apply = state.candidates(state.source).into_iter().any(|candidate| {
                 candidate.id == *id
@@ -1800,7 +1651,7 @@ impl Block {
                     );
                 }),
             ));
-        } else if state.page == Page::Results {
+        } else if state.pages.active() == &Page::Results {
             // At most one Primary answer: finishing leaves the sheet, retrying
             // only picks up the games that did not arrive.
             if !state.pending().is_empty() {
@@ -1827,7 +1678,7 @@ impl Block {
             ));
         } else {
             let n = selected_count;
-            if state.page == Page::Sources {
+            if state.pages.active() == &Page::Sources {
                 footer = footer.child(self.button_with_variant(
                     "import-new",
                     tr!(language, "import.footer.newGame"),
@@ -1840,7 +1691,7 @@ impl Block {
                     cx,
                 ));
             }
-            if n > 0 || state.page != Page::Sources {
+            if n > 0 || state.pages.active() != &Page::Sources {
                 footer = footer.child(components::button(
                     "import-add",
                     {
@@ -1863,26 +1714,7 @@ impl Block {
                 ));
             }
         }
-        div()
-            .id("import-games")
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .child(body)
-            .child(footer)
-            .into_any_element()
-    }
-
-    pub(super) fn import_header_back(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.shell.import_games.running {
-            let action = if matches!(self.shell.import_games.page, Page::DataPolicy(_)) {
-                Action::Back
-            } else {
-                Action::Sources
-            };
-            self.handle_import_games(action, window, cx);
-        }
+        DrawerPage::new("import-games", body, footer.into_any_element()).render()
     }
 }
 
@@ -2018,7 +1850,13 @@ mod tests {
                         sources: Vec::new(),
                         candidates: vec![shared.clone(), unknown.clone(), stale],
                     });
-                    state.page = Page::List;
+                    state.pages.push(
+                        Page::List,
+                        MotionTime {
+                            now: cx.background_executor().now(),
+                            reduced: true,
+                        },
+                    );
                     view.handle_import_games(Action::OpenDataPolicy("shared".into()), window, cx);
                     view.handle_import_games(
                         Action::SelectDataPolicy("shared".into(), DataPolicy::Isolated),
@@ -2026,7 +1864,7 @@ mod tests {
                         cx,
                     );
                     view.handle_import_games(Action::Back, window, cx);
-                    assert_eq!(view.shell.import_games.page, Page::List);
+                    assert_eq!(*view.shell.import_games.pages.active(), Page::List);
                     assert_eq!(
                         view.shell.import_games.risk(&shared),
                         Some(DataRisk::Isolated)
@@ -2042,7 +1880,7 @@ mod tests {
                     view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
                     view.handle_import_games(Action::ApplyDataPolicy("stale".into()), window, cx);
                     assert_eq!(
-                        view.shell.import_games.page,
+                        *view.shell.import_games.pages.active(),
                         Page::DataPolicy("unknown".into())
                     );
                     assert!(!view.shell.import_games.is_confirmed("stale"));
@@ -2155,32 +1993,6 @@ mod tests {
         assert_eq!(
             tr!(Language::Japanese, "import.source.many", count = 3),
             "3 ゲーム"
-        );
-    }
-
-    #[test]
-    fn source_list_motion_reverses_continuously_and_respects_reduced_motion() {
-        let start = Instant::now();
-        let mut motion = PageMotion::default();
-        motion.navigate(&Page::List, start, false);
-        let at_100 = motion.sample(start + Duration::from_millis(100), false).0;
-        assert!(at_100 > 0. && at_100 < 1.);
-        motion.navigate(&Page::Sources, start + Duration::from_millis(100), false);
-        assert_eq!(
-            motion.sample(start + Duration::from_millis(100), false).0,
-            at_100
-        );
-        let returning = motion.sample(start + Duration::from_millis(140), false).0;
-        assert!(returning < at_100);
-        motion.navigate(&Page::List, start + Duration::from_millis(140), false);
-        assert_eq!(
-            motion.sample(start + Duration::from_millis(140), false).0,
-            returning
-        );
-        motion.navigate(&Page::Sources, start + Duration::from_millis(150), true);
-        assert_eq!(
-            motion.sample(start + Duration::from_millis(150), true),
-            (0., false)
         );
     }
 
@@ -2352,13 +2164,13 @@ mod tests {
                     sources: Vec::new(),
                     candidates: vec![unknown],
                 });
-                view.shell.import_games.page = Page::List;
+                view.shell.import_games.pages.push(Page::List, MotionTime { now: cx.background_executor().now(), reduced: true });
                 view.shell.import_games.list_scroll.set_offset(gpui::point(gpui::px(0.), gpui::px(-84.)));
                 view.handle_import_games(Action::OpenDataPolicy("unknown".into()), window, cx);
-                assert!(matches!(view.shell.import_games.page, Page::DataPolicy(ref id) if id == "unknown"));
+                assert!(matches!(view.shell.import_games.pages.active(), Page::DataPolicy(id) if id == "unknown"));
                 view.handle_import_games(Action::SelectDataPolicy("unknown".into(), DataPolicy::Shared), window, cx);
                 view.handle_import_games(Action::ApplyDataPolicy("unknown".into()), window, cx);
-                assert_eq!(view.shell.import_games.page, Page::List);
+                assert_eq!(*view.shell.import_games.pages.active(), Page::List);
                 assert!(view.shell.import_games.selected.contains("unknown"));
                 assert!(view.shell.import_games.is_confirmed("unknown"));
                 assert_eq!(view.shell.import_games.list_scroll.offset().y, gpui::px(-84.));

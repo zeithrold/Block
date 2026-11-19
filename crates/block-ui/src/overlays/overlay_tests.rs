@@ -1480,38 +1480,83 @@ fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn auth_provider_add_opens_as_dialog_and_escape_dismisses_it(cx: &mut TestAppContext) {
+#[expect(
+    clippy::expect_used,
+    reason = "Missing drawer geometry is a failure of the native surface under test."
+)]
+fn auth_provider_drawer_dismissals_discard_the_draft_and_restore_the_trigger(
+    cx: &mut TestAppContext,
+) {
+    #[derive(Debug)]
+    enum Dismissal {
+        Cancel,
+        Escape,
+        Backdrop,
+        Drag,
+    }
+
     let (view, cx) = fixture(cx);
-    let trigger_focus = cx.update(|window, cx| window.focused(cx));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
-            view.shell
-                .surfaces
-                .open(Surface::AuthProviderAdd, window, cx);
+            view.handle(UiAction::SignIn, window, cx);
+            view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
         });
     });
-    cx.run_until_parked();
-    assert_eq!(
-        cx.windows().len(),
-        1,
-        "the provider form stays inside the window"
-    );
-    cx.update(|window, cx| assert!(window.has_active_dialog(cx)));
-    view.read_with(cx, |view, _| {
-        assert!(matches!(
-            view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::AuthProviderAdd)
-        ));
+    let trigger_focus = view.read_with(cx, |view, cx| {
+        view.shell.surfaces.trigger_focus("auth-provider-add", cx)
     });
-    crate::test_support::press(cx, "escape");
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| assert!(!view.shell.surfaces.is_open()));
-    cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
-    assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
+    for dismissal in [
+        Dismissal::Cancel,
+        Dismissal::Escape,
+        Dismissal::Backdrop,
+        Dismissal::Drag,
+    ] {
+        click(cx, "auth-provider-add");
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+        let panel = crate::test_support::control_bounds(cx, "block-drawer")
+            .expect("the provider form paints in the native drawer");
+        match dismissal {
+            Dismissal::Cancel => click(cx, "auth-provider-cancel"),
+            Dismissal::Escape => crate::test_support::press(cx, "escape"),
+            Dismissal::Backdrop => {
+                cx.simulate_click(
+                    point(panel.center().x, panel.top() - px(10.)),
+                    Modifiers::none(),
+                );
+            }
+            Dismissal::Drag => {
+                let handle = crate::test_support::control_bounds(cx, "drawer-handle")
+                    .expect("the provider drawer exposes its drag handle")
+                    .center();
+                let end = handle + point(px(0.), panel.size.height * 0.35);
+                cx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::none());
+                cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::none());
+                cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+            }
+        }
+        cx.run_until_parked();
+        assert!(
+            crate::test_support::control_bounds(cx, "block-drawer").is_none(),
+            "{dismissal:?}"
+        );
+        assert!(
+            view.read_with(cx, |view, _| view
+                .shell
+                .auth
+                .as_ref()
+                .is_some_and(|wizard| !wizard.is_provider_drafting())),
+            "{dismissal:?} should return to the wizard without a provider draft"
+        );
+        assert_eq!(
+            cx.update(|window, cx| window.focused(cx)),
+            Some(trigger_focus.clone()),
+            "{dismissal:?}"
+        );
+    }
 }
 
 #[gpui::test]
-fn compact_wizard_sections_and_provider_dialog_actions_stay_reachable(cx: &mut TestAppContext) {
+fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppContext) {
     for language in crate::Language::ALL {
         let (view, cx) = fixture(cx);
         cx.simulate_resize(size(px(360.), px(540.)));
@@ -1549,7 +1594,7 @@ fn compact_wizard_sections_and_provider_dialog_actions_stay_reachable(cx: &mut T
             });
         });
         cx.run_until_parked();
-        let viewport = crate::test_support::control_bounds(cx, "auth-provider-scroll");
+        let viewport = crate::test_support::control_bounds(cx, "authlib-add-body");
         assert!(
             viewport.is_some(),
             "{language:?}: provider form must scroll"
@@ -1559,7 +1604,17 @@ fn compact_wizard_sections_and_provider_dialog_actions_stay_reachable(cx: &mut T
         };
         assert!(viewport.left() >= px(0.) && viewport.right() <= px(360.));
         assert!(viewport.bottom() <= px(540.));
+        let save = crate::test_support::control_bounds(cx, "auth-provider-save");
+        assert!(
+            save.is_some_and(|save| save.top() >= viewport.bottom() && save.bottom() <= px(540.)),
+            "{language:?}: Save starts inside the pinned footer: {save:?}"
+        );
         let position = viewport.center();
+        let drop_zone = crate::test_support::control_bounds(cx, "provider-drop-zone");
+        assert!(
+            drop_zone.is_some(),
+            "{language:?}: quick-link zone is present"
+        );
         cx.simulate_mouse_move(position, None, Modifiers::none());
         cx.simulate_event(gpui::ScrollWheelEvent {
             position,
@@ -1567,12 +1622,15 @@ fn compact_wizard_sections_and_provider_dialog_actions_stay_reachable(cx: &mut T
             ..gpui::ScrollWheelEvent::default()
         });
         cx.run_until_parked();
-        let save = crate::test_support::control_bounds(cx, "auth-provider-save");
-        assert!(
-            save.is_some_and(
-                |save| save.top() >= viewport.top() && save.bottom() <= viewport.bottom()
-            ),
-            "{language:?}: provider Save must be reachable: save={save:?}, viewport={viewport:?}"
+        assert_ne!(
+            crate::test_support::control_bounds(cx, "provider-drop-zone"),
+            drop_zone,
+            "{language:?}: wheel input must scroll the provider fields"
+        );
+        assert_eq!(
+            crate::test_support::control_bounds(cx, "auth-provider-save"),
+            save,
+            "{language:?}: scrolling the provider form must not move Save"
         );
     }
 }

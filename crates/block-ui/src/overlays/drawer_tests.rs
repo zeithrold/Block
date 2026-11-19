@@ -318,7 +318,7 @@ fn assert_source_card_selection(view: &Entity<Block>, cx: &mut VisualTestContext
         "keyboard focus must not add a thick inner border underneath the outer selection"
     );
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::Sources,
         "the path area selects the source without navigating"
     );
@@ -391,7 +391,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
     }
     click(cx, "import-view-OfficialLauncher");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::List
     );
 
@@ -443,7 +443,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
 
     click(cx, "import-header-back");
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.import_games.page, Page::Sources);
+        assert_eq!(*view.shell.import_games.pages.active(), Page::Sources);
         assert!(view.shell.import_games.selected.contains("one"));
         assert!(matches!(
             view.shell.surfaces.top().map(|entry| &entry.kind),
@@ -458,7 +458,7 @@ fn import_header_uses_ghost_controls_and_back_retains_selection(cx: &mut TestApp
 
     view.update(cx, |view, cx| {
         let state = &mut view.shell.import_games;
-        state.page = Page::Results;
+        state.pages = crate::drawer_page::DrawerPages::new(Page::Results);
         state.submitted.push("one".into());
         state.outcomes.insert(
             "one".into(),
@@ -498,7 +498,7 @@ fn pending_import_reviews_focus_the_first_adjustment_or_open_the_only_policy(
     frame(cx, 32);
     assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.import_games.page, Page::List);
+        assert_eq!(*view.shell.import_games.pages.active(), Page::List);
         assert_eq!(view.shell.import_games.selected, selected);
     });
     let first = bounds(cx, "import-game-one");
@@ -523,7 +523,10 @@ fn pending_import_reviews_focus_the_first_adjustment_or_open_the_only_policy(
     cx.run_until_parked();
     click(cx, "import-review-pending");
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.import_games.page, Page::DataPolicy("one".into()));
+        assert_eq!(
+            *view.shell.import_games.pages.active(),
+            Page::DataPolicy("one".into())
+        );
         assert_eq!(
             view.shell.import_games.selected,
             ["one".into()].into_iter().collect()
@@ -651,7 +654,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     assert_eq!(control_node(cx, "import-select-all").label(), Some("Clear"));
     click(cx, "import-header-back");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::Sources
     );
     assert_eq!(
@@ -669,7 +672,7 @@ fn import_list_keeps_bulk_selection_and_uses_only_header_back(cx: &mut TestAppCo
     );
     click(cx, "import-header-back");
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::Sources
     );
     assert!(view.read_with(cx, |view, _| view.shell.import_games.selected.is_empty()));
@@ -724,7 +727,7 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
         }
         click(cx, "import-view-OfficialLauncher");
         assert_eq!(
-            view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+            view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
             Page::List,
             "every source count must open its candidates"
         );
@@ -759,7 +762,7 @@ fn import_source_button_counts_its_selected_games_and_keeps_list_access(cx: &mut
             );
             click(cx, "import-data-one");
             assert_eq!(
-                view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+                view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
                 Page::DataPolicy("one".into())
             );
             click(cx, "import-policy-shared");
@@ -913,7 +916,10 @@ fn import_data_mode_keeps_unchecked_selection_and_restores_focus(cx: &mut TestAp
     );
     click(cx, "import-data-one");
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.import_games.page, Page::DataPolicy("one".into()));
+        assert_eq!(
+            *view.shell.import_games.pages.active(),
+            Page::DataPolicy("one".into())
+        );
         assert_eq!(
             view.shell.import_games.selected,
             ["two".into()].into_iter().collect()
@@ -930,7 +936,7 @@ fn import_data_mode_keeps_unchecked_selection_and_restores_focus(cx: &mut TestAp
     crate::test_support::press(cx, "enter");
     cx.run_until_parked();
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::DataPolicy("one".into())
     );
     click(cx, "import-policy-done");
@@ -942,7 +948,7 @@ fn import_data_mode_keeps_unchecked_selection_and_restores_focus(cx: &mut TestAp
     );
     assert_eq!(control_node(cx, "import-data-one").focused(), Some(true));
     view.read_with(cx, |view, _| {
-        assert_eq!(view.shell.import_games.page, Page::List);
+        assert_eq!(*view.shell.import_games.pages.active(), Page::List);
         assert_eq!(
             view.shell.import_games.selected,
             ["two".into()].into_iter().collect()
@@ -1037,7 +1043,7 @@ fn import_header_keyboard_back_and_close_preserve_dismissal_policy(cx: &mut Test
     crate::test_support::press(cx, "enter");
     cx.run_until_parked();
     assert_eq!(
-        view.read_with(cx, |view, _| view.shell.import_games.page.clone()),
+        view.read_with(cx, |view, _| view.shell.import_games.pages.active().clone()),
         Page::Sources
     );
 
@@ -1051,7 +1057,7 @@ fn import_header_keyboard_back_and_close_preserve_dismissal_policy(cx: &mut Test
             act(&view, UiAction::Drawer(Some(Drawer::ImportGames)), cx);
         }
         let cancel = view.update(cx, |view, cx| {
-            view.shell.import_games.page = Page::Progress;
+            view.shell.import_games.pages = crate::drawer_page::DrawerPages::new(Page::Progress);
             view.shell.import_games.running = true;
             view.shell.import_games.cancel = block_launcher::CancellationToken::new();
             cx.notify();

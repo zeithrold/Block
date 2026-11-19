@@ -249,7 +249,11 @@ fn import_policy_choice_survives_switching_sources(cx: &mut gpui::TestAppContext
         let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
         view.update_in(cx, |view, window, cx| {
             view.shell.import_games.apply_discovery(report);
-            view.shell.import_games.page = crate::import_games::Page::List;
+            view.handle_import_games(
+                ImportAction::View(view.shell.import_games.source),
+                window,
+                cx,
+            );
             view.handle_import_games(
                 ImportAction::OpenDataPolicy("adjacent-one".into()),
                 window,
@@ -264,7 +268,7 @@ fn import_policy_choice_survives_switching_sources(cx: &mut gpui::TestAppContext
                 cx,
             );
             view.handle_import_games(ImportAction::Back, window, cx);
-            view.handle_import_games(ImportAction::Sources, window, cx);
+            view.handle_import_games(ImportAction::Back, window, cx);
             view.handle_import_games(
                 ImportAction::Source(SourceKind::OfficialLauncher),
                 window,
