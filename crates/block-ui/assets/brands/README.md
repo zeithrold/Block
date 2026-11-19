@@ -14,9 +14,7 @@ trademark rights. Follow the linked branding guidelines, including pairing
 the symbol with "Sign in with Microsoft" and not altering the logo.
 
 Render through GPUI's full-color image route, not `svg()` or a themed icon
-wrapper. The SVG element uses an alpha mask and discards the four colors
-(`vendor/gpui-pre/src/svg_renderer.rs`, `render_alpha_mask`).
+wrapper. The SVG element uses an alpha mask and discards the four colors.
 The encoded SVG image route preserves them through
-`ImageFormat::Svg` and `render_single_frame`
-(`vendor/gpui-pre/src/platform.rs`, `Image::to_image_data`).
+`ImageFormat::Svg` and `render_single_frame` in the published GPUI crate.
 Keep the intrinsic square aspect ratio and original fills in both themes.

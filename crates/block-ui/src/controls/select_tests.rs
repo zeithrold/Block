@@ -4,7 +4,7 @@ use crate::{
     modpack_import::{Phase, State, TargetDraft},
 };
 use block_launcher::install::fabric::LoaderVersion;
-use gpui::{Focusable as _, Modifiers, ScrollDelta, ScrollWheelEvent, size};
+use gpui::{Focusable as _, Modifiers, ScrollDelta, ScrollEvent, size};
 
 fn settle(cx: &mut gpui::VisualTestContext) {
     cx.run_until_parked();
@@ -1020,10 +1020,10 @@ fn wheel_scrolls_the_long_selector_without_moving_the_wizard_beneath(
         let tab = view.read_with(cx, |view, _| view.router.tab());
         cx.simulate_mouse_move(pointer, None, Modifiers::none());
         cx.run_until_parked();
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: pointer,
             delta: ScrollDelta::Pixels(point(px(0.), px(-2400.))),
-            ..ScrollWheelEvent::default()
+            ..ScrollEvent::default()
         });
         settle(cx);
 
@@ -1048,10 +1048,10 @@ fn wheel_scrolls_the_long_selector_without_moving_the_wizard_beneath(
         assert_eq!(view.read_with(cx, |view, _| view.router.tab()), tab);
         assert!(pack_page_open(&view, cx) && select_open(&view, cx));
 
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: pointer,
             delta: ScrollDelta::Pixels(point(px(0.), px(2400.))),
-            ..ScrollWheelEvent::default()
+            ..ScrollEvent::default()
         });
         settle(cx);
         let returned = open_selector(&view, cx);

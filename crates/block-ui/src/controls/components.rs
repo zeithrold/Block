@@ -1310,7 +1310,7 @@ mod tests {
         StatefulInteractiveElement as _, Styled as _, Window, div, point, px,
     };
 
-    fn press(cx: &mut gpui::VisualTestContext, key: &str) {
+    fn press(cx: &mut gpui::VisualTestContext, key: &'static str) {
         let parsed = Keystroke::parse(key);
         assert!(parsed.is_ok(), "invalid test keystroke: {key}");
         if let Ok(keystroke) = parsed {

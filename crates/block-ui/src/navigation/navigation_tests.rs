@@ -186,10 +186,10 @@ fn scrolling_before_navigation_freezes_the_last_visible_detail(cx: &mut TestAppC
     cx.run_until_parked();
     let body = view.read_with(cx, |view, _| view.shell.games.detail_scroll.bounds());
     cx.simulate_mouse_move(body.center(), None, gpui::Modifiers::none());
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: body.center(),
         delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-120.))),
-        ..gpui::ScrollWheelEvent::default()
+        ..gpui::ScrollEvent::default()
     });
     cx.run_until_parked();
     frame(cx, 30);

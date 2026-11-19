@@ -131,10 +131,10 @@ fn compact_long_dialog_keeps_title_and_close_fixed_while_body_scrolls(cx: &mut T
 
     let position = scroll.origin + point(px(8.), px(8.));
     cx.simulate_mouse_move(position, None, Modifiers::none());
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position,
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
-        ..gpui::ScrollWheelEvent::default()
+        ..gpui::ScrollEvent::default()
     });
     cx.run_until_parked();
     let scrolled =
@@ -1358,10 +1358,10 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
     });
 
     let body = view.read_with(cx, |view, _| view.shell.wizard.body_scroll.bounds());
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: body.center(),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
-        ..gpui::ScrollWheelEvent::default()
+        ..gpui::ScrollEvent::default()
     });
     cx.run_until_parked();
     assert!(
@@ -1616,10 +1616,10 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
             "{language:?}: quick-link zone is present"
         );
         cx.simulate_mouse_move(position, None, Modifiers::none());
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position,
             delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1200.))),
-            ..gpui::ScrollWheelEvent::default()
+            ..gpui::ScrollEvent::default()
         });
         cx.run_until_parked();
         assert_ne!(

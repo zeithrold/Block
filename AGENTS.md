@@ -27,7 +27,7 @@
 - Tests should protect observable contracts against credible regressions. Extend existing coverage before duplicating it, exercise the real implementation rather than a copy, and confirm regression tests fail before the fix when practical. Prefer established dependency boundaries over test-only production interfaces.
 - For UI changes, verify the actual native behavior affected. Use semantic theme roles rather than borrowing visually similar tokens; fix layout or font-metric causes rather than hiding clipping with cosmetic offsets. Record any native verification that could not be performed.
 - Run native UI verification on Linux ARM64. Another host's build, tests or screenshots do not replace that UI evidence.
-- Shared text break rules live in the maintained [GPUI patch](vendor/gpui-pre/PATCHES.md). Verify its owner tests and Linux native shaping; preserve localized bytes rather than hiding punctuation defects in copy or font changes.
+- Use official registry releases of GPUI; do not vendor third-party libraries. Check Chinese and Japanese text with Block's [Linux native shaping regression](crates/block-ui/src/overlays/cjk_wrapping_tests.rs): preserve text and grapheme boundaries at all tested widths and check punctuation at the rendered Drawer width. Extremely narrow lines follow upstream GPUI behavior; do not rewrite localized text or fonts to change it.
 - Reused QA scenes can retain old executable hardlinks. Match the running executable's hash to the intended build; source transfers must not leave timestamps that let Cargo reuse an obsolete binary.
 
 ## Maintaining these instructions

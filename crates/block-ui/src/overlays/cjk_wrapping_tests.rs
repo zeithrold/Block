@@ -1,13 +1,23 @@
 //! Shape the unchanged policy note with the native font system, without a desktop window.
 
 use super::{DrawerFrame, DrawerLayer};
-use crate::{Language, Palette, shell::Drawer, shell::Surface};
+use crate::{Language, Palette, design, shell::Drawer, shell::Surface};
 use gpui::{
-    AppContext as _, AvailableSpace, Edges, IntoElement as _, Refineable as _, Styled as _,
-    TextRun, TextStyle, TextSystem, WindowTextSystem, div, point, px, size,
+    AnyElement, AppContext as _, Context, Edges, IntoElement as _, ParentElement as _, Render,
+    Styled as _, TextRun, TextSystem, Window, WindowTextSystem, canvas, div, point, px,
 };
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, cell::Cell, rc::Rc, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation as _;
+
+const FORBIDDEN_ROW_STARTS: [char; 5] = ['。', '、', 'ァ', 'ィ', 'ー'];
+
+struct NoteLayout(Option<AnyElement>);
+
+impl Render for NoteLayout {
+    fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl gpui::IntoElement {
+        div().children(self.0.take())
+    }
+}
 
 #[gpui::test]
 #[expect(
@@ -24,102 +34,136 @@ fn policy_notes_keep_cjk_punctuation_with_native_shaping(cx: &mut gpui::TestAppC
         .expect("the production regular face loads");
     let shaper = WindowTextSystem::new(text_system.clone());
     let (owner, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.draw(
-        point(px(0.), px(0.)),
-        size(px(360.), px(720.)),
-        |window, cx| {
+    let drawer_size = crate::window_geometry::preferred_management_size();
+    for language in [Language::SimplifiedChinese, Language::Japanese] {
+        let text = tr!(language, "import.policy.files_remain");
+        let typography = Rc::new(Cell::new(None));
+        let probe = typography.clone();
+        cx.draw(point(px(0.), px(0.)), drawer_size, |window, cx| {
+            cx.set_global(design::Typography::new(&text_system));
             let layer = cx.new(|cx| DrawerLayer::new(window, cx));
-            for language in [Language::SimplifiedChinese, Language::Japanese] {
-                let frame = DrawerFrame {
-                    revision: 0,
-                    kind: Surface::Drawer(Drawer::ImportGames),
-                    owner: owner.downgrade(),
-                    palette: Palette::LIGHT,
-                    language,
-                    title: String::new(),
-                    description: String::new(),
-                    focus: cx.focus_handle(),
-                    insets: Edges::all(px(0.)),
-                    width: px(360.),
-                    height: px(720.),
-                    panel_height: 652.,
-                    translation: 0.,
-                    scrim: 1.,
-                    dragging: false,
-                    closing: false,
-                    #[cfg(debug_assertions)]
-                    trace: None,
-                };
-                let text = tr!(language, "import.policy.files_remain");
-                let mut note = crate::note(text.clone());
-                let mut sheet = layer.update(cx, |layer, cx| {
-                    layer.sheet(&frame, div().into_any_element(), Vec::new(), cx)
-                });
-                let mut style = TextStyle::default();
-                style.refine(sheet.text_style());
-                style.refine(note.text_style());
-                let font_size = style.font_size.to_pixels(window.rem_size());
-                let runs = [TextRun {
-                    len: text.len(),
-                    font: style.font(),
-                    ..TextRun::default()
-                }];
-                let unwrapped = shaper.shape_line(text.clone().into(), font_size, &runs, None);
-                // Measure the actual note element at the compact sheet's body width.
-                let measured = note.into_any_element().layout_as_root(
-                    size(
-                        AvailableSpace::Definite(frame.width - px(40.)),
-                        AvailableSpace::MinContent,
-                    ),
-                    window,
-                    cx,
+            let frame = DrawerFrame {
+                revision: 0,
+                kind: Surface::Drawer(Drawer::ImportGames),
+                owner: owner.downgrade(),
+                palette: Palette::LIGHT,
+                language,
+                title: String::new(),
+                description: String::new(),
+                focus: cx.focus_handle(),
+                insets: Edges::all(px(0.)),
+                width: drawer_size.width,
+                height: drawer_size.height,
+                panel_height: 652.,
+                translation: 0.,
+                scrim: 1.,
+                dragging: false,
+                closing: false,
+                #[cfg(debug_assertions)]
+                trace: None,
+            };
+            // An out-of-flow probe reads the real panel's note width and inherited
+            // typography without relying on the test window's stub text metrics.
+            let note = crate::note(text.clone()).relative().child(
+                canvas(
+                    move |bounds, window, _| {
+                        let style = window.text_style();
+                        probe.set(Some((
+                            bounds.size.width,
+                            style.font_size.to_pixels(window.rem_size()),
+                            style.font(),
+                        )));
+                    },
+                    |_, (), _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            );
+            let sheet = layer.update(cx, |layer, cx| {
+                let panel = layer.panel(&frame, &owner, note.into_any_element(), cx);
+                layer.sheet(&frame, panel, Vec::new(), cx)
+            });
+            // Interactive sheet elements require a GPUI view during prepaint.
+            div().child(cx.new(|_| NoteLayout(Some(sheet.into_any_element()))))
+        });
+        let (product_width, font_size, font) =
+            typography.take().expect("the policy note was laid out");
+        let runs = [TextRun {
+            len: text.len(),
+            font,
+            ..TextRun::default()
+        }];
+        let unwrapped = shaper.shape_line(text.clone().into(), font_size, &runs, None);
+        let rows_at = |width| {
+            let shaped = shaper
+                .shape_text(text.clone().into(), font_size, &runs, Some(width), None)
+                .unwrap_or_else(|error| panic!("{language:?}, {width:?}: {error}"));
+            let [line] = shaped.as_slice() else {
+                panic!(
+                    "{language:?}, {width:?}: expected one logical line, got {}",
+                    shaped.len()
                 );
-                let mut widths = vec![measured.width];
-                widths.extend((20_u16..=340).step_by(3).map(|width| px(f32::from(width))));
-                for (index, ch) in text.char_indices() {
-                    if matches!(ch, '。' | '、') {
-                        let x = unwrapped.x_for_index(index);
-                        widths.extend([x - px(0.5), x, x + px(0.5)]);
-                    }
-                }
-                let graphemes = text
-                    .grapheme_indices(true)
-                    .map(|(index, _)| index)
-                    .collect::<Vec<_>>();
-                for width in widths {
-                    let shaped = shaper
-                        .shape_text(text.clone().into(), font_size, &runs, Some(width), None)
-                        .expect("native note shaping succeeds");
-                    assert_eq!(shaped.len(), 1);
-                    let line = &shaped[0];
-                    assert_eq!(line.text.as_ref(), text.as_str());
-                    let offsets = line
-                        .wrap_boundaries
-                        .iter()
-                        .map(|boundary| {
-                            line.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix]
-                                .index
-                        })
-                        .collect::<Vec<_>>();
-                    let rows = std::iter::once(0)
-                        .chain(offsets.iter().copied())
-                        .zip(offsets.iter().copied().chain(std::iter::once(text.len())))
-                        .map(|(start, end)| &text[start..end])
-                        .collect::<Vec<_>>();
-                    assert_eq!(rows.concat(), text);
-                    assert!(offsets.iter().all(|index| graphemes.contains(index)));
-                    assert!(
-                        rows.iter()
-                            .all(|row| !row.starts_with(['。', '、', 'ァ', 'ィ', 'ー'])),
-                        "{language:?}, {width:?}: {rows:?}"
-                    );
-                }
-                println!(
-                    "NATIVE_CJK_NOTE {language:?}: font_size={font_size:?}, measured_width={:?}",
-                    measured.width
+            };
+            assert_eq!(line.text.as_ref(), text.as_str(), "{language:?}, {width:?}");
+            let offsets = line.wrap_boundaries.iter().map(|boundary| {
+                line.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index
+            });
+            let graphemes = text.grapheme_indices(true).map(|(index, _)| index);
+            let mut rows = Vec::new();
+            let mut start = 0;
+            for end in offsets.chain(std::iter::once(text.len())) {
+                assert!(
+                    start < end,
+                    "{language:?}, {width:?}: invalid row {start}..{end}"
                 );
+                assert!(
+                    end == text.len() || graphemes.clone().any(|index| index == end),
+                    "{language:?}, {width:?}: break at byte {end} splits a grapheme"
+                );
+                rows.push(&text[start..end]);
+                start = end;
             }
-            div()
-        },
-    );
+            assert_eq!(rows.concat(), text, "{language:?}, {width:?}");
+            rows
+        };
+
+        // Emergency breaks are allowed across the sweep, but must preserve text.
+        let sweep = (20_u16..=340)
+            .step_by(3)
+            .chain([340])
+            .map(|width| px(f32::from(width)));
+        let punctuation_edges = text
+            .char_indices()
+            .filter_map(|(index, ch)| {
+                FORBIDDEN_ROW_STARTS
+                    .contains(&ch)
+                    .then(|| unwrapped.x_for_index(index))
+            })
+            .flat_map(|x| [x - px(0.5), x, x + px(0.5)]);
+        for width in sweep.chain(punctuation_edges) {
+            drop(rows_at(width));
+        }
+
+        // Check a neighborhood around the measured compact drawer, not an
+        // allowlist of widths where the upstream emergency breaker succeeds.
+        for width in [
+            product_width - px(3.),
+            product_width,
+            product_width + px(3.),
+        ] {
+            let rows = rows_at(width);
+            assert!(
+                rows.iter()
+                    .all(|row| !row.starts_with(FORBIDDEN_ROW_STARTS)),
+                "{language:?}, {width:?}: forbidden row start in {rows:?}"
+            );
+        }
+        let product_rows = rows_at(product_width);
+        assert_eq!(
+            product_rows.len(),
+            2,
+            "{language:?}, {product_width:?}: {product_rows:?}"
+        );
+        println!("NATIVE_CJK_NOTE {language:?}: width={product_width:?}, rows={product_rows:?}");
+    }
 }

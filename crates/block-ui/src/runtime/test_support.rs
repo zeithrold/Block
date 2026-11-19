@@ -75,7 +75,8 @@ pub(super) fn window<V: gpui::Render + 'static>(
 pub(super) fn press(cx: &mut gpui::VisualTestContext, keys: &str) {
     ensure_live_window(cx);
     for key in keys.split(' ') {
-        let keystroke = gpui::Keystroke::parse(key).expect("valid test keystroke");
+        let os = cx.update(|_, app| app.platform_info().os);
+        let keystroke = gpui::Keystroke::parse_with_os(key, os).expect("valid test keystroke");
         let pressed_in = gpui::VisualContext::window_handle(cx);
         cx.simulate_keystrokes(key);
         if cx
@@ -171,10 +172,10 @@ pub(super) fn scroll_into_view(
             -160.
         };
         cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position,
             delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(delta))),
-            ..gpui::ScrollWheelEvent::default()
+            ..gpui::ScrollEvent::default()
         });
         cx.run_until_parked();
     }

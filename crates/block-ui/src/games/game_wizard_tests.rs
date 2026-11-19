@@ -162,10 +162,10 @@ fn reveal_wizard_control(
     if delta != px(0.) {
         let position = body.center();
         cx.simulate_mouse_move(position, None, Modifiers::none());
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position,
             delta: gpui::ScrollDelta::Pixels(point(px(0.), delta)),
-            ..gpui::ScrollWheelEvent::default()
+            ..gpui::ScrollEvent::default()
         });
         cx.run_until_parked();
     }

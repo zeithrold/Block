@@ -464,13 +464,13 @@ mod tests {
             && let Some((control, body)) = bounds.zip(cx.debug_bounds("about-body"))
             && (control.top() < body.top() || control.bottom() > body.bottom())
         {
-            cx.simulate_event(gpui::ScrollWheelEvent {
+            cx.simulate_event(gpui::ScrollEvent {
                 position: body.center(),
                 delta: gpui::ScrollDelta::Pixels(point(
                     px(0.),
                     body.center().y - control.center().y,
                 )),
-                ..gpui::ScrollWheelEvent::default()
+                ..gpui::ScrollEvent::default()
             });
             cx.run_until_parked();
             bounds = crate::test_support::control_bounds(cx, selector);
@@ -674,10 +674,10 @@ mod tests {
                     );
                     if expanded {
                         let content_before = cx.debug_bounds("about-scroll-content");
-                        cx.simulate_event(gpui::ScrollWheelEvent {
+                        cx.simulate_event(gpui::ScrollEvent {
                             position: point(body.left() + px(12.), body.top() + px(12.)),
                             delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1600.))),
-                            ..gpui::ScrollWheelEvent::default()
+                            ..gpui::ScrollEvent::default()
                         });
                         cx.run_until_parked();
                         let content_after = cx.debug_bounds("about-scroll-content");
@@ -687,10 +687,10 @@ mod tests {
                                 .is_some_and(|(before, after)| after.top() < before.top())
                         );
                         assert_eq!(cx.debug_bounds("about-footer"), Some(footer));
-                        cx.simulate_event(gpui::ScrollWheelEvent {
+                        cx.simulate_event(gpui::ScrollEvent {
                             position: point(body.left() + px(12.), body.top() + px(12.)),
                             delta: gpui::ScrollDelta::Pixels(point(px(0.), px(1600.))),
-                            ..gpui::ScrollWheelEvent::default()
+                            ..gpui::ScrollEvent::default()
                         });
                     }
                 }

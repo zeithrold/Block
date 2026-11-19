@@ -5124,10 +5124,10 @@ mod tests {
         if delta != gpui::px(0.) {
             let position = body.center();
             cx.simulate_mouse_move(position, None, gpui::Modifiers::none());
-            cx.simulate_event(gpui::ScrollWheelEvent {
+            cx.simulate_event(gpui::ScrollEvent {
                 position,
                 delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), delta)),
-                ..gpui::ScrollWheelEvent::default()
+                ..gpui::ScrollEvent::default()
             });
             cx.run_until_parked();
             cx.update(|window, _| window.refresh());
