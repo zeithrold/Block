@@ -42,7 +42,7 @@ impl AuthProviderDraft {
         ) {
             (false, _, _, _) => (Reveal::Hidden, 0.),
             // Once revealed, a remeasurement must not hide or restart the warning.
-            (true, _, _, Reveal::Visible) => (Reveal::Visible, 1.),
+            (true, _, _, Reveal::Visible) | (true, true, true, _) => (Reveal::Visible, 1.),
             (true, _, false, Reveal::Fading(started)) => {
                 let sample = Timing::new(Duration::from_millis(120))
                     .ease(Easing::EaseOut)
@@ -54,7 +54,6 @@ impl AuthProviderDraft {
                 }
             }
             (true, false, _, reveal) => (reveal, 0.),
-            (true, true, true, _) => (Reveal::Visible, 1.),
             (true, true, false, Reveal::Hidden) => (Reveal::Fading(time.now), 0.),
         };
         warning.reveal.set(reveal);

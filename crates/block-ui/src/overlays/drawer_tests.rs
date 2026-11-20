@@ -47,6 +47,22 @@ fn frame(cx: &mut VisualTestContext, millis: u64) {
     cx.run_until_parked();
 }
 
+fn set_provider_address(view: &Entity<Block>, value: &str, cx: &mut VisualTestContext) {
+    view.update(cx, |view, cx| {
+        if let Some(draft) = view
+            .shell
+            .auth
+            .as_ref()
+            .and_then(|state| state.provider_draft.as_ref())
+        {
+            draft
+                .address
+                .update(cx, |field, cx| field.set_value(value, cx));
+        }
+    });
+    cx.run_until_parked();
+}
+
 #[gpui::test]
 fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppContext) {
     let (view, cx, _system_motion) = fixture(cx, false);
@@ -57,22 +73,7 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
     act(&view, UiAction::AuthProviderAdd, cx);
     frame(cx, 900);
     let compact = bounds(cx, "block-drawer");
-    let address = |value: &str, cx: &mut VisualTestContext| {
-        view.update(cx, |view, cx| {
-            if let Some(draft) = view
-                .shell
-                .auth
-                .as_ref()
-                .and_then(|state| state.provider_draft.as_ref())
-            {
-                draft
-                    .address
-                    .update(cx, |field, cx| field.set_value(value, cx));
-            }
-        });
-        cx.run_until_parked();
-    };
-    address("http://example.test", cx);
+    set_provider_address(&view, "http://example.test", cx);
     frame(cx, 299);
     assert_eq!(bounds(cx, "block-drawer"), compact);
     act(&view, UiAction::AuthProviderConsent, cx);
@@ -106,6 +107,23 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
     assert!(crate::test_support::control_bounds(cx, "auth-provider-warning").is_none());
     animation_frame(cx, 60);
     assert_eq!(bounds(cx, "block-drawer"), expanded);
+    assert_provider_consent_waits_for_warning(&view, cx);
+    set_provider_address(&view, "https://example.test", cx);
+    frame(cx, 299);
+    assert_eq!(bounds(cx, "block-drawer"), expanded);
+    assert!(crate::test_support::control_bounds(cx, "auth-provider-warning").is_some());
+    frame(cx, 1);
+    frame(cx, 64);
+    let shrinking = bounds(cx, "block-drawer");
+    assert!(expanded.top() < shrinking.top() && shrinking.top() < compact.top());
+    assert_eq!(shrinking.bottom(), compact.bottom());
+    assert!(crate::test_support::control_bounds(cx, "auth-provider-http").is_none());
+    frame(cx, 236);
+    assert_eq!(bounds(cx, "block-drawer"), compact);
+    assert_provider_drawer_refits_after_resize_and_edits(&view, cx, compact, expanded);
+}
+
+fn assert_provider_consent_waits_for_warning(view: &Entity<Block>, cx: &mut VisualTestContext) {
     let warning_indicator_alpha = |cx: &mut VisualTestContext| {
         control_quads(cx, "auth-provider-http-indicator")
             .iter()
@@ -121,7 +139,7 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
         assert_ne!(control_node(cx, "auth-provider-http").focused(), Some(true));
     }
     click(cx, "auth-provider-http");
-    act(&view, UiAction::AuthProviderConsent, cx);
+    act(view, UiAction::AuthProviderConsent, cx);
     animation_frame(cx, 60);
     assert!(warning_indicator_alpha(cx) > 0.99);
     assert_eq!(
@@ -133,21 +151,17 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
         control_node(cx, "auth-provider-identify").disabled(),
         Some(true)
     );
-    address("https://example.test", cx);
-    frame(cx, 299);
-    assert_eq!(bounds(cx, "block-drawer"), expanded);
-    assert!(crate::test_support::control_bounds(cx, "auth-provider-warning").is_some());
-    frame(cx, 1);
-    frame(cx, 64);
-    let shrinking = bounds(cx, "block-drawer");
-    assert!(expanded.top() < shrinking.top() && shrinking.top() < compact.top());
-    assert_eq!(shrinking.bottom(), compact.bottom());
-    assert!(crate::test_support::control_bounds(cx, "auth-provider-http").is_none());
-    frame(cx, 236);
-    assert_eq!(bounds(cx, "block-drawer"), compact);
+}
+
+fn assert_provider_drawer_refits_after_resize_and_edits(
+    view: &Entity<Block>,
+    cx: &mut VisualTestContext,
+    compact: gpui::Bounds<gpui::Pixels>,
+    expanded: gpui::Bounds<gpui::Pixels>,
+) {
     cx.simulate_resize(size(px(300.), px(768.)));
     frame(cx, 1200);
-    address("http://example.test", cx);
+    set_provider_address(view, "http://example.test", cx);
     frame(cx, 1200);
     let narrow = bounds(cx, "block-drawer");
     assert!(
@@ -156,13 +170,13 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
     );
     assert_eq!(narrow.bottom(), expanded.bottom());
     cx.simulate_resize(size(px(432.), px(768.)));
-    address("https://example.test", cx);
+    set_provider_address(view, "https://example.test", cx);
     frame(cx, 1200);
-    address("http://example.test", cx);
+    set_provider_address(view, "http://example.test", cx);
     frame(cx, 300);
     frame(cx, 96);
     let interrupted = bounds(cx, "block-drawer");
-    address("invalid", cx);
+    set_provider_address(view, "invalid", cx);
     assert_eq!(bounds(cx, "block-drawer"), interrupted);
     frame(cx, 299);
     assert!(bounds(cx, "block-drawer").top() < interrupted.top());
@@ -174,14 +188,14 @@ fn provider_drawer_reserves_then_reveals_at_the_fitted_height(cx: &mut TestAppCo
     frame(cx, 236);
     assert_eq!(bounds(cx, "block-drawer"), compact);
     assert!(crate::test_support::control_bounds(cx, "auth-provider-http").is_none());
-    address("http://example.test", cx);
+    set_provider_address(view, "http://example.test", cx);
     frame(cx, 300);
     frame(cx, 300);
     assert_eq!(bounds(cx, "block-drawer"), expanded);
     animation_frame(cx, 60);
     frame(cx, 60);
     assert!(crate::test_support::control_bounds(cx, "auth-provider-warning").is_some());
-    address("http://other.test", cx);
+    set_provider_address(view, "http://other.test", cx);
     assert!(crate::test_support::control_bounds(cx, "auth-provider-warning").is_some());
     frame(cx, 60);
     assert_eq!(

@@ -98,13 +98,14 @@ fn policy_notes_keep_cjk_punctuation_with_native_shaping(cx: &mut gpui::TestAppC
         let rows_at = |width| {
             let shaped = shaper
                 .shape_text(text.clone().into(), font_size, &runs, Some(width), None)
-                .unwrap_or_else(|error| panic!("{language:?}, {width:?}: {error}"));
-            let [line] = shaped.as_slice() else {
-                panic!(
-                    "{language:?}, {width:?}: expected one logical line, got {}",
-                    shaped.len()
-                );
-            };
+                .map_err(|error| format!("{language:?}, {width:?}: {error}"))
+                .expect("native shaping succeeds");
+            assert_eq!(
+                shaped.len(),
+                1,
+                "{language:?}, {width:?}: expected one logical line"
+            );
+            let line = &shaped[0];
             assert_eq!(line.text.as_ref(), text.as_str(), "{language:?}, {width:?}");
             let offsets = line.wrap_boundaries.iter().map(|boundary| {
                 line.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index
@@ -135,11 +136,8 @@ fn policy_notes_keep_cjk_punctuation_with_native_shaping(cx: &mut gpui::TestAppC
             .map(|width| px(f32::from(width)));
         let punctuation_edges = text
             .char_indices()
-            .filter_map(|(index, ch)| {
-                FORBIDDEN_ROW_STARTS
-                    .contains(&ch)
-                    .then(|| unwrapped.x_for_index(index))
-            })
+            .filter(|&(_, ch)| FORBIDDEN_ROW_STARTS.contains(&ch))
+            .map(|(index, _)| unwrapped.x_for_index(index))
             .flat_map(|x| [x - px(0.5), x, x + px(0.5)]);
         for width in sweep.chain(punctuation_edges) {
             drop(rows_at(width));

@@ -1,6 +1,11 @@
 //! Network discovery returns a draft; only explicit save operations write the catalog.
-use super::*;
+use std::path::Path;
+
+use anyhow::ensure;
 use block_auth::AuthlibProvider;
+use block_launcher::{CancellationToken, avatars::ImageFetch};
+
+use super::{Engine, EventSender, Message, finish, load_providers, persist_provider};
 
 impl Engine {
     pub(crate) fn detect_auth_provider(
@@ -87,9 +92,28 @@ impl Engine {
     }
 }
 
+async fn commit(
+    root: &Path,
+    original: Option<&AuthlibProvider>,
+    provider: AuthlibProvider,
+    sender: &EventSender,
+) -> anyhow::Result<crate::i18n::UiText> {
+    persist_provider(root, original, &provider)?;
+    let _ = sender
+        .unscoped()
+        .send(Message::Providers(Ok(load_providers(root)?)))
+        .await;
+    let _ = sender
+        .send(Message::ProviderSaved(provider.id.to_string()))
+        .await;
+    Ok(msg!("completion.provider_saved", name = provider.name))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::{CancellationToken, Message, load_providers};
     use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
     #[test]
@@ -145,21 +169,4 @@ mod tests {
             Ok(())
         })
     }
-}
-
-async fn commit(
-    root: &Path,
-    original: Option<&AuthlibProvider>,
-    provider: AuthlibProvider,
-    sender: &EventSender,
-) -> anyhow::Result<crate::i18n::UiText> {
-    persist_provider(root, original, &provider)?;
-    let _ = sender
-        .unscoped()
-        .send(Message::Providers(Ok(load_providers(root)?)))
-        .await;
-    let _ = sender
-        .send(Message::ProviderSaved(provider.id.to_string()))
-        .await;
-    Ok(msg!("completion.provider_saved", name = provider.name))
 }
