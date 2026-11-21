@@ -590,6 +590,11 @@
     "zh-Hans": "检测服务器",
     "ja": "サーバーを検出"
   },
+  "accounts.auth.provider_add.confirm_http": {
+    "en": "Confirm HTTP risk to detect",
+    "zh-Hans": "确认 HTTP 风险后可检测",
+    "ja": "HTTP のリスク確認が必要です"
+  },
   "accounts.auth.provider_add.existing": {
     "en": "Already saved as %{name}. Select it without creating a duplicate.",
     "zh-Hans": "已保存为 %{name}。请直接选择它，无需创建重复项。",

@@ -2,16 +2,21 @@ use super::*;
 use gpui_base::motion::{Easing, Timing};
 use std::{
     cell::Cell,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
-const ADDRESS_DEBOUNCE: Duration = Duration::from_millis(300);
-
 #[derive(Debug, Default)]
 pub(super) struct HttpWarning {
-    pub(super) reserved: bool,
-    pending: Option<gpui::Task<()>>,
+    reserved: Cell<bool>,
     reveal: Cell<Reveal>,
+    pub(super) painted_control: Rc<Cell<bool>>,
+}
+
+pub(super) enum Destination<'a> {
+    Saved(&'a block_auth::AuthlibProvider),
+    Https(String),
+    Http { url: String, approved: bool },
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -23,19 +28,20 @@ enum Reveal {
 }
 
 impl AuthProviderDraft {
-    pub(super) fn http_consent_ready(&self, raw: &str) -> bool {
-        self.pages.active() == &Page::Address
-            && self.http_warning.pending.is_none()
-            && self.http_warning.reserved
-            && self.fit.settled()
-            && matches!(self.http_warning.reveal.get(), Reveal::Visible)
-            && self.observed_address == raw
+    pub(super) fn warning_revealed(&self) -> bool {
+        matches!(self.http_warning.reveal.get(), Reveal::Visible)
     }
 
-    pub(super) fn warning_opacity(&self, time: MotionTime, window: &Window) -> f32 {
+    pub(super) fn warning_opacity(&self, http: bool, time: MotionTime, window: &Window) -> f32 {
         let warning = &self.http_warning;
+        warning.painted_control.set(false);
+        let present = http && self.pages.active() == &Page::Address;
+        if warning.reserved.replace(present) != present {
+            warning.reveal.set(Reveal::Hidden);
+            self.fit.invalidate();
+        }
         let (reveal, opacity) = match (
-            warning.reserved && self.pages.active() == &Page::Address,
+            present,
             self.fit.settled(),
             time.reduced,
             warning.reveal.get(),
@@ -65,6 +71,25 @@ impl AuthProviderDraft {
 }
 
 impl Block {
+    pub(super) fn provider_destination(
+        &self,
+        draft: &AuthProviderDraft,
+        raw: &str,
+    ) -> block_auth::Result<Destination<'_>> {
+        let address = block_auth::ProviderAddress::parse(raw)?;
+        Ok(if let Some(saved) = self.saved_at(&address.url) {
+            Destination::Saved(saved)
+        } else if address.insecure {
+            Destination::Http {
+                approved: draft.observed_address == raw
+                    && draft.accepted_http.as_deref() == Some(&address.url),
+                url: address.url,
+            }
+        } else {
+            Destination::Https(address.url)
+        })
+    }
+
     pub(super) fn provider_address_edited(
         &mut self,
         field: gpui::Entity<crate::TextInput>,
@@ -80,33 +105,7 @@ impl Block {
         draft.observed_address = value;
         draft.accepted_http = None;
         draft.error = None;
-        let id = draft.id;
-        let timer = cx.background_executor().timer(ADDRESS_DEBOUNCE);
-        // Replacing the handle cancels the previous edit; dropping the draft cancels it too.
-        draft.http_warning.pending = Some(cx.spawn(async move |owner, cx| {
-            timer.await;
-            // A released owner has no drawer left to update.
-            drop(owner.update(cx, |view, cx| {
-                let Some(draft) = view.provider_draft().filter(|draft| draft.id == id) else {
-                    return;
-                };
-                let raw = draft.address.read(cx).value(cx);
-                if draft.observed_address != raw {
-                    return;
-                }
-                let reserved = block_auth::ProviderAddress::parse(&raw)
-                    .is_ok_and(|address| address.insecure && view.saved_at(&address.url).is_none());
-                if let Some(draft) = view.provider_draft_mut() {
-                    draft.http_warning.pending = None;
-                    if draft.http_warning.reserved != reserved {
-                        draft.http_warning.reserved = reserved;
-                        draft.http_warning.reveal.set(Reveal::Hidden);
-                        draft.fit.invalidate();
-                    }
-                    cx.notify();
-                }
-            }));
-        }));
+        draft.http_warning.painted_control.set(false);
         cx.notify();
     }
 }

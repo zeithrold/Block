@@ -1616,9 +1616,6 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
             });
         });
         cx.run_until_parked();
-        cx.executor()
-            .advance_clock(std::time::Duration::from_millis(300));
-        cx.run_until_parked();
         let viewport = crate::test_support::control_bounds(cx, "authlib-add-body");
         assert!(
             viewport.is_some(),
@@ -1636,10 +1633,6 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
         );
         let position = viewport.center();
         let identify = crate::test_support::control_bounds(cx, "auth-provider-http");
-        assert!(
-            identify.is_some(),
-            "{language:?}: address consent is present"
-        );
         cx.simulate_mouse_move(position, None, Modifiers::none());
         cx.simulate_event(gpui::ScrollEvent {
             position,
@@ -1647,10 +1640,15 @@ fn compact_wizard_and_provider_drawer_actions_stay_reachable(cx: &mut TestAppCon
             ..gpui::ScrollEvent::default()
         });
         cx.run_until_parked();
+        let scrolled = crate::test_support::control_bounds(cx, "auth-provider-http");
         assert_ne!(
-            crate::test_support::control_bounds(cx, "auth-provider-http"),
-            identify,
-            "{language:?}: wheel input must scroll the provider fields"
+            scrolled, identify,
+            "{language:?}: wheel input scrolls the provider fields"
+        );
+        assert!(
+            scrolled.is_some_and(|checkbox| checkbox.top() >= viewport.top()
+                && checkbox.bottom() <= viewport.bottom()),
+            "{language:?}: the entire consent control is exposed above the pinned footer"
         );
         assert_eq!(
             crate::test_support::control_bounds(cx, "auth-provider-identify"),

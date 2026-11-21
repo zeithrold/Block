@@ -69,16 +69,11 @@ impl Block {
         };
         let lang = self.language();
         let raw = draft.address.read(cx).value(cx);
-        let parsed = block_auth::ProviderAddress::parse(&raw).ok();
-        let existing = parsed.as_ref().and_then(|a| self.saved_at(&a.url));
-        let http = parsed.as_ref().is_some_and(|a| a.insecure);
+        let destination = self.provider_destination(draft, &raw).ok();
+        let http = matches!(destination, Some(Destination::Http { .. }));
+        let consent = matches!(destination, Some(Destination::Http { approved: true, .. }));
         let time = self.provider_motion(cx);
-        let opacity = draft.warning_opacity(time, window);
-        let interactive = http && existing.is_none() && draft.http_consent_ready(&raw);
-        let consent = interactive
-            && parsed
-                .as_ref()
-                .is_some_and(|a| draft.accepted_http.as_deref() == Some(&a.url));
+        let opacity = draft.warning_opacity(http, time, window);
         let body = draft.pages.render(time, window, |page, active| {
             let error = draft
                 .error
@@ -101,35 +96,44 @@ impl Block {
                                 ..Default::default()
                             },
                         ));
-                    if let Some(provider) = existing.filter(|_| !draft.http_warning.reserved) {
+                    if let Some(Destination::Saved(provider)) = &destination {
                         body = body.child(note(tr!(
                             lang,
                             "accounts.auth.provider_add.existing",
                             name = provider.name
                         )));
-                    } else if draft.http_warning.reserved {
-                        let interactive = active && interactive;
+                    } else if http {
+                        let interactive = active && !self.busy && draft.warning_revealed();
+                        let shown = raw.clone();
+                        let control = components::checkbox(
+                            "auth-provider-http",
+                            tr!(lang, "accounts.auth.http_consent"),
+                            consent,
+                            self.palette,
+                            ControlState {
+                                disabled: !interactive,
+                                ..Default::default()
+                            },
+                            cx.listener(move |view, (), window, cx| {
+                                if view
+                                    .provider_draft()
+                                    .is_some_and(|draft| draft.address.read(cx).value(cx) == shown)
+                                {
+                                    view.handle(UiAction::AuthProviderConsent, window, cx);
+                                }
+                            }),
+                        )
+                        .tab_stop(interactive);
                         let warning = div()
                             .flex()
                             .flex_col()
                             .gap_4()
                             .child(note(tr!(lang, "accounts.auth.provider_add.http_note")))
-                            .child(
-                                components::checkbox(
-                                    "auth-provider-http",
-                                    tr!(lang, "accounts.auth.http_consent"),
-                                    consent,
-                                    self.palette,
-                                    ControlState {
-                                        disabled: self.busy || !interactive,
-                                        ..Default::default()
-                                    },
-                                    cx.listener(|view, (), window, cx| {
-                                        view.handle(UiAction::AuthProviderConsent, window, cx)
-                                    }),
-                                )
-                                .tab_stop(interactive),
-                            );
+                            .child(checkbox::ConsentControl {
+                                content: div().child(control),
+                                enabled: interactive,
+                                painted: draft.http_warning.painted_control.clone(),
+                            });
                         body = body.child(if active && opacity > 0. {
                             warning
                                 .opacity(opacity)
@@ -204,13 +208,15 @@ impl Block {
         let (id, title, action, blocked) = match draft.pages.active() {
             Page::Address => (
                 "auth-provider-identify",
-                if existing.is_some() {
+                if matches!(destination, Some(Destination::Saved(_))) {
                     tr!(lang, "accounts.auth.provider_add.use_saved")
+                } else if http && !consent {
+                    tr!(lang, "accounts.auth.provider_add.confirm_http")
                 } else {
                     tr!(lang, "accounts.auth.provider_add.identify")
                 },
                 UiAction::AuthProviderIdentify,
-                raw.trim().is_empty() || existing.is_none() && http && !consent,
+                destination.is_none() || http && !consent,
             ),
             Page::Confirm(review) => (
                 "auth-provider-save",

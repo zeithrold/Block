@@ -2,7 +2,9 @@ use super::*;
 use crate::drawer_page::{DrawerFit, DrawerPages, MotionTime};
 #[path = "provider_drawer_warning.rs"]
 mod warning;
-use warning::HttpWarning;
+use warning::{Destination, HttpWarning};
+#[path = "provider_drawer_checkbox.rs"]
+mod checkbox;
 #[path = "provider_drawer_result.rs"]
 mod result;
 #[path = "provider_drawer_view.rs"]
@@ -122,17 +124,13 @@ impl Block {
             return;
         };
         let raw = draft.address.read(cx).value(cx);
-        if let Ok(address) = block_auth::ProviderAddress::parse(&raw)
-            && address.insecure
-            && self.saved_at(&address.url).is_none()
-            && draft.http_consent_ready(&raw)
+        if draft.pages.active() == &Page::Address
+            && draft.observed_address == raw
+            && draft.http_warning.painted_control.get()
+            && let Ok(Destination::Http { url, approved }) = self.provider_destination(draft, &raw)
             && let Some(draft) = self.provider_draft_mut()
         {
-            draft.accepted_http = if draft.accepted_http.as_deref() == Some(address.url.as_str()) {
-                None
-            } else {
-                Some(address.url)
-            };
+            draft.accepted_http = (!approved).then_some(url);
             draft.error = None;
         }
         cx.notify();
@@ -149,34 +147,37 @@ impl Block {
             return;
         };
         let raw = draft.address.read(cx).value(cx);
-        let address = match block_auth::ProviderAddress::parse(&raw) {
-            Ok(address) => address,
+        let (url, accepted) = match self.provider_destination(draft, &raw) {
+            Ok(Destination::Saved(provider)) => {
+                self.use_auth_provider(provider.id, window, cx);
+                return;
+            }
+            Ok(Destination::Https(url)) => (url, false),
+            Ok(Destination::Http {
+                url,
+                approved: true,
+            }) => (url, true),
+            Ok(Destination::Http {
+                approved: false, ..
+            }) => {
+                self.provider_error(
+                    AccountMessage::product("accounts.auth.error.provider_http_confirm"),
+                    cx,
+                );
+                return;
+            }
             Err(error) => {
                 self.provider_error(AccountMessage::diagnostic(error.to_string()), cx);
                 return;
             }
         };
-        if let Some(provider) = self.saved_at(&address.url) {
-            self.use_auth_provider(provider.id, window, cx);
-            return;
-        }
-        let accepted = address.insecure
-            && draft.http_consent_ready(&raw)
-            && draft.accepted_http.as_deref() == Some(&address.url);
-        if address.insecure && !accepted {
-            self.provider_error(
-                AccountMessage::product("accounts.auth.error.provider_http_confirm"),
-                cx,
-            );
-            return;
-        }
         self.begin_provider_attempt(
             msg!("accounts.auth.status.discovering_provider"),
             crate::ui_logging::Operation::DiscoverAuthProvider,
             cx,
         );
         if let Some(engine) = &self.engine {
-            engine.detect_auth_provider(address.url, accepted, self.cancel.clone());
+            engine.detect_auth_provider(url, accepted, self.cancel.clone());
         }
     }
     fn provider_error(&mut self, error: AccountMessage, cx: &mut Context<'_, Self>) {
