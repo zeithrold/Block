@@ -64,6 +64,8 @@ mod first_run;
 #[cfg(test)]
 #[path = "setup/first_run_tests.rs"]
 mod first_run_tests;
+#[path = "controls/form_select.rs"]
+mod form_select;
 #[path = "navigation/frame_motion.rs"]
 mod frame_motion;
 #[path = "games/game_wizard.rs"]
@@ -592,7 +594,7 @@ impl Block {
             }
             None => {}
         }
-        self.refresh_select_language(cx);
+        self.refresh_select_language();
     }
 
     /// Revert a Settings preview whenever navigation leaves that page.
@@ -1618,10 +1620,6 @@ impl Block {
         let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
         let captured_anchor = anchor.clone();
         let app_menu = matches!(action, UiAction::Drawer(Some(Drawer::Menu)));
-        let product_choice = match &action {
-            UiAction::OpenProductSelect(kind) => Some(*kind),
-            _ => None,
-        };
         let choice = match action {
             UiAction::ChooseAppearance { wizard, color } => Some((wizard, color)),
             _ => None,
@@ -1636,10 +1634,6 @@ impl Block {
                 view.open_appearance_select_at(wizard, color, captured_anchor.get(), window, cx);
                 view.motion_dirty = true;
                 cx.notify();
-            } else if let Some(kind) = product_choice {
-                view.open_product_select(kind, captured_anchor.get(), window, cx);
-                view.motion_dirty = true;
-                cx.notify();
             } else if app_menu {
                 view.open_app_menu_at(captured_anchor.get(), window, cx);
                 view.motion_dirty = true;
@@ -1652,7 +1646,7 @@ impl Block {
             disabled,
             ..Default::default()
         };
-        let control = if choice.is_some() || product_choice.is_some() {
+        let control = if choice.is_some() {
             components::select_trigger(id, visible_label, self.palette, state, on_activate)
         } else {
             components::button_role(
@@ -1669,7 +1663,7 @@ impl Block {
                 on_activate,
             )
         };
-        if choice.is_some() || product_choice.is_some() {
+        if choice.is_some() {
             control.child(
                 gpui::canvas(
                     move |bounds, _, _| anchor.set(Some(bounds)),

@@ -86,12 +86,6 @@ impl Overlays {
         )
     }
 
-    pub(super) fn discard(&mut self) -> Option<Surface> {
-        let entry = self.entries.pop()?;
-        self.trace_change(&entry, "closed");
-        Some(entry.kind)
-    }
-
     fn trace_change(&self, entry: &SurfaceLayer, state: &'static str) {
         if let Some(view_id) = self.view_id {
             tracing::debug!(

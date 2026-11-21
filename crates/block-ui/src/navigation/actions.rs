@@ -15,7 +15,7 @@ use crate::{
     appearance::Appearance,
     authentication, browser, downloads, feedback, first_run,
     game_wizard::{CreationKind, WizardPage, WizardStep},
-    import_games, instance_editor, modpack_import, motion, select,
+    import_games, instance_editor, modpack_import, motion,
     settings::SettingsDraft,
     shell::{Drawer, EditorExit, EditorKind, PendingEditorExit, Surface},
 };
@@ -68,7 +68,6 @@ pub(super) enum UiAction {
     WizardCustomWindow,
     WizardInstanceOptions,
     ChooseAppearance { wizard: bool, color: bool },
-    OpenProductSelect(select::ProductChoice),
     DefaultJavaAutomatic(bool),
     DefaultWindow { width: u32, height: u32 },
     CustomDefaultWindow,
@@ -120,7 +119,6 @@ pub(super) enum UiAction {
     AuthBack,
     AuthMethod(authentication::Method),
     AuthProvider(block_auth::AccountProvider),
-    AuthExternalProvider(uuid::Uuid),
     AuthProviderAdd,
     AuthProviderIdentify,
     AuthProviderBack,
@@ -257,7 +255,6 @@ impl Block {
             UiAction::ChooseAppearance { wizard, color } => {
                 self.open_appearance_select(wizard, color, window, cx);
             }
-            UiAction::OpenProductSelect(kind) => self.open_product_select(kind, None, window, cx),
             UiAction::DefaultJavaAutomatic(value) => {
                 self.set_default_java_automatic(value, window, cx);
             }
@@ -348,7 +345,6 @@ impl Block {
             UiAction::ProviderRemove(id) => self.remove_provider(id, window, cx),
             UiAction::AuthProvider(provider) => self.choose_auth_provider(provider, cx),
             UiAction::AuthBack => self.auth_back(window, cx),
-            UiAction::AuthExternalProvider(id) => self.choose_external_provider(id, window, cx),
             UiAction::AuthProviderAdd => self.open_auth_provider_add(window, cx),
             UiAction::AuthProviderIdentify => self.identify_auth_provider(window, cx),
             UiAction::AuthProviderBack => self.back_auth_provider(window, cx),
@@ -866,16 +862,6 @@ impl Block {
     pub(super) fn available_while_busy(action: &UiAction) -> bool {
         if let UiAction::SelectValue(action) = action {
             return Self::available_while_busy(action);
-        }
-        if let UiAction::OpenProductSelect(choice) = action {
-            return matches!(
-                choice,
-                select::ProductChoice::Language
-                    | select::ProductChoice::Appearance
-                    | select::ProductChoice::Proxy
-                    | select::ProductChoice::DefaultJava
-                    | select::ProductChoice::DefaultWindow
-            );
         }
         matches!(
             action,

@@ -521,7 +521,7 @@ mod tests {
                         window,
                         cx,
                     ));
-                    view.shell.surfaces.discard();
+                    view.shell.surfaces.close(window, &view.focus, cx);
                 });
             });
         });

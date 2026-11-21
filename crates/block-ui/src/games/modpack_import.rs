@@ -24,7 +24,6 @@ use super::{
     components::{self, BadgeVariant, ButtonVariant, ControlState, FieldOptions, ProgressState},
     game_wizard::{CreationKind, WizardStep},
     note, patterns,
-    select::ProductChoice,
     shell::Surface,
 };
 use crate::{
@@ -2279,7 +2278,11 @@ impl Block {
             "modpack-target-version",
             tr!(language, "modpack.target.version_label"),
             &value,
-            ProductChoice::PackTargetVersion,
+            crate::form_select::Options::new(
+                self.versions.iter().map(|v| (v.clone(), v.clone())),
+                draft.version.clone(),
+                |v| UiAction::PackImport(Action::SelectTargetVersion(v)),
+            ),
             cx,
         )
     }
@@ -2300,7 +2303,22 @@ impl Block {
             "modpack-target-loader",
             tr!(language, "modpack.target.loader_label"),
             &value,
-            ProductChoice::PackTargetLoader,
+            crate::form_select::Options::new(
+                [
+                    LoaderKind::Vanilla,
+                    LoaderKind::Fabric,
+                    LoaderKind::Quilt,
+                    LoaderKind::Forge,
+                    LoaderKind::NeoForge,
+                ]
+                .into_iter()
+                .map(|kind| {
+                    let name = loader_name(&kind, language);
+                    (kind, name)
+                }),
+                draft.loader.clone(),
+                |v| UiAction::PackImport(Action::SelectTargetLoader(v)),
+            ),
             cx,
         )
     }
@@ -2363,7 +2381,24 @@ impl Block {
                     "modpack-target-build",
                     tr!(language, "modpack.target.build_label"),
                     &value,
-                    ProductChoice::PackTargetBuild,
+                    crate::form_select::Options::new(
+                        catalog.builds.iter().map(|build| {
+                            (
+                                build.version.clone(),
+                                if build.stable {
+                                    build.version.clone()
+                                } else {
+                                    tr!(
+                                        language,
+                                        "modpack.target.build_preview",
+                                        version = build.version
+                                    )
+                                },
+                            )
+                        }),
+                        draft.build.clone(),
+                        |v| UiAction::PackImport(Action::SelectTargetBuild(v)),
+                    ),
                     cx,
                 ))
             }

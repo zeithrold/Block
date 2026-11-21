@@ -4,77 +4,17 @@
     reason = "Selectors are internal to the product shell."
 )]
 use super::{
-    Block, Form, Language, Tab, UiAction, browser::CollectionLoad, design::Icon, modpack_import,
-    scroll_area::ScrollAreaExt as _, shell::Surface,
+    Block, Form, Language, Tab, UiAction, design::Icon, scroll_area::ScrollAreaExt as _,
+    shell::Surface,
 };
-use block_launcher::catalog::{DataPolicy, InstanceColor, InstanceIcon, LoaderKind};
+use block_launcher::catalog::{InstanceColor, InstanceIcon};
 use gpui::{
-    App, Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Pixels, Point, RenderOnce, ScrollHandle, StatefulInteractiveElement as _,
-    Styled as _, Window, div, point, px, rgb,
+    Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
+    ParentElement as _, Pixels, Point, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
+    Window, div, point, px, rgb,
 };
-use std::{
-    cell::Cell,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation as _;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ProductChoice {
-    AuthProvider,
-    Language,
-    Appearance,
-    Proxy,
-    DefaultJava,
-    DefaultWindow,
-    InstanceDataPolicy,
-    InstanceRuntime,
-    InstanceWindow,
-    WizardRuntime,
-    WizardWindow,
-    /// The exact Minecraft version of a plain archive's target.
-    PackTargetVersion,
-    /// The loader of a plain archive's target; Vanilla is one of the choices.
-    PackTargetLoader,
-    /// One build of the chosen loader for the chosen Minecraft version.
-    PackTargetBuild,
-}
-
-/// Presentation only: Base Select is the sole semantic/focus/keyboard root.
-#[derive(IntoElement)]
-struct ProductSelectTrigger {
-    base: gpui_base::Select,
-    focus: FocusHandle,
-    palette: super::Palette,
-    disabled: bool,
-}
-
-impl RenderOnce for ProductSelectTrigger {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
-        let focused = !self.disabled && self.focus.is_focused(window);
-        self.base
-            .w_full()
-            .min_w_0()
-            .h(px(super::design::CONTROL_HEIGHT))
-            .rounded(px(super::design::CONTROL_RADIUS))
-            .border_1()
-            .border_color(rgb(if focused {
-                self.palette.ring
-            } else {
-                self.palette.input
-            }))
-            .bg(rgb(self.palette.background))
-            .text_color(rgb(self.palette.foreground))
-            .text_size(px(super::design::BODY_FONT_SIZE))
-            .shadow(if focused {
-                super::design::focus_ring(self.palette.ring)
-            } else {
-                Vec::new()
-            })
-            .opacity(if self.disabled { 0.5 } else { 1. })
-    }
-}
 
 #[derive(Clone, Debug)]
 pub(super) struct SelectChoice<A> {
@@ -96,7 +36,6 @@ pub(super) struct SelectState<A> {
     /// The options viewport. Long catalogs (Minecraft versions, loader builds)
     /// scroll inside the popup instead of growing past it.
     pub scroll: ScrollHandle,
-    pub product: Option<ProductChoice>,
     identity: SelectIdentity,
     typeahead: String,
     typed_at: Option<Instant>,
@@ -109,7 +48,6 @@ pub(super) enum MenuKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SelectIdentity {
-    Product(ProductChoice),
     Appearance { wizard: bool, color: bool },
     AppMenu,
 }
@@ -117,7 +55,6 @@ enum SelectIdentity {
 impl SelectIdentity {
     const fn action(&self) -> UiAction {
         match self {
-            Self::Product(kind) => UiAction::OpenProductSelect(*kind),
             Self::Appearance { wizard, color } => UiAction::ChooseAppearance {
                 wizard: *wizard,
                 color: *color,
@@ -206,61 +143,30 @@ impl<A> SelectState<A> {
 
 impl Block {
     /// Refresh only option labels, retaining the popup, active row and focus.
-    pub(super) fn refresh_select_language(&mut self, cx: &mut Context<'_, Self>) {
-        let identity = self
-            .shell
-            .surfaces
-            .top()
-            .and_then(|layer| match &layer.kind {
-                Surface::Select(state) => Some(state.identity.clone()),
-                _ => None,
-            });
-        let Some(identity) = identity else {
+    pub(super) fn refresh_select_language(&mut self) {
+        let language = self.language();
+        let Some(layer) = self.shell.surfaces.top_mut() else {
             return;
         };
-        let language = self.language();
-        let labels: Option<Vec<String>> = match identity {
-            SelectIdentity::Product(kind) => self
-                .product_choices(kind, cx)
-                .map(|(_, choices)| choices.into_iter().map(|choice| choice.label).collect()),
-            SelectIdentity::AppMenu | SelectIdentity::Appearance { .. } => self
-                .shell
-                .surfaces
-                .top()
-                .and_then(|layer| match &layer.kind {
-                    Surface::Select(state) => Some(
-                        state
-                            .choices
-                            .iter()
-                            .map(|choice| match &choice.action {
-                                UiAction::DeleteInstanceId(_) => {
-                                    tr!(language, "choice.delete_from_library")
-                                }
-                                UiAction::InstanceIcon(icon)
-                                | UiAction::WizardInstanceIcon(icon) => {
-                                    crate::i18n::instance_icon_name(language, *icon)
-                                }
-                                UiAction::InstanceColor(color)
-                                | UiAction::WizardInstanceColor(color) => {
-                                    crate::i18n::instance_color_name(language, *color)
-                                }
-                                action => app_menu_item(action).map_or_else(
-                                    || choice.label.clone(),
-                                    |item| tr!(language, item.label),
-                                ),
-                            })
-                            .collect(),
-                    ),
-                    _ => None,
-                }),
+        let Surface::Select(state) = &mut layer.kind else {
+            return;
         };
-        if let (Some(labels), Some(layer)) = (labels, self.shell.surfaces.top_mut())
-            && let Surface::Select(state) = &mut layer.kind
-            && state.choices.len() == labels.len()
-        {
-            for (choice, label) in state.choices.iter_mut().zip(labels) {
-                choice.label = label;
-            }
+        for choice in &mut state.choices {
+            choice.label = match &choice.action {
+                UiAction::InstanceIcon(icon) | UiAction::WizardInstanceIcon(icon) => {
+                    crate::i18n::instance_icon_name(language, *icon)
+                }
+                UiAction::InstanceColor(color) | UiAction::WizardInstanceColor(color) => {
+                    crate::i18n::instance_color_name(language, *color)
+                }
+                UiAction::DeleteInstanceId(_) => tr!(language, "choice.delete_from_library"),
+                action => {
+                    let Some(item) = app_menu_item(action) else {
+                        continue;
+                    };
+                    tr!(language, item.label)
+                }
+            };
         }
     }
 
@@ -268,363 +174,6 @@ impl Block {
         (!self.busy || Self::available_while_busy(&identity.action()))
             && !self.shell.surfaces.layers().any(|layer| {
                 matches!(&layer.kind, Surface::Select(state) if &state.identity == identity)
-            })
-    }
-
-    pub(super) fn open_product_select(
-        &mut self,
-        kind: ProductChoice,
-        anchor: Option<Bounds<Pixels>>,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.open_product_select_from_trigger(kind, anchor, None, window, cx);
-    }
-
-    fn open_product_select_from_trigger(
-        &mut self,
-        kind: ProductChoice,
-        anchor: Option<Bounds<Pixels>>,
-        trigger: Option<&FocusHandle>,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        // An accessibility client can issue a second action before the next
-        // semantic frame. The already-open product selector owns that request.
-        let identity = SelectIdentity::Product(kind);
-        if !self.can_open_select(&identity) {
-            return;
-        }
-        let Some((title, choices)) = self.product_choices(kind, cx) else {
-            return;
-        };
-        // Accessible activation need not focus the native Base trigger. Capture
-        // that real control as the restoration target only after rejecting
-        // stale busy/duplicate requests, which must not steal popup focus.
-        if let Some(trigger) = trigger {
-            trigger.focus(window, cx);
-        }
-        self.open_select_at(title, choices, identity, anchor, window, cx);
-    }
-
-    fn product_choices(
-        &self,
-        kind: ProductChoice,
-        cx: &Context<'_, Self>,
-    ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
-        let language = self.language();
-        match kind {
-            ProductChoice::Language => Some((
-                "settings.language.label",
-                Language::ALL
-                    .into_iter()
-                    .map(|choice| SelectChoice {
-                        label: choice.self_name().to_owned(),
-                        selected: choice == language,
-                        action: UiAction::SetLanguage(choice),
-                    })
-                    .collect(),
-            )),
-            ProductChoice::AuthProvider => {
-                let choices = self.auth_provider_choices();
-                (!choices.is_empty()).then_some(("select.auth_provider", choices))
-            }
-            ProductChoice::InstanceDataPolicy => {
-                let Some(Form::EditInstance(form)) = &self.form else {
-                    return None;
-                };
-                Some((
-                    "select.game_data",
-                    [
-                        ("choice.data_isolated", DataPolicy::Isolated),
-                        ("choice.data_shared", DataPolicy::Shared),
-                    ]
-                    .into_iter()
-                    .map(|(label, value)| SelectChoice {
-                        label: tr!(language, label),
-                        selected: form.original.data_policy == value,
-                        action: UiAction::InstanceDataPolicy(value),
-                    })
-                    .collect(),
-                ))
-            }
-            ProductChoice::InstanceRuntime => Some((
-                "select.java_runtime",
-                runtime_choices(
-                    language,
-                    self.instance_runtime_automatic()?,
-                    UiAction::InstanceRuntimeAutomatic,
-                ),
-            )),
-            ProductChoice::InstanceWindow => {
-                let (width, height, custom) = self.instance_window_values(cx)?;
-                Some((
-                    "select.window_size",
-                    window_choices(
-                        language,
-                        &width,
-                        &height,
-                        custom,
-                        |width, height| UiAction::InstanceWindow { width, height },
-                        UiAction::CustomInstanceWindow,
-                    ),
-                ))
-            }
-            ProductChoice::WizardRuntime => {
-                let profile = self.shell.wizard.draft.as_ref()?;
-                Some((
-                    "select.java_runtime",
-                    runtime_choices(language, profile.managed, UiAction::WizardRuntime),
-                ))
-            }
-            ProductChoice::WizardWindow => {
-                let profile = self.shell.wizard.draft.as_ref()?;
-                Some((
-                    "select.window_size",
-                    window_choices(
-                        language,
-                        &profile.width.read(cx).value(),
-                        &profile.height.read(cx).value(),
-                        profile.window_custom,
-                        |width, height| UiAction::WizardWindow { width, height },
-                        UiAction::WizardCustomWindow,
-                    ),
-                ))
-            }
-            ProductChoice::PackTargetVersion => {
-                let draft = self.shell.pack_import.draft.as_ref()?;
-                (!self.versions.is_empty()).then(|| {
-                    (
-                        "modpack.target.version_label",
-                        self.versions
-                            .iter()
-                            .map(|version| SelectChoice {
-                                label: version.clone(),
-                                selected: draft.version.as_deref() == Some(version.as_str()),
-                                action: UiAction::PackImport(
-                                    modpack_import::Action::SelectTargetVersion(version.clone()),
-                                ),
-                            })
-                            .collect(),
-                    )
-                })
-            }
-            ProductChoice::PackTargetLoader => {
-                let draft = self.shell.pack_import.draft.as_ref()?;
-                Some((
-                    "modpack.target.loader_label",
-                    [
-                        LoaderKind::Vanilla,
-                        LoaderKind::Fabric,
-                        LoaderKind::Quilt,
-                        LoaderKind::Forge,
-                        LoaderKind::NeoForge,
-                    ]
-                    .into_iter()
-                    .map(|kind| SelectChoice {
-                        label: modpack_import::loader_name(&kind, language),
-                        selected: draft.loader.as_ref() == Some(&kind),
-                        action: UiAction::PackImport(modpack_import::Action::SelectTargetLoader(
-                            kind,
-                        )),
-                    })
-                    .collect(),
-                ))
-            }
-            ProductChoice::PackTargetBuild => {
-                let draft = self.shell.pack_import.draft.as_ref()?;
-                let kind = draft
-                    .loader
-                    .clone()
-                    .filter(|kind| *kind != LoaderKind::Vanilla)?;
-                let version = draft.version.clone()?;
-                let catalog = draft
-                    .catalog
-                    .as_ref()
-                    .filter(|catalog| catalog.kind == kind && catalog.minecraft == version)?;
-                if !matches!(catalog.load, CollectionLoad::Ready) || catalog.builds.is_empty() {
-                    return None;
-                }
-                Some((
-                    "modpack.target.build_label",
-                    catalog
-                        .builds
-                        .iter()
-                        .map(|build| SelectChoice {
-                            label: if build.stable {
-                                build.version.clone()
-                            } else {
-                                tr!(
-                                    language,
-                                    "modpack.target.build_preview",
-                                    version = build.version
-                                )
-                            },
-                            selected: draft.build.as_deref() == Some(build.version.as_str()),
-                            action: UiAction::PackImport(
-                                modpack_import::Action::SelectTargetBuild(build.version.clone()),
-                            ),
-                        })
-                        .collect(),
-                ))
-            }
-            _ => self.settings_choices(kind, cx),
-        }
-    }
-
-    fn settings_choices(
-        &self,
-        kind: ProductChoice,
-        cx: &Context<'_, Self>,
-    ) -> Option<(&'static str, Vec<SelectChoice<UiAction>>)> {
-        let draft = self.settings_form.as_ref()?;
-        let language = self.language();
-        Some(match kind {
-            ProductChoice::Appearance => (
-                "select.appearance",
-                [
-                    ("choice.appearance_system", super::Appearance::System),
-                    ("choice.appearance_light", super::Appearance::Light),
-                    ("choice.appearance_dark", super::Appearance::Dark),
-                ]
-                .into_iter()
-                .map(|(label, value)| SelectChoice {
-                    label: tr!(language, label),
-                    selected: draft.appearance == value,
-                    action: UiAction::SetAppearance(value),
-                })
-                .collect(),
-            ),
-            ProductChoice::Proxy => (
-                "select.proxy",
-                [
-                    ("choice.proxy_system", 0),
-                    ("choice.proxy_direct", 1),
-                    ("choice.proxy_manual", 2),
-                ]
-                .into_iter()
-                .map(|(label, mode)| SelectChoice {
-                    label: tr!(language, label),
-                    selected: draft.proxy_mode == mode,
-                    action: UiAction::ProxyMode(mode),
-                })
-                .collect(),
-            ),
-            ProductChoice::DefaultJava => (
-                "select.default_java",
-                runtime_choices(
-                    language,
-                    draft.java_automatic,
-                    UiAction::DefaultJavaAutomatic,
-                ),
-            ),
-            ProductChoice::DefaultWindow => (
-                "select.default_window",
-                window_choices(
-                    language,
-                    &draft.width.read(cx).value(),
-                    &draft.height.read(cx).value(),
-                    draft.window_custom,
-                    |width, height| UiAction::DefaultWindow { width, height },
-                    UiAction::CustomDefaultWindow,
-                ),
-            ),
-            ProductChoice::AuthProvider
-            | ProductChoice::Language
-            | ProductChoice::InstanceDataPolicy
-            | ProductChoice::InstanceRuntime
-            | ProductChoice::InstanceWindow
-            | ProductChoice::WizardRuntime
-            | ProductChoice::WizardWindow
-            | ProductChoice::PackTargetVersion
-            | ProductChoice::PackTargetLoader
-            | ProductChoice::PackTargetBuild => return None,
-        })
-    }
-
-    pub(super) fn product_select_field(
-        &self,
-        id: &'static str,
-        label: impl Into<gpui::SharedString>,
-        value: &str,
-        kind: ProductChoice,
-        cx: &Context<'_, Self>,
-    ) -> gpui::Div {
-        let focus = self.shell.surfaces.trigger_focus(id, cx);
-        let disabled = self.busy && !Self::available_while_busy(&UiAction::OpenProductSelect(kind));
-        let open = self.shell.surfaces.top().is_some_and(
-            |layer| matches!(&layer.kind, Surface::Select(state) if state.product == Some(kind)),
-        );
-        let anchor = Rc::new(Cell::new(None));
-        let pointer_anchor = anchor.clone();
-        let pointer_focus = focus.clone();
-        let accessible_focus = focus.clone();
-        let view = cx.weak_entity();
-        let selector = gpui_base::Select::new(format!("{id}-select"))
-            .open(open)
-            .disabled(disabled)
-            .focus_handle(&focus)
-
-
-            .on_open_change(move |open, window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    if open {
-                        view.open_product_select_from_trigger(
-                            kind,
-                            anchor.get(),
-                            Some(&accessible_focus),
-                            window,
-                            cx,
-                        );
-                    } else if view.shell.surfaces.top().is_some_and(|layer|
-                        matches!(&layer.kind, Surface::Select(state) if state.product == Some(kind))) {
-                        // Base owns focus restoration for its own Cancel path.
-                        view.shell.surfaces.discard();
-                    }
-                    view.motion_dirty = true;
-                    cx.notify();
-                });
-            })
-            .child(div()
-                .id(id)
-                .debug_selector(move || id.to_owned())
-                .size_full()
-                .px(px(10.))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child({
-                    let anchor = pointer_anchor.clone();
-                    gpui::canvas(move |bounds, _, _| anchor.set(Some(bounds)), |_, _, _, _| {}).absolute().inset_0()
-                })
-                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |view, _, window, cx| {
-                    if disabled { return; }
-                    view.open_product_select_from_trigger(
-                        kind,
-                        pointer_anchor.get(),
-                        Some(&pointer_focus),
-                        window,
-                        cx,
-                    );
-                    view.motion_dirty = true;
-                    cx.notify();
-                    cx.stop_propagation();
-                }))
-                .child(div().flex_1().min_w_0().text_ellipsis().child(value.to_owned()))
-                .child(Icon::Selector.render(14., self.palette.muted)));
-        let label: gpui::SharedString = label.into();
-        div()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(div().text_sm().child(label))
-            .child(ProductSelectTrigger {
-                base: selector,
-                focus,
-                palette: self.palette,
-                disabled,
             })
     }
 
@@ -642,11 +191,7 @@ impl Block {
         }
         let menu = match identity {
             SelectIdentity::AppMenu => Some(MenuKind::App),
-            SelectIdentity::Product(_) | SelectIdentity::Appearance { .. } => None,
-        };
-        let product = match identity {
-            SelectIdentity::Product(kind) => Some(kind),
-            _ => None,
+            SelectIdentity::Appearance { .. } => None,
         };
         let width = if menu == Some(MenuKind::App) {
             px(192.)
@@ -670,7 +215,6 @@ impl Block {
                 active,
                 focus: focus.clone(),
                 scroll,
-                product,
                 identity,
                 typeahead: String::new(),
                 typed_at: None,
@@ -1011,52 +555,6 @@ fn app_menu_item(action: &UiAction) -> Option<&'static AppMenuItem> {
         return None;
     };
     APP_MENU.iter().find(|item| item.tab == *tab)
-}
-
-fn runtime_choices(
-    language: Language,
-    automatic: bool,
-    action: impl Fn(bool) -> UiAction,
-) -> Vec<SelectChoice<UiAction>> {
-    [
-        ("choice.java_automatic", true),
-        ("choice.java_custom", false),
-    ]
-    .into_iter()
-    .map(|(label, value)| SelectChoice {
-        label: tr!(language, label),
-        selected: automatic == value,
-        action: action(value),
-    })
-    .collect()
-}
-
-fn window_choices(
-    language: Language,
-    width: &str,
-    height: &str,
-    custom: bool,
-    preset: impl Fn(u32, u32) -> UiAction,
-    custom_action: UiAction,
-) -> Vec<SelectChoice<UiAction>> {
-    let current = (
-        width.trim().parse::<u32>().ok(),
-        height.trim().parse::<u32>().ok(),
-    );
-    let mut choices: Vec<_> = super::settings::WINDOW_PRESETS
-        .into_iter()
-        .map(|(width, height)| SelectChoice {
-            label: format!("{width} × {height}"),
-            selected: !custom && current == (Some(width), Some(height)),
-            action: preset(width, height),
-        })
-        .collect();
-    choices.push(SelectChoice {
-        label: tr!(language, "choice.custom_size"),
-        selected: custom,
-        action: custom_action,
-    });
-    choices
 }
 
 #[cfg(test)]

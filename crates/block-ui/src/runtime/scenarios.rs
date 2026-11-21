@@ -474,6 +474,7 @@ impl Block {
                     },
                     cx,
                 );
+                auth.sync_auth_provider_selection(window, cx);
             }
             if name == "auth-verifying" {
                 self.auth_stage(SignInStage::Ownership);

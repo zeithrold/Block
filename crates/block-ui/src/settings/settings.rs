@@ -1417,18 +1417,18 @@ impl Block {
         draft.focus_regions.observe_control(id, control, cx)
     }
 
-    fn settings_select(
+    fn settings_select<V: Clone + PartialEq + 'static>(
         &self,
         draft: &SettingsDraft,
         id: &'static str,
         label: impl Into<SharedString>,
         value: &str,
-        kind: super::select::ProductChoice,
+        options: crate::form_select::Options<V>,
         cx: &Context<'_, Self>,
     ) -> gpui::Div {
         draft.focus_regions.observe(
             id,
-            self.product_select_field(id, label, value, kind, cx),
+            self.product_select_field(id, label, value, options, cx),
             cx,
         )
     }
@@ -1595,7 +1595,18 @@ impl Block {
                 "settings-appearance",
                 tr!(language, "select.appearance"),
                 &appearance,
-                super::select::ProductChoice::Appearance,
+                crate::form_select::Options::new(
+                    [
+                        (
+                            Appearance::System,
+                            tr!(language, "choice.appearance_system"),
+                        ),
+                        (Appearance::Light, tr!(language, "choice.appearance_light")),
+                        (Appearance::Dark, tr!(language, "choice.appearance_dark")),
+                    ],
+                    Some(draft.appearance),
+                    UiAction::SetAppearance,
+                ),
                 cx,
             ))
             .child(
@@ -1629,7 +1640,11 @@ impl Block {
                 "settings-language",
                 tr!(language, "settings.language.label"),
                 language.self_name(),
-                super::select::ProductChoice::Language,
+                crate::form_select::Options::new(
+                    Language::ALL.map(|v| (v, v.self_name().to_owned())),
+                    Some(language),
+                    UiAction::SetLanguage,
+                ),
                 cx,
             ))
             .child(note(tr!(language, "settings.language.hint")))
@@ -1681,7 +1696,11 @@ impl Block {
                             "settings-default-java",
                             tr!(language, "select.default_java"),
                             &java,
-                            super::select::ProductChoice::DefaultJava,
+                            crate::form_select::Options::runtime(
+                                language,
+                                draft.java_automatic,
+                                UiAction::DefaultJavaAutomatic,
+                            ),
                             cx,
                         )
                         .flex_1(),
@@ -1726,7 +1745,18 @@ impl Block {
                 "settings-default-window",
                 tr!(language, "select.default_window"),
                 &window,
-                super::select::ProductChoice::DefaultWindow,
+                crate::form_select::Options::window(
+                    language,
+                    &width,
+                    &height,
+                    draft.window_custom,
+                    |size| match size {
+                        crate::form_select::WindowSize::Preset(width, height) => {
+                            UiAction::DefaultWindow { width, height }
+                        }
+                        crate::form_select::WindowSize::Custom => UiAction::CustomDefaultWindow,
+                    },
+                ),
                 cx,
             ))
             .children(draft.window_custom.then(|| {
@@ -1829,7 +1859,15 @@ impl Block {
                 "settings-proxy",
                 tr!(language, "select.proxy"),
                 &proxy,
-                super::select::ProductChoice::Proxy,
+                crate::form_select::Options::new(
+                    [
+                        (0, tr!(language, "choice.proxy_system")),
+                        (1, tr!(language, "choice.proxy_direct")),
+                        (2, tr!(language, "choice.proxy_manual")),
+                    ],
+                    Some(draft.proxy_mode),
+                    UiAction::ProxyMode,
+                ),
                 cx,
             ))
             .children((draft.proxy_mode == 2).then(|| {

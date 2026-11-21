@@ -231,6 +231,8 @@ struct DeviceCode {
 #[path = "provider_drawer.rs"]
 mod provider_drawer;
 use provider_drawer::AuthProviderDraft;
+#[path = "provider_picker.rs"]
+mod provider_picker;
 
 impl AuthWizard {
     fn waiting_for_browser(&self) -> bool {
@@ -303,6 +305,7 @@ pub(super) struct AuthWizard {
     pub(super) username: Option<gpui::Entity<super::TextInput>>,
     login: Option<gpui::Entity<super::TextInput>>,
     password: Option<gpui::Entity<gpui_base::input::InputState>>,
+    provider_picker: Option<provider_picker::ProviderPicker>,
     external_provider: Option<uuid::Uuid>,
     external_api: Option<String>,
     characters: Vec<block_auth::AuthlibProfile>,
@@ -457,6 +460,8 @@ impl AuthWizard {
             login: self.login.clone(),
             // Outgoing motion layers never retain a password editor or its history.
             password: None,
+            // A motion copy never mounts another trigger bound to the live popup.
+            provider_picker: None,
             external_provider: self.external_provider,
             external_api: self.external_api.clone(),
             characters: self.characters.clone(),
@@ -718,7 +723,7 @@ impl Block {
         }
     }
 
-    pub(super) fn choose_external_provider(
+    fn choose_external_provider(
         &mut self,
         id: uuid::Uuid,
         window: &mut Window,
@@ -754,40 +759,9 @@ impl Block {
             }
             state.error = None;
             state.transition(Phase::Connect);
-            if self
-                .shell
-                .surfaces
-                .top()
-                .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Select(_)))
-            {
-                self.shell.surfaces.close(window, &self.focus, cx);
-            }
+            state.sync_auth_provider_selection(window, cx);
             cx.notify();
         }
-    }
-
-    pub(super) fn auth_provider_choices(&self) -> Vec<super::select::SelectChoice<UiAction>> {
-        if self.shell.auth.as_ref().is_none_or(|state| {
-            state.provider != AccountProvider::Authlib
-                || !matches!(state.phase, Phase::Connect | Phase::Failed)
-                || state.provider_draft.is_some()
-        }) {
-            return Vec::new();
-        }
-        self.shell
-            .providers
-            .records
-            .iter()
-            .map(|provider| super::select::SelectChoice {
-                label: format!("{} · {}", provider.name, provider.api_url),
-                selected: self
-                    .shell
-                    .auth
-                    .as_ref()
-                    .is_some_and(|state| state.external_provider == Some(provider.id)),
-                action: UiAction::AuthExternalProvider(provider.id),
-            })
-            .collect()
     }
 
     pub(super) fn choose_auth_provider(
@@ -838,11 +812,11 @@ impl Block {
                     field.read(cx).focus_handle(cx).focus(window, cx);
                 }
             }
-            AccountProvider::Authlib => self
-                .shell
-                .surfaces
-                .trigger_focus("auth-provider-picker", cx)
-                .focus(window, cx),
+            AccountProvider::Authlib => {
+                if let Some(picker) = &state.provider_picker {
+                    picker.focus_handle(cx).focus(window, cx);
+                }
+            }
             AccountProvider::Microsoft => {
                 if let Some(focus) = &state.focus {
                     focus.focus(window, cx);
@@ -1071,6 +1045,7 @@ impl Block {
                 cx,
             )),
             password: Some(password),
+            provider_picker: Some(self.new_auth_provider_picker(window, cx)),
             external_provider: self.shell.providers.records.first().map(|p| p.id),
             external_api: self
                 .shell
@@ -1777,10 +1752,6 @@ impl Block {
             .records
             .iter()
             .find(|p| Some(p.id) == state.external_provider);
-        let picker_value = provider.map_or_else(
-            || tr!(language, "accounts.auth.provider.picker.empty"),
-            |provider| provider.name.clone(),
-        );
         let mut card = components::card(self.palette)
             .debug_selector(|| "auth-authlib".into())
             .gap_3()
@@ -1789,13 +1760,7 @@ impl Block {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().w_full().min_w_0().child(self.product_select_field(
-                        "auth-provider-picker",
-                        tr!(language, "select.auth_provider"),
-                        &picker_value,
-                        super::select::ProductChoice::AuthProvider,
-                        cx,
-                    )))
+                    .child(self.render_provider_picker(state, provider))
                     .child(
                         self.auth_button(
                             "auth-provider-add",
@@ -4453,6 +4418,22 @@ mod tests {
             scroll_into_view(cx, body, "auth-authlib"),
             "the community account type must be reachable"
         );
+        let fixtures = (
+            crate::providers::fixture_provider(false),
+            crate::providers::fixture_provider(true),
+        );
+        assert!(
+            matches!(fixtures, (Ok(_), Ok(_))),
+            "both provider fixtures must be valid"
+        );
+        let (Ok(https), Ok(http)) = fixtures else {
+            return;
+        };
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.receive_providers(Ok(vec![https.clone(), http.clone()]), cx);
+            });
+        });
         click(cx, "auth-authlib");
         let picker = crate::test_support::control_bounds(cx, "auth-provider-picker");
         assert!(
@@ -4461,14 +4442,60 @@ mod tests {
             }),
             "the provider picker must be visible: {picker:?} in {body:?}"
         );
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
+        let trigger = cx.update(|window, cx| {
+            view.read_with(cx, |view, cx| {
+                let focus = view
+                    .shell
+                    .auth
+                    .as_ref()
+                    .and_then(|state| state.provider_picker.as_ref())
+                    .map(|picker| picker.focus_handle(cx));
                 assert!(
+                    focus.as_ref().is_some_and(|focus| focus.is_focused(window)),
+                    "the server picker takes focus"
+                );
+                focus
+            })
+        });
+        let Some(trigger) = trigger else {
+            return;
+        };
+        crate::test_support::press(cx, "enter");
+        cx.update(|window, _| assert!(!trigger.is_focused(window), "the popup takes focus"));
+        crate::test_support::press(cx, "down");
+        crate::test_support::press(cx, "escape");
+        cx.update(|window, cx| {
+            view.read_with(cx, |view, _| {
+                assert_eq!(
                     view.shell
-                        .surfaces
-                        .trigger_focus("auth-provider-picker", cx)
-                        .is_focused(window),
-                    "the first community-provider control takes focus"
+                        .auth
+                        .as_ref()
+                        .map(|state| state.external_provider),
+                    Some(None),
+                    "Escape leaves the wizard open without selecting a row"
+                );
+                assert!(
+                    trigger.is_focused(window),
+                    "Escape returns focus to the picker"
+                );
+            });
+        });
+        crate::test_support::press(cx, "enter");
+        crate::test_support::press(cx, "down");
+        crate::test_support::press(cx, "enter");
+        cx.update(|window, cx| {
+            view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.shell
+                        .auth
+                        .as_ref()
+                        .map(|state| { (state.external_provider, state.external_api.as_deref()) }),
+                    Some((Some(https.id), Some(https.api_url.as_str()))),
+                    "confirm chooses the row's server and credential destination"
+                );
+                assert!(
+                    trigger.is_focused(window),
+                    "confirm returns focus to the picker"
                 );
             });
         });

@@ -402,7 +402,11 @@ impl Block {
         cx.notify();
     }
 
-    pub(super) fn receive_providers(&mut self, result: Result<Vec<AuthlibProvider>, String>) {
+    pub(super) fn receive_providers(
+        &mut self,
+        result: Result<Vec<AuthlibProvider>, String>,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.shell.providers.loaded = true;
         match result {
             Ok(records) => {
@@ -417,6 +421,7 @@ impl Block {
                 }
                 self.shell.providers.records = records;
                 self.shell.providers.load_error = None;
+                self.refresh_auth_provider_picker(cx);
             }
             Err(error) => self.shell.providers.load_error = Some(error),
         }
@@ -1290,7 +1295,7 @@ mod tests {
                         form.name
                             .update(cx, |field, cx| field.set_value("Unsaved name", cx));
                     }
-                    view.receive_providers(Ok(vec![other.clone()]));
+                    view.receive_providers(Ok(vec![other.clone()]), cx);
                     assert!(
                         view.shell
                             .providers
@@ -1557,7 +1562,7 @@ mod tests {
                             form.name
                                 .update(cx, |field, cx| field.set_value("Unsaved name", cx));
                         }
-                        view.receive_providers(Ok(Vec::new()));
+                        view.receive_providers(Ok(Vec::new()), cx);
                         assert_eq!(
                             view.shell.providers.form.as_ref().map(|form| form.id),
                             draft

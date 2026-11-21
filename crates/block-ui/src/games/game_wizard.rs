@@ -2461,14 +2461,15 @@ impl Block {
             .flex()
             .flex_col()
             .gap_4()
-            // The shared selector owns its label as `&'static str`, so this
-            // trigger keeps the shared English label until the selector accepts
-            // localized copy.
             .child(self.product_select_field(
                 "wizard-java-runtime",
                 tr!(language, "select.java_runtime"),
                 &runtime,
-                super::select::ProductChoice::WizardRuntime,
+                crate::form_select::Options::runtime(
+                    language,
+                    profile.managed,
+                    UiAction::WizardRuntime,
+                ),
                 cx,
             ))
             .children((!profile.managed).then(|| {
@@ -2483,7 +2484,18 @@ impl Block {
                 "wizard-window-size",
                 tr!(language, "select.window_size"),
                 &size,
-                super::select::ProductChoice::WizardWindow,
+                crate::form_select::Options::window(
+                    language,
+                    &width,
+                    &height,
+                    profile.window_custom,
+                    |size| match size {
+                        crate::form_select::WindowSize::Preset(width, height) => {
+                            UiAction::WizardWindow { width, height }
+                        }
+                        crate::form_select::WindowSize::Custom => UiAction::WizardCustomWindow,
+                    },
+                ),
                 cx,
             ))
             .children(profile.window_custom.then(|| {

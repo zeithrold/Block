@@ -55,6 +55,7 @@ impl Block {
             state.error = None;
             state.provider_draft = None;
             state.transition(Phase::Connect);
+            state.sync_auth_provider_selection(window, cx);
         }
         self.shell.surfaces.close(window, &self.focus, cx);
         cx.notify();

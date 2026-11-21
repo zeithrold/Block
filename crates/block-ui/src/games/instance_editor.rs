@@ -221,12 +221,14 @@ impl Block {
             focus.focus(window, cx);
         }
     }
+    #[cfg(test)]
     pub(super) fn instance_runtime_automatic(&self) -> Option<bool> {
         match &self.form {
             Some(Form::EditInstance(form)) => Some(form.managed),
             _ => None,
         }
     }
+    #[cfg(test)]
     pub(super) fn instance_window_values(&self, cx: &gpui::App) -> Option<(String, String, bool)> {
         match &self.form {
             Some(Form::EditInstance(form)) => Some((
@@ -285,7 +287,18 @@ impl Block {
                 "instance-window",
                 tr!(language, "select.window_size"),
                 &size,
-                super::select::ProductChoice::InstanceWindow,
+                crate::form_select::Options::window(
+                    language,
+                    &form.width.read(cx).value(),
+                    &form.height.read(cx).value(),
+                    form.window_custom,
+                    |size| match size {
+                        crate::form_select::WindowSize::Preset(width, height) => {
+                            UiAction::InstanceWindow { width, height }
+                        }
+                        crate::form_select::WindowSize::Custom => UiAction::CustomInstanceWindow,
+                    },
+                ),
                 cx,
             ));
         if form.window_custom
@@ -1087,7 +1100,11 @@ impl Block {
                     "instance-runtime",
                     tr!(language, "select.java_runtime"),
                     &runtime,
-                    super::select::ProductChoice::InstanceRuntime,
+                    crate::form_select::Options::runtime(
+                        language,
+                        form.managed,
+                        UiAction::InstanceRuntimeAutomatic,
+                    ),
                     cx,
                 )
             });
@@ -1288,7 +1305,14 @@ impl Block {
                 "data-policy",
                 tr!(language, "select.game_data"),
                 &policy,
-                super::select::ProductChoice::InstanceDataPolicy,
+                crate::form_select::Options::new(
+                    [
+                        (DataPolicy::Isolated, tr!(language, "choice.data_isolated")),
+                        (DataPolicy::Shared, tr!(language, "choice.data_shared")),
+                    ],
+                    Some(form.original.data_policy),
+                    UiAction::InstanceDataPolicy,
+                ),
                 cx,
             )
         })

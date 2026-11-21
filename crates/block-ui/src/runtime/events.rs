@@ -106,7 +106,7 @@ impl Block {
                 Message::ForOperation { .. } | Message::ForPack { .. } => {}
                 Message::Catalog(result) => self.receive_catalog(result, cx),
                 Message::Providers(result) => {
-                    self.receive_providers(result);
+                    self.receive_providers(result, cx);
                     if let Some(engine) = &self.engine {
                         engine.load_images();
                     }

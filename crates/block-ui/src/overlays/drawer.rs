@@ -782,6 +782,13 @@ impl Render for DrawerLayer {
         );
         let (body, popups) = owner.update(cx, |view, cx| {
             let body = view.render_surface_sheet_body(&frame.kind, window, cx);
+            // No product Drawer body currently contains a styled Select. Replace
+            // only its body in the regression, keeping the live modal composition.
+            #[cfg(test)]
+            let body = match cx.try_global::<select_tests::SelectBody>() {
+                Some(fixture) => fixture.render(),
+                None => body,
+            };
             let popups = if view.shell.surfaces.contains(frame.revision) {
                 view.render_popups(true, window, cx)
             } else {
@@ -797,3 +804,7 @@ impl Render for DrawerLayer {
 #[cfg(test)]
 #[path = "drawer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "drawer_select_tests.rs"]
+mod select_tests;
