@@ -1005,43 +1005,8 @@ fn native_close_and_quit_use_distinct_exit_prompts_without_discarding(
     );
 }
 
-#[gpui::test]
-fn native_close_dismisses_an_open_selector_before_routing_save_errors(
-    cx: &mut gpui::TestAppContext,
-) {
-    let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = crate::tests::test_view(window, cx);
-        view.router.navigate(Tab::Home);
-        view.preferences.reduce_motion = true;
-        view.saved_preferences.reduce_motion = true;
-        view
-    });
-    cx.simulate_resize(size(px(360.), px(720.)));
-    view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx);
-        view.handle(UiAction::SettingsPage(0), window, cx);
-        if let Some(draft) = &view.settings_form {
-            draft
-                .memory
-                .update(cx, |input, cx| input.set_value("invalid", cx));
-        }
-    });
-    settings_click(cx, "settings-appearance");
-    view.update_in(cx, |view, window, cx| {
-        assert!(!view.allow_native_window_close(window, cx));
-        assert_eq!(view.shell.surfaces.layers().count(), 1);
-    });
-    settings_click(cx, "settings-exit-save");
-    assert!(cx.update(|window, cx| {
-        let view = view.read(cx);
-        !view.shell.surfaces.is_open()
-            && view.shell.settings_page == Some(1)
-            && view.settings_form.as_ref().is_some_and(|draft| {
-                draft.memory.read(cx).value(cx) == "invalid"
-                    && draft.memory.read(cx).focus_handle(cx).is_focused(window)
-            })
-    }));
-}
+#[path = "settings_select_navigation_tests.rs"]
+mod select_navigation;
 
 #[gpui::test]
 fn returning_restores_index_and_category_scroll_positions(cx: &mut gpui::TestAppContext) {
@@ -1368,34 +1333,6 @@ fn settings_controls_and_long_storage_paths_fit_the_home_frame(cx: &mut gpui::Te
             cx.update(|window, _| window.remove_window());
         }
     }
-}
-
-#[gpui::test]
-fn alt_left_dismisses_select_before_returning_to_the_index(cx: &mut gpui::TestAppContext) {
-    let (view, cx) = crate::test_support::window(cx, |window, cx| {
-        let mut view = crate::tests::test_view(window, cx);
-        view.router.navigate(Tab::Home);
-        view.preferences.reduce_motion = true;
-        view.saved_preferences.reduce_motion = true;
-        view
-    });
-    cx.simulate_resize(size(px(360.), px(720.)));
-    view.update_in(cx, |view, window, cx| {
-        view.handle(UiAction::Tab(Tab::Settings), window, cx);
-    });
-    settings_click(cx, "settings-page-general");
-    settings_click(cx, "settings-appearance");
-    assert!(view.read_with(cx, |view, _| view.shell.surfaces.is_open()));
-    crate::test_support::press(cx, "alt-left");
-    settings_frame(cx);
-    assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()
-        && view.shell.settings_page == Some(0)));
-    crate::test_support::press(cx, "alt-left");
-    settings_frame(cx);
-    assert!(
-        view.read_with(cx, |view, _| view.shell.settings_page.is_none()
-            && view.router.tab() == Tab::Settings)
-    );
 }
 
 #[gpui::test]

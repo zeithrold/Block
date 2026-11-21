@@ -18,6 +18,10 @@ mod keys;
 mod options;
 pub(crate) use options::{Options, WindowSize};
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, gpui::Action)]
+#[action(namespace = launcher_form)]
+pub(super) struct DismissFormSelect;
+
 #[derive(Clone, PartialEq)]
 struct Row<V> {
     value: V,
@@ -158,9 +162,31 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for Field<V> {
             }
             field.picker.clone()
         });
+        let dismiss = move |window: &mut Window, cx: &mut App| {
+            let field = mounted.read(cx);
+            if field.picker.focus_handle(cx) == field.trigger {
+                return false;
+            }
+            // Cancel at the trigger: Kit restores it synchronously, before a
+            // dirty-exit dialog can take focus. List cancellation is deferred.
+            let trigger = field.trigger.clone();
+            trigger.dispatch_action(&gpui_base::actions::Cancel, window, cx);
+            true
+        };
         div()
             .id(id)
             .debug_selector(move || id.into())
+            .on_key_down({
+                let dismiss = dismiss.clone();
+                move |event, window, cx| {
+                    if crate::settings::is_back_key(event) && dismiss(window, cx) {
+                        cx.stop_propagation();
+                    }
+                }
+            })
+            .on_action(move |_: &DismissFormSelect, window, cx| {
+                dismiss(window, cx);
+            })
             .w_full()
             .h(px(design::CONTROL_HEIGHT))
             .child(

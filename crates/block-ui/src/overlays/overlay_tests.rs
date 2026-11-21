@@ -1390,10 +1390,6 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
     });
     click(cx, "wizard-java-runtime");
     view.read_with(cx, |view, _| {
-        assert!(matches!(
-            view.shell.surfaces.top().map(|layer| &layer.kind),
-            Some(Surface::Select(_))
-        ));
         assert_eq!(
             view.page_spec().wizard,
             Some(crate::navigation::WizardKey::Game(
@@ -1411,10 +1407,30 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
             "a nested selector must not remount its owner: {controls:?}"
         );
         assert!(!controls[0].path().contains(&"dialog".into()));
+        assert_eq!(
+            controls[0].expanded(),
+            Some(true),
+            "click opens the selector"
+        );
     });
     assert!(crate::test_support::control_bounds(cx, "wizard-component-version").is_none());
     crate::test_support::press(cx, "escape");
     cx.run_until_parked();
+    cx.update(|window, _| {
+        let selector =
+            gpui_base::test_support::find(window, &[], &"wizard-java-runtime-select".into())
+                .unwrap_or_else(|| unreachable!("first Escape must leave the selector mounted"));
+        assert_eq!(
+            selector.expanded(),
+            Some(false),
+            "first Escape closes the selector"
+        );
+        assert_eq!(
+            selector.focused(),
+            Some(true),
+            "first Escape restores trigger focus"
+        );
+    });
     view.read_with(cx, |view, _| {
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.shell.wizard.page, Some(WizardPage::Location));

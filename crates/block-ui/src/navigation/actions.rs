@@ -1108,6 +1108,9 @@ impl Block {
             .layers()
             .any(|entry| matches!(entry.kind, Surface::SettingsExit(_)))
         {
+            if let Some(focus) = window.focused(cx) {
+                focus.dispatch_action(&crate::form_select::DismissFormSelect, window, cx);
+            }
             self.shell.surfaces.clear(window, &self.focus, cx);
             self.shell
                 .surfaces
