@@ -373,11 +373,12 @@ impl Block {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let closed_select = self
-            .shell
-            .surfaces
-            .top()
-            .is_some_and(|entry| matches!(entry.kind, super::shell::Surface::Select(_)));
+        let closed_select = self.shell.surfaces.top().is_some_and(|entry| {
+            matches!(
+                entry.kind,
+                super::shell::Surface::Select(_) | super::shell::Surface::AppMenu { .. }
+            )
+        });
         if closed_select {
             self.shell.surfaces.close(window, &self.focus, cx);
             self.motion_dirty = true;

@@ -1,61 +1,43 @@
-use super::{
-    Duration, Language, MenuKind, Surface, Tab, UiAction, click, press, px, settle, settle_tab,
-};
+use super::{Language, Surface, Tab, UiAction, click, press, px, settle, settle_tab};
+use gpui::Modifiers;
+use gpui_base::test_support::{ElementSnapshot, snapshots};
+
+fn menu_row(cx: &mut gpui::VisualTestContext, label: &str) -> ElementSnapshot {
+    cx.update(|window, _| {
+        snapshots(window).into_iter().find(|row| {
+            row.visible() && row.role() == Some(gpui::Role::MenuItem) && row.label() == Some(label)
+        })
+    })
+    .unwrap_or_else(|| unreachable!("missing menu item {label}"))
+}
 
 #[gpui::test]
-fn menu_entrance_forwards_the_first_typeahead_once_without_waiting_for_animation(
-    cx: &mut gpui::TestAppContext,
-) {
+fn first_arrow_opens_inspection_without_waiting_for_animation(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.router.navigate(Tab::Home);
         view
     });
-    press(cx, "tab enter a");
-    assert!(view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, Surface::Select(state) if state.choices[state.active].label == "Accounts"))), "{:?}", view.read_with(cx, |view, _| view.shell.surfaces.top().map(|layer| format!("{:?}", layer.kind))));
-    press(cx, "enter");
+    press(cx, "tab enter down down enter");
     assert_eq!(
         view.read_with(cx, |view, _| view.router.tab()),
         Tab::Accounts
     );
-    assert!(view.read_with(cx, |view, _| view.shell.surfaces.top().is_none()));
+    assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
 }
 
 #[gpui::test]
-fn app_menu_shares_roving_typeahead_current_page_and_real_navigation(
-    cx: &mut gpui::TestAppContext,
-) {
+fn menu_checks_current_page_and_routes_keyboard_and_pointer_choices(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
-            view.preferences.reduce_motion = true;
-            view.handle(UiAction::Tab(Tab::Home), window, cx);
-        });
+    view.update_in(cx, |view, window, cx| {
+        view.preferences.reduce_motion = true;
+        view.handle(UiAction::Tab(Tab::Home), window, cx);
     });
     click(cx, "app-menu");
-    assert!(view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(|layer| matches!(&layer.kind, Surface::Select(state) if state.menu == Some(MenuKind::App) && state.active == 0 && state.width == px(192.)))));
-
-    press(cx, "a");
-    assert!(
-        view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(
-            |layer| matches!(&layer.kind, Surface::Select(state) if state.active == 1)
-        ))
-    );
-    press(cx, "a");
-    assert!(
-        view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(
-            |layer| matches!(&layer.kind, Surface::Select(state) if state.active == 4)
-        ))
-    );
+    assert_eq!(menu_row(cx, "Home").checked(), Some(true));
+    press(cx, "up up");
+    assert_eq!(menu_row(cx, "Settings").selected(), Some(true));
     assert_eq!(view.read_with(cx, |view, _| view.router.tab()), Tab::Home);
-    cx.executor().advance_clock(Duration::from_millis(701));
-    press(cx, "s e t");
-    assert!(
-        view.read_with(cx, |view, _| view.shell.surfaces.top().is_some_and(
-            |layer| matches!(&layer.kind, Surface::Select(state) if state.active == 3)
-        ))
-    );
-
     press(cx, "enter");
     assert!(
         view.read_with(cx, |view, _| view.router.tab() == Tab::Settings
@@ -65,7 +47,9 @@ fn app_menu_shares_roving_typeahead_current_page_and_real_navigation(
     click(cx, "settings-back");
     assert_eq!(view.read_with(cx, |view, _| view.router.tab()), Tab::Home);
     click(cx, "app-menu");
-    click(cx, "menu-games");
+    let games = menu_row(cx, "Games").bounds();
+    cx.simulate_click(games.center(), Modifiers::none());
+    settle(cx);
     assert!(
         view.read_with(cx, |view, _| view.router.tab() == Tab::Instances
             && !view.shell.surfaces.is_open())
@@ -73,53 +57,47 @@ fn app_menu_shares_roving_typeahead_current_page_and_real_navigation(
 }
 
 #[gpui::test]
-fn menu_labels_resolve_in_the_view_language(cx: &mut gpui::TestAppContext) {
+fn open_menu_follows_language_and_keeps_focus_on_the_menu(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.router.navigate(Tab::Home);
         view
     });
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| view.open_app_menu_at(None, window, cx));
-    });
-    cx.run_until_parked();
-    press(cx, "down");
-    let focus = view.read_with(cx, |view, _| {
-        view.shell
-            .surfaces
-            .top()
-            .and_then(|layer| match &layer.kind {
-                Surface::Select(state) => Some(state.focus.clone()),
-                _ => None,
-            })
-    });
+    press(cx, "tab");
+    let trigger = cx
+        .update(|window, cx| window.focused(cx))
+        .unwrap_or_else(|| unreachable!("menu trigger must be focused after Tab"));
+    press(cx, "enter");
+    let focus = cx
+        .update(|window, cx| window.focused(cx))
+        .unwrap_or_else(|| unreachable!("menu must be focused after Enter"));
+    assert_ne!(focus, trigger);
     for (language, title, first_choice) in [
         (Language::English, "Block menu", "Home"),
         (Language::SimplifiedChinese, "Block 菜单", "主页"),
         (Language::Japanese, "Block メニュー", "ホーム"),
     ] {
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.handle(UiAction::SetLanguage(language), window, cx);
-            });
+        view.update_in(cx, |view, window, cx| {
+            view.handle(UiAction::SetLanguage(language), window, cx)
         });
-        let resolved = view.read_with(cx, |view, _| {
-            let layer = view.shell.surfaces.top()?;
-            let Surface::Select(state) = &layer.kind else {
-                return None;
-            };
-            assert_eq!(state.active, 1);
-            assert_eq!(Some(state.focus.clone()), focus);
-            assert!(state.choices[0].selected);
-            Some((state.title(language), state.choices[0].label.clone()))
-        });
-        assert_eq!(
-            resolved,
-            Some((title.to_owned(), first_choice.to_owned())),
-            "{}",
-            language.code()
-        );
+        settle(cx);
+        assert!(view.read_with(cx, |view, _| {
+            view.shell
+                .surfaces
+                .top()
+                .is_some_and(|layer| layer.kind.title(language) == title)
+        }));
+        assert_eq!(menu_row(cx, first_choice).checked(), Some(true));
+        assert!(cx.update(|window, _| focus.is_focused(window)));
     }
+    press(cx, "escape");
+    settle(cx);
+    assert!(cx.update(|window, _| trigger.is_focused(window)));
+    click(cx, "app-menu");
+    cx.simulate_click(gpui::point(px(300.), px(50.)), Modifiers::none());
+    settle(cx);
+    assert!(view.read_with(cx, |view, _| view.router.tab() == Tab::Home
+        && !view.shell.surfaces.is_open()));
 }
 
 #[gpui::test]
@@ -139,13 +117,22 @@ fn tab_in_a_dialog_never_closes_the_shell_menu_beneath_it(cx: &mut gpui::TestApp
         press(cx, keys);
         settle_tab(cx);
         assert!(view.read_with(cx, |view, _| {
-            matches!(view.shell.surfaces.top().map(|layer| &layer.kind), Some(Surface::GamesHelp))
-                && view.shell.surfaces.layers().any(|layer| matches!(&layer.kind, Surface::Select(state) if state.menu == Some(MenuKind::App)))
+            matches!(
+                view.shell.surfaces.top().map(|layer| &layer.kind),
+                Some(Surface::GamesHelp)
+            ) && view
+                .shell
+                .surfaces
+                .layers()
+                .any(|layer| matches!(&layer.kind, Surface::AppMenu { .. }))
         }));
     }
     press(cx, "escape");
     settle(cx);
-    assert!(view.read_with(cx, |view, _| matches!(view.shell.surfaces.top().map(|layer| &layer.kind), Some(Surface::Select(state)) if state.menu == Some(MenuKind::App))));
+    assert!(view.read_with(cx, |view, _| matches!(
+        view.shell.surfaces.top().map(|layer| &layer.kind),
+        Some(Surface::AppMenu { .. })
+    )));
     press(cx, "escape");
     settle(cx);
     assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()));
@@ -159,14 +146,14 @@ fn saved_overlay_snapshot_keeps_the_selector_offset_it_captured(cx: &mut gpui::T
         view.preferences.reduce_motion = true;
         view
     });
-    click(cx, "app-menu");
-    // The compact app menu does not need to scroll. Seed its native handle to
-    // exercise the snapshot's isolation independently of popup size.
+    view.update_in(cx, |view, window, cx| {
+        view.open_appearance_select(true, true, window, cx)
+    });
     let captured = gpui::point(px(0.), px(-40.));
     let (saved, live) = view.read_with(cx, |view, _| {
         let Some(Surface::Select(state)) = view.shell.surfaces.top().map(|layer| &layer.kind)
         else {
-            unreachable!("app menu opened");
+            unreachable!("appearance selector opened");
         };
         state.scroll.set_offset(captured);
         (view.shell.surfaces.snapshot(), state.scroll.clone())

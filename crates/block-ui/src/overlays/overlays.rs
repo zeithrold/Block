@@ -10,9 +10,9 @@ use super::{
     shell::{Drawer, OverlayPresentation, Surface},
 };
 use gpui::{
-    App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, px,
+    App, AppContext as _, Context, FocusHandle, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, px,
 };
 use gpui_component::WindowExt as _;
 use std::{cell::RefCell, collections::HashMap};
@@ -125,7 +125,10 @@ impl Overlays {
         }
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
-        let focus = cx.focus_handle();
+        let focus = match &kind {
+            Surface::AppMenu { menu, .. } => menu.focus_handle(cx),
+            _ => cx.focus_handle(),
+        };
         let presentation = kind.overlay();
         let overlay_kind = kind.clone();
         let entry = SurfaceLayer {
@@ -135,7 +138,7 @@ impl Overlays {
             return_focus: super::drawer::DrawerLayer::closing_return_focus(window, cx)
                 .or_else(|| window.focused(cx)),
         };
-        if matches!(entry.kind, Surface::Select(_)) {
+        if matches!(entry.kind, Surface::Select(_) | Surface::AppMenu { .. }) {
             focus.focus(window, cx);
             self.entries.push(entry);
             if let Some(entry) = self.entries.last() {
@@ -608,7 +611,7 @@ impl Surface {
         match self {
             Self::Drawer(Drawer::ImportGames) => "import_games",
             Self::Drawer(Drawer::Language) => "language",
-            Self::Drawer(Drawer::Menu) => "menu",
+            Self::Drawer(Drawer::Menu) | Self::AppMenu { .. } => "menu",
             Self::Drawer(Drawer::Accounts) => "accounts",
             Self::Drawer(Drawer::Instances) => "instances",
             Self::Drawer(Drawer::Downloads) => "downloads",
@@ -638,7 +641,7 @@ impl Surface {
     /// from a semantic key, so a retained layer follows the painting language.
     pub(super) fn title(&self, language: super::Language) -> String {
         match self {
-            Self::Drawer(Drawer::Menu) => tr!(language, "surface.menu"),
+            Self::Drawer(Drawer::Menu) | Self::AppMenu { .. } => tr!(language, "surface.menu"),
             Self::Drawer(Drawer::Language) => tr!(language, "setup.language.label"),
             Self::Drawer(Drawer::Accounts) => tr!(language, "action.switch_account"),
             Self::Drawer(Drawer::Instances) => tr!(language, "action.switch_game"),
@@ -662,7 +665,7 @@ impl Surface {
     /// popup because a centered modal would not match the prototype pickers.
     pub(super) fn overlay(&self) -> Option<OverlayPresentation> {
         match self {
-            Self::Drawer(Drawer::Menu) | Self::Select(_) => None,
+            Self::Drawer(Drawer::Menu) | Self::AppMenu { .. } | Self::Select(_) => None,
             Self::Drawer(
                 Drawer::Accounts
                 | Drawer::Instances

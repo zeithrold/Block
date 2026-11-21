@@ -3,15 +3,11 @@
     clippy::redundant_pub_crate,
     reason = "Selectors are internal to the product shell."
 )]
-use super::{
-    Block, Form, Language, Tab, UiAction, design::Icon, scroll_area::ScrollAreaExt as _,
-    shell::Surface,
-};
+use super::{Block, Form, Language, UiAction, scroll_area::ScrollAreaExt as _, shell::Surface};
 use block_launcher::catalog::{InstanceColor, InstanceIcon};
 use gpui::{
     Bounds, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    ParentElement as _, Pixels, Point, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
-    Window, div, point, px, rgb,
+    ParentElement as _, Pixels, Point, ScrollHandle, Styled as _, Window, div, point, px,
 };
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation as _;
@@ -30,7 +26,6 @@ pub(super) struct SelectState<A> {
     pub choices: Vec<SelectChoice<A>>,
     pub anchor: Point<Pixels>,
     pub width: Pixels,
-    pub menu: Option<MenuKind>,
     pub active: usize,
     pub focus: FocusHandle,
     /// The options viewport. Long catalogs (Minecraft versions, loader builds)
@@ -41,15 +36,9 @@ pub(super) struct SelectState<A> {
     typed_at: Option<Instant>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum MenuKind {
-    App,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SelectIdentity {
     Appearance { wizard: bool, color: bool },
-    AppMenu,
 }
 
 impl SelectIdentity {
@@ -59,51 +48,9 @@ impl SelectIdentity {
                 wizard: *wizard,
                 color: *color,
             },
-            Self::AppMenu => UiAction::Drawer(Some(super::Drawer::Menu)),
         }
     }
 }
-
-#[derive(Clone, Copy)]
-struct AppMenuItem {
-    id: &'static str,
-    /// Semantic catalog key; a displayed label is never a logical identity.
-    label: &'static str,
-    tab: Tab,
-    icon: Icon,
-}
-const APP_MENU: [AppMenuItem; 5] = [
-    AppMenuItem {
-        id: "menu-home",
-        label: "menu.home",
-        tab: Tab::Home,
-        icon: Icon::Home,
-    },
-    AppMenuItem {
-        id: "menu-accounts",
-        label: "menu.accounts",
-        tab: Tab::Accounts,
-        icon: Icon::Account,
-    },
-    AppMenuItem {
-        id: "menu-games",
-        label: "menu.games",
-        tab: Tab::Instances,
-        icon: Icon::Games,
-    },
-    AppMenuItem {
-        id: "menu-settings",
-        label: "menu.settings",
-        tab: Tab::Settings,
-        icon: Icon::Settings,
-    },
-    AppMenuItem {
-        id: "menu-about",
-        label: "menu.about",
-        tab: Tab::About,
-        icon: Icon::Info,
-    },
-];
 
 impl<A> SelectState<A> {
     /// The selector's own name in the language of the view that presents it.
@@ -160,12 +107,7 @@ impl Block {
                     crate::i18n::instance_color_name(language, *color)
                 }
                 UiAction::DeleteInstanceId(_) => tr!(language, "choice.delete_from_library"),
-                action => {
-                    let Some(item) = app_menu_item(action) else {
-                        continue;
-                    };
-                    tr!(language, item.label)
-                }
+                _ => continue,
             };
         }
     }
@@ -189,15 +131,7 @@ impl Block {
         if !self.can_open_select(&identity) {
             return;
         }
-        let menu = match identity {
-            SelectIdentity::AppMenu => Some(MenuKind::App),
-            SelectIdentity::Appearance { .. } => None,
-        };
-        let width = if menu == Some(MenuKind::App) {
-            px(192.)
-        } else {
-            anchor.map_or(px(224.), |bounds| bounds.size.width.max(px(144.)))
-        };
+        let width = anchor.map_or(px(224.), |bounds| bounds.size.width.max(px(144.)));
         let active = choices
             .iter()
             .position(|choice| choice.selected)
@@ -211,7 +145,6 @@ impl Block {
             Surface::Select(SelectState {
                 title,
                 choices,
-                menu,
                 active,
                 focus: focus.clone(),
                 scroll,
@@ -317,38 +250,6 @@ impl Block {
         );
     }
 
-    pub(super) fn open_app_menu_at(
-        &mut self,
-        anchor: Option<Bounds<Pixels>>,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let current = self.router.tab();
-        let language = self.language();
-        let choices = APP_MENU
-            .into_iter()
-            .filter(|item| {
-                // The setup draft keeps its own surface; only Settings and About
-                // are reachable previews until setup is finished.
-                self.router.tab() != Tab::Onboarding
-                    || matches!(item.tab, Tab::Settings | Tab::About)
-            })
-            .map(|item| SelectChoice {
-                label: tr!(language, item.label),
-                selected: item.tab == current,
-                action: UiAction::Tab(item.tab),
-            })
-            .collect();
-        self.open_select_at(
-            "surface.menu",
-            choices,
-            SelectIdentity::AppMenu,
-            anchor,
-            window,
-            cx,
-        );
-    }
-
     pub(super) fn select_key(
         &mut self,
         event: &KeyDownEvent,
@@ -408,41 +309,6 @@ impl Block {
         true
     }
 
-    fn app_menu_header(&self) -> gpui::Div {
-        div()
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(super::shell::brand(36.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.))
-                            .child(div().text_sm().child("Block"))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.))
-                                    .text_xs()
-                                    .text_color(rgb(self.palette.muted))
-                                    .child(format!("v{}", self.build_info.version))
-                                    .child(super::components::badge(
-                                        "pilot.m2",
-                                        self.palette,
-                                        super::components::BadgeVariant::Secondary,
-                                    )),
-                            ),
-                    ),
-            )
-            .child(div().h(px(1.)).my_1().bg(rgb(self.palette.border)))
-    }
-
     pub(super) fn select_options(
         &self,
         state: &SelectState<UiAction>,
@@ -453,10 +319,6 @@ impl Block {
             matches!(&layer.kind, Surface::Select(current) if current.focus == state.focus)
                 .then_some(layer.revision)
         });
-        let mut content = div();
-        if state.menu == Some(MenuKind::App) {
-            content = content.child(self.app_menu_header());
-        }
         // Version and loader-build catalogs are longer than the popup: the
         // options scroll inside it, and the active row stays reachable.
         let options = state.choices.iter().enumerate().map(|(index, choice)| {
@@ -474,87 +336,26 @@ impl Block {
                 }
                 view.handle(UiAction::SelectValue(Box::new(action.clone())), window, cx);
             });
-            let app_item = (state.menu == Some(MenuKind::App))
-                .then(|| app_menu_item(&choice.action))
-                .flatten();
-            let id = app_item.map_or_else(
-                || format!("select-choice-{index}"),
-                |item| item.id.to_owned(),
-            );
-            let mut option = if state.menu.is_some() {
-                super::components::button_role(
-                    id,
-                    if app_item.is_some() {
-                        String::new()
-                    } else {
-                        choice.label.clone()
-                    },
-                    self.palette,
-                    super::components::ButtonVariant::Ghost,
-                    control_state,
-                    gpui::accesskit::Role::MenuItem,
-                    on_activate,
-                )
-                .w_full()
-                .justify_start()
-            } else {
-                super::components::select_option(
-                    id,
-                    choice.label.clone(),
-                    choice.selected,
-                    self.palette,
-                    control_state,
-                    on_activate,
-                )
-            }
+            let mut option = super::components::select_option(
+                format!("select-choice-{index}"),
+                choice.label.clone(),
+                choice.selected,
+                self.palette,
+                control_state,
+                on_activate,
+            )
             .tab_stop(index == state.active && !disabled);
             if index == state.active {
                 option = option.track_focus(&state.focus.clone().tab_stop(!disabled));
             }
-            if let Some(item) = app_item {
-                option = option
-                    .aria_label(choice.label.clone())
-                    .gap_2()
-                    .child(item.icon.render(16., self.palette.muted))
-                    .child(choice.label.clone());
-                if choice.selected {
-                    option = option.bg(rgb(self.palette.accent));
-                }
-            }
-            let section_start = app_item
-                .is_some_and(|item| matches!(item.tab, Tab::Onboarding | Tab::About))
-                && index > 0
-                && state
-                    .choices
-                    .get(index - 1)
-                    .and_then(|choice| app_menu_item(&choice.action))
-                    .is_some_and(|item| !matches!(item.tab, Tab::Onboarding | Tab::About));
-            div()
-                .children(
-                    section_start.then(|| div().h(px(1.)).my_1().bg(rgb(self.palette.border))),
-                )
-                .child(option)
+            div().child(option)
         });
-        let content = content
+        div()
             .id("select-options")
             .max_h(max_height)
-            .children(options);
-        if state.menu.is_some() {
-            content
-                .scroll_area(&state.scroll, "select.options", self.palette, false)
-                .tab_index(-1)
-                .tab_stop(false)
-        } else {
-            content.scroll_list_area(&state.scroll, "select.options", self.palette)
-        }
+            .children(options)
+            .scroll_list_area(&state.scroll, "select.options", self.palette)
     }
-}
-
-fn app_menu_item(action: &UiAction) -> Option<&'static AppMenuItem> {
-    let UiAction::Tab(tab) = action else {
-        return None;
-    };
-    APP_MENU.iter().find(|item| item.tab == *tab)
 }
 
 #[cfg(test)]

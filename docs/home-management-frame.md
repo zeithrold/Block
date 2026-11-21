@@ -61,6 +61,12 @@ The app menu begins with the Brand display; its vertical padding is 4 px per sid
 
 The local native gate passed 573 tests across 39 suites. Actual macOS Home, menu and Accounts views were inspected and captured. A fresh replay recorded 246 foreground paints, kept the native origin/720 px height fixed, bounded sidebar/content travel at 12/20 px and kept the sidebar stationary during child navigation. The observed page start gap was 37–43 ms. Evidence: `target/ui-alignment/{home-light.jpg,menu-light.jpg,accounts-light.jpg,native.jsonl,measurement.json,macos-verify.log}`. These are native paint submissions rather than compositor timestamps; Windows/Linux visual review remains pending.
 
+### In-window application menu (2026-11-21)
+
+The Home menu now hosts the published `gpui-component` 0.10.0 `PopupMenu`. Its named menu items use a check mark for the current page. Up/Down inspect enabled rows (wrapping and skipping the separator), Enter navigates, and Escape or an outside press dismisses. The Kit cursor starts unset and has no prefix typeahead. Changing language rebuilds localized rows and clears keyboard inspection, without changing the current page or the menu's focus handle.
+
+Block keeps the trigger, the Base `Positioner` and the surface stack so an overlying dialog retains its own focus and dismissal order. The menu-only brand/version/badge header is gone; the shared logo and Settings About branding remain. The specialized appearance selector still uses its own keyboard and rendering behavior.
+
 ## Verification (2026-10-24)
 
 - The final local macOS verification entry passed formatting, workspace all-target/all-feature checks, strict Clippy, **573 tests across 39 suites**, the native build and build-identity check. This is an automated result, not visual acceptance.

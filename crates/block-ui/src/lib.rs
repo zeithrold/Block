@@ -27,6 +27,8 @@ mod action_list;
 mod actions;
 #[path = "controls/alert.rs"]
 mod alert;
+#[path = "controls/app_menu.rs"]
+mod app_menu;
 #[path = "settings/appearance.rs"]
 mod appearance;
 #[path = "accounts/authentication.rs"]
@@ -548,6 +550,7 @@ impl Block {
 
     fn refresh_language(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.refresh_language_without_window(cx);
+        self.refresh_app_menu_language(window, cx);
         if let Some(auth) = &self.shell.auth {
             auth.refresh_placeholders(self.language(), window, cx);
         }
@@ -1655,15 +1658,11 @@ impl Block {
                 self.palette,
                 variant,
                 state,
-                if id.starts_with("menu-") {
-                    gpui::accesskit::Role::MenuItem
-                } else {
-                    gpui::accesskit::Role::Button
-                },
+                gpui::accesskit::Role::Button,
                 on_activate,
             )
         };
-        if choice.is_some() {
+        if choice.is_some() || app_menu {
             control.child(
                 gpui::canvas(
                     move |bounds, _, _| anchor.set(Some(bounds)),
@@ -2525,7 +2524,19 @@ mod tests {
             view.read_with(cx, |view, _| view.shell.drawer()),
             Some(super::Drawer::Menu)
         );
-        click_selector(cx, "menu-settings");
+        let settings = cx.update(|window, _| {
+            gpui_base::test_support::snapshots(window)
+                .into_iter()
+                .find(|row| {
+                    row.visible()
+                        && row.role() == Some(gpui::Role::MenuItem)
+                        && row.label() == Some("Settings")
+                })
+                .unwrap_or_else(|| unreachable!("Settings menu item"))
+                .bounds()
+        });
+        cx.simulate_click(settings.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
         assert_eq!(
             view.read_with(cx, |view, _| view.router.tab()),
             super::Tab::Settings

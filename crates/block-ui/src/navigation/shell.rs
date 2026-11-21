@@ -75,6 +75,10 @@ pub(super) enum Surface {
     EditorExit(EditorExit),
     GamesHelp,
     AuthProviderAdd,
+    AppMenu {
+        menu: gpui::Entity<gpui_component::menu::PopupMenu>,
+        anchor: gpui::Point<gpui::Pixels>,
+    },
     Select(super::select::SelectState<UiAction>),
 }
 
@@ -190,9 +194,7 @@ impl ShellState {
     pub(super) fn drawer(&self) -> Option<Drawer> {
         self.surfaces.top().and_then(|layer| match layer.kind {
             Surface::Drawer(drawer) => Some(drawer),
-            Surface::Select(ref state) if state.menu == Some(super::select::MenuKind::App) => {
-                Some(Drawer::Menu)
-            }
+            Surface::AppMenu { .. } => Some(Drawer::Menu),
             Surface::DownloadFiles(_)
             | Surface::DeleteInstance(_)
             | Surface::RemoveAccount(_)
@@ -235,7 +237,7 @@ impl Block {
             )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
                 if super::settings::is_back_key(event)
-                    && !view.composition_in_progress(&UiAction::NavigationBack, cx)
+                    && !view.composition_in_progress(&UiAction::NavigationBack, window, cx)
                 {
                     if view.shell.surfaces.is_open() {
                         view.handle(UiAction::Drawer(None), window, cx);
@@ -510,6 +512,7 @@ impl Block {
                     .into_any_element()
                 } else {
                     self.button("app-menu", "", UiAction::Drawer(Some(Drawer::Menu)), cx)
+                        .aria_label(tr!(language, "surface.menu"))
                         .child(super::design::Icon::Menu.render(18., self.palette.muted))
                         .into_any_element()
                 }
@@ -1146,6 +1149,21 @@ impl Block {
             .layers()
             .filter_map(|layer| {
                 let state = match &layer.kind {
+                    Surface::AppMenu { menu, anchor } => {
+                        return (sheet_parent == sheet
+                            && !self.visual_only
+                            && self
+                                .shell
+                                .surfaces
+                                .top()
+                                .is_some_and(|top| top.revision == layer.revision))
+                        .then(|| {
+                            gpui_base::Positioner::corner(gpui::Anchor::TopLeft, *anchor)
+                                .margin(px(8.))
+                                .child(menu.clone())
+                                .into_any_element()
+                        });
+                    }
                     Surface::Select(state) if sheet_parent == sheet => state,
                     Surface::Select(_) => return None,
                     kind => {
@@ -1334,7 +1352,7 @@ impl Block {
             Surface::Drawer(Drawer::Language) => {
                 let search = self.shell.first_run.language_search.as_ref();
                 let query = search
-                    .map(|field| field.read(cx).value().trim().to_lowercase())
+                    .map(|field| field.read(cx).value(cx).trim().to_lowercase())
                     .unwrap_or_default();
                 let choices = crate::Language::ALL
                     .into_iter()
@@ -1368,7 +1386,7 @@ impl Block {
                                     .min_w_0()
                                     .child(field.clone()),
                             )
-                            .children((!field.read(cx).value().is_empty()).then(|| {
+                            .children((!field.read(cx).value(cx).is_empty()).then(|| {
                                 super::components::button(
                                     "setup-language-clear",
                                     tr!(self.language(), "search.clear"),

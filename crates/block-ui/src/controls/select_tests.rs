@@ -1,5 +1,5 @@
-use super::{Block, Language, MenuKind, Surface, Tab, UiAction};
-use crate::{Appearance, test_support::press};
+use super::{Block, Language, Surface, UiAction};
+use crate::{Appearance, Tab, test_support::press};
 use gpui::{Bounds, Modifiers, Pixels, VisualTestContext, px, size};
 use gpui_base::test_support::{ElementSnapshot, find, texts};
 use std::time::Duration;
