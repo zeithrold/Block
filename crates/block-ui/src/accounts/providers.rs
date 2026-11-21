@@ -65,8 +65,8 @@ impl State {
     pub(super) fn dirty(&self, cx: &gpui::App) -> bool {
         self.form.as_ref().is_some_and(|form| {
             let original = form.original.as_ref();
-            form.name.read(cx).value() != original.map_or("", |provider| provider.name.as_str())
-                || form.address.read(cx).value()
+            form.name.read(cx).value(cx) != original.map_or("", |provider| provider.name.as_str())
+                || form.address.read(cx).value(cx)
                     != original.map_or("", |provider| provider.api_url.as_str())
                 || form.accepted_address.as_deref()
                     != original
@@ -370,9 +370,9 @@ impl Block {
         cx.observe(&address, |view, field, cx| {
             if let Some(form) = &mut view.shell.providers.form
                 && form.address == field
-                && form.observed_address != field.read(cx).value()
+                && form.observed_address != field.read(cx).value(cx)
             {
-                form.observed_address = field.read(cx).value();
+                form.observed_address = field.read(cx).value(cx);
                 form.accepted_address = None;
                 view.shell.providers.error = None;
                 cx.notify();
@@ -386,7 +386,7 @@ impl Block {
         name.read(cx).focus_handle(cx).focus(window, cx);
         self.shell.providers.form = Some(ProviderForm {
             id: uuid::Uuid::new_v4(),
-            observed_address: address.read(cx).value(),
+            observed_address: address.read(cx).value(cx),
             original,
             name,
             address,
@@ -478,7 +478,7 @@ impl Block {
         let Some(form) = &self.shell.providers.form else {
             return;
         };
-        let parsed = ProviderAddress::parse(&form.address.read(cx).value());
+        let parsed = ProviderAddress::parse(&form.address.read(cx).value(cx));
         match parsed {
             Ok(parsed) => {
                 let existing = self
@@ -495,7 +495,7 @@ impl Block {
                     return;
                 }
                 if let Some(form) = &mut self.shell.providers.form {
-                    if form.name.read(cx).value().trim().is_empty() {
+                    if form.name.read(cx).value(cx).trim().is_empty() {
                         form.name
                             .update(cx, |field, cx| field.set_value(&parsed.suggested_name, cx));
                     }
@@ -514,7 +514,7 @@ impl Block {
 
     pub(super) fn consent_provider(&mut self, cx: &mut Context<'_, Self>) {
         if let Some(form) = &mut self.shell.providers.form {
-            let address = form.address.read(cx).value().trim().to_owned();
+            let address = form.address.read(cx).value(cx).trim().to_owned();
             form.accepted_address = if form.accepted_address.as_ref() == Some(&address) {
                 None
             } else {
@@ -531,8 +531,8 @@ impl Block {
         let Some(form) = &self.shell.providers.form else {
             return;
         };
-        let name = form.name.read(cx).value().trim().to_owned();
-        let address = form.address.read(cx).value().trim().to_owned();
+        let name = form.name.read(cx).value(cx).trim().to_owned();
+        let address = form.address.read(cx).value(cx).trim().to_owned();
         let parsed = ProviderAddress::parse(&address);
         let error = if form.original.as_ref().is_some_and(|original| {
             !self
@@ -710,7 +710,7 @@ impl Block {
         let language = self.language();
         let state = &self.shell.providers;
         let query = state.query.as_ref().map_or_else(String::new, |field| {
-            field.read(cx).value().trim().to_lowercase()
+            field.read(cx).value(cx).trim().to_lowercase()
         });
         let mut rows = div().flex().flex_col();
         for provider in &state.records {
@@ -973,7 +973,7 @@ impl Block {
             }
         });
         if let Some(form) = form {
-            let address = form.address.read(cx).value();
+            let address = form.address.read(cx).value(cx);
             let insecure = ProviderAddress::parse(&address).is_ok_and(|p| p.insecure);
             let missing = form.original.as_ref().is_some_and(|original| {
                 !self
@@ -1085,7 +1085,7 @@ impl Block {
                     .flex_col()
                     .gap_4()
                     .child(components::provider_icon(
-                        &form.name.read(cx).value(),
+                        &form.name.read(cx).value(cx),
                         header_icon,
                         self.palette,
                         36.,
@@ -1297,11 +1297,11 @@ mod tests {
                     }
                     view.receive_providers(Ok(vec![other.clone()]), cx);
                     assert!(
-                        view.shell
-                            .providers
-                            .form
-                            .as_ref()
-                            .is_some_and(|f| f.name.read(cx).value() == "Unsaved name")
+                        view.shell.providers.form.as_ref().is_some_and(|f| f
+                            .name
+                            .read(cx)
+                            .value(cx)
+                            == "Unsaved name")
                     );
                     view.busy = true;
                     view.cancel = block_launcher::CancellationToken::new();
@@ -1392,7 +1392,7 @@ mod tests {
                     .providers
                     .form
                     .as_ref()
-                    .is_some_and(|form| form.name.read(cx).value() == "Draft community")
+                    .is_some_and(|form| form.name.read(cx).value(cx) == "Draft community")
             }));
             assert_eq!(
                 control_node(cx, "provider-cancel").label(),
@@ -1568,11 +1568,9 @@ mod tests {
                             draft
                         );
                         assert!(view.shell.providers.dirty(cx));
-                        assert!(
-                            view.shell.providers.form.as_ref().is_some_and(|form| {
-                                form.name.read(cx).value() == "Unsaved name"
-                            })
-                        );
+                        assert!(view.shell.providers.form.as_ref().is_some_and(|form| {
+                            form.name.read(cx).value(cx) == "Unsaved name"
+                        }));
                         view.save_provider(cx);
                         assert_eq!(
                             view.shell.providers.error,

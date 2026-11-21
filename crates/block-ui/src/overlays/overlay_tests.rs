@@ -587,6 +587,14 @@ fn escape_closes_a_confirmation_above_the_sheet_before_the_sheet(cx: &mut TestAp
     cx.update(|window, cx| {
         assert!(crate::drawer::DrawerLayer::is_open(window, cx));
         assert!(!window.has_active_dialog(cx));
+        assert!(
+            view.read(cx)
+                .shell
+                .selector
+                .as_ref()
+                .is_some_and(|selector| { selector.query_focus(cx).is_focused(window) }),
+            "confirmation must return focus to the live sheet search field"
+        );
     });
 
     crate::test_support::press(cx, "escape");
@@ -1180,7 +1188,7 @@ fn wizard_version_page_owns_its_input_and_escape_restores_the_draft(cx: &mut Tes
     cx.run_until_parked();
     let (route, search_id, original_version) = view.read_with(cx, |view, cx| {
         let version = match &view.form {
-            Some(crate::Form::Instance(form)) => form.version.read(cx).value(),
+            Some(crate::Form::Instance(form)) => form.version.read(cx).value(cx),
             _ => String::new(),
         };
         (
@@ -1271,7 +1279,7 @@ fn wizard_version_page_owns_its_input_and_escape_restores_the_draft(cx: &mut Tes
                     .wizard
                     .version_search
                     .as_ref()
-                    .is_some_and(|input| input.read(cx).value() == "1.2")
+                    .is_some_and(|input| input.read(cx).value(cx) == "1.2")
             );
         });
     });
@@ -1292,8 +1300,8 @@ fn wizard_version_page_owns_its_input_and_escape_restores_the_draft(cx: &mut Tes
         assert!(!view.shell.surfaces.is_open());
         assert_eq!(view.page_spec().wizard, route);
         assert!(matches!(&view.form, Some(crate::Form::Instance(form))
-            if form.name.read(cx).value() == "Retained draft"
-                && form.version.read(cx).value() == original_version));
+            if form.name.read(cx).value(cx) == "Retained draft"
+                && form.version.read(cx).value(cx) == original_version));
     });
     cx.update(|window, cx| assert!(!window.has_active_dialog(cx)));
     assert_eq!(cx.update(|window, cx| window.focused(cx)), trigger_focus);
@@ -1337,7 +1345,7 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
                 .wizard
                 .loader_search
                 .as_ref()
-                .is_some_and(|search| search.read(cx).value() == "retained search")
+                .is_some_and(|search| search.read(cx).value(cx) == "retained search")
         );
     });
     click(cx, "wizard-loader-neoforge");
@@ -1347,7 +1355,7 @@ fn wizard_component_page_keeps_its_draft_beneath_a_nested_selector(cx: &mut Test
                 .wizard
                 .loader_search
                 .as_ref()
-                .is_some_and(|search| search.read(cx).value().is_empty())
+                .is_some_and(|search| search.read(cx).value(cx).is_empty())
         );
         assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.is_neoforge()));
     });
@@ -1462,8 +1470,8 @@ fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext
         view.read_with(cx, |view, cx| {
             assert!(view.shell.wizard.draft.as_ref().is_some_and(|instance| {
                 instance.options
-                    && instance.memory.read(cx).value() == "invalid"
-                    && instance.jvm.read(cx).value() == "-Xms1G"
+                    && instance.memory.read(cx).value(cx) == "invalid"
+                    && instance.jvm.read(cx).value(cx) == "-Xms1G"
                     && instance.memory.read(cx).focus_handle(cx).is_focused(window)
             }));
         });
@@ -1473,8 +1481,8 @@ fn onboarding_configuration_owns_one_live_advanced_input(cx: &mut TestAppContext
     view.read_with(cx, |view, cx| {
         assert!(view.shell.wizard.draft.as_ref().is_some_and(|instance| {
             instance.options
-                && instance.memory.read(cx).value() == "invalid"
-                && instance.jvm.read(cx).value() == "-Xms1G"
+                && instance.memory.read(cx).value(cx) == "invalid"
+                && instance.jvm.read(cx).value(cx) == "-Xms1G"
         }));
     });
 }

@@ -379,8 +379,8 @@ impl Block {
             && let Some(super::Form::Instance(form)) = &mut self.form
         {
             form.optifine = Some(Box::new(block_launcher::install::optifine::OptiFineJar {
-                minecraft: form.version.read(cx).value(),
-                version: format!("{}_HD_U_J1", form.version.read(cx).value()),
+                minecraft: form.version.read(cx).value(cx),
+                version: format!("{}_HD_U_J1", form.version.read(cx).value(cx)),
                 launchwrapper: "2.3".into(),
                 forge: Some("52.0.16".into()),
                 resource: block_launcher::Resource {
@@ -419,7 +419,7 @@ impl Block {
             .then(|| version.into());
             self.shell.wizard.loader_catalog = Some(super::game_wizard::LoaderCatalog {
                 request: uuid::Uuid::new_v4(),
-                minecraft: form.version.read(cx).value(),
+                minecraft: form.version.read(cx).value(cx),
                 kind,
                 builds,
                 load,

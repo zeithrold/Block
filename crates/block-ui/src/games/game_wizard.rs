@@ -239,11 +239,11 @@ impl InstanceDraft {
     }
 
     pub(super) fn invalid_field(&self, cx: &gpui::App) -> Option<WizardField> {
-        let name = self.name.read(cx).value();
+        let name = self.name.read(cx).value(cx);
         let valid_number = |input: &Entity<TextInput>, minimum, maximum| {
             input
                 .read(cx)
-                .value()
+                .value(cx)
                 .trim()
                 .parse::<u32>()
                 .is_ok_and(|value| (minimum..=maximum).contains(&value))
@@ -252,13 +252,13 @@ impl InstanceDraft {
             Some(WizardField::InstanceName)
         } else if self.server_preferences(cx).validate().is_err() {
             Some(WizardField::Server)
-        } else if components::parse_memory_gb(&self.memory.read(cx).value()).is_err() {
+        } else if components::parse_memory_gb(&self.memory.read(cx).value(cx)).is_err() {
             Some(WizardField::Memory)
         } else if !self.managed
-            && !std::path::Path::new(self.java.read(cx).value().trim()).is_absolute()
+            && !std::path::Path::new(self.java.read(cx).value(cx).trim()).is_absolute()
         {
             Some(WizardField::Java)
-        } else if super::parse_arguments(&self.jvm.read(cx).value()).is_err() {
+        } else if super::parse_arguments(&self.jvm.read(cx).value(cx)).is_err() {
             Some(WizardField::Jvm)
         } else if !valid_number(&self.width, 320, 16384) {
             Some(WizardField::Width)
@@ -287,7 +287,7 @@ impl InstanceDraft {
 
     fn server_preferences(&self, cx: &gpui::App) -> block_launcher::catalog::ServerPreferences {
         block_launcher::catalog::ServerPreferences {
-            address: self.server.read(cx).value().trim().to_owned(),
+            address: self.server.read(cx).value(cx).trim().to_owned(),
             connect_on_launch: self.connect_on_launch,
         }
     }
@@ -296,30 +296,30 @@ impl InstanceDraft {
         &self,
         cx: &gpui::App,
     ) -> Result<super::engine::InstanceDraftValues, WizardText> {
-        let name = self.name.read(cx).value().trim().to_owned();
+        let name = self.name.read(cx).value(cx).trim().to_owned();
         if block_launcher::catalog::validate_name(&name).is_err() {
             return Err(msg!("wizard.instance_settings.defaultError"));
         }
         let defaults = super::settings::GameDefaults {
-            memory_mib: components::parse_memory_gb(&self.memory.read(cx).value())
+            memory_mib: components::parse_memory_gb(&self.memory.read(cx).value(cx))
                 .map_err(|error| WizardText::message(error.key()))?,
             java: if self.managed {
                 String::new()
             } else {
-                self.java.read(cx).value().trim().to_owned()
+                self.java.read(cx).value(cx).trim().to_owned()
             },
-            jvm_arguments: self.jvm.read(cx).value(),
+            jvm_arguments: self.jvm.read(cx).value(cx),
             width: self
                 .width
                 .read(cx)
-                .value()
+                .value(cx)
                 .trim()
                 .parse()
                 .map_err(|_| msg!("wizard.instance_settings.widthError"))?,
             height: self
                 .height
                 .read(cx)
-                .value()
+                .value(cx)
                 .trim()
                 .parse()
                 .map_err(|_| msg!("wizard.instance_settings.heightError"))?,
@@ -388,7 +388,7 @@ impl InstanceDraft {
                 &self.width,
                 &self.height,
             ]
-            .map(|field| field.read(cx).value()),
+            .map(|field| field.read(cx).value(cx)),
             managed: self.managed,
             fullscreen: self.fullscreen,
             window_custom: self.window_custom,
@@ -412,7 +412,7 @@ impl InstanceDraft {
         .zip(checkpoint.values)
         {
             input.update(cx, |input, cx| {
-                if input.value() != value {
+                if input.value(cx) != value {
                     input.set_value(&value, cx);
                 }
             });
@@ -623,9 +623,9 @@ impl WizardState {
             values
         });
         InitialDraft {
-            name: form.name.read(cx).value(),
-            version: form.version.read(cx).value(),
-            directory: form.directory.read(cx).value(),
+            name: form.name.read(cx).value(cx),
+            version: form.version.read(cx).value(cx),
+            directory: form.directory.read(cx).value(cx),
             loader: form.loader.clone(),
             loader_version: form.loader_version.clone(),
             optifine: form.optifine.clone(),
@@ -683,7 +683,7 @@ impl Block {
             .and_then(|selected| {
                 selected
                     .validate_for(
-                        &form.version.read(cx).value(),
+                        &form.version.read(cx).value(cx),
                         &form.loader,
                         form.loader_version.as_deref(),
                     )
@@ -802,7 +802,7 @@ impl Block {
         }
         match result {
             Ok(selected) => match selected.validate_for(
-                &form.version.read(cx).value(),
+                &form.version.read(cx).value(cx),
                 &form.loader,
                 form.loader_version.as_deref(),
             ) {
@@ -932,19 +932,19 @@ impl Block {
             && self.shell.wizard.page.is_none()
             && let Some(Form::Instance(form)) = &self.form
         {
-            let version = form.version.read(cx).value();
+            let version = form.version.read(cx).value(cx);
             let invalid_version = version.trim().is_empty()
                 || version.len() > 80
                 || version.chars().any(char::is_control)
                 || self.wizard_version_restriction(version.trim()).is_some();
-            if block_launcher::catalog::validate_name(&form.name.read(cx).value()).is_err() {
+            if block_launcher::catalog::validate_name(&form.name.read(cx).value(cx)).is_err() {
                 field = Some(WizardField::GameName);
             } else if invalid_version {
                 field = Some(WizardField::Version);
             } else if self.wizard_loader_text(cx).is_some() {
                 field = Some(WizardField::Loader);
             } else {
-                let directory = form.directory.read(cx).value();
+                let directory = form.directory.read(cx).value(cx);
                 if !directory.trim().is_empty()
                     && !std::path::Path::new(directory.trim()).is_absolute()
                 {
@@ -1208,8 +1208,8 @@ impl Block {
             && let Some(Form::Instance(form)) = &self.form
         {
             self.shell.wizard.section_snapshot = Some(ComponentDraft {
-                version: form.version.read(cx).value(),
-                directory: form.directory.read(cx).value(),
+                version: form.version.read(cx).value(cx),
+                directory: form.directory.read(cx).value(cx),
                 loader: form.loader.clone(),
                 loader_version: form.loader_version.clone(),
                 loader_catalog: self.shell.wizard.loader_catalog.clone(),
@@ -1303,7 +1303,7 @@ impl Block {
             .as_ref()
             .is_some_and(|catalog| {
                 catalog.kind == form.loader
-                    && catalog.minecraft == form.version.read(cx).value()
+                    && catalog.minecraft == form.version.read(cx).value(cx)
                     && matches!(catalog.load, CollectionLoad::Ready)
                     && catalog.builds.iter().any(|build| build.version == version)
             });
@@ -1322,7 +1322,7 @@ impl Block {
         if form.loader == LoaderKind::Vanilla {
             return;
         }
-        let minecraft = form.version.read(cx).value();
+        let minecraft = form.version.read(cx).value(cx);
         let kind = form.loader.clone();
         if !force
             && self
@@ -1381,7 +1381,7 @@ impl Block {
         };
         if catalog.request != request
             || catalog.kind != form.loader
-            || catalog.minecraft != form.version.read(cx).value()
+            || catalog.minecraft != form.version.read(cx).value(cx)
         {
             return;
         }
@@ -1444,7 +1444,8 @@ impl Block {
                 let Some(catalog) = self.shell.wizard.loader_catalog.as_ref() else {
                     return Some(WizardText::message("wizard.loader.issue.loadCatalog"));
                 };
-                if catalog.kind != form.loader || catalog.minecraft != form.version.read(cx).value()
+                if catalog.kind != form.loader
+                    || catalog.minecraft != form.version.read(cx).value(cx)
                 {
                     return Some(WizardText::message("wizard.loader.issue.reload"));
                 }
@@ -1516,7 +1517,7 @@ impl Block {
         let Some(Form::Instance(form)) = &mut self.form else {
             return;
         };
-        let changed = form.version.read(cx).value() != version;
+        let changed = form.version.read(cx).value(cx) != version;
         if changed {
             form.version
                 .update(cx, |field, cx| field.set_value(&version, cx));
@@ -1567,7 +1568,7 @@ impl Block {
                 WizardText::message("wizard.error.reopen"),
             ));
         };
-        let version = form.version.read(cx).value();
+        let version = form.version.read(cx).value(cx);
         if page == WizardPage::Version
             && (version.trim().is_empty()
                 || version.len() > 80
@@ -1610,7 +1611,7 @@ impl Block {
         if page != WizardPage::Location {
             return None;
         }
-        let directory = form.directory.read(cx).value();
+        let directory = form.directory.read(cx).value(cx);
         if !directory.trim().is_empty()
             && (!std::path::Path::new(directory.trim()).is_absolute()
                 || directory.chars().any(char::is_control))
@@ -1627,8 +1628,13 @@ impl Block {
             ));
         };
         if !profile.managed
-            && (!std::path::Path::new(profile.java.read(cx).value().trim()).is_absolute()
-                || profile.java.read(cx).value().chars().any(char::is_control))
+            && (!std::path::Path::new(profile.java.read(cx).value(cx).trim()).is_absolute()
+                || profile
+                    .java
+                    .read(cx)
+                    .value(cx)
+                    .chars()
+                    .any(char::is_control))
         {
             return Some((
                 WizardField::Java,
@@ -1653,7 +1659,7 @@ impl Block {
         ] {
             if !input
                 .read(cx)
-                .value()
+                .value(cx)
                 .trim()
                 .parse::<u32>()
                 .is_ok_and(|value| (minimum..=maximum).contains(&value))
@@ -1667,13 +1673,13 @@ impl Block {
             }
         }
         if self.router.tab() == Tab::Onboarding {
-            if components::parse_memory_gb(&profile.memory.read(cx).value()).is_err() {
+            if components::parse_memory_gb(&profile.memory.read(cx).value(cx)).is_err() {
                 return Some((
                     WizardField::Memory,
                     WizardText::message("wizard.error.memoryRange"),
                 ));
             }
-            if super::parse_arguments(&profile.jvm.read(cx).value()).is_err() {
+            if super::parse_arguments(&profile.jvm.read(cx).value(cx)).is_err() {
                 return Some((WizardField::Jvm, msg!("common.arguments_unclosed_quote")));
             }
         }
@@ -1717,9 +1723,9 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return;
         };
-        let name = form.name.read(cx).value();
-        let version = form.version.read(cx).value();
-        let directory = form.directory.read(cx).value();
+        let name = form.name.read(cx).value(cx);
+        let version = form.version.read(cx).value(cx);
+        let directory = form.directory.read(cx).value(cx);
         let loader = form.selected_loader();
         let optifine = form.optifine.as_deref().cloned();
         let kind = self.shell.wizard.kind;
@@ -1749,7 +1755,7 @@ impl Block {
                 return;
             }
             let directory = match &self.form {
-                Some(Form::Instance(form)) => form.directory.read(cx).value().to_string(),
+                Some(Form::Instance(form)) => form.directory.read(cx).value(cx).to_string(),
                 _ => directory,
             };
             let directory =
@@ -2303,7 +2309,7 @@ impl Block {
         cx: &gpui::App,
     ) -> Option<block_launcher::catalog::AutomaticConnection> {
         let version = if let Some(Form::Instance(form)) = &self.form {
-            Some(form.version.read(cx).value())
+            Some(form.version.read(cx).value(cx))
         } else {
             None
         };
@@ -2325,7 +2331,7 @@ impl Block {
         let connection = self.wizard_automatic_connection(cx);
         let supported = self.wizard_automatic_connection_supported(cx);
         let language = self.language();
-        let has_address = !profile.server.read(cx).value().trim().is_empty();
+        let has_address = !profile.server.read(cx).value(cx).trim().is_empty();
         let mut fields = div()
             .flex()
             .flex_col()
@@ -2441,8 +2447,8 @@ impl Block {
 
     fn wizard_runtime_window(&self, profile: &InstanceDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let width = profile.width.read(cx).value();
-        let height = profile.height.read(cx).value();
+        let width = profile.width.read(cx).value(cx);
+        let height = profile.height.read(cx).value(cx);
         let size = text(
             language,
             if profile.window_custom {
@@ -2545,7 +2551,7 @@ impl Block {
     ) -> impl IntoElement + use<> {
         self.reconcile_wizard_disclosure(cx);
         let language = self.language();
-        let version = form.version.read(cx).value();
+        let version = form.version.read(cx).value(cx);
         let version_kind = self
             .version_catalog
             .iter()
@@ -2680,10 +2686,11 @@ impl Block {
                         } else {
                             tr!(language, "wizard.config.customJava")
                         },
-                        components::parse_memory_gb(&profile.memory.read(cx).value()).map_or_else(
-                            |_| profile.memory.read(cx).value(),
-                            components::memory_label,
-                        )
+                        components::parse_memory_gb(&profile.memory.read(cx).value(cx))
+                            .map_or_else(
+                                |_| profile.memory.read(cx).value(cx),
+                                components::memory_label,
+                            )
                     ),
                     if profile.fullscreen {
                         tr!(language, "wizard.config.fullscreenValue")
@@ -2692,8 +2699,8 @@ impl Block {
                             language,
                             "wizard.instance_settings.windowSizeValue",
                             &[
-                                ("width", &profile.width.read(cx).value()),
-                                ("height", &profile.height.read(cx).value()),
+                                ("width", &profile.width.read(cx).value(cx)),
+                                ("height", &profile.height.read(cx).value(cx)),
                             ],
                         )
                     },
@@ -2857,13 +2864,13 @@ impl Block {
         form: &InstanceForm,
         cx: &gpui::App,
     ) -> Vec<(String, Option<block_launcher::manifest::model::VersionType>)> {
-        let selected = form.version.read(cx).value();
+        let selected = form.version.read(cx).value(cx);
         let query = self
             .shell
             .wizard
             .version_search
             .as_ref()
-            .map_or_else(String::new, |search| search.read(cx).value())
+            .map_or_else(String::new, |search| search.read(cx).value(cx))
             .trim()
             .to_lowercase();
         if self.version_catalog.is_empty() {
@@ -2900,7 +2907,7 @@ impl Block {
             .wizard
             .version_search
             .as_ref()
-            .is_some_and(|search| search.read(cx).is_composing())
+            .is_some_and(|search| TextInput::has_marked_text(search, window, cx))
         {
             return;
         }
@@ -2918,7 +2925,7 @@ impl Block {
         if versions.is_empty() {
             return;
         }
-        let selected = form.version.read(cx).value();
+        let selected = form.version.read(cx).value(cx);
         let from_row = self
             .shell
             .wizard
@@ -3130,7 +3137,7 @@ impl Block {
         cx: &gpui::App,
     ) -> gpui::Stateful<gpui::Div> {
         let language = self.language();
-        let selected = form.version.read(cx).value();
+        let selected = form.version.read(cx).value(cx);
         let entry = self
             .version_catalog
             .iter()
@@ -3206,7 +3213,7 @@ impl Block {
         versions: Vec<(String, Option<block_launcher::manifest::model::VersionType>)>,
         cx: &Context<'_, Self>,
     ) -> super::scroll_area::ScrollArea<gpui_base::RadioGroup> {
-        let selected = form.version.read(cx).value();
+        let selected = form.version.read(cx).value(cx);
         let language = self.language();
         let empty = versions.is_empty();
         let group = self
@@ -3436,7 +3443,7 @@ impl Block {
 
     fn wizard_loader_builds(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let minecraft = form.version.read(cx).value();
+        let minecraft = form.version.read(cx).value(cx);
         let mut pane = div()
             .w_full()
             .min_w_0()
@@ -3598,7 +3605,7 @@ impl Block {
             .wizard
             .loader_search
             .as_ref()
-            .map_or_else(String::new, |input| input.read(cx).value())
+            .map_or_else(String::new, |input| input.read(cx).value(cx))
             .trim()
             .to_lowercase();
         let filtered: Vec<_> = builds

@@ -161,7 +161,7 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
             view.shell.wizard.step = crate::game_wizard::WizardStep::Setup;
             let scope = view.setup_game_library_scope().context("new game scope")?;
             let directory = match &view.form {
-                Some(crate::Form::Instance(form)) => form.directory.read(cx).value().to_string(),
+                Some(crate::Form::Instance(form)) => form.directory.read(cx).value(cx).to_string(),
                 _ => anyhow::bail!("creation form"),
             };
             let leaf = std::path::Path::new(&directory)
@@ -179,7 +179,7 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
             assert_eq!(view.setup_library_parent(&scope), parent);
             if let Some(crate::Form::Instance(form)) = &view.form {
                 assert_eq!(
-                    std::path::PathBuf::from(form.directory.read(cx).value()),
+                    std::path::PathBuf::from(form.directory.read(cx).value(cx)),
                     parent.join(&leaf)
                 );
                 form.name.update(cx, |field, cx| field.set_value("", cx));
@@ -199,7 +199,7 @@ fn library_choice_stays_pending_until_valid_confirmation_and_keeps_generated_ide
             view.finish_setup_library_browse(id, Ok(Some(final_parent.clone())), cx);
             if let Some(crate::Form::Instance(form)) = &view.form {
                 assert_eq!(
-                    std::path::PathBuf::from(form.directory.read(cx).value()),
+                    std::path::PathBuf::from(form.directory.read(cx).value(cx)),
                     custom_directory,
                     "a chosen instance directory must not be inferred from its UUID-shaped name"
                 );
@@ -1193,7 +1193,7 @@ fn finishing_first_run_confirms_a_changed_retained_game_draft(cx: &mut gpui::Tes
         cx.run_until_parked();
         assert!(view.read_with(cx, |view, cx| {
             matches!(&view.form, Some(crate::Form::Instance(form))
-                if form.name.read(cx).value() == "Retained game")
+                if form.name.read(cx).value(cx) == "Retained game")
         }));
         let home = bounds(cx, "setup-continue")?;
         cx.simulate_click(home.center(), gpui::Modifiers::none());
@@ -1279,8 +1279,8 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
         view.shell.first_run.stage == Stage::Overview
             && !view.wizard_task_active()
             && matches!(&view.form, Some(super::Form::Instance(form))
-                if form.name.read(cx).value() == "Preserved game"
-                    && form.version.read(cx).value() == "1.20.6"
+                if form.name.read(cx).value(cx) == "Preserved game"
+                    && form.version.read(cx).value(cx) == "1.20.6"
                     && form.loader == block_launcher::catalog::LoaderKind::Fabric
                     && form.loader_version.as_deref() == Some("0.15.11"))
     }));
@@ -1310,8 +1310,8 @@ fn back_hides_custom_game_draft_without_resetting_it_or_leaking_into_account_flo
         view.shell.first_run.stage == Stage::GameWizard
             && view.wizard_task_active()
             && matches!(&view.form, Some(super::Form::Instance(form))
-                if form.name.read(cx).value() == "Preserved game"
-                    && form.version.read(cx).value() == "1.20.6"
+                if form.name.read(cx).value(cx) == "Preserved game"
+                    && form.version.read(cx).value(cx) == "1.20.6"
                     && form.loader == block_launcher::catalog::LoaderKind::Fabric
                     && form.loader_version.as_deref() == Some("0.15.11"))
     }));
@@ -1410,7 +1410,7 @@ fn returning_to_overview_keeps_the_hidden_game_draft_and_compact_bounds(
                 crate::window_geometry::home_size(window).width
             );
             assert!(matches!(&view.form, Some(super::Form::Instance(form))
-                if form.name.read(cx).value() == "Retained game"));
+                if form.name.read(cx).value(cx) == "Retained game"));
         });
     });
 }
@@ -1617,7 +1617,7 @@ fn recommended_game_uses_a_release_when_snapshots_are_enabled_and_listed_first(
             view.shell.first_run.stage == Stage::GameWizard
                 && view.shell.wizard.step == super::game_wizard::WizardStep::Setup
                 && matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.version.read(cx).value() == "1.20.6")
+                    if form.version.read(cx).value(cx) == "1.20.6")
         }),
         "Recommended pre-fills the same Setup page"
     );
@@ -1654,7 +1654,7 @@ fn recommended_setup_prefills_without_replacing_an_open_draft(cx: &mut gpui::Tes
             view.handle_first_run(FirstRunAction::Recommended, window, cx);
             assert!(
                 matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.name.read(cx).value() == "Kept draft"
+                    if form.name.read(cx).value(cx) == "Kept draft"
                         && Some(form.name.entity_id()) == draft),
                 "Recommended must resume the draft instead of overwriting it"
             );
@@ -2088,7 +2088,7 @@ fn first_setup_language_saves_immediately_without_finishing_setup_or_resetting_d
                 && !view.preferences.onboarding_complete
                 && view.language() == crate::Language::Japanese
                 && matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.name.read(cx).value() == "Retained game"
+                    if form.name.read(cx).value(cx) == "Retained game"
                         && Some(form.name.entity_id()) == draft_id)
         }));
         let stored = crate::Preferences::load(root.path())?;

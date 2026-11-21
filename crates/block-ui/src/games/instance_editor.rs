@@ -232,8 +232,8 @@ impl Block {
     pub(super) fn instance_window_values(&self, cx: &gpui::App) -> Option<(String, String, bool)> {
         match &self.form {
             Some(Form::EditInstance(form)) => Some((
-                form.width.read(cx).value(),
-                form.height.read(cx).value(),
+                form.width.read(cx).value(cx),
+                form.height.read(cx).value(cx),
                 form.window_custom,
             )),
             _ => None,
@@ -276,8 +276,8 @@ impl Block {
         let language = self.language();
         let size = format!(
             "{} × {}",
-            form.width.read(cx).value(),
-            form.height.read(cx).value()
+            form.width.read(cx).value(cx),
+            form.height.read(cx).value(cx)
         );
         let mut fields = div()
             .flex()
@@ -289,8 +289,8 @@ impl Block {
                 &size,
                 crate::form_select::Options::window(
                     language,
-                    &form.width.read(cx).value(),
-                    &form.height.read(cx).value(),
+                    &form.width.read(cx).value(cx),
+                    &form.height.read(cx).value(cx),
                     form.window_custom,
                     |size| match size {
                         crate::form_select::WindowSize::Preset(width, height) => {
@@ -679,7 +679,7 @@ impl Block {
             ]
             .into_iter()
             .zip(&baseline.values)
-            .any(|(field, value)| field.read(cx).value() != *value)
+            .any(|(field, value)| field.read(cx).value(cx) != *value)
             || form.original.target_id != original.target_id
             || form.original.appearance != original.appearance
             || form.original.fullscreen != original.fullscreen
@@ -786,15 +786,15 @@ impl Block {
             window_custom: form.window_custom,
             optifine: form.optifine.clone(),
             values: [
-                form.name.read(cx).value(),
-                form.memory.read(cx).value(),
-                form.java.read(cx).value(),
-                form.jvm.read(cx).value(),
-                form.game.read(cx).value(),
-                form.server.read(cx).value(),
-                form.width.read(cx).value(),
-                form.height.read(cx).value(),
-                form.game_directory.read(cx).value(),
+                form.name.read(cx).value(cx),
+                form.memory.read(cx).value(cx),
+                form.java.read(cx).value(cx),
+                form.jvm.read(cx).value(cx),
+                form.game.read(cx).value(cx),
+                form.server.read(cx).value(cx),
+                form.width.read(cx).value(cx),
+                form.height.read(cx).value(cx),
+                form.game_directory.read(cx).value(cx),
             ],
         });
         self.shell
@@ -1344,7 +1344,7 @@ impl Block {
         let supported = connection.is_some_and(|connection| {
             connection != block_launcher::catalog::AutomaticConnection::Unsupported
         });
-        let address = form.server.read(cx).value();
+        let address = form.server.read(cx).value(cx);
         let mut choice = div().flex().flex_col().gap_2();
         if !address.trim().is_empty() {
             choice = choice.child(components::checkbox(
@@ -1563,7 +1563,7 @@ pub(super) fn parse_instance(
     let mut profile = form.original.clone();
     form.name
         .read(cx)
-        .value()
+        .value(cx)
         .trim()
         .clone_into(&mut profile.name);
     if profile.name.is_empty() {
@@ -1574,7 +1574,7 @@ pub(super) fn parse_instance(
     }
     form.server
         .read(cx)
-        .value()
+        .value(cx)
         .trim()
         .clone_into(&mut profile.server.address);
     if profile.server.address.is_empty() {
@@ -1584,9 +1584,9 @@ pub(super) fn parse_instance(
         .server
         .validate()
         .map_err(|error| EditorIssue::Reported(EditorField::Server, error.to_string()))?;
-    profile.memory_mib =
-        components::parse_memory_gb(&form.memory.read(cx).value()).map_err(EditorIssue::Memory)?;
-    let java = form.java.read(cx).value();
+    profile.memory_mib = components::parse_memory_gb(&form.memory.read(cx).value(cx))
+        .map_err(EditorIssue::Memory)?;
+    let java = form.java.read(cx).value(cx);
     profile.runtime = if form.managed {
         RuntimeSelection::Managed
     } else {
@@ -1597,7 +1597,7 @@ pub(super) fn parse_instance(
     profile.width = form
         .width
         .read(cx)
-        .value()
+        .value(cx)
         .trim()
         .parse::<u32>()
         .ok()
@@ -1606,13 +1606,13 @@ pub(super) fn parse_instance(
     profile.height = form
         .height
         .read(cx)
-        .value()
+        .value(cx)
         .trim()
         .parse::<u32>()
         .ok()
         .filter(|value| (240..=16384).contains(value))
         .ok_or(EditorIssue::Height)?;
-    profile.game_directory = PathBuf::from(form.game_directory.read(cx).value().trim());
+    profile.game_directory = PathBuf::from(form.game_directory.read(cx).value(cx).trim());
     if !profile.game_directory.is_absolute()
         || profile.game_directory.to_string_lossy().contains('\0')
     {
@@ -1630,12 +1630,12 @@ pub(super) fn parse_instance(
             error.to_string(),
         )
     })?;
-    profile.jvm_args = super::parse_arguments(&form.jvm.read(cx).value())
+    profile.jvm_args = super::parse_arguments(&form.jvm.read(cx).value(cx))
         .map_err(|_| EditorIssue::Arguments(EditorField::Jvm))?;
     profile
         .validate()
         .map_err(|error| EditorIssue::Reported(EditorField::Jvm, error.to_string()))?;
-    profile.game_args = super::parse_arguments(&form.game.read(cx).value())
+    profile.game_args = super::parse_arguments(&form.game.read(cx).value(cx))
         .map_err(|_| EditorIssue::Arguments(EditorField::Game))?;
     profile
         .validate()

@@ -163,7 +163,9 @@ fn ime_escape_keeps_the_current_form_open_until_composition_finishes(
             if let Some(super::Form::Instance(form)) = &view.form {
                 form.name.update(cx, |field, cx| {
                     field.focus_handle(cx).focus(window, cx);
-                    field.replace_and_mark_text_in_range(None, "中文", None, window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_and_mark_text_in_range(None, "中文", None, window, cx)
+                    });
                 });
             }
         });
@@ -175,8 +177,11 @@ fn ime_escape_keeps_the_current_form_open_until_composition_finishes(
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             if let Some(super::Form::Instance(form)) = &view.form {
-                form.name
-                    .update(cx, |field, cx| field.unmark_text(window, cx));
+                form.name.update(cx, |field, cx| {
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.unmark_text(window, cx)
+                    })
+                });
             }
         });
     });
@@ -222,11 +227,11 @@ fn games_route_during_setup_keeps_the_setup_page_with_a_status(cx: &mut gpui::Te
                     .text(crate::Language::English)
                     .contains("Finish setup or choose Skip setup to continue.")
             }));
-            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Keep setup"));
+            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value(cx) == "Keep setup"));
             view.handle(UiAction::Tab(Tab::Settings), window, cx);
             view.handle(UiAction::Tab(Tab::About), window, cx);
             assert_eq!(view.router.tab(), Tab::Onboarding);
-            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value() == "Keep setup"));
+            assert!(matches!(&view.form, Some(crate::Form::Instance(form)) if form.name.read(cx).value(cx) == "Keep setup"));
         });
     });
     cx.run_until_parked();
@@ -269,7 +274,7 @@ fn native_close_confirms_a_changed_game_draft(cx: &mut gpui::TestAppContext) {
     }
     assert!(view.read_with(cx, |view, cx| {
         matches!(&view.form, Some(super::Form::Instance(form))
-            if form.name.read(cx).value() == "Keep this draft")
+            if form.name.read(cx).value(cx) == "Keep this draft")
     }));
 }
 
@@ -315,7 +320,7 @@ fn application_quit_confirms_the_current_draft_and_ignores_a_stale_confirmation(
     }
     assert!(view.read_with(cx, |view, cx| {
         matches!(&view.form, Some(super::Form::Instance(form))
-            if form.name.read(cx).value() == "First draft")
+            if form.name.read(cx).value(cx) == "First draft")
             && !view.shell.surfaces.is_open()
     }));
 
@@ -337,7 +342,7 @@ fn application_quit_confirms_the_current_draft_and_ignores_a_stale_confirmation(
     }
     assert!(view.read_with(cx, |view, cx| {
         matches!(&view.form, Some(super::Form::Instance(form))
-            if form.name.read(cx).value() == "Replacement draft")
+            if form.name.read(cx).value(cx) == "Replacement draft")
             && !view.shell.surfaces.is_open()
     }));
     crate::test_support::press(cx, "cmd-q");

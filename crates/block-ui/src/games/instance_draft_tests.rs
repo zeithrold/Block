@@ -68,7 +68,7 @@ fn profile_subpage_cancel_restores_its_checkpoint_and_done_only_changes_the_draf
                 form.memory.update(cx, |field, cx| field.set_value("8", cx));
             }
             view.handle(UiAction::InstancePageCancel, window, cx);
-            assert!(matches!(&view.form, Some(Form::EditInstance(form)) if form.memory.read(cx).value() == "2"));
+            assert!(matches!(&view.form, Some(Form::EditInstance(form)) if form.memory.read(cx).value(cx) == "2"));
             view.handle(UiAction::CancelForm, window, cx);
             assert!(view.form.is_none());
             assert!(matches!(view.router.screen(), crate::navigation::Screen::Record(crate::navigation::RecordRef::Instance(id)) if id == "instance-a"));
@@ -103,7 +103,7 @@ fn root_dirty_check_preserves_invalid_and_hidden_raw_profile_values(cx: &mut Tes
                     &form.server,
                 ][index]
                     .clone();
-                let initial = field.read(cx).value();
+                let initial = field.read(cx).value(cx);
                 field.update(cx, |field, cx| field.set_value("\"invalid raw input", cx));
                 assert!(view.instance_editor_dirty(cx));
                 field.update(cx, |field, cx| field.set_value(&initial, cx));
@@ -145,7 +145,7 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
     cx.update(|window, cx| {
         view.read_with(cx, |view, cx| {
             assert!(matches!(&view.form, Some(Form::EditInstance(form)) if form.memory.read(cx).focus_handle(cx).is_focused(window)
-                && form.jvm.read(cx).value() == "-Dkept=true"));
+                && form.jvm.read(cx).value(cx) == "-Dkept=true"));
             assert_eq!(view.shell.editor.page, Some(EditorPage::Launch));
             assert!(!view.busy);
         });
@@ -162,7 +162,7 @@ fn profile_validation_reveals_the_actual_invalid_field_and_recovers_without_losi
             }
             view.handle(UiAction::SaveInstance, window, cx);
             assert!(matches!(&view.form, Some(Form::EditInstance(form)) if form.jvm.read(cx).focus_handle(cx).is_focused(window)
-                && form.memory.read(cx).value() == "4"));
+                && form.memory.read(cx).value(cx) == "4"));
             assert_eq!(view.snapshot.instances[0].memory_mib, 2048);
             assert!(!view.busy);
         });
@@ -385,7 +385,7 @@ fn real_save_failure_keeps_the_draft_and_retry_restores_trigger_after_persistenc
         std::fs::create_dir(&path)?;
         click(cx, "save-instance");
         finish_operation(&view, cx);
-        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.name.read(cx).value() == "Retried profile")));
+        assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.name.read(cx).value(cx) == "Retried profile")));
         let save = cx.debug_bounds("save-instance");
         let error = cx.debug_bounds("instance-save-error");
         assert!(

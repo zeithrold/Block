@@ -26,7 +26,7 @@ fn untouched_instance_defaults_are_clean_and_raw_edits_are_dirty(cx: &mut TestAp
                 .ok_or_else(|| anyhow::anyhow!("missing Instance draft"))?;
             assert!(!view.instance_editor_dirty(cx));
             for field in [&editor.name, &editor.java, &editor.width, &editor.height] {
-                let initial = field.read(cx).value();
+                let initial = field.read(cx).value(cx);
                 field.update(cx, |field, cx| field.set_value(" invalid ", cx));
                 assert!(view.instance_editor_dirty(cx));
                 field.update(cx, |field, cx| field.set_value(&initial, cx));
@@ -135,7 +135,7 @@ fn dirty_editor_prompt_escape_restores_the_actual_text_input_focus(cx: &mut Test
                         crate::Form::EditInstance(form) => Some(form.as_ref()),
                         _ => None,
                     })
-                    .is_some_and(|editor| editor.name.read(cx).value() == "Native QA draft")
+                    .is_some_and(|editor| editor.name.read(cx).value(cx) == "Native QA draft")
             }));
         }
         Ok(())

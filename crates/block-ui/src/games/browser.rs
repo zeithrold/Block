@@ -307,7 +307,7 @@ impl Block {
             .query
             .as_ref()
             .map_or_else(String::new, |field| {
-                field.read(cx).value().trim().to_lowercase()
+                field.read(cx).value(cx).trim().to_lowercase()
             });
         match self.browser_kind() {
             BrowserKind::Accounts => self
@@ -374,7 +374,7 @@ impl Block {
                 .collection()
                 .query
                 .as_ref()
-                .is_some_and(|query| query.read(cx).is_composing())
+                .is_some_and(|query| TextInput::has_marked_text(query, window, cx))
         {
             return;
         }

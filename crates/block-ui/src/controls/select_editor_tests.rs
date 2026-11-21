@@ -55,9 +55,9 @@ fn profile_selects_commit_only_the_page_draft_and_cancel_restores_its_checkpoint
     });
     click(cx, "instance-runtime");
     crate::test_support::press(cx, "home enter");
-    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value() == "/usr/bin/java")));
+    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value(cx) == "/usr/bin/java")));
     click(cx, "cancel-instance-page");
-    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value().is_empty())));
+    assert!(view.read_with(cx, |view, cx| matches!(&view.form, Some(Form::EditInstance(form)) if form.managed && form.java.read(cx).value(cx).is_empty())));
 }
 
 #[gpui::test]

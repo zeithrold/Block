@@ -127,7 +127,7 @@ fn optifine_chooser_failure_preserves_the_instance_draft_and_ignores_stale_reque
                     .as_ref()
                     .is_some_and(|error| error.message(Language::English).contains("file chooser"))
                     && editor.optifine_request.is_none()
-                    && editor.name.read(cx).value() == "Unsaved name"
+                    && editor.name.read(cx).value(cx) == "Unsaved name"
             })
         }));
 
@@ -303,7 +303,7 @@ fn invalid_instance_dimensions_reveal_and_focus_the_field_in_a_short_window(
         view.read_with(cx, |view, cx| {
             assert!(draft(view).is_some_and(|editor| {
                 editor.width.read(cx).focus_handle(cx).is_focused(window)
-                    && editor.name.read(cx).value() == "Preserved draft"
+                    && editor.name.read(cx).value(cx) == "Preserved draft"
             }));
             assert!(!view.busy);
         });
@@ -372,8 +372,8 @@ fn a_real_save_failure_keeps_the_draft_and_retry_commits_complete_settings(
         assert!(view.read_with(cx, |view, cx| {
             draft(view).is_some_and(|editor| {
                 view.shell.editor.save_error.is_some()
-                    && editor.name.read(cx).value() == "Saved instance"
-                    && editor.width.read(cx).value() == "1536"
+                    && editor.name.read(cx).value(cx) == "Saved instance"
+                    && editor.width.read(cx).value(cx) == "1536"
             })
         }));
         fs::remove_dir(&path)?;
@@ -614,7 +614,7 @@ fn the_optifine_card_entry_reveals_and_focuses_its_action_in_a_short_window(
                     "the opened draft takes the focus from the card"
                 );
                 assert_eq!(
-                    editor.name.read(cx).value(),
+                    editor.name.read(cx).value(cx),
                     "Test game",
                     "the draft keeps the current instance name"
                 );

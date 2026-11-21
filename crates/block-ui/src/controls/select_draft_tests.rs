@@ -124,7 +124,7 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
     assert!(
         view.read_with(cx, |view, cx| view.settings_form.as_ref().is_some_and(
             |draft| draft.java_automatic
-                && draft.java.read(cx).value() == "/usr/bin/java"
+                && draft.java.read(cx).value(cx) == "/usr/bin/java"
                 && draft
                     .parse(&view.saved_preferences, cx)
                     .is_ok_and(|preferences| preferences.game.java.is_empty())
@@ -134,8 +134,8 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
     crate::test_support::press(cx, "home enter");
     assert!(
         view.read_with(cx, |view, cx| view.settings_form.as_ref().is_some_and(
-            |draft| draft.width.read(cx).value() == "854"
-                && draft.height.read(cx).value() == "480"
+            |draft| draft.width.read(cx).value(cx) == "854"
+                && draft.height.read(cx).value(cx) == "480"
                 && !draft.window_custom
         ))
     );
@@ -167,7 +167,7 @@ fn settings_runtime_window_and_proxy_use_real_choices_without_saving_draft_early
     assert!(
         view.read_with(cx, |view, cx| view.settings_form.as_ref().is_some_and(
             |draft| draft.proxy_mode == 2
-                && draft.proxy_url.read(cx).value() == "ftp://127.0.0.1:7890"
+                && draft.proxy_url.read(cx).value(cx) == "ftp://127.0.0.1:7890"
                 && draft.error.as_ref().is_some_and(
                     |error| error.field == Some(crate::settings::SettingsField::ProxyUrl)
                 )

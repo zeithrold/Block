@@ -195,7 +195,7 @@ impl Block {
         if form.directory.entity_id() != *field {
             return;
         }
-        let directory = PathBuf::from(form.directory.read(cx).value().trim());
+        let directory = PathBuf::from(form.directory.read(cx).value(cx).trim());
         if self
             .shell
             .first_run
@@ -279,7 +279,7 @@ impl Block {
         let parent = self.setup_library_parent(&scope);
         let actual_game = match (&scope, &self.form) {
             (Scope::Game(_), Some(Form::Instance(form))) => {
-                let directory = PathBuf::from(form.directory.read(cx).value().trim());
+                let directory = PathBuf::from(form.directory.read(cx).value(cx).trim());
                 directory
                     .parent()
                     .filter(|directory_parent| {

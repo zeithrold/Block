@@ -584,7 +584,7 @@ impl SettingsDraft {
         let java = if self.java_automatic {
             String::new()
         } else {
-            let path = self.java.read(cx).value().trim().to_owned();
+            let path = self.java.read(cx).value(cx).trim().to_owned();
             if path.is_empty() {
                 return Err(SettingsError::at(
                     SettingsField::Java,
@@ -593,12 +593,12 @@ impl SettingsDraft {
             }
             path
         };
-        let memory_mib = components::parse_memory_gb(&self.memory.read(cx).value())
+        let memory_mib = components::parse_memory_gb(&self.memory.read(cx).value(cx))
             .map_err(|error| SettingsError::at(SettingsField::Memory, error.key()))?;
         let game = GameDefaults {
             memory_mib,
             java,
-            jvm_arguments: self.jvm.read(cx).value(),
+            jvm_arguments: self.jvm.read(cx).value(cx),
             width: number(
                 &self.width,
                 SettingsField::Width,
@@ -672,12 +672,12 @@ impl SettingsDraft {
                 "settings.error.retries_range",
             ));
         }
-        let rate = parse_rate(&self.rate.read(cx).value())
+        let rate = parse_rate(&self.rate.read(cx).value(cx))
             .map_err(|error| SettingsError::at(SettingsField::Rate, error.key()))?;
         let proxy = match self.proxy_mode {
             0 => ProxyMode::System,
             1 => ProxyMode::Direct,
-            2 => ProxyMode::manual(self.proxy_url.read(cx).value().trim().into()).map_err(
+            2 => ProxyMode::manual(self.proxy_url.read(cx).value(cx).trim().into()).map_err(
                 |error| {
                     SettingsError::detail(SettingsField::ProxyUrl, "settings.error.proxy", error)
                 },
@@ -755,7 +755,7 @@ fn number<T: std::str::FromStr>(
 ) -> Result<T, SettingsError> {
     input
         .read(cx)
-        .value()
+        .value(cx)
         .trim()
         .parse()
         .map_err(|_| SettingsError::at(field, key))
@@ -1483,7 +1483,7 @@ impl Block {
         if memory.is_composing() {
             return;
         }
-        let Ok(value) = components::parse_memory_gb(&memory.value()) else {
+        let Ok(value) = components::parse_memory_gb(&memory.value(cx)) else {
             return;
         };
         let next = if increase {
@@ -1504,7 +1504,7 @@ impl Block {
 
     fn settings_memory_field(&self, draft: &SettingsDraft, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let value = components::parse_memory_gb(&draft.memory.read(cx).value()).ok();
+        let value = components::parse_memory_gb(&draft.memory.read(cx).value(cx)).ok();
         let composing = draft.memory.read(cx).is_composing();
         let friendly = value.map_or_else(
             || tr!(language, "settings.game.memory.invalid"),
@@ -1657,8 +1657,8 @@ impl Block {
         } else {
             tr!(language, "settings.game.java.custom")
         };
-        let width = draft.width.read(cx).value();
-        let height = draft.height.read(cx).value();
+        let width = draft.width.read(cx).value(cx);
+        let height = draft.height.read(cx).value(cx);
         let window = if draft.window_custom {
             tr!(
                 language,
@@ -1716,8 +1716,8 @@ impl Block {
                 )
             }))
             .children(
-                (!draft.java_automatic && !draft.java.read(cx).value().is_empty()).then(|| {
-                    let path = draft.java.read(cx).value();
+                (!draft.java_automatic && !draft.java.read(cx).value(cx).is_empty()).then(|| {
+                    let path = draft.java.read(cx).value(cx);
                     let wrapped: String = path
                         .chars()
                         .flat_map(|character| [character, '\u{200b}'])
@@ -2032,7 +2032,7 @@ mod tests {
             click_save(cx);
             assert!(view.read_with(cx, |view, cx| {
                 view.settings_form.as_ref().is_some_and(|draft| {
-                    draft.page == 1 && draft.memory.read(cx).value() == "not-a-number"
+                    draft.page == 1 && draft.memory.read(cx).value(cx) == "not-a-number"
                 }) && view
                     .status
                     .text(crate::Language::English)
@@ -2057,7 +2057,7 @@ mod tests {
             click_save(cx);
             assert!(view.read_with(cx, |view, cx| {
                 view.settings_form.as_ref().is_some_and(|draft| {
-                    draft.page == 3 && draft.concurrent.read(cx).value() == "0"
+                    draft.page == 3 && draft.concurrent.read(cx).value(cx) == "0"
                 }) && view
                     .status
                     .text(crate::Language::English)

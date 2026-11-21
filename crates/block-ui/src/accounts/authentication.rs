@@ -635,7 +635,7 @@ impl Block {
             return;
         }
         let login = state.login.as_ref().map_or_else(String::new, |field| {
-            field.read(cx).value().trim().to_owned()
+            field.read(cx).value(cx).trim().to_owned()
         });
         let password = state
             .password
@@ -1107,7 +1107,7 @@ impl Block {
                 .as_ref()
                 .and_then(|state| state.username.as_ref())
                 .map_or_else(String::new, |field| {
-                    field.read(cx).value().trim().to_owned()
+                    field.read(cx).value(cx).trim().to_owned()
                 });
             let result = super::engine::offline_account(&name);
             let prepared = match result {
@@ -3075,7 +3075,7 @@ mod tests {
             view.shell.auth.is_none()
                 && view.router.tab() == Tab::Onboarding
                 && view.shell.first_run.stage == crate::first_run::Stage::Overview
-                && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "世界 draft")
+                && matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value(cx) == "世界 draft")
         }));
         cx.update(|window, cx| {
             view.read_with(cx, |view, _| assert!(view.focus.is_focused(window)));
@@ -3293,7 +3293,7 @@ mod tests {
                     && state
                         .username
                         .as_ref()
-                        .is_some_and(|field| field.read(cx).value() == "Local_Draft")
+                        .is_some_and(|field| field.read(cx).value(cx) == "Local_Draft")
             ))
         );
 
@@ -3320,7 +3320,7 @@ mod tests {
                     .auth
                     .as_ref()
                     .and_then(|state| state.username.as_ref())
-                    .map(|field| field.read(cx).value().to_string()),
+                    .map(|field| field.read(cx).value(cx).to_string()),
                 Some("Local_Draft".into())
             );
         });
@@ -4375,7 +4375,7 @@ mod tests {
                     state.is_some_and(|state| state
                         .username
                         .as_ref()
-                        .is_some_and(|field| field.read(cx).value() == "Compact_Draft")),
+                        .is_some_and(|field| field.read(cx).value(cx) == "Compact_Draft")),
                     "a non-sensitive draft survives the switch"
                 );
                 assert!(
@@ -4408,7 +4408,7 @@ mod tests {
                     state.is_some_and(|state| state
                         .username
                         .as_ref()
-                        .is_some_and(|field| field.read(cx).value() == "Compact_Draft")),
+                        .is_some_and(|field| field.read(cx).value(cx) == "Compact_Draft")),
                     "the returning form keeps its draft"
                 );
             });

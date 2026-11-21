@@ -1767,7 +1767,7 @@ fn import_new_opens_the_ordinary_new_instance_setup(cx: &mut TestAppContext) {
     view.read_with(cx, |view, cx| {
         assert_eq!(view.shell.wizard.step, WizardStep::Setup);
         let name = match &view.form {
-            Some(Form::Instance(form)) => form.name.read(cx).value(),
+            Some(Form::Instance(form)) => form.name.read(cx).value(cx),
             _ => String::new(),
         };
         assert_eq!(name, "Hand made", "the open draft survives the sheet");

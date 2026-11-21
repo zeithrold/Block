@@ -121,7 +121,7 @@ impl Block {
         let Some(draft) = self.provider_draft().filter(|_| !self.busy) else {
             return;
         };
-        let raw = draft.address.read(cx).value();
+        let raw = draft.address.read(cx).value(cx);
         if let Ok(address) = block_auth::ProviderAddress::parse(&raw)
             && address.insecure
             && self.saved_at(&address.url).is_none()
@@ -148,7 +148,7 @@ impl Block {
         else {
             return;
         };
-        let raw = draft.address.read(cx).value();
+        let raw = draft.address.read(cx).value(cx);
         let address = match block_auth::ProviderAddress::parse(&raw) {
             Ok(address) => address,
             Err(error) => {
@@ -225,7 +225,7 @@ impl Block {
             return;
         }
         let mut provider = (*review.provider).clone();
-        let alias = review.alias.read(cx).value();
+        let alias = review.alias.read(cx).value(cx);
         if !alias.trim().is_empty() {
             provider.name = alias.trim().to_owned();
         }

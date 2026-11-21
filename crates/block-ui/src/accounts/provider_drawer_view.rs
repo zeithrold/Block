@@ -68,7 +68,7 @@ impl Block {
             return div().into_any_element();
         };
         let lang = self.language();
-        let raw = draft.address.read(cx).value();
+        let raw = draft.address.read(cx).value(cx);
         let parsed = block_auth::ProviderAddress::parse(&raw).ok();
         let existing = parsed.as_ref().and_then(|a| self.saved_at(&a.url));
         let http = parsed.as_ref().is_some_and(|a| a.insecure);

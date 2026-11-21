@@ -675,18 +675,18 @@ mod snapshot_tests {
             "the outgoing copy is independent"
         );
         assert_eq!(
-            frozen.read_with(cx, |field, _| field.value()),
+            frozen.read_with(cx, |field, cx| field.value(cx)),
             "Packed world"
         );
 
         live.update(cx, |field, cx| field.set_value("Renamed while leaving", cx));
         assert_eq!(
-            frozen.read_with(cx, |field, _| field.value()),
+            frozen.read_with(cx, |field, cx| field.value(cx)),
             "Packed world",
             "a later edit does not change what is already leaving"
         );
         assert_eq!(
-            live.read_with(cx, |field, _| field.value()),
+            live.read_with(cx, |field, cx| field.value(cx)),
             "Renamed while leaving"
         );
     }

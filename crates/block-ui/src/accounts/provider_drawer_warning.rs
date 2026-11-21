@@ -70,7 +70,7 @@ impl Block {
         field: gpui::Entity<crate::TextInput>,
         cx: &mut Context<'_, Self>,
     ) {
-        let value = field.read(cx).value();
+        let value = field.read(cx).value(cx);
         let Some(draft) = self
             .provider_draft_mut()
             .filter(|draft| draft.address == field && draft.observed_address != value)
@@ -90,7 +90,7 @@ impl Block {
                 let Some(draft) = view.provider_draft().filter(|draft| draft.id == id) else {
                     return;
                 };
-                let raw = draft.address.read(cx).value();
+                let raw = draft.address.read(cx).value(cx);
                 if draft.observed_address != raw {
                     return;
                 }

@@ -374,7 +374,6 @@ fn labeled_field(label: SharedString, input: &Entity<TextInput>, options: &Field
         label
     };
     let input_focus = input.clone();
-    let semantic_input = input.clone();
     div()
         .flex()
         .flex_col()
@@ -396,19 +395,10 @@ fn labeled_field(label: SharedString, input: &Entity<TextInput>, options: &Field
                 })
                 .child(label),
         )
-        .child(input.clone())
-        .child(
-            gpui::canvas(
-                move |_, _, cx| {
-                    semantic_input.update(cx, |input, cx| {
-                        input.set_field_semantics(semantics, cx);
-                    });
-                },
-                |_, (), _, _| {},
-            )
-            .absolute()
-            .inset_0(),
-        )
+        .child(super::text_input::LabeledEditor {
+            input: input.clone(),
+            semantics,
+        })
 }
 
 pub(super) fn field_with(
@@ -2055,7 +2045,7 @@ mod tests {
                     .focus_handle(cx)
                     .is_focused(window)
             );
-            assert_eq!(view.read(cx).input.read(cx).value(), "中文 👩🏽‍💻");
+            assert_eq!(view.read(cx).input.read(cx).value(cx), "中文 👩🏽‍💻");
         });
     }
 }

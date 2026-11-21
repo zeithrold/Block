@@ -107,7 +107,11 @@ impl Block {
             }
         })
         .detach();
-        query.read(cx).focus_handle(cx).focus(window, cx);
+        // A confirmation can capture this focus before the sheet's first paint.
+        // Give it the live editor handle, not the draft's pre-mount handle.
+        if let Some(editor) = query.update(cx, |field, cx| field.editor(window, cx)) {
+            editor.focus_handle(cx).focus(window, cx);
+        }
         self.shell.selector = Some(SearchSelectorState {
             drawer,
             query,
@@ -134,7 +138,7 @@ impl Block {
         let Some(state) = &self.shell.selector else {
             return;
         };
-        let value = state.query.read(cx).value();
+        let value = state.query.read(cx).value(cx);
         if value == state.last_query {
             return;
         }
@@ -190,7 +194,7 @@ impl Block {
         if !matches!(key, "up" | "down" | "home" | "end" | "enter") {
             return false;
         }
-        if state.query.read(cx).is_composing() {
+        if TextInput::has_marked_text(&state.query, window, cx) {
             return false;
         }
         let query_focused = state.query.read(cx).focus_handle(cx).is_focused(window);
@@ -206,7 +210,7 @@ impl Block {
         }
         let choices = self.selector_choices(
             state.drawer,
-            &state.query.read(cx).value().trim().to_lowercase(),
+            &state.query.read(cx).value(cx).trim().to_lowercase(),
         );
         let active = active_index(&choices, state.active.as_deref());
         if key == "enter" {
@@ -253,7 +257,7 @@ impl Block {
                 .child(note(tr!(self.language(), "search.reopen")))
                 .into_any_element();
         };
-        let has_query = !state.query.read(cx).value().is_empty();
+        let has_query = !state.query.read(cx).value(cx).is_empty();
         let language = self.language();
         let accounts = drawer == Drawer::Accounts;
         let rows = self.selector_results(drawer, state, window, cx);
@@ -333,7 +337,7 @@ impl Block {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement + use<> {
-        let query = state.query.read(cx).value().trim().to_lowercase();
+        let query = state.query.read(cx).value(cx).trim().to_lowercase();
         let choices = self.selector_choices(drawer, &query);
         let active = active_index(&choices, state.active.as_deref());
         let language = self.language();
@@ -848,7 +852,7 @@ mod tests {
             view.shell
                 .selector
                 .as_ref()
-                .is_some_and(|state| state.query.read(cx).value() == "前no matching instance")
+                .is_some_and(|state| state.query.read(cx).value(cx) == "前no matching instance")
         }));
         click(cx, "selector-clear");
         cx.update(|window, cx| {
@@ -856,7 +860,9 @@ mod tests {
                 if let Some(state) = &view.shell.selector {
                     state.query.update(cx, |field, cx| {
                         field.focus_handle(cx).focus(window, cx);
-                        field.replace_and_mark_text_in_range(None, "中文", None, window, cx);
+                        field.edit_fixture(window, cx, |state, window, cx| {
+                            state.replace_and_mark_text_in_range(None, "中文", None, window, cx)
+                        });
                     });
                 }
             });
@@ -951,7 +957,7 @@ mod tests {
                         .shell
                         .selector
                         .as_ref()
-                        .is_some_and(|state| state.query.read(cx).value().is_empty())
+                        .is_some_and(|state| state.query.read(cx).value(cx).is_empty())
             }));
             cx.update(|window, cx| {
                 view.read_with(cx, |view, cx| {
@@ -969,7 +975,7 @@ mod tests {
                 view.shell
                     .selector
                     .as_ref()
-                    .is_some_and(|state| state.query.read(cx).value() == "Test")
+                    .is_some_and(|state| state.query.read(cx).value(cx) == "Test")
             }));
         }
     }
@@ -994,7 +1000,7 @@ mod tests {
             view.shell
                 .selector
                 .as_ref()
-                .is_some_and(|state| state.query.read(cx).value().is_empty())
+                .is_some_and(|state| state.query.read(cx).value(cx).is_empty())
         }));
         assert!(crate::test_support::control_bounds(cx, "selector-clear").is_none());
     }

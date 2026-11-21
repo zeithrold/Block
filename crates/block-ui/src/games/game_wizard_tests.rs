@@ -320,14 +320,14 @@ fn game_creation_defaults_to_a_catalog_release_and_never_guesses_when_missing(
         view.begin_game_wizard(cx);
         assert!(matches!(
             &view.form,
-            Some(Form::Instance(form)) if form.version.read(cx).value() == "1.21.1"
+            Some(Form::Instance(form)) if form.version.read(cx).value(cx) == "1.21.1"
         ));
         view.version_catalog.clear();
         view.versions = vec!["26w10a".into()];
         view.begin_game_wizard(cx);
         assert!(matches!(
             &view.form,
-            Some(Form::Instance(form)) if form.version.read(cx).value().is_empty()
+            Some(Form::Instance(form)) if form.version.read(cx).value(cx).is_empty()
         ));
     });
 }
@@ -425,7 +425,7 @@ fn leaving_a_changed_game_confirms_discard_and_untouched_game_does_not(cx: &mut 
             }));
             click(cx, "discard-game-stay");
             assert!(view.read_with(cx, |view, cx| {
-                matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "Keep me")
+                matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value(cx) == "Keep me")
             }));
             click(cx, "task-close");
             click(cx, "discard-game-confirm");
@@ -733,11 +733,11 @@ fn setup_shows_effective_settings_and_keeps_its_draft_across_component_pages(
             && view.wizard_configuration_summary(cx)
                 == ("Custom Java · 4 GB".to_owned(), "Fullscreen".to_owned())
             && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
-                profile.jvm.read(cx).value() == "-XX:+UseG1GC"
+                profile.jvm.read(cx).value(cx) == "-XX:+UseG1GC"
                     && !profile.managed
                     && profile.fullscreen
             })
-            && matches!(&view.form, Some(Form::Instance(form)) if form.directory.read(cx).value() == directory)
+            && matches!(&view.form, Some(Form::Instance(form)) if form.directory.read(cx).value(cx) == directory)
     }));
     assert!(crate::test_support::control_bounds(cx, "wizard-component-location").is_some());
     assert_eq!(
@@ -757,7 +757,7 @@ fn setup_keeps_a_long_loader_label_inside_its_card(cx: &mut TestAppContext) {
         let Some(Form::Instance(form)) = &mut view.form else {
             return;
         };
-        let minecraft = form.version.read(cx).value();
+        let minecraft = form.version.read(cx).value(cx);
         assert_eq!(minecraft, "1.21.1");
         assert!(
             selected
@@ -980,7 +980,7 @@ fn setup_summary_states_java_and_arguments_inherited_from_saved_defaults(cx: &mu
             .wizard
             .draft
             .as_ref()
-            .map(|profile| profile.jvm.read(cx).value())),
+            .map(|profile| profile.jvm.read(cx).value(cx))),
         Some("-XX:+UseG1GC".to_owned()),
         "the fold holds the inherited arguments Create will submit"
     );
@@ -1375,7 +1375,7 @@ fn retained_wizard_snapshot_freezes_editors_and_scroll_without_sharing_mutation(
         let profile = frozen.draft.as_ref();
         assert!(profile.is_some());
         if let Some(profile) = profile {
-            assert_eq!(profile.name.read(cx).value(), "中文 Profile");
+            assert_eq!(profile.name.read(cx).value(cx), "中文 Profile");
         }
     });
 }
@@ -1425,8 +1425,8 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
             assert!(token.is_cancelled(), "Back releases the section request");
             assert!(view.shell.wizard.optifine_request.is_none());
             assert!(matches!(&view.form, Some(Form::Instance(form))
-                if form.version.read(cx).value() == " invalid version "
-                    && form.directory.read(cx).value() == "relative folder"));
+                if form.version.read(cx).value(cx) == " invalid version "
+                    && form.directory.read(cx).value(cx) == "relative folder"));
             assert_eq!(
                 view.shell
                     .wizard
@@ -1435,7 +1435,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
                     .ok_or_else(|| anyhow::anyhow!("profile draft"))?
                     .width
                     .read(cx)
-                    .value(),
+                    .value(cx),
                 "invalid width"
             );
 
@@ -1457,8 +1457,8 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
                 .update(cx, |field, cx| field.set_value("1920", cx));
             view.cancel_component_draft(cx);
             assert!(matches!(&view.form, Some(Form::Instance(form))
-                if form.version.read(cx).value() == " invalid version "
-                    && form.directory.read(cx).value() == "relative folder"));
+                if form.version.read(cx).value(cx) == " invalid version "
+                    && form.directory.read(cx).value(cx) == "relative folder"));
             assert_eq!(
                 view.shell
                     .wizard
@@ -1467,7 +1467,7 @@ fn section_back_retains_raw_values_and_cancel_restores_the_next_checkpoint(
                     .ok_or_else(|| anyhow::anyhow!("profile draft"))?
                     .width
                     .read(cx)
-                    .value(),
+                    .value(cx),
                 "invalid width"
             );
             Ok(())
@@ -1504,8 +1504,8 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
         }
         view.cancel_component_draft(cx);
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.version.read(cx).value(), "1.21.1");
-            assert_eq!(form.directory.read(cx).value(), "");
+            assert_eq!(form.version.read(cx).value(cx), "1.21.1");
+            assert_eq!(form.directory.read(cx).value(cx), "");
             assert!(!form.is_neoforge());
         }
         assert_eq!(view.snapshot.instances.len(), 1);
@@ -1525,7 +1525,7 @@ fn component_cancel_restores_values_and_done_only_commits_the_local_draft(cx: &m
         assert_eq!(view.shell.wizard.page, None);
         assert!(error_text(view).is_none());
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.directory.read(cx).value(), directory);
+            assert_eq!(form.directory.read(cx).value(cx), directory);
         }
         assert_eq!(view.snapshot.instances.len(), 1);
         assert_eq!(view.snapshot.instances.len(), 1);
@@ -1555,7 +1555,7 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
     view.update(cx, |view, cx| {
         let request = view.shell.wizard.loader_catalog.as_ref().map(|catalog| catalog.request);
         if let Some(request) = request { view.receive_loader_versions(request, Ok(vec![loader_build("21.1.219", true)]), cx); }
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.21.1"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value(cx) == "1.21.1"));
         cx.notify();
     });
     view.update(cx, |view, cx| {
@@ -1581,7 +1581,7 @@ fn loader_picker_search_preserves_the_selected_real_build_and_cancel_rolls_back(
     ));
     click(cx, "wizard-back");
     view.read_with(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.is_neoforge() && form.version.read(cx).value() == "1.21.1"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if !form.is_neoforge() && form.version.read(cx).value(cx) == "1.21.1"));
     });
 }
 
@@ -1679,7 +1679,7 @@ fn version_search_filters_real_metadata_and_does_not_steal_ime_navigation(cx: &m
     crate::test_support::press(cx, "down");
     view.read_with(cx, |view, cx| {
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.version.read(cx).value(), "1.21.1");
+            assert_eq!(form.version.read(cx).value(cx), "1.21.1");
             assert_eq!(view.matching_wizard_versions(form, cx).len(), 2);
         }
     });
@@ -1687,7 +1687,9 @@ fn version_search_filters_real_metadata_and_does_not_steal_ime_navigation(cx: &m
         view.update(cx, |view, cx| {
             if let Some(search) = &view.shell.wizard.version_search {
                 search.update(cx, |search, cx| {
-                    search.replace_and_mark_text_in_range(None, "中", None, window, cx);
+                    search.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_and_mark_text_in_range(None, "中", None, window, cx)
+                    });
                 });
             }
         });
@@ -1695,7 +1697,7 @@ fn version_search_filters_real_metadata_and_does_not_steal_ime_navigation(cx: &m
     crate::test_support::press(cx, "up");
     view.read_with(cx, |view, cx| {
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.version.read(cx).value(), "1.21.1");
+            assert_eq!(form.version.read(cx).value(cx), "1.21.1");
         }
     });
     view.update(cx, |view, cx| {
@@ -1717,7 +1719,7 @@ fn version_search_filters_real_metadata_and_does_not_steal_ime_navigation(cx: &m
     crate::test_support::press(cx, "down");
     view.read_with(cx, |view, cx| {
         if let Some(Form::Instance(form)) = &view.form {
-            assert_eq!(form.version.read(cx).value(), "24w44a");
+            assert_eq!(form.version.read(cx).value(cx), "24w44a");
         }
     });
 }
@@ -1748,7 +1750,7 @@ fn long_version_list_end_reveals_the_last_row_and_has_one_roving_tab_stop(cx: &m
     cx.simulate_resize(size(px(960.), px(600.)));
     crate::test_support::press(cx, "tab tab end");
     cx.run_until_parked();
-    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.20.39")); });
+    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value(cx) == "1.20.39")); });
     let last = crate::test_support::control_bounds(cx, "wizard-version-39");
     let viewport = crate::test_support::control_bounds(cx, "wizard-version-list");
     assert!(
@@ -1809,7 +1811,7 @@ fn version_loading_failure_retry_and_recovery_preserve_the_draft(cx: &mut TestAp
 
     view.read_with(cx, |view, cx| {
         assert!(matches!(view.version_load, crate::browser::CollectionLoad::Ready));
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value() == "保留 draft" && form.version.read(cx).value() == "1.20.6"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.name.read(cx).value(cx) == "保留 draft" && form.version.read(cx).value(cx) == "1.20.6"));
         assert_eq!(view.version_catalog.len(), 1);
     });
 }
@@ -1894,10 +1896,10 @@ fn minecraft_change_clears_the_build_and_cancel_restores_the_loader(cx: &mut Tes
     cx.simulate_resize(size(px(960.), px(600.)));
     cx.run_until_parked();
 
-    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.loader_version.is_none() && form.version.read(cx).value() == "1.21.1")); });
+    view.read_with(cx, |view, cx| { assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.loader_version.is_none() && form.version.read(cx).value(cx) == "1.21.1")); });
     click(cx, "cancel-instance");
     view.update(cx, |view, cx| {
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value() == "1.20.6"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.is_neoforge() && form.version.read(cx).value(cx) == "1.20.6"));
         assert!(view.shell.wizard.version_notice.is_none());
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
         view.set_wizard_version("1.20.6".into(), cx);
@@ -2213,7 +2215,7 @@ fn instance_error_expands_advanced_settings_and_reveals_the_invalid_input(cx: &m
             let profile = view.read(cx).shell.wizard.draft.as_ref();
             assert!(profile.is_some_and(|profile| {
                 profile.height.read(cx).focus_handle(cx).is_focused(window)
-                    && profile.height.read(cx).value() == "not-a-number"
+                    && profile.height.read(cx).value(cx) == "not-a-number"
             }));
         });
         assert_eq!(
@@ -2283,8 +2285,8 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         let original = view.shell.wizard.draft.as_ref().map(|profile| {
             (
                 profile.width.entity_id(),
-                profile.width.read(cx).value(),
-                profile.java.read(cx).value(),
+                profile.width.read(cx).value(cx),
+                profile.java.read(cx).value(cx),
             )
         });
         view.open_game_wizard_page(Some(WizardPage::Location), cx);
@@ -2301,8 +2303,8 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         assert_eq!(
             view.shell.wizard.draft.as_ref().map(|profile| (
                 profile.width.entity_id(),
-                profile.width.read(cx).value(),
-                profile.java.read(cx).value()
+                profile.width.read(cx).value(cx),
+                profile.java.read(cx).value(cx)
             )),
             original
         );
@@ -2319,10 +2321,12 @@ fn configuration_done_validates_its_own_fields_and_cancel_restores_editable_enti
         view.update(cx, |view, cx| {
             if let Some(profile) = &view.shell.wizard.draft {
                 profile.width.update(cx, |field, cx| {
-                    field.replace_text_in_range(Some(0..4), "1280", window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_text_in_range(Some(0..4), "1280", window, cx)
+                    });
                 });
                 assert_eq!(
-                    profile.width.read(cx).value(),
+                    profile.width.read(cx).value(cx),
                     "1280",
                     "cancel must restore the editable original, never a frozen outgoing entity"
                 );
@@ -2395,8 +2399,8 @@ fn assert_section_cancelled_without_stale_validation(
         );
         assert!(
             matches!(&view.form, Some(Form::Instance(form))
-            if form.directory.read(cx).value().is_empty()
-                && form.name.read(cx).value() == "Retained game"),
+            if form.directory.read(cx).value(cx).is_empty()
+                && form.name.read(cx).value(cx) == "Retained game"),
             "section cancellation restores the checkpoint, not the rejected edits"
         );
     });
@@ -2495,7 +2499,7 @@ fn wizard_state_section_cancel_discards_validation_and_pending_reveal(cx: &mut T
         assert!(view.shell.wizard.error_field.is_none());
         assert_eq!(view.shell.wizard.reveal.get(), None);
         assert!(matches!(&view.form, Some(Form::Instance(form))
-            if form.directory.read(cx).value().is_empty()));
+            if form.directory.read(cx).value(cx).is_empty()));
     });
 }
 
@@ -2759,7 +2763,7 @@ fn changing_minecraft_keeps_the_loader_but_cancels_old_mappings_and_rejects_late
         assert_ne!(old, current);
         if let Some(request) = current { view.receive_loader_versions(request, Ok(vec![loader_build("0.16.14", true)]), cx); }
         assert!(view.wizard_loader_issue(cx).is_none());
-        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.as_deref() == Some("0.16.14") && form.version.read(cx).value() == "1.21.1"));
+        assert!(matches!(&view.form, Some(Form::Instance(form)) if form.loader_version.as_deref() == Some("0.16.14") && form.version.read(cx).value(cx) == "1.21.1"));
         assert!(view.shell.wizard.version_notice.is_some());
         view.choose_wizard_loader(LoaderKind::Quilt, cx);
         assert!(view.shell.wizard.version_notice.is_none());
@@ -2965,7 +2969,7 @@ fn arm64_version_picker_disables_lwjgl2_versions_with_the_reason(cx: &mut TestAp
         view.set_wizard_version("1.20.6".into(), cx);
         view.set_wizard_version("1.12.2".into(), cx);
         assert!(
-            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.20.6")
+            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value(cx) == "1.20.6")
         );
         assert!(view.shell.wizard.version_notice.as_ref().is_some_and(|notice| {
             notice.text(Language::English).contains(LWJGL2_ARM64_REASON)
@@ -3006,7 +3010,7 @@ fn x64_version_picker_keeps_lwjgl2_versions_selectable(cx: &mut TestAppContext) 
         assert_eq!(view.wizard_version_restriction("1.12.2"), None);
         view.set_wizard_version("1.12.2".into(), cx);
         assert!(
-            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value() == "1.12.2")
+            matches!(&view.form, Some(Form::Instance(form)) if form.version.read(cx).value(cx) == "1.12.2")
         );
         view.open_game_wizard_page(Some(WizardPage::Version), cx);
         assert!(view.validate_wizard_section(WizardPage::Version, cx));

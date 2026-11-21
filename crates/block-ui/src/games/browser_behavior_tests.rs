@@ -517,7 +517,7 @@ fn detail_navigation_preserves_query_and_selection_during_a_background_operation
                     .games
                     .query
                     .as_ref()
-                    .map(|field| field.read(cx).value())
+                    .map(|field| field.read(cx).value(cx))
                     .as_deref(),
                 Some("Adventure")
             );
@@ -562,7 +562,9 @@ fn search_keyboard_roves_without_selecting_or_interrupting_chinese_composition(
             if let Some(query) = &view.shell.games.query {
                 query.read(cx).focus_handle(cx).focus(window, cx);
                 query.update(cx, |field, cx| {
-                    field.replace_and_mark_text_in_range(None, "中", Some(1..1), window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_and_mark_text_in_range(None, "中", Some(1..1), window, cx)
+                    });
                 });
             }
         });

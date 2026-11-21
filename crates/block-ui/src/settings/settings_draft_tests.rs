@@ -161,8 +161,8 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             view.reset_settings(window, cx);
             assert!(view.settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
-                    && draft.memory.read(cx).value() == "2"
-                    && draft.concurrent.read(cx).value() == "3"
+                    && draft.memory.read(cx).value(cx) == "2"
+                    && draft.concurrent.read(cx).value(cx) == "3"
                     && draft.appearance == Appearance::Dark
                     && draft.is_dirty(&view.saved_preferences, cx)
             }));
@@ -180,7 +180,7 @@ fn restore_only_current_section_and_cancel_restore_the_saved_preview(
             view.select_settings_page(1, window, cx);
             assert!(view.settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
-                    && draft.memory.read(cx).value() == "4"
+                    && draft.memory.read(cx).value(cx) == "4"
                     && !draft.is_dirty(&view.saved_preferences, cx)
             }));
         });
@@ -210,7 +210,7 @@ fn a_hidden_invalid_section_is_opened_and_its_exact_field_receives_focus(
                         .as_ref()
                         .is_some_and(|error| error.field == Some(SettingsField::Width))
                     && draft.width.read(cx).focus_handle(cx).is_focused(window)
-                    && draft.width.read(cx).value() == "0"
+                    && draft.width.read(cx).value(cx) == "0"
             }));
             assert_eq!(view.saved_preferences, Preferences::default());
         });
@@ -261,7 +261,7 @@ fn save_failure_keeps_all_drafts_and_preview_without_changing_disk(cx: &mut gpui
                 view.save_settings(window, cx);
                 assert!(view.settings_form.as_ref().is_some_and(|draft| {
                     draft.page == 3
-                        && draft.concurrent.read(cx).value() == "3"
+                        && draft.concurrent.read(cx).value(cx) == "3"
                         && draft.appearance == Appearance::Dark
                         && draft.error.is_some()
                         && draft.is_dirty(&view.saved_preferences, cx)
@@ -315,8 +315,8 @@ fn outgoing_snapshot_owns_independent_inputs_scroll_and_reveal_state(
         assert!(frozen.as_ref().is_some_and(|frozen| {
             view.settings_form.as_ref().is_some_and(|live| {
                 frozen.memory.entity_id() != live.memory.entity_id()
-                    && frozen.memory.read(cx).value() == "2"
-                    && live.memory.read(cx).value() == "8"
+                    && frozen.memory.read(cx).value(cx) == "2"
+                    && live.memory.read(cx).value(cx) == "8"
                     && frozen.scroll.offset().y == px(-24.)
                     && live.scroll.offset().y == px(-96.)
                     && frozen.reveal.get() == Some(SettingsField::Width)
@@ -422,7 +422,9 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
         cx.update(|window, cx| {
             input.update(cx, |input, cx| {
                 input.focus_handle(cx).focus(window, cx);
-                input.replace_and_mark_text_in_range(None, "入力", Some(0..1), window, cx);
+                input.edit_fixture(window, cx, |state, window, cx| {
+                    state.replace_and_mark_text_in_range(None, "入力", Some(0..1), window, cx)
+                });
             });
         });
         let focus = cx.update(|window, cx| window.focused(cx));
@@ -444,13 +446,18 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
             let selection = cx.update(|window, cx| {
                 input.update(cx, |input, cx| {
                     input
-                        .selected_text_range(false, window, cx)
+                        .editor(window, cx)
+                        .and_then(|state| {
+                            state.update(cx, |state, cx| {
+                                state.selected_text_range(false, window, cx)
+                            })
+                        })
                         .map(|selection| selection.range)
                 })
             });
             assert_eq!(selection, Some(0..1));
             assert!(input.read_with(cx, |input, _| input.is_composing()));
-            assert_eq!(input.read_with(cx, |input, _| input.value()), "入力");
+            assert_eq!(input.read_with(cx, |input, cx| input.value(cx)), "入力");
             assert_eq!(
                 view.read_with(cx, |view, _| {
                     view.settings_form
@@ -470,7 +477,11 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
                 view.handle(UiAction::SavePreferences, window, cx);
                 assert_eq!(view.saved_preferences.language, None);
                 assert!(input.read(cx).is_composing());
-                input.update(cx, |input, cx| input.unmark_text(window, cx));
+                input.update(cx, |input, cx| {
+                    input.edit_fixture(window, cx, |state, window, cx| {
+                        state.unmark_text(window, cx)
+                    })
+                });
                 view.handle(UiAction::SavePreferences, window, cx);
                 assert_eq!(
                     view.settings_form
@@ -478,7 +489,7 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
                         .map(|draft| draft.jvm.entity_id()),
                     Some(identity)
                 );
-                assert_eq!(input.read(cx).value(), "入力");
+                assert_eq!(input.read(cx).value(cx), "入力");
             });
         });
         assert_eq!(
@@ -568,7 +579,8 @@ fn memory_stepper_uses_one_gb_steps_preserves_cancel_and_really_saves_preference
         settings_click(cx, "settings-memory-increase");
         assert!(view.read_with(cx, |view, cx| {
             view.settings_form.as_ref().is_some_and(|draft| {
-                draft.memory.read(cx).value() == "3" && draft.is_dirty(&view.saved_preferences, cx)
+                draft.memory.read(cx).value(cx) == "3"
+                    && draft.is_dirty(&view.saved_preferences, cx)
             })
         }));
         assert_eq!(
@@ -584,7 +596,7 @@ fn memory_stepper_uses_one_gb_steps_preserves_cancel_and_really_saves_preference
                 view.handle(UiAction::Tab(Tab::Settings), window, cx);
                 view.select_settings_page(1, window, cx);
                 if let Some(draft) = &view.settings_form {
-                    assert_eq!(draft.memory.read(cx).value(), "2");
+                    assert_eq!(draft.memory.read(cx).value(cx), "2");
                     draft
                         .memory
                         .update(cx, |field, cx| field.set_value("1.5", cx));
@@ -595,7 +607,7 @@ fn memory_stepper_uses_one_gb_steps_preserves_cancel_and_really_saves_preference
         assert!(view.read_with(cx, |view, cx| {
             view.settings_form
                 .as_ref()
-                .is_some_and(|draft| draft.memory.read(cx).value() == "2.5")
+                .is_some_and(|draft| draft.memory.read(cx).value(cx) == "2.5")
         }));
         settings_click(cx, "save-preferences");
         assert_eq!(Preferences::load(root.path())?.game.memory_mib, 2560);
@@ -632,24 +644,26 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
     assert!(view.read_with(cx, |view, cx| {
         view.settings_form
             .as_ref()
-            .is_some_and(|draft| draft.memory.read(cx).value() == "3")
+            .is_some_and(|draft| draft.memory.read(cx).value(cx) == "3")
     }));
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             if let Some(draft) = &view.settings_form {
                 draft.memory.update(cx, |field, cx| {
-                    field.replace_and_mark_text_in_range(None, "中文", None, window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_and_mark_text_in_range(None, "中文", None, window, cx)
+                    });
                 });
             }
             let before = view
                 .settings_form
                 .as_ref()
-                .map(|draft| draft.memory.read(cx).value());
+                .map(|draft| draft.memory.read(cx).value(cx));
             view.adjust_settings_memory(true, cx);
             assert_eq!(
                 view.settings_form
                     .as_ref()
-                    .map(|draft| draft.memory.read(cx).value()),
+                    .map(|draft| draft.memory.read(cx).value(cx)),
                 before
             );
         });
@@ -659,7 +673,9 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
         view.update(cx, |view, cx| {
             if let Some(draft) = &view.settings_form {
                 draft.memory.update(cx, |field, cx| {
-                    field.unmark_text(window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.unmark_text(window, cx)
+                    });
                     field.set_value("32", cx);
                 });
             }
@@ -667,7 +683,7 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
             assert_eq!(
                 view.settings_form
                     .as_ref()
-                    .map(|draft| draft.memory.read(cx).value()),
+                    .map(|draft| draft.memory.read(cx).value(cx)),
                 Some("32".into())
             );
             if let Some(draft) = &view.settings_form {
@@ -679,11 +695,11 @@ fn memory_keyboard_bounds_composition_and_window_range_hints_are_real_consumers(
             assert_eq!(
                 view.settings_form
                     .as_ref()
-                    .map(|draft| draft.memory.read(cx).value()),
+                    .map(|draft| draft.memory.read(cx).value(cx)),
                 Some("1".into())
             );
             if let Some(draft) = &view.settings_form {
-                assert_eq!(draft.width.read(cx).value(), "1280");
+                assert_eq!(draft.width.read(cx).value(cx), "1280");
                 draft.width.read(cx).focus_handle(cx).focus(window, cx);
                 draft.reveal.set(Some(SettingsField::Width));
             }
@@ -731,7 +747,10 @@ fn manual_proxy_drafts_preserve_socks_dns_mode_through_persistence_and_cancel(
                     .as_ref()
                     .context("Reopened settings draft")?;
                 assert_eq!(draft.proxy_mode, 2);
-                assert_eq!(draft.proxy_url.read(cx).value(), "socks5h://127.0.0.1:1080");
+                assert_eq!(
+                    draft.proxy_url.read(cx).value(cx),
+                    "socks5h://127.0.0.1:1080"
+                );
                 draft.proxy_url.update(cx, |input, cx| {
                     input.set_value("socks5://user:secret@localhost:1080", cx)
                 });
@@ -764,7 +783,6 @@ fn settings_memory_validation_uses_gb_and_enforces_the_one_to_thirty_two_gb_boun
             let Some(draft) = view.settings_form.as_ref() else {
                 return;
             };
-            let draft = draft.snapshot(cx);
             for (value, expected) in [
                 ("0.5", None),
                 ("33", None),
@@ -901,8 +919,8 @@ fn save_and_leave_retains_invalid_and_unwritable_drafts_until_retry_succeeds(
         assert!(cx.update(
             |window, cx| view.read(cx).settings_form.as_ref().is_some_and(|draft| {
                 draft.page == 1
-                    && draft.memory.read(cx).value() == "invalid"
-                    && draft.concurrent.read(cx).value() == "3"
+                    && draft.memory.read(cx).value(cx) == "invalid"
+                    && draft.concurrent.read(cx).value(cx) == "3"
                     && draft.memory.read(cx).focus_handle(cx).is_focused(window)
                     && draft
                         .error
@@ -928,8 +946,8 @@ fn save_and_leave_retains_invalid_and_unwritable_drafts_until_retry_succeeds(
                         .error
                         .as_ref()
                         .is_some_and(|error| error.field.is_none())
-                        && draft.memory.read(cx).value() == "4"
-                        && draft.concurrent.read(cx).value() == "3"
+                        && draft.memory.read(cx).value(cx) == "4"
+                        && draft.concurrent.read(cx).value(cx) == "3"
                 }))
         );
         assert_eq!(std::fs::read(&root)?, b"not a directory");
@@ -1019,7 +1037,7 @@ fn native_close_dismisses_an_open_selector_before_routing_save_errors(
         !view.shell.surfaces.is_open()
             && view.shell.settings_page == Some(1)
             && view.settings_form.as_ref().is_some_and(|draft| {
-                draft.memory.read(cx).value() == "invalid"
+                draft.memory.read(cx).value(cx) == "invalid"
                     && draft.memory.read(cx).focus_handle(cx).is_focused(window)
             })
     }));

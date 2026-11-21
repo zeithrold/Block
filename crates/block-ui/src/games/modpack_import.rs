@@ -911,7 +911,7 @@ impl Block {
             let name_changed = state
                 .initial_name
                 .as_ref()
-                .is_some_and(|initial| name.read(cx).value() != *initial);
+                .is_some_and(|initial| name.read(cx).value(cx) != *initial);
             let target_changed = state.draft.as_ref().is_some_and(|draft| {
                 draft.version != draft.detected_version
                     || draft.loader.is_some()
@@ -1069,7 +1069,7 @@ impl Block {
             .pack_import
             .name
             .as_ref()
-            .and_then(|field| instance_name_error(&field.read(cx).value()));
+            .and_then(|field| instance_name_error(&field.read(cx).value(cx)));
         self.shell.pack_import.name_error = error;
     }
 
@@ -1080,7 +1080,7 @@ impl Block {
             .pack_import
             .name
             .as_ref()
-            .map(|field| field.read(cx).value().trim().to_owned())
+            .map(|field| field.read(cx).value(cx).trim().to_owned())
     }
 
     /// Route one interaction in the wizard. Every transition is applied
@@ -2965,7 +2965,7 @@ mod tests {
                         if form.name.entity_id() == original.entity_id())
             }));
             assert_eq!(
-                original.read_with(cx, |field, _| field.value()),
+                original.read_with(cx, |field, cx| field.value(cx)),
                 "Keep this game"
             );
             Ok(())
@@ -3013,7 +3013,10 @@ mod tests {
                     .is_some_and(|layer| matches!(layer.kind, Surface::DiscardGameDraft { .. }))
             }));
             click_pack(cx, "discard-game-stay")?;
-            assert_eq!(name.read_with(cx, |field, _| field.value()), "Edited pack");
+            assert_eq!(
+                name.read_with(cx, |field, cx| field.value(cx)),
+                "Edited pack"
+            );
             Ok(())
         })();
         assert!(result.is_ok(), "{result:?}");
@@ -3068,7 +3071,7 @@ mod tests {
             }));
             click_pack(cx, "discard-game-stay")?;
             assert_eq!(
-                name.read_with(cx, |field, _| field.value()),
+                name.read_with(cx, |field, cx| field.value(cx)),
                 "Edited parent"
             );
             Ok(())
@@ -3248,7 +3251,7 @@ mod tests {
             assert!(view.read_with(cx, |view, cx| {
                 view.shell.pack_import.name.as_ref().is_some_and(|name| {
                     name.entity_id() == field.entity_id()
-                        && name.read(cx).value() == "My imported game"
+                        && name.read(cx).value(cx) == "My imported game"
                 }) && view
                     .shell
                     .pack_import
@@ -3665,7 +3668,7 @@ mod tests {
                 .pack_import
                 .name
                 .as_ref()
-                .is_some_and(|name| name.read(cx).value() == "Edited pack")
+                .is_some_and(|name| name.read(cx).value(cx) == "Edited pack")
         }));
     }
 
@@ -4154,10 +4157,15 @@ mod tests {
                 .ok_or_else(|| anyhow::anyhow!("saved name is not shown"))?;
             cx.update(|window, cx| {
                 field.update(cx, |field, cx| {
-                    field.replace_text_in_range(None, "altered", window, cx);
+                    field.edit_fixture(window, cx, |state, window, cx| {
+                        state.replace_text_in_range(None, "altered", window, cx)
+                    });
                 });
             });
-            assert_eq!(field.read_with(cx, |field, _| field.value()), "Saved pack");
+            assert_eq!(
+                field.read_with(cx, |field, cx| field.value(cx)),
+                "Saved pack"
+            );
             let request = uuid::Uuid::new_v4();
             view.update(cx, |view, cx| {
                 view.shell.pack_import.phase = Phase::Installing;
@@ -4369,7 +4377,9 @@ mod tests {
                 cx.update(|window, cx| {
                     name.update(cx, |input, cx| {
                         input.set_value("Original draft", cx);
-                        input.replace_and_mark_text_in_range(None, "草", None, window, cx);
+                        input.edit_fixture(window, cx, |state, window, cx| {
+                            state.replace_and_mark_text_in_range(None, "草", None, window, cx)
+                        });
                     });
                     profile_name.update(cx, |input, cx| input.set_value("Custom profile", cx));
                     view.update(cx, |view, cx| {
@@ -4386,7 +4396,7 @@ mod tests {
                     });
                 });
                 cx.run_until_parked();
-                let value = name.read_with(cx, |input, _| input.value());
+                let value = name.read_with(cx, |input, cx| input.value(cx));
                 assert!(name.read_with(cx, |input, _| input.is_composing()));
                 for _ in 0..2 {
                     view.update(cx, |view, cx| {
@@ -4428,13 +4438,13 @@ mod tests {
                             view.shell.first_run.stage == Stage::GameChoice
                                 && matches!(&view.form, Some(crate::Form::Instance(form))
                                 if form.name.entity_id() == name.entity_id()
-                                    && form.name.read(cx).value() == value
+                                    && form.name.read(cx).value(cx) == value
                                     && form.name.read(cx).is_composing()
                                     && form.loader == LoaderKind::Forge
                                     && form.loader_version.as_deref() == Some("47.2.20"))
                                 && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
                                     profile.name.entity_id() == profile_name.entity_id()
-                                        && profile.name.read(cx).value() == "Custom profile"
+                                        && profile.name.read(cx).value(cx) == "Custom profile"
                                 })
                         }),
                         "origin={origin:?}: Cancel must restore the same live entities"
@@ -4463,12 +4473,12 @@ mod tests {
                         view.shell.first_run.stage == Stage::Overview
                             && matches!(&view.form, Some(crate::Form::Instance(form))
                             if form.name.entity_id() == name.entity_id()
-                                && form.name.read(cx).value() == value
+                                && form.name.read(cx).value(cx) == value
                                 && form.name.read(cx).is_composing()
                                 && form.loader_version.as_deref() == Some("47.2.20"))
                             && view.shell.wizard.draft.as_ref().is_some_and(|profile| {
                                 profile.name.entity_id() == profile_name.entity_id()
-                                    && profile.name.read(cx).value() == "Custom profile"
+                                    && profile.name.read(cx).value(cx) == "Custom profile"
                             })
                     }),
                     "origin={origin:?}: Done must restore the same live draft"
@@ -4540,7 +4550,7 @@ mod tests {
                 view.handle(UiAction::CancelForm, window, cx);
                 assert!(
                     matches!(&view.form, Some(super::super::Form::Instance(form))
-                    if form.name.read(cx).value() == "Parent draft")
+                    if form.name.read(cx).value(cx) == "Parent draft")
                 );
             });
         });
@@ -5855,7 +5865,7 @@ mod tests {
             return;
         };
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             long,
             "the pack's own name is shown unmodified"
         );
@@ -5893,7 +5903,7 @@ mod tests {
                 .pack_import
                 .name
                 .as_ref()
-                .map(|field| (field.entity_id(), field.read(cx).value()))
+                .map(|field| (field.entity_id(), field.read(cx).value(cx)))
         });
         assert_eq!(kept, Some((field.entity_id(), String::from("Harbor 界"))));
     }
@@ -5917,7 +5927,7 @@ mod tests {
             return;
         };
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             "Packed world"
         );
         assert_eq!(
@@ -5929,11 +5939,13 @@ mod tests {
         // Nothing is committed yet, so the editor accepts typing.
         cx.update(|window, cx| {
             field.update(cx, |field, cx| {
-                field.replace_text_in_range(None, "  ", window, cx);
+                field.edit_fixture(window, cx, |state, window, cx| {
+                    state.replace_text_in_range(None, "  ", window, cx)
+                });
             });
         });
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             "Packed world  "
         );
 
@@ -5946,7 +5958,7 @@ mod tests {
             );
         });
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             "Saved catalog name",
             "the field shows the name returned by the catalog"
         );
@@ -5968,11 +5980,13 @@ mod tests {
         // Editing the field no longer applies.
         cx.update(|window, cx| {
             field.update(cx, |field, cx| {
-                field.replace_text_in_range(None, "Renamed", window, cx);
+                field.edit_fixture(window, cx, |state, window, cx| {
+                    state.replace_text_in_range(None, "Renamed", window, cx)
+                });
             });
         });
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             "Saved catalog name"
         );
     }
@@ -5993,7 +6007,10 @@ mod tests {
         let Some(field) = field else {
             return;
         };
-        assert_eq!(field.read_with(cx, |field, _| field.value()), "Test game");
+        assert_eq!(
+            field.read_with(cx, |field, cx| field.value(cx)),
+            "Test game"
+        );
         assert_eq!(
             view.read_with(cx, |view, _| view.shell.pack_import.instance_name.clone()),
             Some(String::from("Test game"))
@@ -6001,11 +6018,13 @@ mod tests {
 
         cx.update(|window, cx| {
             field.update(cx, |field, cx| {
-                field.replace_text_in_range(None, "Renamed", window, cx);
+                field.edit_fixture(window, cx, |state, window, cx| {
+                    state.replace_text_in_range(None, "Renamed", window, cx)
+                });
             });
         });
         assert_eq!(
-            field.read_with(cx, |field, _| field.value()),
+            field.read_with(cx, |field, cx| field.value(cx)),
             "Test game",
             "the saved Instance name stays as the catalog recorded it"
         );
@@ -6081,7 +6100,7 @@ mod tests {
             assert!(crate::test_support::control_bounds(cx, "modpack-archive").is_some());
             assert!(view.read_with(cx, |view, cx| {
                 view.shell.pack_import.name.as_ref().is_some_and(|name| {
-                    name.entity_id() == field.entity_id() && name.read(cx).value() == "Kept draft"
+                    name.entity_id() == field.entity_id() && name.read(cx).value(cx) == "Kept draft"
                 })
             }));
 
@@ -6100,7 +6119,7 @@ mod tests {
                 view.read_with(cx, |view, cx| {
                     view.shell.pack_import.name.as_ref().is_some_and(|name| {
                         name.entity_id() == field.entity_id()
-                            && name.read(cx).value() == "Kept draft"
+                            && name.read(cx).value(cx) == "Kept draft"
                     })
                 }),
                 "re-inspecting the accepted archive retains its editor"
@@ -6123,7 +6142,7 @@ mod tests {
                 view.read_with(cx, |view, cx| {
                     view.shell.pack_import.name.as_ref().is_some_and(|name| {
                         name.entity_id() != field.entity_id()
-                            && name.read(cx).value() == "Other archive"
+                            && name.read(cx).value(cx) == "Other archive"
                     })
                 }),
                 "a different accepted archive starts with its own name"
@@ -6168,7 +6187,7 @@ mod tests {
                     state
                         .name
                         .as_ref()
-                        .map(|field| (field.entity_id(), field.read(cx).value())),
+                        .map(|field| (field.entity_id(), field.read(cx).value(cx))),
                 )
             }),
             (
@@ -6188,7 +6207,7 @@ mod tests {
                     .pack_import
                     .name
                     .as_ref()
-                    .map(|field| (field.entity_id(), field.read(cx).value()))
+                    .map(|field| (field.entity_id(), field.read(cx).value(cx)))
             }),
             Some((field.entity_id(), String::from("My pack")))
         );
@@ -6241,7 +6260,7 @@ mod tests {
                 .pack_import
                 .name
                 .as_ref()
-                .map(|field| (field.entity_id(), field.read(cx).value()))
+                .map(|field| (field.entity_id(), field.read(cx).value(cx)))
         });
         let Some((replaced_id, replaced_value)) = replaced else {
             return;
@@ -6279,7 +6298,7 @@ mod tests {
                     .pack_import
                     .name
                     .as_ref()
-                    .map(|field| (field.entity_id(), field.read(cx).value()))
+                    .map(|field| (field.entity_id(), field.read(cx).value(cx)))
             }),
             Some((field.entity_id(), String::from("My pack"))),
             "a retry keeps the user's draft even when the archive moved"

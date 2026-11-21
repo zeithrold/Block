@@ -624,7 +624,7 @@ impl Block {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>, options: LaunchOptions) -> Self {
         initialize(cx);
         Self::install_window_close_guard(window, cx);
-        text_input::bind_keys(cx);
+
         bind_navigation_keys(cx);
         let focus = cx.focus_handle();
         focus.focus(window, cx);
@@ -1306,9 +1306,9 @@ impl Block {
         let Some(Form::Instance(form)) = &self.form else {
             return false;
         };
-        let directory = form.directory.read(cx).value();
-        let name = form.name.read(cx).value();
-        let version = form.version.read(cx).value();
+        let directory = form.directory.read(cx).value(cx);
+        let name = form.name.read(cx).value(cx);
+        let version = form.version.read(cx).value(cx);
         if let Some(reason) = self.wizard_version_restriction(version.trim()) {
             self.report(msg!(
                 "wizard.version.unsupported_arm",
@@ -2061,7 +2061,7 @@ mod tests {
         super::Block::install_window_close_guard(window, cx);
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        super::text_input::bind_keys(cx);
+
         super::bind_navigation_keys(cx);
         super::Block {
             build_info: super::BuildInfo::default(),
@@ -2263,7 +2263,7 @@ mod tests {
             cx.run_until_parked();
             assert!(view.read_with(cx, |view, cx| {
                 matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.directory.read(cx).value() == "/chosen/game")
+                    if form.directory.read(cx).value(cx) == "/chosen/game")
             }));
             view.update(cx, |view, cx| {
                 if let Some(super::Form::Instance(form)) = &view.form {
@@ -2280,7 +2280,7 @@ mod tests {
                     .text(crate::Language::English)
                     .contains("installation folder chooser")
                     && matches!(&view.form, Some(super::Form::Instance(form))
-                        if form.directory.read(cx).value() == "/draft/game")
+                        if form.directory.read(cx).value(cx) == "/draft/game")
             }));
             click_selector(cx, "browse-install");
             cx.simulate_path_prompt_response(|_| {
@@ -2291,7 +2291,7 @@ mod tests {
                 view.status.text(crate::Language::English) == "Installation folder selected."
                     && view.shell.wizard.error.is_none()
                     && matches!(&view.form, Some(super::Form::Instance(form))
-                        if form.directory.read(cx).value() == "/chosen/after-retry")
+                        if form.directory.read(cx).value(cx) == "/chosen/after-retry")
             }));
             view.update(cx, |view, cx| {
                 view.router.navigate(super::Tab::Onboarding);
@@ -2903,11 +2903,11 @@ mod tests {
         crate::test_support::ensure_live_window(cx);
         cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
         click_selector(cx, "wizard-kind-instance");
-        crate::test_support::press(cx, "cmd-a");
+        crate::test_support::press(cx, "secondary-a");
         cx.simulate_input("世界 🧱");
         assert_eq!(
             view.read_with(cx, |view, cx| match &view.form {
-                Some(super::Form::Instance(form)) => form.name.read(cx).value(),
+                Some(super::Form::Instance(form)) => form.name.read(cx).value(cx),
                 _ => String::new(),
             }),
             "世界 🧱"
@@ -2933,11 +2933,11 @@ mod tests {
             version_focused(cx),
             "Tab must reach the exact version input"
         );
-        crate::test_support::press(cx, "cmd-a");
+        crate::test_support::press(cx, "secondary-a");
         cx.simulate_input("1.20.1");
         assert_eq!(
             view.read_with(cx, |view, cx| match &view.form {
-                Some(super::Form::Instance(form)) => form.version.read(cx).value(),
+                Some(super::Form::Instance(form)) => form.version.read(cx).value(cx),
                 _ => String::new(),
             }),
             "1.20.1"
@@ -2950,7 +2950,7 @@ mod tests {
             view.form.as_ref().map(|form| match form {
                 super::Form::Instance(form) => (
                     form.is_neoforge(),
-                    form.version.read(cx).value(),
+                    form.version.read(cx).value(cx),
                     form.loader.clone(),
                     form.loader_version.clone(),
                 ),
@@ -3053,7 +3053,7 @@ mod tests {
             click_selector(cx, "create-instance");
             cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1300.)));
             click_selector(cx, "wizard-kind-instance");
-            crate::test_support::press(cx, "cmd-a");
+            crate::test_support::press(cx, "secondary-a");
             cx.simulate_input("世界 draft");
             click_selector(cx, "wizard-component-version");
             cx.update(|window, cx| {
@@ -3067,7 +3067,7 @@ mod tests {
                     focus.focus(window, cx);
                 }
             });
-            crate::test_support::press(cx, "cmd-a");
+            crate::test_support::press(cx, "secondary-a");
             cx.simulate_input("1.20.1");
             click_selector(cx, "wizard-next");
             click_selector(cx, "wizard-component-location");
@@ -3077,9 +3077,9 @@ mod tests {
             click_selector(cx, "wizard-component-version");
             assert!(view.read_with(cx, |view, cx| {
                 matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.name.read(cx).value() == "世界 draft"
-                        && form.version.read(cx).value() == "1.20.1"
-                        && form.directory.read(cx).value() == directory.to_string_lossy())
+                    if form.name.read(cx).value(cx) == "世界 draft"
+                        && form.version.read(cx).value(cx) == "1.20.1"
+                        && form.directory.read(cx).value(cx) == directory.to_string_lossy())
             }));
             assert!(!view.read_with(cx, |view, _| view.busy));
             click_selector(cx, "cancel-instance");

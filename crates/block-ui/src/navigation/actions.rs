@@ -504,7 +504,7 @@ impl Block {
         cx: &mut Context<'_, Self>,
     ) -> bool {
         self.exit_blocked_by_auth_save(action)
-            || self.composition_in_progress(action, cx)
+            || self.composition_in_progress(action, window, cx)
             || !self.action_allowed(action)
             || self.confirm_pack_leave_if_needed(action, window, cx)
             || self.confirm_game_discard_if_needed(action, window, cx)
@@ -603,7 +603,8 @@ impl Block {
     pub(super) fn composition_in_progress(
         &self,
         action: &UiAction,
-        cx: &Context<'_, Self>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
     ) -> bool {
         if matches!(
             action,
@@ -617,7 +618,7 @@ impl Block {
             draft
                 .fields()
                 .iter()
-                .any(|field| field.read(cx).is_composing())
+                .any(|field| crate::TextInput::has_marked_text(field, window, cx))
         }) {
             return true;
         }
@@ -632,7 +633,7 @@ impl Block {
         ) && self
             .form_inputs()
             .iter()
-            .any(|field| field.read(cx).is_composing()))
+            .any(|field| crate::TextInput::has_marked_text(field, window, cx)))
             || matches!(
                 action,
                 UiAction::PackImport(
@@ -643,7 +644,7 @@ impl Block {
                 .pack_import
                 .name
                 .as_ref()
-                .is_some_and(|field| field.read(cx).is_composing())
+                .is_some_and(|field| crate::TextInput::has_marked_text(field, window, cx))
     }
 
     /// Whether the dispatcher may run this action now. Everything waits for a
