@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::{
     IndexPath, Size,
-    searchable_list::SearchableListItem,
+    searchable_list::{SearchableListItem, SearchableVec},
     select::{Caret, Select, SelectEvent, SelectState},
 };
 use uuid::Uuid;
@@ -137,7 +137,7 @@ impl SearchableListItem for ProviderChoice {
     }
 }
 
-pub(super) type ProviderPicker = Entity<SelectState<Vec<ProviderChoice>>>;
+pub(super) type ProviderPicker = Entity<SelectState<SearchableVec<ProviderChoice>>>;
 
 impl Block {
     fn auth_provider_choice(&self, provider: &AuthlibProvider) -> ServerChoice {
@@ -173,11 +173,13 @@ impl Block {
     ) -> ProviderPicker {
         let items = self.auth_provider_choices();
         let selected = (!items.is_empty()).then(|| IndexPath::new(0));
-        let picker = cx.new(|cx| SelectState::new(items, selected, window, cx));
+        let picker = cx.new(|cx| {
+            SelectState::new(SearchableVec::from(items), selected, window, cx).searchable(true)
+        });
         cx.subscribe_in(
             &picker,
             window,
-            |view, picker, event: &SelectEvent<Vec<ProviderChoice>>, window, cx| {
+            |view, picker, event: &SelectEvent<SearchableVec<ProviderChoice>>, window, cx| {
                 if let SelectEvent::Confirm(Some(value)) = event
                     && let Some(state) = view.shell.auth.as_ref().filter(|state| {
                         state.provider_picker.as_ref() == Some(picker)
@@ -215,7 +217,7 @@ impl Block {
                     if let Some(state) = &view.shell.auth
                         && let Some(picker) = &state.provider_picker
                     {
-                        let items = view.auth_provider_choices();
+                        let items = SearchableVec::from(view.auth_provider_choices());
                         picker.update(cx, |picker, cx| picker.set_items(items, window, cx));
                         state.sync_auth_provider_selection(window, cx);
                     }

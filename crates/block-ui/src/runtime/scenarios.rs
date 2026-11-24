@@ -46,6 +46,7 @@ pub const SCENARIOS: &[&str] = &[
     "auth-choose",
     "auth-information",
     "auth-authlib-information",
+    "auth-authlib-many-providers",
     "auth-authlib-http-warning",
     "auth-authlib-characters",
     "auth-authlib-complete",
@@ -461,6 +462,20 @@ impl Block {
                     super::providers::fixture_provider(false)?,
                     super::providers::fixture_provider(true)?,
                 ];
+                if name == "auth-authlib-many-providers" {
+                    let template = &self.shell.providers.records[0];
+                    let additional: Vec<_> = (3_u128..=40)
+                        .map(|number| {
+                            let mut provider = template.clone();
+                            provider.id = uuid::Uuid::from_u128(number);
+                            provider.name = format!("Test server {number:02}");
+                            provider.api_url =
+                                format!("https://node-{number:02}.example.test/api/");
+                            provider
+                        })
+                        .collect();
+                    self.shell.providers.records.extend(additional);
+                }
                 self.shell.providers.loaded = true;
             }
             self.open_auth_wizard(window, cx);
