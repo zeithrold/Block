@@ -31,16 +31,6 @@ use super::{
 
 pub(super) const WINDOW_PRESETS: [(u32, u32); 3] = [(854, 480), (1280, 720), (1920, 1080)];
 
-pub(super) fn is_back_key(event: &gpui::KeyDownEvent) -> bool {
-    let modifiers = event.keystroke.modifiers;
-    event.keystroke.key == "left"
-        && modifiers.alt
-        && !modifiers.control
-        && !modifiers.platform
-        && !modifiers.shift
-        && !modifiers.function
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct GameDefaults {

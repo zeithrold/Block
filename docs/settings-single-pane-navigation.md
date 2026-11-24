@@ -84,9 +84,9 @@ This remains true after validation routes to a category: it is a stable parent
 relationship, not an unpredictable return to whichever page happened to
 initiate Save. At the index, a second Back returns to Home.
 
-Use Alt+Left for navigation; handle a menu or dialog's dismissal before page
-navigation. Do not overload Escape with unconditional draft discard. Keyboard
-focus follows the new context; returning restores the originating row.
+Use the Back control for page navigation. Escape dismisses an open menu or
+dialog; it must not unconditionally discard a draft. Keyboard focus follows
+the new context; returning restores the originating row.
 
 ## Make saving understandable without a sidebar
 

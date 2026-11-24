@@ -288,7 +288,6 @@ impl Overlays {
                 let gate = build_owner.clone();
                 let confirm = build_owner.clone();
                 let dismiss = build_owner.clone();
-                let title_owner = build_owner.clone();
                 super::design::ui_text(dialog, language, dialog_cx)
                     .w(dialog_width)
                     .px(px(0.))
@@ -296,7 +295,6 @@ impl Overlays {
                     .pb(px(0.))
                     .close_button(false)
                     .content(move |content, _window, _cx| {
-                        let title_owner = title_owner.clone();
                         let header = {
                             div()
                                 .debug_selector(|| "surface-dialog-title".into())
@@ -306,9 +304,6 @@ impl Overlays {
                                 .flex()
                                 .flex_shrink_0()
                                 .items_center()
-                                .on_key_down(move |event, window, cx| {
-                                    settings_dialog_back(&title_owner, revision, event, window, cx);
-                                })
                                 .child(
                                     gpui_component::dialog::DialogTitle::new()
                                         .flex_1()
@@ -460,39 +455,7 @@ impl Render for SurfaceOverlayBody {
             })
             .relative()
             .w_full()
-            .on_key_down(cx.listener(move |body, event, window, cx| {
-                settings_dialog_back(&body.owner, revision, event, window, cx);
-            }))
             .child(body)
-    }
-}
-
-fn settings_dialog_back(
-    owner: &WeakEntity<Block>,
-    revision: usize,
-    event: &gpui::KeyDownEvent,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    if !super::settings::is_back_key(event) {
-        return;
-    }
-    let allowed = owner.upgrade().is_some_and(|owner| {
-        let view = owner.read(cx);
-        view.router.tab() == super::Tab::Settings
-            && view.shell.surfaces.top().is_some_and(|entry| {
-                entry.revision == revision && matches!(entry.kind, Surface::SettingsExit(_))
-            })
-            && !view.settings_form.as_ref().is_some_and(|draft| {
-                draft
-                    .fields()
-                    .iter()
-                    .any(|field| field.read(cx).is_composing())
-            })
-    });
-    if allowed {
-        window.dispatch_action(Box::new(gpui_base::actions::Cancel), cx);
-        cx.stop_propagation();
     }
 }
 

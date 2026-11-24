@@ -813,7 +813,12 @@ impl Block {
                 }
             }
             AccountProvider::Authlib => {
-                if let Some(picker) = &state.provider_picker {
+                if self.shell.providers.records.is_empty() {
+                    self.shell
+                        .surfaces
+                        .trigger_focus("auth-provider-add", cx)
+                        .focus(window, cx);
+                } else if let Some(picker) = &state.provider_picker {
                     picker.focus_handle(cx).focus(window, cx);
                 }
             }
@@ -1746,51 +1751,56 @@ impl Block {
     /// the address the form states.
     fn authlib_form(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
+        let empty = self.shell.providers.records.is_empty();
         let provider = self
             .shell
             .providers
             .records
             .iter()
             .find(|p| Some(p.id) == state.external_provider);
-        let mut card = components::card(self.palette)
+        let provider_control = if empty {
+            let add_label = tr!(language, "accounts.auth.provider.picker.add");
+            components::button(
+                "auth-provider-add",
+                "",
+                self.palette,
+                ButtonVariant::Primary,
+                ControlState {
+                    disabled: self.busy || state.provider_draft.is_some(),
+                    ..ControlState::default()
+                },
+                cx.listener(|view, (), window, cx| {
+                    view.handle(UiAction::AuthProviderAdd, window, cx);
+                }),
+            )
+            .aria_label(add_label.clone())
+            .track_focus(&self.shell.surfaces.trigger_focus("auth-provider-add", cx))
+            .w_full()
+            .gap_2()
+            .child(Icon::Plus.render(16., self.palette.on_primary))
+            .child(add_label)
+            .into_any_element()
+        } else {
+            self.render_provider_picker(state, provider)
+                .into_any_element()
+        };
+        let mut form = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
             .debug_selector(|| "auth-authlib".into())
             .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(self.render_provider_picker(state, provider))
-                    .child(
-                        self.auth_button(
-                            "auth-provider-add",
-                            tr!(language, "accounts.providers.add"),
-                            UiAction::AuthProviderAdd,
-                            ButtonVariant::Outline,
-                            ControlState {
-                                disabled: self.busy,
-                                ..ControlState::default()
-                            },
-                            cx,
-                        )
-                        .track_focus(&self.shell.surfaces.trigger_focus("auth-provider-add", cx)),
-                    ),
-            )
-            // The address that receives the account and password stays visible.
-            .children(provider.map(|p| note(p.api_url.clone())));
+            .child(provider_control);
         if let Some(error) = &self.shell.providers.load_error {
-            card = card.child(note(error.clone()));
-        }
-        if self.shell.providers.loaded && self.shell.providers.records.is_empty() {
-            card = card.child(note(tr!(language, "accounts.auth.provider.none")));
+            form = form.child(note(error.clone()));
         }
         if state.provider_draft.is_some() {
-            card = card.child(note(tr!(language, "accounts.auth.provider.drawer_open")));
+            form = form.child(note(tr!(language, "accounts.auth.provider.drawer_open")));
         }
         if provider.is_some_and(|provider| {
             state.external_api.as_deref() != Some(provider.api_url.as_str())
         }) {
-            card = card.child(note(tr!(
+            form = form.child(note(tr!(
                 language,
                 "accounts.auth.provider.address_changed"
             )));
@@ -1798,7 +1808,7 @@ impl Block {
         if let Some(provider) = provider
             && provider.api_url.starts_with("http:")
         {
-            card = card.child(AlertVariant::Warning.render(
+            form = form.child(AlertVariant::Warning.render(
                 "auth-http-warning",
                 None,
                 tr!(language, "accounts.auth.provider.http_warning"),
@@ -1817,7 +1827,7 @@ impl Block {
                 },
             ));
         }
-        card.child(fields.child(self.password_field(state)))
+        form.child(fields.child(self.password_field(state)))
             .child(note(tr!(language, "accounts.auth.password.note")))
     }
 
@@ -1858,9 +1868,14 @@ impl Block {
     /// the page saves and selects it without another confirmation.
     fn offline_form(&self, state: &AuthWizard) -> gpui::Div {
         let language = self.language();
-        let mut card = components::card(self.palette).debug_selector(|| "auth-offline".into());
+        let mut form = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .gap_4()
+            .debug_selector(|| "auth-offline".into());
         if let Some(field) = &state.username {
-            card = card.child(
+            form = form.child(
                 components::field_with(
                     tr!(language, "accounts.auth.offline.name.label"),
                     field,
@@ -1874,8 +1889,7 @@ impl Block {
                 .debug_selector(|| "auth-offline-name".into()),
             );
         }
-        card.child(note(tr!(language, "accounts.auth.offline.name.rule")))
-            .child(note(tr!(language, "accounts.auth.offline.card_note")))
+        form.child(note(tr!(language, "accounts.auth.offline.name.rule")))
     }
 
     /// The failure of the attempt this page started, with the form it started

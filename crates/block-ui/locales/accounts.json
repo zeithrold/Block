@@ -71,9 +71,9 @@
     "ja": "Microsoft でサインイン"
   },
   "accounts.auth.info.description.offline": {
-    "en": "Choose a name for local play without an authentication service. Adding saves it on this device and selects it.",
-    "zh-Hans": "为无需身份验证服务的本地游戏选择一个名称。添加后会在此设备上保存并选中它。",
-    "ja": "認証サービスを使わないローカルプレイ用の名前を選択します。追加するとこのデバイスに保存され、選択されます。"
+    "en": "No sign-in needed. Block saves and selects this account when you add it.",
+    "zh-Hans": "无需登录。添加后，Block 会保存并选中这个账号。",
+    "ja": "サインインは不要です。追加すると、Block がこのアカウントを保存して選択します。"
   },
   "accounts.auth.info.description.authlib": {
     "en": "Choose your server and enter its account credentials.",
@@ -275,10 +275,10 @@
     "zh-Hans": "选择服务器",
     "ja": "サーバーを選択"
   },
-  "accounts.auth.provider.none": {
-    "en": "No saved providers. Use + to add your server or import its quick link.",
-    "zh-Hans": "尚未保存验证服务器。使用 + 添加你的服务器或导入其快速链接。",
-    "ja": "保存済みの認証サーバーはありません。「+」でサーバーを追加するか、クイックリンクをインポートしてください。"
+  "accounts.auth.provider.picker.add": {
+    "en": "Add an authentication server",
+    "zh-Hans": "添加认证服务器",
+    "ja": "認証サーバーを追加"
   },
   "accounts.auth.provider.drawer_open": {
     "en": "Finish adding the provider or close the drawer before signing in.",
@@ -325,11 +325,6 @@
     "zh-Hans": "密码发送后即被清除，绝不会被保存。只有完成操作才会安全保存此验证服务器的令牌。",
     "ja": "パスワードは送信後に消去され、保存されることはありません。「完了」でのみ、この認証サーバーのトークンが安全に保存されます。"
   },
-  "accounts.auth.offline.card_note": {
-    "en": "An offline identity for local play, without signing in to an authentication service.",
-    "zh-Hans": "用于本地游戏的离线身份，无需登录身份验证服务。",
-    "ja": "認証サービスにサインインしない、ローカルプレイ用のオフライン ID です。"
-  },
   "accounts.auth.offline.name.label": {
     "en": "Player name",
     "zh-Hans": "玩家名称",
@@ -341,9 +336,9 @@
     "ja": "プレイヤー名"
   },
   "accounts.auth.offline.name.rule": {
-    "en": "Use 1–16 ASCII letters, numbers, or underscores. Names are case-sensitive.",
-    "zh-Hans": "使用 1–16 个 ASCII 字母、数字或下划线。名称区分大小写。",
-    "ja": "1〜16 文字の ASCII 英数字またはアンダースコアを使用してください。名前は大文字と小文字を区別します。"
+    "en": "1–16 characters: A–Z, a–z, 0–9, or _. Case-sensitive.",
+    "zh-Hans": "1–16 个英文字母、数字或下划线，区分大小写。",
+    "ja": "半角英数字とアンダースコアで1〜16文字。大文字と小文字を区別します。"
   },
   "accounts.auth.microsoft.card_note": {
     "en": "Block never asks for your Microsoft password. Finish in the browser; Block verifies ownership before it offers to save the account.",

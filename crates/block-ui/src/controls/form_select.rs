@@ -176,14 +176,6 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for Field<V> {
         div()
             .id(id)
             .debug_selector(move || id.into())
-            .on_key_down({
-                let dismiss = dismiss.clone();
-                move |event, window, cx| {
-                    if crate::settings::is_back_key(event) && dismiss(window, cx) {
-                        cx.stop_propagation();
-                    }
-                }
-            })
             .on_action(move |_: &DismissFormSelect, window, cx| {
                 dismiss(window, cx);
             })

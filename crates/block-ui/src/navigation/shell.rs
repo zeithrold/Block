@@ -236,16 +236,7 @@ impl Block {
                 cx.listener(|view, _, _, _| view.shell.chrome_dragging = false),
             )
             .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
-                if super::settings::is_back_key(event)
-                    && !view.composition_in_progress(&UiAction::NavigationBack, window, cx)
-                {
-                    if view.shell.surfaces.is_open() {
-                        view.handle(UiAction::Drawer(None), window, cx);
-                    } else {
-                        view.handle(UiAction::NavigationBack, window, cx);
-                    }
-                    cx.stop_propagation();
-                } else if event.keystroke.key == "escape" {
+                if event.keystroke.key == "escape" {
                     // Base Dialog owns Escape while a surface is mounted.
                     if !view.shell.surfaces.is_open() {
                         if view.shell.auth.is_some() {

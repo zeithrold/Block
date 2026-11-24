@@ -124,7 +124,10 @@ impl Block {
                 }
                 Message::Accounts(result) => self.receive_accounts(result),
                 Message::AccountImages(images) => self.store_account_images(images),
-                Message::ProviderImages(icons) => self.store_provider_images(icons),
+                Message::ProviderImages(icons) => {
+                    self.store_provider_images(icons);
+                    self.refresh_auth_provider_picker(cx);
+                }
                 Message::Versions(result) => self.receive_versions(result),
                 Message::LoaderVersions { request, result } => {
                     if !self.receive_pack_loader_versions(request, result.clone(), cx) {

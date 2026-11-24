@@ -1409,6 +1409,14 @@ mod tests {
 
         let result = (|| -> anyhow::Result<()> {
             let provider = fixture_provider(false)?;
+            let back = |cx: &mut gpui::VisualTestContext| -> anyhow::Result<()> {
+                let bounds = crate::test_support::control_bounds(cx, "providers-back")
+                    .or_else(|| crate::test_support::control_bounds(cx, "navigation-back"))
+                    .ok_or_else(|| anyhow::anyhow!("provider Back button did not paint"))?;
+                cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+                cx.run_until_parked();
+                Ok(())
+            };
             let (view, cx) = crate::test_support::window(cx, |window, cx| {
                 let mut view = crate::tests::test_view(window, cx);
                 view.preferences.reduce_motion = true;
@@ -1470,7 +1478,7 @@ mod tests {
                         .is_some_and(|form| form.name.read(cx).focus_handle(cx).is_focused(window))
                 }));
             });
-            crate::test_support::press(cx, "alt-left");
+            back(cx)?;
             assert!(view.read_with(cx, |view, _| view.router.screen()
                 == &Screen::Provider(provider.id)
                 && view.shell.providers.form.is_none()));
@@ -1483,8 +1491,8 @@ mod tests {
                 view.read_with(cx, |view, _| view.shell.providers.form.is_some()),
                 "returning must focus the original Edit provider action"
             );
-            crate::test_support::press(cx, "alt-left");
-            crate::test_support::press(cx, "alt-left");
+            back(cx)?;
+            back(cx)?;
             for (selector, destination) in [
                 ("provider-add", Screen::NewProvider),
                 (
@@ -1496,7 +1504,7 @@ mod tests {
                     .ok_or_else(|| anyhow::anyhow!("provider origin did not paint: {selector}"))?;
                 cx.simulate_click(origin.center(), gpui::Modifiers::none());
                 cx.run_until_parked();
-                crate::test_support::press(cx, "alt-left");
+                back(cx)?;
                 for _ in 0..2 {
                     cx.update(|window, cx| window.simulate_next_frame(cx));
                     cx.run_until_parked();
@@ -1507,7 +1515,7 @@ mod tests {
                     destination,
                     "returning must preserve the actual invoking provider control"
                 );
-                crate::test_support::press(cx, "alt-left");
+                back(cx)?;
             }
             cx.update(|window, cx| {
                 view.update(cx, |view, cx| {

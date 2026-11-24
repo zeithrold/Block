@@ -429,7 +429,9 @@ fn language_preview_and_save_keep_the_live_input_and_composition(cx: &mut gpui::
         });
         let focus = cx.update(|window, cx| window.focused(cx));
         assert!(focus.is_some());
-        crate::test_support::press(cx, "alt-left");
+        view.update_in(cx, |view, window, cx| {
+            view.handle(UiAction::SettingsBack, window, cx);
+        });
         assert!(view.read_with(cx, |view, _| view.shell.settings_page == Some(1)));
         assert!(input.read_with(cx, |input, _| input.is_composing()));
         for (language, expected_label) in [
@@ -1336,7 +1338,7 @@ fn settings_controls_and_long_storage_paths_fit_the_home_frame(cx: &mut gpui::Te
 }
 
 #[gpui::test]
-fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpui::TestAppContext) {
+fn escape_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpui::TestAppContext) {
     use gpui_component::WindowExt as _;
 
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
@@ -1360,7 +1362,7 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     crate::test_support::press(cx, "shift-tab");
     settings_frame(cx);
     assert_ne!(cx.update(|window, cx| window.focused(cx)), initial_focus);
-    crate::test_support::press(cx, "alt-left");
+    crate::test_support::press(cx, "escape");
     settings_frame(cx);
     assert!(view.read_with(cx, |view, _| {
         !view.shell.surfaces.is_open() && view.shell.settings_page == Some(1)
@@ -1373,7 +1375,7 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     crate::test_support::press(cx, "tab");
     settings_frame(cx);
     assert_ne!(cx.update(|window, cx| window.focused(cx)), initial_focus);
-    crate::test_support::press(cx, "alt-left");
+    crate::test_support::press(cx, "escape");
     settings_frame(cx);
     assert!(view.read_with(cx, |view, _| {
         !view.shell.surfaces.is_open() && view.shell.settings_page == Some(1)
@@ -1385,7 +1387,7 @@ fn alt_left_dismisses_settings_dialogs_without_leaving_their_parent(cx: &mut gpu
     });
     settings_frame(cx);
     assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
-    crate::test_support::press(cx, "alt-left");
+    crate::test_support::press(cx, "escape");
     settings_frame(cx);
     assert!(view.read_with(cx, |view, _| {
         !view.shell.surfaces.is_open()

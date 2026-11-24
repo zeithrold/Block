@@ -89,7 +89,7 @@ fn dirty_editor_prompt_escape_restores_the_actual_text_input_focus(cx: &mut Test
         }
         for origin in [Origin::Back, Origin::NativeClose, Origin::ApplicationQuit] {
             match origin {
-                Origin::Back => crate::test_support::press(cx, "alt-left"),
+                Origin::Back => crate::test_support::press(cx, "escape"),
                 Origin::NativeClose => {
                     let allowed = cx.update(|window, cx| {
                         view.update(cx, |view, cx| view.allow_native_window_close(window, cx))

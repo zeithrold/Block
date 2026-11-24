@@ -224,11 +224,21 @@ fn scrolling_before_navigation_freezes_the_last_visible_detail(cx: &mut TestAppC
     );
     frame(cx, 240);
     assert!(view.read_with(cx, |view, _| view.motion.detail.outgoing().is_none()));
-    crate::test_support::press(cx, "alt-left alt-left");
+    let screen = view.read_with(cx, |view, _| view.router.screen().clone());
+    crate::test_support::press(cx, "alt-left");
+    assert_eq!(
+        view.read_with(cx, |view, _| view.router.screen().clone()),
+        screen,
+        "Alt/Option+Left must not navigate"
+    );
+    view.update_in(cx, |view, window, cx| {
+        view.handle(UiAction::NavigationBack, window, cx);
+        view.handle(UiAction::NavigationBack, window, cx);
+    });
     assert_eq!(
         view.read_with(cx, |view, _| view.router.screen().clone()),
         crate::navigation::Screen::List,
-        "both Back keys must route while the returning detail is still mounting"
+        "both Back actions must route while the returning detail is still mounting"
     );
 }
 

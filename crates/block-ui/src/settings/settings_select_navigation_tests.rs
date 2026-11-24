@@ -56,7 +56,7 @@ fn native_close_dismisses_an_open_selector_before_routing_save_errors(
 }
 
 #[gpui::test]
-fn alt_left_dismisses_select_before_returning_to_the_index(cx: &mut gpui::TestAppContext) {
+fn escape_dismisses_select_before_back_returns_to_the_index(cx: &mut gpui::TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.router.navigate(Tab::Home);
@@ -71,14 +71,14 @@ fn alt_left_dismisses_select_before_returning_to_the_index(cx: &mut gpui::TestAp
     settings_click(cx, "settings-page-general");
     settings_click(cx, "settings-appearance");
     assert_eq!(appearance_expanded(cx), Some(true));
-    crate::test_support::press(cx, "alt-left");
+    crate::test_support::press(cx, "escape");
     settings_frame(cx);
     assert_eq!(
         view.read_with(cx, |view, _| view.shell.settings_page),
         Some(0)
     );
     assert_eq!(appearance_expanded(cx), Some(false));
-    crate::test_support::press(cx, "alt-left");
+    settings_click(cx, "settings-back");
     settings_frame(cx);
     assert!(
         view.read_with(cx, |view, _| view.shell.settings_page.is_none()
