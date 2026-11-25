@@ -1072,6 +1072,7 @@ impl Engine {
                     let prepared = auth.prepare_sign_in(&pending, None, &cancel).await?;
                     let account = prepared.account().clone();
                     merge_signed_in_account(accounts, &account)?;
+                    let skin = authlib_confirmation_skin(&root, &auth, &provider, &account, &cancel).await;
                     {
                         let mut slot = prepared_slot
                             .lock()
@@ -1079,7 +1080,7 @@ impl Engine {
                         ensure!(!cancel.is_cancelled(), "Sign-in was cancelled.");
                         *slot = Some((cancel.clone(), prepared));
                     }
-                    let _ = sender.send(Message::AuthPrepared(account, None)).await;
+                    let _ = sender.send(Message::AuthPrepared(account, skin)).await;
                     Ok(msg!("completion.external_identity"))
                 } else {
                     let profiles = pending.profiles().to_vec();
@@ -1122,11 +1123,14 @@ impl Engine {
                     pending.clone()
                 };
                 let provider = provider_by_id(&root, provider_id)?;
-                let prepared = block_auth::AuthlibAuth::new(&provider)?
+                let auth = block_auth::AuthlibAuth::new(&provider)?;
+                let prepared = auth
                     .prepare_sign_in(&pending, Some(selected), &cancel)
                     .await?;
                 let account = prepared.account().clone();
                 merge_signed_in_account(load_accounts(&root)?, &account)?;
+                let skin =
+                    authlib_confirmation_skin(&root, &auth, &provider, &account, &cancel).await;
                 {
                     let mut prepared_slot = prepared_slot
                         .lock()
@@ -1145,7 +1149,7 @@ impl Engine {
                         slot.take();
                     }
                 }
-                let _ = sender.send(Message::AuthPrepared(account, None)).await;
+                let _ = sender.send(Message::AuthPrepared(account, skin)).await;
                 Ok(msg!("completion.external_character"))
             }
             .await;
@@ -1774,6 +1778,31 @@ async fn account_images(
         }
     }
     Ok(images)
+}
+
+async fn authlib_confirmation_skin(
+    root: &Path,
+    auth: &block_auth::AuthlibAuth,
+    provider: &block_auth::AuthlibProvider,
+    account: &Account,
+    cancel: &CancellationToken,
+) -> Option<SkinImage> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let skin = auth
+            .profile_skin(account.reference.player_id, cancel)
+            .await?;
+        let fetch = ImageFetch::new().ok()?;
+        cached_account_skin(
+            (&ImageCache::new(root), &fetch),
+            &account.identity_key(),
+            (&skin.url, &provider.metadata.skin_domains),
+            cancel,
+        )
+        .await
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 async fn cached_account_skin(
@@ -2588,6 +2617,95 @@ mod tests {
         assert_eq!(accounts, vec![renamed]);
         Ok(())
     }
+    #[test]
+    fn authlib_confirmation_fetches_and_decodes_the_verified_characters_skin() -> anyhow::Result<()>
+    {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let directory = tempfile::tempdir()?;
+        let (_, runtime, _) = fixture_engine(directory.path())?;
+        runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let origin = format!("http://{}", listener.local_addr()?);
+            let mut provider = crate::providers::fixture_provider(true)?;
+            provider.api_url = format!("{origin}/api/");
+            provider.metadata.icon_url = format!("{origin}/favicon.ico");
+            provider.metadata.skin_domains = vec!["127.0.0.1".into()];
+            let mut metadata: serde_json::Value = serde_json::from_str(&provider.metadata_json)?;
+            metadata["skinDomains"] = serde_json::json!(["127.0.0.1"]);
+            provider.metadata_json = metadata.to_string();
+            let auth = block_auth::AuthlibAuth::new(&provider)?;
+            let account = super::offline_account("Selected")?;
+            let id = account.reference.player_id;
+            let texture = serde_json::json!({"textures":{"SKIN":{"url":format!("{origin}/chosen.png")}}});
+            // TOML is the product's config format; the public texture property is base64 JSON.
+            let encoded = encode_fixture_texture(texture.to_string().as_bytes());
+            let profile = serde_json::json!({
+                "id": id.simple().to_string(),
+                "properties": [{"name": "textures", "value": encoded}],
+            })
+            .to_string();
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::from_pixel(64, 64, image::Rgba([32, 97, 184, 255]))
+                .write_to(&mut png, image::ImageFormat::Png)?;
+            let png = png.into_inner();
+            let expected = png.clone();
+            let server = tokio::spawn(async move {
+                for (path, content_type, body) in [
+                    (format!("/api/sessionserver/session/minecraft/profile/{}", id.simple()), "application/json", profile.into_bytes()),
+                    ("/chosen.png".into(), "image/png", png),
+                ] {
+                    let (mut stream, _) = listener.accept().await?;
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        request.push(stream.read_u8().await?);
+                        anyhow::ensure!(request.len() <= 8192, "oversized fixture request");
+                    }
+                    let request = std::str::from_utf8(&request)?;
+                    assert!(request.starts_with(&format!("GET {path} HTTP/")));
+                    assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                    let headers = format!("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n", body.len());
+                    stream.write_all(headers.as_bytes()).await?;
+                    stream.write_all(&body).await?;
+                }
+                Ok::<_, anyhow::Error>(())
+            });
+            let result = super::authlib_confirmation_skin(
+                directory.path(), &auth, &provider, &account, &block_launcher::CancellationToken::new(),
+            ).await.context("confirmation must receive the provider's PNG")?;
+            tokio::time::timeout(Duration::from_secs(5), server).await???;
+            assert_eq!(result.bytes, expected);
+            assert!(crate::components::AccountAvatar::from_skin(result).is_some());
+            Ok(())
+        })
+    }
+
+    fn encode_fixture_texture(input: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut result = String::new();
+        for chunk in input.chunks(3) {
+            let [a, b, c] = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
+            result.push(char::from(ALPHABET[usize::from(a >> 2)]));
+            result.push(char::from(ALPHABET[usize::from((a & 3) << 4 | b >> 4)]));
+            result.push(if chunk.len() > 1 {
+                char::from(ALPHABET[usize::from((b & 15) << 2 | c >> 6)])
+            } else {
+                '='
+            });
+            result.push(if chunk.len() > 2 {
+                char::from(ALPHABET[usize::from(c & 63)])
+            } else {
+                '='
+            });
+        }
+        result
+    }
+
     #[test]
     fn external_password_exchange_rechecks_the_exact_provider_address_before_io()
     -> anyhow::Result<()> {

@@ -164,6 +164,54 @@ impl AuthlibAuth {
         })
     }
 
+    /// Resolve a verified character's public skin without sending credentials.
+    /// A missing profile, unexpected identity, or unusable texture has no preview.
+    #[must_use]
+    pub async fn profile_skin(
+        &self,
+        id: Uuid,
+        cancel: &CancellationToken,
+    ) -> Option<crate::SkinTexture> {
+        #[derive(Deserialize)]
+        struct ProfileProperties {
+            id: Uuid,
+            properties: Vec<UserProperty>,
+        }
+
+        let url = canonical_url(&self.provider.api_url)
+            .ok()?
+            .join(&format!(
+                "sessionserver/session/minecraft/profile/{}",
+                id.simple()
+            ))
+            .ok()?;
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => None,
+            result = async {
+                let mut response = self.client.get(url).send().await.ok()?;
+                if response.status() != StatusCode::OK
+                    || response.content_length().is_some_and(|size| size > MAX_METADATA as u64)
+                {
+                    return None;
+                }
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response.chunk().await.ok()? {
+                    if bytes.len().saturating_add(chunk.len()) > MAX_METADATA {
+                        return None;
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                let profile: ProfileProperties = serde_json::from_slice(&bytes).ok()?;
+                if profile.id != id {
+                    return None;
+                }
+                let encoded = profile.properties.iter().rev().find(|p| p.name == "textures")?;
+                decode_skin_texture(&encoded.value, &self.provider.metadata.skin_domains)
+            } => result,
+        }
+    }
+
     /// Authenticate without persisting a password or either token.
     pub async fn authenticate(
         &self,
@@ -793,6 +841,10 @@ pub fn skin_texture(
     let properties: std::collections::BTreeMap<String, Vec<String>> =
         serde_json::from_str(session.expose_user_properties()).ok()?;
     let encoded = properties.get("textures")?.last()?;
+    decode_skin_texture(encoded, &provider.metadata.skin_domains)
+}
+
+fn decode_skin_texture(encoded: &str, domains: &[String]) -> Option<crate::SkinTexture> {
     let decoded = STANDARD.decode(encoded).ok()?;
     if decoded.len() > 16 * 1024 {
         return None;
@@ -800,7 +852,7 @@ pub fn skin_texture(
     let document: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     let skin = document.pointer("/textures/SKIN")?;
     let url = skin.get("url")?.as_str()?;
-    if !skin_url_declared(url, &provider.metadata.skin_domains) {
+    if !skin_url_declared(url, domains) {
         return None;
     }
     let variant = if skin
@@ -1404,6 +1456,45 @@ mod tests {
             "Content-Type: application/json\r\n".into(),
             value.to_string(),
         )
+    }
+
+    #[tokio::test]
+    async fn profile_skin_uses_the_selected_identity_without_credentials()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let skin_url = "https://textures.example.test/skin/selected";
+        let payload = |id: u128, url: &str| {
+            serde_json::json!({
+                "id": Uuid::from_u128(id).simple().to_string(),
+                "properties": [{"name": "textures", "value": textures_value(url, false)}]
+            })
+        };
+        let (url, requests) = server(vec![
+            json_step(&payload(9, skin_url)),
+            json_step(&payload(7, "https://unlisted.invalid/skin")),
+            json_step(&payload(7, skin_url)),
+        ])
+        .await?;
+        let auth = auth_fixture(&url)?;
+        let id = Uuid::from_u128(7);
+        let cancel = CancellationToken::new();
+        assert!(auth.profile_skin(id, &cancel).await.is_none());
+        assert!(auth.profile_skin(id, &cancel).await.is_none());
+        assert_eq!(
+            auth.profile_skin(id, &cancel)
+                .await
+                .ok_or("missing skin")?
+                .url,
+            skin_url
+        );
+        for request in requests.await?? {
+            assert!(request.starts_with(&format!(
+                "GET /sessionserver/session/minecraft/profile/{} HTTP/",
+                id.simple()
+            )));
+            assert!(!request.to_ascii_lowercase().contains("authorization:"));
+            assert!(request.ends_with("\r\n\r\n"));
+        }
+        Ok(())
     }
 
     fn request_json(

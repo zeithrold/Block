@@ -1763,6 +1763,7 @@ impl Render for Block {
         self.palette = self.preferences.palette(window.appearance());
         cx.set_global(self.palette);
         sync_component_theme(self.palette, cx);
+        self.mount_auth_character_picker(window, cx);
         if self.router.tab() == Tab::Home && self.form.is_none() {
             feedback::ToastLayer::reserve_actions(px(116.), window, cx);
         }

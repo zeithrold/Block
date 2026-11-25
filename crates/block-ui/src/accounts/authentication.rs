@@ -29,6 +29,11 @@ use gpui::{
     img, point, prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_base::motion::{Easing, Transition, transition};
+use gpui_component::{
+    IndexPath,
+    searchable_list::{SearchableListItem, SearchableVec},
+    select::{Select, SelectEvent, SelectState},
+};
 
 use super::{
     Block, Language, Tab, UiAction, account_id,
@@ -41,6 +46,23 @@ use super::{
 /// The account page's single reading column. Its footer aligns to the same width
 /// and horizontal padding, so the page reads as one column at any window size.
 const AUTH_CONTENT_WIDTH: f32 = 328.;
+
+#[derive(Clone)]
+struct CharacterOption(block_auth::AuthlibProfile);
+
+impl SearchableListItem for CharacterOption {
+    type Value = uuid::Uuid;
+
+    fn title(&self) -> gpui::SharedString {
+        self.0.name.clone().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.0.id
+    }
+}
+
+type CharacterOptions = SearchableVec<CharacterOption>;
 
 /// Microsoft owns most Java Edition accounts and is therefore the page's
 /// default; the other types follow it in the alternatives list.
@@ -310,6 +332,7 @@ pub(super) struct AuthWizard {
     external_api: Option<String>,
     characters: Vec<block_auth::AuthlibProfile>,
     character: Option<uuid::Uuid>,
+    character_picker: Option<gpui::Entity<SelectState<CharacterOptions>>>,
     pub(crate) provider_draft: Option<AuthProviderDraft>,
     method: Method,
     device_code: Option<DeviceCode>,
@@ -466,6 +489,7 @@ impl AuthWizard {
             external_api: self.external_api.clone(),
             characters: self.characters.clone(),
             character: self.character,
+            character_picker: None,
             provider_draft: None,
             method: self.method,
             device_code: None,
@@ -668,6 +692,7 @@ impl Block {
         if let Some(state) = &mut self.shell.auth {
             state.characters.clear();
             state.character = None;
+            state.character_picker = None;
             state.prepared_account = None;
             state.error = None;
             state.attempt = Some((self.operation_revision, self.cancel.clone()));
@@ -706,9 +731,56 @@ impl Block {
         {
             state.character = characters.first().map(|p| p.id);
             state.characters = characters;
+            state.character_picker = None;
             state.error = None;
             state.transition(Phase::Characters);
         }
+    }
+
+    pub(super) fn mount_auth_character_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(state) =
+            self.shell.auth.as_mut().filter(|state| {
+                state.phase == Phase::Characters && state.character_picker.is_none()
+            })
+        else {
+            return;
+        };
+        let selected = state
+            .characters
+            .iter()
+            .position(|profile| Some(profile.id) == state.character)
+            .map(IndexPath::new);
+        let items = CharacterOptions::new(
+            state
+                .characters
+                .iter()
+                .cloned()
+                .map(CharacterOption)
+                .collect::<Vec<_>>(),
+        );
+        let picker = cx.new(|cx| SelectState::new(items, selected, window, cx).searchable(true));
+        cx.subscribe_in(
+            &picker,
+            window,
+            |view, picker, event: &SelectEvent<CharacterOptions>, window, cx| {
+                if let SelectEvent::Confirm(Some(id)) = event
+                    && view
+                        .shell
+                        .auth
+                        .as_ref()
+                        .is_some_and(|state| state.character_picker.as_ref() == Some(picker))
+                {
+                    view.handle(UiAction::AuthCharacter(*id), window, cx);
+                }
+            },
+        )
+        .detach();
+        state.character_picker = Some(picker);
+        cx.notify();
     }
 
     pub(super) fn choose_auth_character(&mut self, id: uuid::Uuid, cx: &mut Context<'_, Self>) {
@@ -753,6 +825,7 @@ impl Block {
                 state.external_api = Some(api);
                 state.characters.clear();
                 state.character = None;
+                state.character_picker = None;
                 if let Some(field) = &state.password {
                     field.update(cx, |input, cx| input.set_value("", window, cx));
                 }
@@ -901,6 +974,7 @@ impl Block {
             }
             state.characters.clear();
             state.character = None;
+            state.character_picker = None;
             state.browser_url = None;
             state.device_code = None;
             state.stage = None;
@@ -1560,7 +1634,7 @@ impl Block {
             Phase::Preparing | Phase::Waiting | Phase::Verifying => {
                 body.child(self.auth_waiting(state, cx))
             }
-            Phase::Characters => body.child(self.auth_character_choice(state, cx)),
+            Phase::Characters => body.child(self.auth_character_choice(state)),
             Phase::Failed => body.child(self.auth_failed(state, cx)),
             Phase::Complete | Phase::Saved => body.child(self.auth_complete(state)),
             Phase::Saving => body.child(components::progress(
@@ -1941,28 +2015,30 @@ impl Block {
     }
 
     /// The characters the provider returned; the chosen one becomes the account.
-    fn auth_character_choice(&self, state: &AuthWizard, cx: &Context<'_, Self>) -> gpui::Div {
+    fn auth_character_choice(&self, state: &AuthWizard) -> gpui::Div {
         let language = self.language();
-        let mut choices = components::card(self.palette).gap_3();
-        for character in &state.characters {
-            let id = character.id;
-            choices = choices
-                .child(components::radio(
-                    format!("auth-character-{id}"),
-                    character.name.clone(),
-                    state.character == Some(id),
-                    self.palette,
-                    ControlState {
-                        disabled: self.busy,
-                        ..ControlState::default()
-                    },
-                    cx.listener(move |view, (), window, cx| {
-                        view.handle(UiAction::AuthCharacter(id), window, cx)
-                    }),
-                ))
-                .child(note(character.id.to_string()));
-        }
-        div().flex().flex_col().gap_3().child(choices).children(
+        let label = tr!(language, "accounts.auth.characters.title");
+        let choice = if let Some(picker) = &state.character_picker {
+            Select::new(picker)
+                .id("auth-character-select")
+                .accessibility_label(label)
+                .disabled(self.busy)
+                .w_full()
+                .into_any_element()
+        } else {
+            // Outgoing motion snapshots never mount the live popup.
+            div()
+                .h(px(super::design::CONTROL_HEIGHT))
+                .children(
+                    state
+                        .characters
+                        .iter()
+                        .find(|profile| Some(profile.id) == state.character)
+                        .map(|profile| note(profile.name.clone())),
+                )
+                .into_any_element()
+        };
+        div().flex().flex_col().gap_3().child(choice).children(
             state
                 .error
                 .as_ref()
@@ -2827,6 +2903,48 @@ mod tests {
                 view.cancel_auth(window, cx);
                 assert!(view.shell.auth.is_none());
             })
+        });
+    }
+
+    #[gpui::test]
+    fn character_select_keeps_duplicate_names_bound_to_the_confirmed_profile(
+        cx: &mut TestAppContext,
+    ) {
+        use gpui_component::select::SelectEvent;
+
+        let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
+        let first = uuid::Uuid::from_u128(1);
+        let second = uuid::Uuid::from_u128(2);
+        let picker = view.update_in(cx, |view, window, cx| {
+            view.open_auth_wizard(window, cx);
+            view.choose_auth_provider(block_auth::AccountProvider::Authlib, cx);
+            simulate_started_attempt(view, Phase::Preparing);
+            view.auth_characters(
+                [first, second]
+                    .into_iter()
+                    .map(|id| block_auth::AuthlibProfile {
+                        id,
+                        name: "SameName".into(),
+                    })
+                    .collect(),
+            );
+            view.busy = false;
+            view.mount_auth_character_picker(window, cx);
+            let Some(state) = view.shell.auth.as_ref() else {
+                unreachable!("missing active wizard")
+            };
+            assert_eq!(state.character, Some(first));
+            state
+                .character_picker
+                .clone()
+                .unwrap_or_else(|| unreachable!("missing mounted Select"))
+        });
+        picker.update(cx, |_, cx| cx.emit(SelectEvent::Confirm(Some(second))));
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert!(view.shell.auth.as_ref().is_some_and(|state| {
+                state.character == Some(second) && state.phase == Phase::Characters
+            }));
         });
     }
 
