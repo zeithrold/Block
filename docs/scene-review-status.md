@@ -1,9 +1,10 @@
 # Block 逐场景评审状态
 
-更新日期：2026-11-08
+更新日期：2026-11-25
 
-建档基线：`036cc5fef32789aa59da1900d4f42f6cdaa7437e`  
-场景契约：初始化场景为 `direct-setup-20261106`，其余为 `compact-ui-20261105`；360×720 逻辑内容尺寸。
+- 建档基线：`036cc5fef32789aa59da1900d4f42f6cdaa7437e`
+- 本次清单对齐基线：`2adfec8`
+- 建档时的场景契约：初始化场景为 `direct-setup-20261106`，其余为 `compact-ui-20261105`；360×720 逻辑内容尺寸。
 
 本文件记录本轮用户逐场景评审的进度、问题和确认结论。每次只推进一个场景；历史截图检查、自动化断言、测试和 CI 通过均不自动转为用户验收通过。
 
@@ -11,12 +12,12 @@
 
 | 总场景 | 待评审 | 评审中 | 待修复 | 待复核 | 已通过 | 阻塞 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 97 | 88 | 0 | 0 | 8 | 1 | 0 |
+| 94 | 67 | 0 | 0 | 5 | 22 | 0 |
 
-- 当前验收结论：仅 Welcome 页面（当前 `setup-overview` 首次设置总览）已通过，见 [R016](#r016)；其他页面及变体尚未验收通过。
-- 建议下一场景：`setup-account`，等待用户开始评审。
-- 当前评审记录：[R001：移除独立欢迎页](#r001)、[R002：首设卡片导航提示](#r002)、[R003：语言抽屉直接选择](#r003)、[R004：语言英文副标题与搜索](#r004)、[R005：语言选中标记](#r005)。
-- 已退役场景：`setup-welcome`；其历史证据保留，不计入当前 97 项。
+- 已通过：Welcome／首次设置总览（[R016](#r016)）、Import Games Drawer 的 3 个场景（[R025](#r025)）、新增账号向导的 18 个场景（[R026](#r026)）。
+- 建议下一场景：`setup-game-choice`，接着验收 `setup-game` 和 `setup-overview-ready`，覆盖创建、保存及完成首次设置后返回 Home。
+- `setup-account` 保留待复核：向导本身已通过，首次设置的独立入口、退出后返回总览及任务状态仍单独验收。
+- `setup-welcome` 与已退出运行时清单的旧 Profile／分离模式场景不计入当前 94 项，历史记录保留。
 - 统计按场景计数，浅色与深色不重复计数。每次更新场景状态时同步本表。
 
 ## 状态与记录规则
@@ -45,13 +46,13 @@
 
 ## 清单来源与已有证据
 
-- 场景标识以 [SCENARIOS](../crates/block-ui/src/runtime/scenarios.rs) 为准；本轮覆盖当前全部 97 项。
-- [场景注册表](visual-review-cases.json) 中的 97 条 `lifecycle = current` 记录对应本轮清单；其余 78 条历史/退役记录不混入当前进度。这里的用户验收状态与注册表的语义对照状态分别记录。
+- 场景标识以 [SCENARIOS](../crates/block-ui/src/runtime/scenarios.rs) 为准；下表覆盖当前全部 94 项。
+- [场景注册表](visual-review-cases.json) 保留此前 97 项基线的语义对照和历史证据，未与本次运行时清单同步，不用于计算当前验收进度。
 - [截图契约](../scripts/scenario_contracts.py) 定义当前场景的可见内容断言，不能代替布局与交互判断。
 - [已有交付记录](../UI_REFINEMENT_HANDOFF.md) 和 [本地证据索引](../target/ui-refinement-20261105/DELIVERY.md) 可复用；[Linux ARM64 视觉记录](../target/ui-refinement-20261105/native-linux/current-visual-review.md) 包含替换截图与滚动补充说明，选图时需同时核对来源。
 - `target/` 下的截图、录像和日志未随源码上传。上述本地链接在没有证据目录的检出中不可用，不能把链接存在当作已查看证据。
 
-这些场景是无网络的合成状态。真实登录、游戏安装/启动/退出、重新打开等跨页流程，需要在相关场景记录中单独写明实际验证结果；完成 97 行不自动等于完整产品或 Release 验收。
+这些场景是无网络的合成状态。真实登录、游戏安装/启动/退出、重新打开等跨页流程，需要在相关场景记录中单独写明实际验证结果；场景台账全部通过也不等于完成[功能验收](gui-acceptance.md)或 Release 验收。
 
 ## 场景清单
 
@@ -67,9 +68,9 @@
 | `setup-game-choice` | 推荐、自定义与导入的选择含义 | 待复核 | [R008](#r008)、[R013](#r013) |
 | `setup-account` | 首次添加账户的入口和退出路径 | 待复核 | [R013](#r013) |
 | `setup-game` | 首次创建游戏、保存与后续准备 | 待复核 | [R013](#r013) |
-| `setup-import-sources` | 来源识别、复制说明与导入入口 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R014](#r014) |
-| `setup-import-list` | 多项选择、数量反馈与导入操作 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R011](#r011)、[R012](#r012)、[R014](#r014) |
-| `setup-import-long-destination` | 长目标路径、滚动与固定操作区 | 待复核 | [R008](#r008)、[R009](#r009)、[R010](#r010)、[R011](#r011)、[R012](#r012)、[R014](#r014) |
+| `setup-import-sources` | 来源识别、实例数量与进入来源列表 | 已通过 | [R025](#r025) |
+| `setup-import-list` | 实例选择、共享/隔离策略与抽屉切页 | 已通过 | [R025](#r025) |
+| `setup-import-long-destination` | 长目标路径、滚动与固定操作区 | 已通过 | [R025](#r025) |
 
 ### Home（4）
 
@@ -84,35 +85,32 @@
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
-| `home-profile-drawer` | 游戏/配置选择、搜索与返回焦点 | 待评审 | — |
+| `home-instance-drawer` | 实例选择、搜索与返回焦点 | 待评审 | — |
 | `home-account-drawer` | 账户选择、身份区分与管理入口 | 待评审 | — |
 | `home-downloads-drawer` | 下载任务、进度说明与滚动 | 待评审 | — |
 | `download-files` | 资源详情、状态与返回下载列表 | 待评审 | — |
 
-### 游戏列表与详情（9）
+### 游戏列表与详情（7）
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
-| `games-bundled` | 普通模式的游戏列表、搜索与创建 | 待评审 | — |
-| `games-separated` | 分离模式的实例/配置关系与导航 | 待评审 | — |
+| `games-bundled` | 实例列表、搜索与创建 | 待评审 | — |
 | `games-detail` | 详情层级、操作入口与当前游戏状态 | 待评审 | — |
 | `games-detail-long-path` | 长路径换行、完整信息与滚动 | 待评审 | — |
 | `games-missing-record` | 记录缺失说明与返回列表 | 待评审 | — |
 | `games-instance-settings` | 实例设置、编辑焦点与保存/取消 | 待评审 | — |
 | `remove-confirmation` | 删除对象、后果说明与文件保留 | 待评审 | — |
-| `separate-confirmation` | 单向模式转换的含义与确认 | 待评审 | — |
-| `games-help` | 实例/配置解释与设置入口 | 待评审 | — |
+| `games-help` | 游戏帮助说明、可用操作与关闭 | 待评审 | — |
 
-### 游戏与配置编辑（6）
+### 实例编辑（5）
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
-| `profile-editor-root` | 名称、服务器与编辑分区入口 | 待评审 | — |
-| `profile-editor-data` | 数据策略、默认账户与应用到草稿 | 待评审 | — |
-| `profile-editor-launch` | Java、内存、窗口与继承关系 | 待评审 | — |
-| `profile-editor-appearance` | 图标、颜色、预览与取消 | 待评审 | — |
+| `instance-editor-root` | 名称、服务器与编辑分区入口 | 待评审 | — |
+| `instance-editor-data` | 数据目录、默认账户与草稿 | 待评审 | — |
+| `instance-editor-launch` | Java、内存、窗口与默认值 | 待评审 | — |
+| `instance-editor-appearance` | 图标、颜色、预览与取消 | 待评审 | — |
 | `instance-editor-exit-dirty` | 实例草稿的保存/放弃/继续编辑 | 待评审 | — |
-| `profile-editor-exit-dirty` | 配置草稿的退出确认与焦点恢复 | 待评审 | — |
 
 ### 游戏创建向导（15）
 
@@ -155,36 +153,36 @@
 | `provider-editor-exit-dirty` | 服务草稿的退出确认 | 待评审 | — |
 | `remove-provider-confirmation` | 移除后果、关联账户与取消 | 待评审 | — |
 
-### 登录与添加账户（17）
+### 登录与添加账户（18）
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
-| `auth-choose` | 认证方式、主入口与其他选项 | 待评审 | — |
-| `auth-information` | 浏览器/设备码方式与开始操作 | 待评审 | — |
-| `auth-waiting` | 等待浏览器、重新打开与切换方式 | 待评审 | — |
-| `auth-device-preparing` | 请求设备码的等待反馈 | 待评审 | — |
-| `auth-device-waiting` | 验证码、复制、打开网页与取消 | 待评审 | — |
-| `auth-verifying` | 账户验证状态与取消边界 | 待评审 | — |
-| `auth-complete` | 已准备身份与最终保存确认 | 待评审 | — |
-| `auth-saving` | 保存期间的反馈与退出限制 | 待评审 | — |
-| `auth-error` | 失败解释与实际可用的恢复操作 | 待评审 | — |
-| `auth-authlib-provider-add` | 登录流程中添加服务与返回 | 待评审 | — |
-| `auth-authlib-information` | 服务目标、账户/密码与信任信息 | 待评审 | — |
-| `auth-authlib-http-warning` | 输入凭据前的 HTTP 提示与同意 | 待评审 | — |
-| `auth-authlib-characters` | 多角色选择、身份与继续 | 待评审 | — |
-| `auth-authlib-complete` | 角色/服务确认与最终保存 | 待评审 | — |
-| `auth-offline-information` | 本地名称、身份说明与添加 | 待评审 | — |
-| `auth-offline-error` | 名称校验、错误换行与更正 | 待评审 | — |
-| `auth-offline-saving` | 保存反馈与重复提交防护 | 待评审 | — |
+| `auth-choose` | 认证方式、主入口与其他选项 | 已通过 | [R026](#r026) |
+| `auth-information` | 浏览器/设备码方式与开始操作 | 已通过 | [R026](#r026) |
+| `auth-waiting` | 等待浏览器、重新打开与切换方式 | 已通过 | [R026](#r026) |
+| `auth-device-preparing` | 请求设备码的等待反馈 | 已通过 | [R026](#r026) |
+| `auth-device-waiting` | 验证码、复制、打开网页与取消 | 已通过 | [R026](#r026) |
+| `auth-verifying` | 账户验证状态与取消边界 | 已通过 | [R026](#r026) |
+| `auth-complete` | 已准备身份与最终保存确认 | 已通过 | [R026](#r026) |
+| `auth-saving` | 保存期间的反馈与退出限制 | 已通过 | [R026](#r026) |
+| `auth-error` | 失败解释与实际可用的恢复操作 | 已通过 | [R026](#r026) |
+| `auth-authlib-provider-add` | 登录流程中添加服务与返回 | 已通过 | [R026](#r026) |
+| `auth-authlib-information` | 服务目标、账户/密码与信任信息 | 已通过 | [R026](#r026) |
+| `auth-authlib-many-providers` | 服务下拉展开、搜索自动聚焦与长列表滚动 | 已通过 | [R026](#r026) |
+| `auth-authlib-http-warning` | 输入凭据前的 HTTP 提示与同意 | 已通过 | [R026](#r026) |
+| `auth-authlib-characters` | 可搜索的纯文本角色下拉，不显示 UUID 或头像 | 已通过 | [R026](#r026) |
+| `auth-authlib-complete` | 所选角色皮肤头像、服务来源与最终保存 | 已通过 | [R026](#r026) |
+| `auth-offline-information` | 本地名称、身份说明与添加 | 已通过 | [R026](#r026) |
+| `auth-offline-error` | 名称校验、错误换行与更正 | 已通过 | [R026](#r026) |
+| `auth-offline-saving` | 保存反馈与重复提交防护 | 已通过 | [R026](#r026) |
 
-### Settings 与 About（10）
+### Settings 与 About（9）
 
 | 场景 ID | 评审重点 | 状态 | 问题 / 记录 |
 | --- | --- | --- | --- |
 | `settings-index` | 分类入口、保存状态与返回 | 待评审 | — |
 | `settings-general` | 语言/外观/减少动态的预览与保存 | 待评审 | — |
 | `settings-game` | 新游戏默认值、Java/JVM 与滚动 | 待评审 | — |
-| `settings-profiles` | 数据策略及模式转换说明 | 待评审 | — |
 | `settings-downloads` | 下载限制、代理与连接测试 | 待评审 | — |
 | `settings-socks5` | SOCKS5 草稿、DNS 语义与保存 | 待评审 | — |
 | `settings-invalid-proxy` | 无效代理的错误定位与恢复 | 待评审 | — |
@@ -525,6 +523,20 @@
 - Linux ARM64/1倍英文与日语浅深主题360/432宽实际画面和View/Radio/进入返回均复核通过，8张来源卡片紧凑/加宽图已查看。进程审计为空，72张全桌面中间图和两端自有临时缓存已清理。原生证据与资源收据见[本轮QA](../target/source-title-gap-20261108/QA.md)。当前用户预览及二进制保留，仍显示上一版间距；不扩展用户验收，不提交/推送。
 
 每次评审后，在此追加对应场景记录，并更新清单中的状态和记录链接。问题按 `R001`、`R002` 连续编号；一个问题影响多个场景时，复用同一编号并列出受影响场景。
+
+<a id="r025"></a>
+
+### R025：Import Games Drawer 整体验收通过 / 2026-11-17
+
+- 用户确认原话：“Import Games的Drawer整体验收通过了。”见[交接记录](../UI_REFINEMENT_HANDOFF.md#用户页面验收)。
+- 覆盖 Drawer 的来源、实例选择、共享/隔离策略及切页动效。实际批量复制、停止、重试和磁盘结果仍按功能清单单独验收；本地整合包导入不在此范围内。
+
+<a id="r026"></a>
+
+### R026：新增登录账号流程整体验收通过 / 2026-11-25
+
+- 用户确认原话：“新建登陆账号流程全部验收通过”。本表将整体验收归到「登录与添加账户」组，包括此前待验收的 Authlib 角色选择；不表示每个合成场景都逐项单独重跑。
+- 不扩展到首次设置外层流程、已有账号和认证服务管理，也不视为所有平台、真实服务或故障注入分支均已验证。
 
 记录格式：
 
