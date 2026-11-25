@@ -18,6 +18,7 @@
 
 ## Verification and evidence
 
+- Reuse the existing Block checkout on the workstation and each test host. Do not create additional Git worktrees, clones, or separate source directories for Block work or verification. See [test-platform guidelines](docs/test-platforms.md).
 - During long-running tasks on macOS, temporarily inhibit automatic sleep with a task-owned process. Release the inhibitor when the task completes, is cancelled or pauses for user input; preserve the user's permanent power settings and other sessions' inhibitors.
 - Use the [justfile](justfile) as the command source of truth. `just check` is the full formatting, type-check, Clippy and test sequence; use focused package tests while iterating. Preserve `--locked` for builds and checks unless intentionally updating dependencies.
 - Select test hosts and verification depth by the changed contract, following [test-platform guidelines](docs/test-platforms.md). Reuse unaffected evidence; a documentation change or a focused native check does not require a fresh full-platform matrix.

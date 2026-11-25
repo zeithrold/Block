@@ -58,13 +58,13 @@ task-owned helper as appropriate. Existing authorization permits test-host
 software installation and temporary services; stop those services after use.
 Do not add a permanent orchestration layer for a one-off check.
 
-Use the existing checkout and Cargo/download caches by default. A separate
-task-owned checkout, worktree or source snapshot is appropriate for concurrent
-work, regression comparison or isolating uncommitted changes. Follow workspace
-attachment/edit permissions before editing another checkout. Keep Windows AMD64
-work on D: because C: is small. Never run heavy Windows AMD64 and Linux AMD64
-builds/tests concurrently: they share one physical machine. Coordinate other
-heavy work when it competes for the same host resources.
+Reuse the existing build checkout and Cargo/download caches on each host.
+Do not create additional Git worktrees, clones, or separate source directories,
+including for concurrent work, regression comparisons, or uncommitted changes.
+If the existing checkout is dirty or in use, preserve it and coordinate access
+instead of creating a duplicate. Linux AMD64 and Windows AMD64 builds and tests
+may run in parallel on their respective hosts. Coordinate other heavy work when
+it competes for the same host resources.
 
 All test hosts may retrieve current source, including uncommitted changes.
 Record the commit and relevant patch/snapshot plus the executable used; do not
