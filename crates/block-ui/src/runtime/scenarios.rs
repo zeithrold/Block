@@ -73,6 +73,8 @@ pub const SCENARIOS: &[&str] = &[
     "setup-overview",
     "setup-overview-ready",
     "setup-game-choice",
+    "setup-game-choice-loading",
+    "setup-game-choice-fallback",
     "setup-import-sources",
     "setup-import-list",
     "setup-account",
@@ -200,6 +202,7 @@ impl Block {
             options.name.as_str(),
             "setup-import-list"
                 | "setup-account"
+                | "setup-game-choice-loading"
                 | "auth-choose"
                 | "auth-waiting"
                 | "auth-verifying"
@@ -629,11 +632,13 @@ impl Block {
         self.shell.first_run = first_run::State::default();
         self.shell.first_run.enabled = true;
         self.shell.first_run.stage = match name {
-            "setup-game-choice" => FirstRunStage::GameChoice,
+            "setup-game-choice" | "setup-game-choice-loading" | "setup-game-choice-fallback" => {
+                FirstRunStage::GameChoice
+            }
             "setup-game" => FirstRunStage::GameWizard,
             _ => FirstRunStage::Overview,
         };
-        if name == "setup-game-choice" {
+        if self.shell.first_run.stage == FirstRunStage::GameChoice {
             self.router.enter_game_choice();
         }
         self.shell.onboarding = onboarding::State::default();
@@ -647,6 +652,22 @@ impl Block {
             Some(std::path::PathBuf::from("/scenario/Block/instances"));
 
         match name {
+            "setup-game-choice" => {
+                self.versions.insert(0, "1.21.4".into());
+                if let Some(mut release) = self.version_catalog.first().cloned() {
+                    release.id = "1.21.4".into();
+                    self.version_catalog.insert(0, release);
+                }
+            }
+            "setup-game-choice-loading" | "setup-game-choice-fallback" => {
+                self.versions.clear();
+                self.version_catalog.clear();
+                self.version_load = if name == "setup-game-choice-loading" {
+                    CollectionLoad::Loading
+                } else {
+                    CollectionLoad::Failed("The version list request failed.".into())
+                };
+            }
             "setup-overview-ready" => {
                 self.accounts = scenario_accounts()?;
                 self.selected_account = self.accounts.first().map(account_id);

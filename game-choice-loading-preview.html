@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Block · 设置游戏 · 版本加载原型</title>
+<style>
+:root{color-scheme:light dark;font:14px/1.5 system-ui,sans-serif;--bg:#fff;--ink:#191919;--muted:#595959;--line:#dedede;--canvas:#f3f3f3;--hover:#f6f6f6}
+@media(prefers-color-scheme:dark){:root{--bg:#191919;--ink:#eee;--muted:#bababa;--line:#424242;--canvas:#101010;--hover:#292929}}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;padding:12px;display:grid;place-content:center;background:var(--canvas);color:var(--ink)}
+article,aside{width:min(360px,calc(100vw - 24px))}article{background:var(--bg);height:720px;max-height:calc(100svh - 94px);overflow:auto;border:1px solid var(--line)}
+header{height:55px;padding:0 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line)}header svg{width:16px}main{padding:16px}
+h1{font-size:20px;line-height:28px;margin:0}p,.sub,output{font-size:12px;line-height:20px;color:var(--muted)}p{margin:6px 0 18px}
+.menu{border:1px solid var(--line);border-radius:14px;overflow:hidden}button,select{font:inherit;color:inherit}button{background:transparent;cursor:pointer}
+.entry{display:grid;grid-template-columns:18px minmax(0,1fr) 16px;gap:10px;align-items:start;width:100%;padding:14px 13px;border:0;text-align:start}
+.entry+.entry{border-top:1px solid var(--line)}.entry:hover:not(:disabled){background:var(--hover)}.entry:focus-visible{outline:2px solid currentColor;outline-offset:-3px}.entry:disabled{cursor:wait}
+svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.65}.entry>svg:first-child{margin-top:2px}
+.end{width:16px;align-self:center;color:var(--muted)}strong{font-weight:600}.sub{display:block;margin-top:3px}
+.ring{width:14px;height:14px;align-self:center;border-radius:50%;border:2px solid var(--line);border-top-color:var(--muted);animation:spin .85s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.ring{animation:none}}
+[hidden]{display:none!important}aside{display:flex;align-items:center;justify-content:space-between;padding:10px 1px;color:var(--muted);font-size:12px}
+select{border:1px solid var(--line);border-radius:6px;padding:4px;background:var(--bg)}output{display:block;margin:12px 0}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="next" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="game" viewBox="0 0 24 24"><path d="M7 6h10c2 0 3 2 4 7l.5 3c.3 2-1.5 3-3 2l-3-3h-7l-3 3c-1.5 1-3.3 0-3-2l.5-3c1-5 2-7 4-7Z"/><path d="M6 10v4m-2-2h4m7-1h.1m2 2h.1"/></symbol>
+<symbol id="tune" viewBox="0 0 24 24"><path d="M3 7h5m5 0h8M3 17h10m5 0h3"/><circle cx="10.5" cy="7" r="2.5"/><circle cx="15.5" cy="17" r="2.5"/></symbol>
+<symbol id="pack" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5m-18 4 9 5 9-5"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M3 18V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v1M3 19l3-9h16l-3 9H3Z"/></symbol>
+</defs></svg>
+<article><header><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>设置游戏</header>
+<main><h1>设置游戏</h1><p>创建一个游戏，或导入已有安装。</p>
+<div class="menu" role="group" aria-label="游戏设置方式">
+<button class="entry" id="recommended" disabled><svg aria-hidden="true"><use href="#game"/></svg><span><strong>推荐配置</strong><span class="sub" id="status" role="status">正在加载 Minecraft 版本列表…</span></span><span class="ring" aria-hidden="true"></span><svg class="end" hidden aria-hidden="true"><use href="#next"/></svg></button>
+<button class="entry"><svg aria-hidden="true"><use href="#tune"/></svg><span><strong>自定义配置</strong><span class="sub">自行选择游戏版本、加载器和启动设置。</span></span><svg class="end" aria-hidden="true"><use href="#next"/></svg></button>
+<button class="entry"><svg aria-hidden="true"><use href="#pack"/></svg><span><strong>导入整合包</strong><span class="sub">从本地整合包文件创建游戏。</span></span><svg class="end" aria-hidden="true"><use href="#next"/></svg></button>
+<button class="entry"><svg aria-hidden="true"><use href="#folder"/></svg><span><strong>导入已有游戏</strong><span class="sub">查看在这台电脑上发现的游戏安装。</span></span><svg class="end" aria-hidden="true"><use href="#next"/></svg></button>
+</div><output></output></main></article>
+<aside><label for="state">原型预览 · 模拟版本列表</label><select id="state"><option value="loading">加载中</option><option value="ready">加载成功</option><option value="fallback">加载失败</option></select></aside>
+<script>
+const state=document.querySelector('#state'), recommended=document.querySelector('#recommended'), feedback=document.querySelector('output');
+const copy={loading:'正在加载 Minecraft 版本列表…',ready:'Minecraft 1.21.4 · 原版',fallback:'版本列表不可用，将使用内置版本 1.21.1。'};
+state.onchange=()=>{
+  const waiting=state.value==='loading';
+  recommended.disabled=waiting;
+  recommended.querySelector('.ring').hidden=!waiting;
+  recommended.querySelector('.end').toggleAttribute('hidden',waiting);
+  document.querySelector('#status').textContent=copy[state.value];
+  feedback.textContent='';
+};
+for(const row of document.querySelectorAll('.entry')) row.onclick=()=>{
+  feedback.textContent=row===recommended
+    ? `原型：将以 Minecraft ${state.value==='fallback'?'1.21.1':'1.21.4'} 进入游戏设置。`
+    : '原型：进入「'+row.querySelector('strong').textContent+'」。';
+};
+</script></html>

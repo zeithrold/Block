@@ -26,6 +26,7 @@ use gpui::{
 
 use super::{
     Block, Language, Tab, TextInput, UiAction, account_id,
+    action_list::{ActionAppearance, ActionCopy, ActionDestination, ActionMenuList, ActionRow},
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState},
     design::Icon,
     input,
@@ -156,18 +157,6 @@ struct Record {
     icon: RowIcon,
     badges: Vec<(String, BadgeVariant)>,
     current: bool,
-}
-
-/// One card of the Instance component grid. `fixed` marks values chosen when the
-/// Instance was created, so the lock marker never depends on a rendered label.
-struct ComponentCard {
-    id: &'static str,
-    icon: Icon,
-    label: String,
-    value: String,
-    description: String,
-    fixed: bool,
-    action: Option<UiAction>,
 }
 
 impl Block {
@@ -1132,79 +1121,31 @@ impl Block {
 
     fn instance_components(&self, instance: &Instance, cx: &Context<'_, Self>) -> gpui::Div {
         let language = self.language();
-        let mut grid = div().flex().flex_col().gap_3();
-        let components = [
-            ComponentCard {
-                id: "component-minecraft",
-                icon: Icon::Blocks,
-                // Minecraft and OptiFine are product names, not translated copy.
-                label: "Minecraft".to_owned(),
-                value: instance.minecraft_version.clone(),
-                description: tr!(language, "games.components.fixed_at_creation"),
-                fixed: true,
-                action: None,
-            },
-            ComponentCard {
-                id: "component-loader",
-                icon: Icon::Layers,
-                label: tr!(language, "games.components.mod_loader"),
-                value: loader_value(instance, language),
-                description: tr!(language, "games.components.fixed_at_creation"),
-                fixed: true,
-                action: None,
-            },
-            ComponentCard {
-                id: "component-optifine",
-                icon: Icon::Experiment,
-                label: "OptiFine".to_owned(),
-                value: instance
-                    .targets
-                    .iter()
-                    .find(|target| instance.target_id == target.id)
-                    .and_then(|target| target.optifine.as_ref())
-                    .map_or_else(
-                        || tr!(language, "games.components.not_installed"),
-                        |selected| selected.version.clone(),
-                    ),
-                description: tr!(language, "games.components.editable_in_settings"),
-                fixed: false,
-                action: Some(UiAction::EditInstanceOptiFine),
-            },
-            ComponentCard {
-                id: "component-instance-settings",
-                icon: Icon::Settings,
-                label: tr!(language, "games.components.instance_settings"),
-                value: match &instance.runtime {
-                    RuntimeSelection::Managed => tr!(language, "games.java.automatic"),
-                    RuntimeSelection::Local { .. } => tr!(language, "games.java.custom"),
-                },
-                description: instance
-                    .game_directory
-                    .display()
-                    .to_string()
-                    .chars()
-                    .flat_map(|character| [character, '\u{200b}'])
-                    .collect(),
-                fixed: false,
-                action: Some(UiAction::EditInstance),
-            },
+        let fixed = [
+            (
+                "component-minecraft",
+                Icon::Blocks,
+                "Minecraft".to_owned(),
+                instance.minecraft_version.clone(),
+            ),
+            (
+                "component-loader",
+                Icon::Layers,
+                tr!(language, "games.components.mod_loader"),
+                loader_value(instance, language),
+            ),
         ];
-        for ComponentCard {
-            id,
-            icon,
-            label,
-            value,
-            description,
-            fixed,
-            action,
-        } in components
-        {
-            let contents = div()
-                .flex()
+        let fixed = fixed.into_iter().map(|(id, icon, label, value)| {
+            components::card(self.palette)
+                .id(id)
+                .flex_row()
                 .items_center()
                 .gap_3()
                 .w_full()
                 .min_w_0()
+                .min_h(px(80.))
+                .p_3()
+                .bg(rgb(self.palette.background))
                 .child(
                     div()
                         .flex_shrink_0()
@@ -1217,7 +1158,7 @@ impl Block {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(note(label.clone()))
+                        .child(note(label))
                         .child(
                             div()
                                 .text_sm()
@@ -1227,65 +1168,105 @@ impl Block {
                                 .whitespace_normal()
                                 .child(value),
                         )
-                        .child(note(description).min_w_0().w_full().whitespace_normal()),
+                        .child(
+                            note(tr!(language, "games.components.fixed_at_creation"))
+                                .min_w_0()
+                                .w_full()
+                                .whitespace_normal(),
+                        ),
                 )
-                .children(action.as_ref().map(|_| {
-                    div()
-                        .flex_shrink_0()
-                        .child(Icon::ChevronRight.render(16., self.palette.muted))
-                }))
-                .children(fixed.then(|| {
+                .child(
                     div()
                         .flex_shrink_0()
                         .debug_selector(move || format!("component-lock-{id}"))
-                        .child(Icon::Lock.render(14., self.palette.muted))
-                }));
-            if let Some(action) = action {
+                        .child(Icon::Lock.render(14., self.palette.muted)),
+                )
+        });
+        let optifine = instance
+            .targets
+            .iter()
+            .find(|target| instance.target_id == target.id)
+            .and_then(|target| target.optifine.as_ref())
+            .map_or_else(
+                || tr!(language, "games.components.not_installed"),
+                |selected| selected.version.clone(),
+            );
+        let runtime = match &instance.runtime {
+            RuntimeSelection::Managed => tr!(language, "games.java.automatic"),
+            RuntimeSelection::Local { .. } => tr!(language, "games.java.custom"),
+        };
+        let directory: String = instance
+            .game_directory
+            .display()
+            .to_string()
+            .chars()
+            .flat_map(|character| [character, '\u{200b}'])
+            .collect();
+        let actions = [
+            (
+                "component-optifine",
+                Icon::Experiment,
+                "OptiFine".to_owned(),
+                optifine,
+                tr!(language, "games.components.editable_in_settings"),
+                UiAction::EditInstanceOptiFine,
+            ),
+            (
+                "component-instance-settings",
+                Icon::Settings,
+                tr!(language, "games.components.instance_settings"),
+                runtime,
+                directory,
+                UiAction::EditInstance,
+            ),
+        ];
+        let actions = actions
+            .into_iter()
+            .map(|(id, icon, title, value, detail, action)| {
                 let trigger = self.shell.surfaces.trigger_focus(id, cx);
                 let restore_focus = trigger.clone();
-                grid = grid.child(
-                    components::button(
-                        id,
-                        "",
-                        self.palette,
-                        ButtonVariant::Ghost,
-                        ControlState {
+                ActionRow::new(
+                    id,
+                    ActionCopy {
+                        title: title.into(),
+                        description: format!("{value}\n{detail}").into(),
+                    },
+                    ActionAppearance {
+                        palette: self.palette,
+                        icon,
+                        destination: ActionDestination::Forward,
+                        state: ControlState {
                             disabled: self.busy,
                             ..Default::default()
                         },
-                        cx.listener(move |view, (): &(), window, cx| {
-                            restore_focus.focus(window, cx);
-                            view.handle(action.clone(), window, cx);
-                        }),
-                    )
-                    .aria_label(label)
-                    .track_focus(&trigger)
-                    .w_full()
-                    .h_auto()
-                    .min_h(px(80.))
-                    .p_3()
-                    .border_1()
-                    .border_color(rgb(self.palette.border))
-                    .rounded(px(super::design::CARD_RADIUS))
-                    .child(contents),
-                );
-            } else {
-                grid = grid.child(
-                    components::card(self.palette)
-                        .id(id)
-                        .w_full()
-                        .min_h(px(80.))
-                        .p_3()
-                        .bg(rgb(self.palette.background))
-                        .child(contents),
-                );
-            }
-        }
+                    },
+                    cx.listener(move |view, (): &(), window, cx| {
+                        restore_focus.focus(window, cx);
+                        view.handle(action.clone(), window, cx);
+                    }),
+                )
+                .track_focus(&trigger)
+                .description(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::MEDIUM)
+                                .whitespace_normal()
+                                .child(value),
+                        )
+                        .child(note(detail).w_full().min_w_0().whitespace_normal()),
+                )
+            });
         div()
             .flex()
             .flex_col()
             .gap_3()
-            .child(grid)
+            .children(fixed)
+            .child(ActionMenuList::render(self.palette, actions))
             .child(note(tr!(language, "games.components.fixed_note")))
     }
 

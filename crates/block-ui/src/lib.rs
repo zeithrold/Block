@@ -138,6 +138,8 @@ mod tooltip;
 mod transitions;
 #[path = "runtime/ui_logging.rs"]
 mod ui_logging;
+#[path = "controls/wait_ring.rs"]
+mod wait_ring;
 #[path = "navigation/window_geometry.rs"]
 mod window_geometry;
 #[path = "navigation/wizard_entrance.rs"]

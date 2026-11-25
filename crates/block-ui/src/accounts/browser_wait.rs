@@ -9,8 +9,9 @@ use super::{
     AuthWizard, Block, ControlState, Method, UiAction, note, patterns, wait_ring::WaitRing,
 };
 use crate::action_list::{
-    ActionAppearance, ActionCopy, ActionDestination, ActionListCard, ActionRow,
+    ActionAppearance, ActionCopy, ActionDestination, ActionMenuList, ActionRow,
 };
+use crate::design::Icon;
 
 impl Block {
     pub(super) fn browser_wait_heading(&self, state: &AuthWizard) -> gpui::Div {
@@ -57,6 +58,7 @@ impl Block {
             },
             ActionAppearance {
                 palette: self.palette,
+                icon: Icon::Browser,
                 destination: ActionDestination::External,
                 state: ControlState {
                     disabled: state.browser_url.is_none() && !self.visual_only,
@@ -73,6 +75,7 @@ impl Block {
             },
             ActionAppearance {
                 palette: self.palette,
+                icon: Icon::DeviceCode,
                 destination: ActionDestination::Forward,
                 state: ControlState {
                     disabled: self.busy,
@@ -83,6 +86,6 @@ impl Block {
                 view.handle(UiAction::AuthMethod(Method::Device), window, cx);
             }),
         );
-        ActionListCard::render(self.palette, [reopen, device]).mt(px(12.))
+        ActionMenuList::render(self.palette, [reopen, device]).mt(px(12.))
     }
 }

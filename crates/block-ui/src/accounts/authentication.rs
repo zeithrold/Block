@@ -14,8 +14,7 @@ use super::scroll_area::ScrollAreaExt as _;
 mod browser_wait;
 #[path = "verification.rs"]
 mod verification;
-#[path = "wait_ring.rs"]
-mod wait_ring;
+use crate::wait_ring;
 use std::{
     fmt,
     sync::{Arc, LazyLock},
@@ -37,6 +36,7 @@ use gpui_component::{
 
 use super::{
     Block, Language, Tab, UiAction, account_id,
+    action_list::{ActionAppearance, ActionCopy, ActionDestination, ActionMenuList, ActionRow},
     alert::AlertVariant,
     components::{self, AvatarState, BadgeVariant, ButtonVariant, ControlState, ProgressState},
     design::Icon,
@@ -1661,7 +1661,10 @@ impl Block {
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.provider_option(AccountProvider::Microsoft, false, cx))
+            .child(ActionMenuList::render(
+                self.palette,
+                [self.provider_option(AccountProvider::Microsoft, false, cx)],
+            ))
             .child(
                 div()
                     .flex()
@@ -1685,140 +1688,94 @@ impl Block {
                     )
                     .child(AuthOptions {
                         expanded: state.other_sign_in_options,
-                        content: div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .children(
-                                ACCOUNT_TYPES
-                                    .into_iter()
-                                    .filter(|provider| *provider != AccountProvider::Microsoft)
-                                    .map(|provider| {
-                                        self.provider_option(
-                                            provider,
-                                            !state.other_sign_in_options,
-                                            cx,
-                                        )
-                                    }),
-                            )
-                            .into_any_element(),
+                        content: ActionMenuList::render(
+                            self.palette,
+                            ACCOUNT_TYPES
+                                .into_iter()
+                                .filter(|provider| *provider != AccountProvider::Microsoft)
+                                .map(|provider| {
+                                    self.provider_option(provider, !state.other_sign_in_options, cx)
+                                }),
+                        )
+                        .into_any_element(),
                     }),
             )
     }
 
-    /// A whole-card action using the same anatomy as the first-run task cards.
+    /// Start browser sign-in or open the provider's input form.
     fn provider_option(
         &self,
         provider: AccountProvider,
         disabled: bool,
         cx: &Context<'_, Self>,
-    ) -> components::Control {
+    ) -> ActionRow {
         let language = self.language();
-        let (title, description, icon) = match provider {
+        let (title, description, icon, destination, action) = match provider {
             AccountProvider::Microsoft => (
                 "accounts.auth.choose.microsoft.title",
                 "accounts.auth.choose.microsoft.description",
-                img(MICROSOFT_LOGO.clone()).size(px(21.)).into_any_element(),
+                Icon::Browser,
+                ActionDestination::External,
+                UiAction::Authenticate,
             ),
             AccountProvider::Authlib => (
                 "accounts.auth.choose.authlib.title",
                 "accounts.auth.choose.authlib.description",
-                Icon::Server
-                    .render(20., self.palette.foreground)
-                    .into_any_element(),
+                Icon::Server,
+                ActionDestination::Forward,
+                UiAction::AuthProvider(provider),
             ),
             AccountProvider::Offline => (
                 "accounts.auth.choose.offline.title",
                 "accounts.auth.choose.offline.description",
-                Icon::Account
-                    .render(20., self.palette.foreground)
-                    .into_any_element(),
+                Icon::Account,
+                ActionDestination::Forward,
+                UiAction::AuthProvider(provider),
             ),
         };
-        let title = tr!(language, title);
-        let description = tr!(language, description);
         let unavailable = provider == AccountProvider::Microsoft
             && self
                 .shell
                 .auth
                 .as_ref()
                 .is_some_and(|state| state.microsoft_unavailable);
-        self.auth_button(
+        let row = ActionRow::new(
             provider_selector(provider),
-            "",
-            if provider == AccountProvider::Microsoft {
-                UiAction::Authenticate
-            } else {
-                UiAction::AuthProvider(provider)
+            ActionCopy {
+                title: tr!(language, title).into(),
+                description: if unavailable {
+                    tr!(language, "accounts.auth.error.missing_client_id").into()
+                } else {
+                    tr!(language, description).into()
+                },
             },
-            ButtonVariant::Outline,
-            ControlState {
-                disabled: self.busy || disabled,
-                ..ControlState::default()
+            ActionAppearance {
+                palette: self.palette,
+                icon,
+                destination,
+                state: ControlState {
+                    disabled: self.busy || disabled,
+                    ..ControlState::default()
+                },
             },
-            cx,
-        )
-        .aria_label(title.clone())
-        .aria_description(if unavailable {
-            tr!(language, "accounts.auth.error.missing_client_id")
+            cx.listener(move |view, (), window, cx| {
+                view.handle(action.clone(), window, cx);
+            }),
+        );
+        let row = if provider == AccountProvider::Microsoft {
+            row.leading(img(MICROSOFT_LOGO.clone()).size(px(18.)))
         } else {
-            description.clone()
-        })
-        .flex_shrink_0()
-        .p_5()
-        .rounded_2xl()
-        .items_start()
-        .justify_start()
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap_4()
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(icon)
-                        .child(if unavailable {
-                            components::badge(
-                                tr!(language, "wizard.setup.unavailable"),
-                                self.palette,
-                                BadgeVariant::Error,
-                            )
-                            .into_any_element()
-                        } else {
-                            Icon::ChevronRight
-                                .render(16., self.palette.muted)
-                                .into_any_element()
-                        }),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .text_lg()
-                                .text_color(rgb(if unavailable {
-                                    self.palette.muted
-                                } else {
-                                    self.palette.foreground
-                                }))
-                                .line_height(px(24.))
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(title),
-                        )
-                        .child(note(description)),
-                ),
-        )
+            row
+        };
+        if unavailable {
+            row.trailing(components::badge(
+                tr!(language, "wizard.setup.unavailable"),
+                self.palette,
+                BadgeVariant::Error,
+            ))
+        } else {
+            row
+        }
     }
 
     /// A community provider signs in with its own account and password, sent to
@@ -3509,8 +3466,17 @@ mod tests {
                 .auth
                 .as_ref()
                 .is_some_and(|state| state.phase == Phase::Connect && state.attempt.is_none())
+                && view.shell.toast.as_ref().is_some_and(|toast| {
+                    toast.message.key() == Some("accounts.auth.error.missing_client_id")
+                })
                 && !view.busy
         }));
+        // The compact chooser now sits behind the notification; let it expire
+        // before simulating the available configuration and clicking again.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(10));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("toast").is_none());
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 if let Some(state) = &mut view.shell.auth {

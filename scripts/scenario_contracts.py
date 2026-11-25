@@ -168,6 +168,8 @@ _add("setup-overview", "Set up Block", "Account", "Game", "English", "Go to Home
 _add("setup-overview-ready", "Set up Block", "English", "Go to Home")
 _add("setup-overview-draft", "Set up Block", "English", "A game draft is still open.", "Continue draft")
 _add("setup-game-choice", "Set up a game", "Recommended setup", "Custom setup")
+_add("setup-game-choice-loading", "Recommended setup", "Loading Minecraft version list", "Custom setup")
+_add("setup-game-choice-fallback", "Recommended setup", "Using built-in version 1.21.1", "Import existing games")
 _add("setup-account", "Sign in with Microsoft", "Open browser")
 _add("setup-game", "Create your game", "Minecraft")
 _add("setup-import-sources", "Import games", "Choose a source.")
@@ -211,7 +213,7 @@ def _window_title(name: str) -> str:
         page = "Accounts"
     elif name == "setup-game":
         page = "Create a game"
-    elif name == "setup-game-choice":
+    elif name in {"setup-game-choice", "setup-game-choice-loading", "setup-game-choice-fallback"}:
         page = "Set up a game"
     elif name.startswith("setup-"):
         page = "Set up Block"

@@ -1,4 +1,4 @@
-//! Compact native activity indicator shared by the authentication pages.
+//! Compact activity indicator for inline waiting states.
 
 use std::{f32::consts::TAU, time::Duration};
 

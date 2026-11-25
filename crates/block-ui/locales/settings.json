@@ -766,28 +766,33 @@
     "ja": "ゲームを作成するか、既存の環境を読み込みます。"
   },
   "setup.game_choice.import_description": {
-    "en": "Choose an existing game folder. The original files stay unchanged.",
-    "zh-Hans": "选择已有游戏文件夹，原文件保持不变。",
-    "ja": "既存のゲームフォルダーを選択します。元のファイルは変更しません。"
+    "en": "View game installations found on this computer.",
+    "zh-Hans": "查看在这台电脑上发现的游戏安装。",
+    "ja": "このコンピューターで見つかったゲーム環境を確認します。"
   },
   "setup.game_choice.recommended_title": {
     "en": "Recommended setup",
-    "zh-Hans": "推荐设置",
+    "zh-Hans": "推荐配置",
     "ja": "おすすめのセットアップ"
   },
+  "setup.game_choice.recommended_loading": {
+    "en": "Loading Minecraft version list…",
+    "zh-Hans": "正在加载 Minecraft 版本列表…",
+    "ja": "Minecraft のバージョン一覧を読み込み中…"
+  },
   "setup.game_choice.recommended_fallback": {
-    "en": "Stable Vanilla Minecraft · current launch defaults",
-    "zh-Hans": "稳定版原版 Minecraft · 当前默认启动设置",
-    "ja": "安定版バニラ Minecraft · 現在の既定起動設定"
+    "en": "The version list is unavailable. Using built-in version %{version}.",
+    "zh-Hans": "版本列表不可用，将使用内置版本 %{version}。",
+    "ja": "バージョン一覧を取得できないため、内蔵バージョン %{version} を使用します。"
   },
   "setup.game_choice.recommended": {
-    "en": "Minecraft %{version} · Vanilla · current launch defaults",
-    "zh-Hans": "Minecraft %{version} · 原版 · 当前默认启动设置",
-    "ja": "Minecraft %{version} · バニラ · 現在の既定起動設定"
+    "en": "Minecraft %{version} · Vanilla",
+    "zh-Hans": "Minecraft %{version} · 原版",
+    "ja": "Minecraft %{version} · バニラ"
   },
   "setup.game_choice.custom_title": {
     "en": "Custom setup",
-    "zh-Hans": "自定义设置",
+    "zh-Hans": "自定义配置",
     "ja": "カスタムセットアップ"
   },
   "setup.game_choice.custom_description": {
@@ -800,20 +805,10 @@
     "zh-Hans": "导入现有游戏",
     "ja": "既存のゲームをインポート"
   },
-  "setup.game_choice.reload": {
-    "en": "Reload versions",
-    "zh-Hans": "重新加载版本",
-    "ja": "バージョンを再読み込み"
-  },
   "setup.notice.install_chooser": {
     "en": "Could not open the installation folder chooser. Check your system file picker and try again.",
     "zh-Hans": "无法打开安装文件夹选择器。请检查系统的文件选择器后重试。",
     "ja": "インストールフォルダーの選択画面を開けませんでした。システムのファイル選択画面を確認して、もう一度お試しください。"
-  },
-  "setup.notice.versions": {
-    "en": "Load the Minecraft version list before using recommended setup. You can retry or use custom setup.",
-    "zh-Hans": "使用推荐设置前请先加载 Minecraft 版本列表。你可以重试或使用自定义设置。",
-    "ja": "おすすめのセットアップを使用する前に、Minecraft のバージョン一覧を読み込んでください。再試行するか、カスタムセットアップを使用できます。"
   },
   "setup.notice.progress": {
     "en": "Could not save setup progress: %{detail}",

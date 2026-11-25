@@ -12,13 +12,17 @@
 use super::scroll_area::ScrollAreaExt as _;
 use super::{
     Block, Form, Preferences, Tab, UiAction,
-    components::{self, ButtonVariant},
+    components::{ButtonVariant, ControlState},
     design::Icon,
     game_wizard::WizardStep,
     note,
     patterns::wizard_heading,
 };
-use crate::Language;
+use crate::{
+    Language,
+    action_list::{ActionAppearance, ActionCopy, ActionDestination, ActionMenuList, ActionRow},
+    wait_ring::WaitRing,
+};
 use block_launcher::catalog::{InstallStatus, PackStatus};
 use gpui::{
     Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle,
@@ -93,7 +97,6 @@ pub(super) enum Notice {
     /// The installation-folder chooser could not be opened.
     InstallChooser,
     LanguageInitialization(String),
-    VersionsUnavailable,
     SetupProgress(String),
     LanguageNotSaved(String),
 }
@@ -107,13 +110,31 @@ impl Notice {
                 "common.language_initialization_failed",
                 error = error
             ),
-            Self::VersionsUnavailable => tr!(language, "setup.notice.versions"),
             Self::SetupProgress(detail) => {
                 tr!(language, "setup.notice.progress", detail = detail.as_str())
             }
             Self::LanguageNotSaved(detail) => {
                 tr!(language, "setup.notice.language", detail = detail.as_str())
             }
+        }
+    }
+}
+
+/// A known modern release used only to seed a new draft, never a catalog entry.
+const BUILT_IN_SETUP_VERSION: &str = "1.21.1";
+
+enum Recommendation<'a> {
+    Loading,
+    Release(&'a str),
+    Fallback,
+}
+
+impl<'a> Recommendation<'a> {
+    const fn version(&self) -> Option<&'a str> {
+        match self {
+            Self::Loading => None,
+            Self::Release(version) => Some(version),
+            Self::Fallback => Some(BUILT_IN_SETUP_VERSION),
         }
     }
 }
@@ -199,11 +220,19 @@ impl Block {
             })
     }
 
-    fn recommended_setup_version(&self) -> Option<&str> {
+    fn setup_recommendation(&self) -> Recommendation<'_> {
+        if matches!(self.version_load, super::browser::CollectionLoad::Loading) {
+            return Recommendation::Loading;
+        }
         self.version_catalog
             .iter()
-            .find(|version| version.kind == block_launcher::manifest::model::VersionType::Release)
-            .map(|version| version.id.as_str())
+            .find(|version| {
+                version.kind == block_launcher::manifest::model::VersionType::Release
+                    && self.wizard_version_restriction(&version.id).is_none()
+            })
+            .map_or(Recommendation::Fallback, |version| {
+                Recommendation::Release(&version.id)
+            })
     }
 
     pub(super) fn first_run_game_ready(&self) -> bool {
@@ -382,6 +411,14 @@ impl Block {
         if !self.shell.first_run.enabled || self.preferences.onboarding_complete {
             return;
         }
+        let version = if matches!(action, Action::Recommended) {
+            let Some(version) = self.setup_recommendation().version() else {
+                return;
+            };
+            Some(version.to_owned())
+        } else {
+            None
+        };
         self.shell.first_run.error = None;
         self.shell.first_run.notice = None;
         match action {
@@ -417,12 +454,6 @@ impl Block {
                     cx.notify();
                     return;
                 }
-                let recommended = matches!(action, Action::Recommended);
-                let version = self.recommended_setup_version().map(str::to_owned);
-                if recommended && version.is_none() {
-                    self.shell.first_run.notice = Some(Notice::VersionsUnavailable);
-                    return;
-                }
                 self.begin_game_wizard(cx);
                 self.shell.wizard.step = WizardStep::Setup;
                 self.shell.first_run.stage = Stage::GameWizard;
@@ -439,7 +470,7 @@ impl Block {
                 }
                 // Recommended only pre-fills the same Setup page; the draft is
                 // saved when the user asks for it.
-                if recommended && let Some(version) = version {
+                if let Some(version) = version {
                     self.set_wizard_version(version, cx);
                 }
                 self.mark_game_wizard_clean(cx);
@@ -598,14 +629,48 @@ impl Block {
         )
     }
 
-    /// The two ways to start a game: the recommended current release, or an
-    /// explicit version, loader and settings choice.
+    /// The four ways to start a game share one list and one version decision.
     fn first_run_game_choice(&self, cx: &Context<'_, Self>) -> gpui::AnyElement {
         let language = self.language();
-        let recommended = self.recommended_setup_version().map_or_else(
-            || tr!(language, "setup.game_choice.recommended_fallback"),
-            |version| tr!(language, "setup.game_choice.recommended", version = version),
+        let recommendation = self.setup_recommendation();
+        let loading = matches!(recommendation, Recommendation::Loading);
+        let recommended = match recommendation {
+            Recommendation::Loading => tr!(language, "setup.game_choice.recommended_loading"),
+            Recommendation::Release(version) => {
+                tr!(language, "setup.game_choice.recommended", version = version)
+            }
+            Recommendation::Fallback => tr!(
+                language,
+                "setup.game_choice.recommended_fallback",
+                version = BUILT_IN_SETUP_VERSION
+            ),
+        };
+        let recommended = self.setup_action_row(
+            "setup-recommended",
+            ActionCopy {
+                title: tr!(language, "setup.game_choice.recommended_title").into(),
+                description: recommended.into(),
+            },
+            Icon::Games,
+            UiAction::FirstRun(Action::Recommended),
+            loading,
+            cx,
         );
+        let recommended = if loading {
+            recommended.trailing(
+                div()
+                    .id("setup-recommended-wait")
+                    .debug_selector(|| "setup-recommended-wait".into())
+                    .child(WaitRing::element(
+                        self.palette,
+                        "setup-recommendation-ring",
+                        !self.motion_preferences().reduced(),
+                    ))
+                    .test_support(),
+            )
+        } else {
+            recommended
+        };
         div()
             .flex()
             .flex_col()
@@ -616,43 +681,46 @@ impl Block {
             ))
             .children(self.first_run_draft_note(cx))
             .children(self.first_run_prepare_note())
-            .child(self.setup_choice(
-                "setup-recommended",
-                &tr!(language, "setup.game_choice.recommended_title"),
-                &recommended,
-                UiAction::FirstRun(Action::Recommended),
-                Icon::Games,
-                cx,
-            ))
-            .child(self.setup_choice(
-                "setup-custom",
-                &tr!(language, "setup.game_choice.custom_title"),
-                &tr!(language, "setup.game_choice.custom_description"),
-                UiAction::FirstRun(Action::Custom),
-                Icon::Settings,
-                cx,
-            ))
-            .child(self.setup_choice(
-                "setup-import-pack",
-                &tr!(language, "modpack.action.import_pack"),
-                &tr!(language, "modpack.entry.pack_note"),
-                UiAction::PackImport(super::modpack_import::Action::Open),
-                Icon::Layers,
-                cx,
-            ))
-            .child(self.button_with_variant(
-                "setup-import-game",
-                tr!(language, "setup.game_choice.import"),
-                UiAction::FirstRun(Action::Import),
-                ButtonVariant::Ghost,
-                cx,
-            ))
-            .child(self.button_with_variant(
-                "setup-reload-versions",
-                tr!(language, "setup.game_choice.reload"),
-                UiAction::ReloadVersions,
-                ButtonVariant::Ghost,
-                cx,
+            .child(ActionMenuList::render(
+                self.palette,
+                [
+                    recommended,
+                    self.setup_action_row(
+                        "setup-custom",
+                        ActionCopy {
+                            title: tr!(language, "setup.game_choice.custom_title").into(),
+                            description: tr!(language, "setup.game_choice.custom_description")
+                                .into(),
+                        },
+                        Icon::Sliders,
+                        UiAction::FirstRun(Action::Custom),
+                        false,
+                        cx,
+                    ),
+                    self.setup_action_row(
+                        "setup-import-pack",
+                        ActionCopy {
+                            title: tr!(language, "modpack.action.import_pack").into(),
+                            description: tr!(language, "modpack.entry.pack_note").into(),
+                        },
+                        Icon::Layers,
+                        UiAction::PackImport(super::modpack_import::Action::Open),
+                        false,
+                        cx,
+                    ),
+                    self.setup_action_row(
+                        "setup-import-game",
+                        ActionCopy {
+                            title: tr!(language, "setup.game_choice.import").into(),
+                            description: tr!(language, "setup.game_choice.import_description")
+                                .into(),
+                        },
+                        Icon::Folder,
+                        UiAction::FirstRun(Action::Import),
+                        false,
+                        cx,
+                    ),
+                ],
             ))
             .into_any_element()
     }
@@ -712,34 +780,31 @@ impl Block {
                     )
                     .child(note(tr!(language, "setup.overview.description"))),
             )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .items_stretch()
-                    .gap_3()
-                    .child(self.setup_task_card(
+            .child(ActionMenuList::render(
+                self.palette,
+                [
+                    self.setup_task_row(
                         "setup-account",
-                        &tr!(language, "setup.account.title"),
-                        &account_description,
+                        ActionCopy {
+                            title: tr!(language, "setup.account.title").into(),
+                            description: account_description.into(),
+                        },
                         Icon::Account,
-                        account,
-                        None,
-                        Action::Account,
+                        (Action::Account, account, None),
                         cx,
-                    ))
-                    .child(self.setup_task_card(
+                    ),
+                    self.setup_task_row(
                         "setup-game",
-                        &tr!(language, "setup.game.title"),
-                        &game_description,
+                        ActionCopy {
+                            title: tr!(language, "setup.game.title").into(),
+                            description: game_description.into(),
+                        },
                         Icon::Games,
-                        game,
-                        importable,
-                        Action::Game,
+                        (Action::Game, game, importable),
                         cx,
-                    )),
-            )
+                    ),
+                ],
+            ))
             .children(
                 (matches!(
                     self.shell.games.load,
@@ -860,170 +925,118 @@ impl Block {
         }
     }
 
-    fn setup_choice(
+    fn setup_action_row(
         &self,
         id: &'static str,
-        title: &str,
-        description: &str,
-        action: UiAction,
+        copy: ActionCopy,
         icon: Icon,
+        action: UiAction,
+        waiting: bool,
         cx: &Context<'_, Self>,
-    ) -> components::Control {
-        self.button_with_variant(id, "", action, ButtonVariant::Outline, cx)
-            .w_full()
-            .h_auto()
-            .min_h(px(90.))
-            .p_5()
-            .rounded_2xl()
-            .gap_3()
-            .items_start()
-            .justify_start()
-            .child(icon.render(20., self.palette.foreground))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap_2()
-                    .child(div().w_full().whitespace_normal().child(title.to_owned()))
-                    .child(note(description.to_owned()).w_full().whitespace_normal()),
-            )
+    ) -> ActionRow {
+        ActionRow::new(
+            id,
+            copy,
+            ActionAppearance {
+                palette: self.palette,
+                icon,
+                destination: if waiting {
+                    ActionDestination::Custom
+                } else {
+                    ActionDestination::Forward
+                },
+                state: ControlState {
+                    disabled: waiting
+                        || self.busy && !self.can_activate(&action)
+                        || self.import_action_disabled(&action),
+                    ..ControlState::default()
+                },
+            },
+            cx.listener(move |view, (), window, cx| view.handle(action.clone(), window, cx)),
+        )
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "A task tile has explicit content and action."
-    )]
-    fn setup_task_card(
+    fn setup_task_row(
         &self,
         id: &'static str,
-        title: &str,
-        description: &str,
+        copy: ActionCopy,
         icon: Icon,
-        complete: bool,
-        importable: Option<usize>,
-        action: Action,
+        (action, complete, importable): (Action, bool, Option<usize>),
         cx: &Context<'_, Self>,
-    ) -> components::Control {
-        self.button_with_variant(
-            id,
-            "",
-            UiAction::FirstRun(action),
-            ButtonVariant::Outline,
-            cx,
-        )
-        .w_full()
-        .flex_shrink_0()
-        .min_w_0()
-        .h_auto()
-        .p_5()
-        .rounded_2xl()
-        .aria_description(importable.map_or_else(
-            || description.to_owned(),
-            |count| {
-                format!(
-                    "{description} {}",
-                    tr!(self.language(), "setup.import.badge", count = count)
+    ) -> ActionRow {
+        let language = self.language();
+        let label = if complete {
+            tr!(language, "setup.status.configured")
+        } else {
+            tr!(language, "setup.status.notConfigured")
+        };
+        let import_label =
+            importable.map(|count| tr!(language, "setup.import.badge", count = count));
+        let description = copy.description.clone();
+        let accessible = import_label.as_ref().map_or_else(
+            || format!("{description} {label}"),
+            |import_label| format!("{description} {label} {import_label}"),
+        );
+        let badges = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .children(import_label.map(|label| {
+                setup_badge(
+                    "setup-import-badge",
+                    label,
+                    self.palette.info_background,
+                    self.palette.info,
                 )
-            },
-        ))
-        .items_start()
-        .justify_start()
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .whitespace_normal()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap_4()
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(icon.render(20., self.palette.foreground))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .children(importable.map(|count| {
-                                    let label =
-                                        tr!(self.language(), "setup.import.badge", count = count);
-                                    div()
-                                        .id("setup-import-badge")
-                                        .debug_selector(|| "setup-import-badge".into())
-                                        .aria_label(label.clone())
-                                        .flex_shrink_0()
-                                        .rounded_full()
-                                        .px_2()
-                                        .py(px(2.))
-                                        .text_xs()
-                                        .line_height(px(16.))
-                                        .bg(rgb(self.palette.info_background))
-                                        .text_color(rgb(self.palette.info))
-                                        .child(label)
-                                }))
-                                .child({
-                                    let label = if complete {
-                                        tr!(self.language(), "setup.status.configured")
-                                    } else {
-                                        tr!(self.language(), "setup.status.notConfigured")
-                                    };
-                                    let selector = format!("{id}-status");
-                                    div()
-                                        .id(gpui::SharedString::from(selector.clone()))
-                                        .debug_selector(move || selector.clone())
-                                        .aria_label(label.clone())
-                                        .flex_shrink_0()
-                                        .rounded_full()
-                                        .px_2()
-                                        .py(px(2.))
-                                        .text_xs()
-                                        .line_height(px(16.))
-                                        .bg(rgb(if complete {
-                                            self.palette.success_background
-                                        } else {
-                                            self.palette.secondary
-                                        }))
-                                        .text_color(rgb(if complete {
-                                            self.palette.success
-                                        } else {
-                                            self.palette.muted
-                                        }))
-                                        .child(label)
-                                        .test_support()
-                                })
-                                .child(Icon::ChevronRight.render(16., self.palette.muted)),
-                        ),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .text_lg()
-                                        .font_weight(gpui::FontWeight::BOLD)
-                                        .child(title.to_owned()),
-                                ),
-                        )
-                        .child(note(description.to_owned())),
-                ),
-        )
+            }))
+            .child(setup_badge(
+                format!("{id}-status"),
+                label,
+                if complete {
+                    self.palette.success_background
+                } else {
+                    self.palette.secondary
+                },
+                if complete {
+                    self.palette.success
+                } else {
+                    self.palette.muted
+                },
+            ));
+        self.setup_action_row(id, copy, icon, UiAction::FirstRun(action), false, cx)
+            .description(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(note(description))
+                    .child(badges),
+            )
+            .map_control(|control| control.aria_description(accessible))
     }
+}
+
+fn setup_badge(
+    id: impl Into<gpui::SharedString>,
+    label: String,
+    background: u32,
+    foreground: u32,
+) -> impl IntoElement {
+    let id = id.into();
+    div()
+        .id(id.clone())
+        .debug_selector(move || id.to_string())
+        .aria_label(label.clone())
+        .flex_shrink_0()
+        .whitespace_nowrap()
+        .rounded_full()
+        .px_2()
+        .py(px(2.))
+        .text_xs()
+        .line_height(px(16.))
+        .bg(rgb(background))
+        .text_color(rgb(foreground))
+        .child(label)
+        .test_support()
 }

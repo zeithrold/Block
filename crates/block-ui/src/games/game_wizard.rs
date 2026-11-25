@@ -45,6 +45,7 @@ impl Drop for LoaderRequest {
 
 use super::{
     Block, Form, InstanceForm, Tab, UiAction,
+    action_list::{ActionAppearance, ActionCopy, ActionDestination, ActionMenuList, ActionRow},
     components::{self, BadgeVariant, ButtonVariant, ControlState, FieldOptions},
     design::Icon,
     input, modpack_import, note, patterns,
@@ -819,24 +820,34 @@ impl Block {
         cx.notify();
     }
 
-    fn wizard_optifine_card(
-        &self,
-        form: &InstanceForm,
-        cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn wizard_optifine_row(&self, form: &InstanceForm, cx: &Context<'_, Self>) -> ActionRow {
         let language = self.language();
         if !matches!(form.loader, LoaderKind::Vanilla | LoaderKind::Forge) {
-            return self.wizard_unavailable(
-                "optifine",
-                "OptiFine",
-                &text(
-                    language,
-                    "wizard.optifine.cannotCombine",
-                    &[("loader", form.loader.name())],
-                ),
+            let unavailable = tr!(language, "wizard.setup.unavailable");
+            let reason = text(
+                language,
+                "wizard.optifine.cannotCombine",
+                &[("loader", form.loader.name())],
+            );
+            return ActionRow::new(
+                "wizard-unavailable-optifine",
+                ActionCopy {
+                    title: "OptiFine".into(),
+                    description: format!("{unavailable}\n{reason}").into(),
+                },
+                ActionAppearance {
+                    palette: self.palette,
+                    icon: Icon::Experiment,
+                    destination: ActionDestination::Custom,
+                    state: ControlState {
+                        disabled: true,
+                        ..ControlState::default()
+                    },
+                },
+                |&(), _, _| {},
             );
         }
-        self.wizard_card(
+        self.wizard_component_row(
             "optifine",
             "OptiFine",
             (
@@ -2288,14 +2299,21 @@ impl Block {
         id: &'static str,
         label: &str,
         cx: &Context<'_, Self>,
-    ) -> components::Control {
-        super::motion::disclosure_trigger(
+    ) -> ActionRow {
+        ActionRow::new(
             id,
-            label,
-            &self.shell.wizard.advanced.borrow(),
-            self.palette,
-            self.motion_preferences(),
-            cx,
+            ActionCopy {
+                title: label.to_owned().into(),
+                description: "".into(),
+            },
+            ActionAppearance {
+                palette: self.palette,
+                icon: Icon::Settings,
+                destination: ActionDestination::Disclosure(
+                    self.shell.wizard.advanced.borrow().is_open(),
+                ),
+                state: ControlState::default(),
+            },
             cx.listener(|view, (): &(), window, cx| {
                 view.handle(UiAction::WizardInstanceOptions, window, cx);
             }),
@@ -2604,33 +2622,34 @@ impl Block {
                 None,
             ))
             .child(
-                div()
-                    .id("wizard-components")
-                    .debug_selector(|| "wizard-components".into())
-                    .grid()
-                    .grid_cols(1)
-                    .gap_3()
-                    .child(self.wizard_card(
-                        "version",
-                        &tr!(language, "wizard.setup.versionCard"),
-                        (&version, &version_kind),
-                        WizardPage::Version,
-                        cx,
-                    ))
-                    .child(self.wizard_card(
-                        "loader",
-                        &tr!(language, "wizard.setup.loaderCard"),
-                        (&loader_label, &loader_detail),
-                        WizardPage::Loader,
-                        cx,
-                    ))
-                    .child(self.wizard_card(
-                        "location",
-                        &tr!(language, "wizard.setup.configurationCard"),
-                        (&configuration.0, &configuration.1),
-                        WizardPage::Location,
-                        cx,
-                    )),
+                ActionMenuList::render(
+                    self.palette,
+                    [
+                        self.wizard_component_row(
+                            "version",
+                            &tr!(language, "wizard.setup.versionCard"),
+                            (&version, &version_kind),
+                            WizardPage::Version,
+                            cx,
+                        ),
+                        self.wizard_component_row(
+                            "loader",
+                            &tr!(language, "wizard.setup.loaderCard"),
+                            (&loader_label, &loader_detail),
+                            WizardPage::Loader,
+                            cx,
+                        ),
+                        self.wizard_component_row(
+                            "location",
+                            &tr!(language, "wizard.setup.configurationCard"),
+                            (&configuration.0, &configuration.1),
+                            WizardPage::Location,
+                            cx,
+                        ),
+                    ],
+                )
+                .id("wizard-components")
+                .debug_selector(|| "wizard-components".into()),
             )
             .child(note(tr!(language, "wizard.setup.openCard")))
             .children(
@@ -2644,17 +2663,23 @@ impl Block {
                     .as_ref()
                     .map(|notice| self.wizard_version_notice(notice, language)),
             )
-            .child(self.wizard_instance_options_trigger(
-                "wizard-instance-settings-options",
-                &tr!(language, "wizard.setup.appearanceLaunch"),
-                cx,
+            .child(ActionMenuList::render(
+                self.palette,
+                [self.wizard_instance_options_trigger(
+                    "wizard-instance-settings-options",
+                    &tr!(language, "wizard.setup.appearanceLaunch"),
+                    cx,
+                )],
             ))
             .child({
                 let content = div()
                     .flex()
                     .flex_col()
                     .gap_4()
-                    .child(self.wizard_optifine_card(form, cx))
+                    .child(ActionMenuList::render(
+                        self.palette,
+                        [self.wizard_optifine_row(form, cx)],
+                    ))
                     .child(self.wizard_instance(window, cx, false))
                     .into_any_element();
                 super::motion::disclosure(
@@ -2709,154 +2734,84 @@ impl Block {
         )
     }
 
-    fn wizard_card(
+    fn wizard_component_row(
         &self,
         id: &str,
         title: &str,
         summary: (&str, &str),
         page: WizardPage,
         cx: &Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    ) -> ActionRow {
         let (value, detail) = summary;
         let icon = match page {
-            WizardPage::Version => Icon::Games,
-            WizardPage::Loader => Icon::Download,
+            WizardPage::Version => Icon::Blocks,
+            WizardPage::Loader => Icon::Layers,
             WizardPage::OptiFine => Icon::Experiment,
             WizardPage::Location => Icon::Settings,
         };
         let value_id = format!("wizard-component-{id}-value");
         let detail_id = format!("wizard-component-{id}-detail");
-        let card = components::button(
+        ActionRow::new(
             format!("wizard-component-{id}"),
-            "",
-            self.palette,
-            ButtonVariant::Outline,
-            ControlState {
-                disabled: self.busy,
-                ..ControlState::default()
+            ActionCopy {
+                title: title.to_owned().into(),
+                description: format!("{value}\n{detail}").into(),
+            },
+            ActionAppearance {
+                palette: self.palette,
+                icon,
+                destination: ActionDestination::Forward,
+                state: ControlState {
+                    disabled: self.busy,
+                    ..ControlState::default()
+                },
             },
             cx.listener(move |view, &(): &(), window, cx| {
                 view.handle(UiAction::WizardPage(Some(page)), window, cx);
             }),
         )
-        .aria_label(format!("{title}: {value}"))
-        .w_full()
-        .h_auto()
-        .min_w_0()
-        .flex()
-        .items_center()
-        .min_h(px(80.))
-        .gap_3()
-        .p_4()
-        .rounded(px(super::design::CARD_RADIUS))
-        .track_focus(&self.shell.wizard.creation_focus(id, cx));
-        let card = card
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(icon.render(20., self.palette.muted)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(note(title.to_owned()))
-                    .child({
-                        let debug_id = value_id.clone();
-                        div()
-                            .id(value_id)
-                            .debug_selector(move || debug_id)
-                            .w_full()
-                            .min_w_0()
-                            .text_sm()
-                            .whitespace_normal()
-                            .child(value.to_owned())
-                    })
-                    .child({
-                        let debug_id = detail_id.clone();
-                        div()
-                            .id(detail_id)
-                            .debug_selector(move || debug_id)
-                            .w_full()
-                            .min_w_0()
-                            .text_xs()
-                            .text_color(rgb(self.palette.muted))
-                            .whitespace_normal()
-                            .child(detail.to_owned())
-                    }),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(Icon::ChevronRight.render(14., self.palette.muted)),
-            );
-        super::tooltip::trigger(
-            card,
-            text(
-                self.language(),
-                "wizard.card.tooltip",
-                &[("title", title), ("value", value), ("detail", detail)],
-            ),
-            Block::language,
-            cx,
-        )
-        .into_any_element()
-    }
-
-    fn wizard_unavailable(&self, id: &str, title: &str, reason: &str) -> gpui::AnyElement {
-        let card = components::button(
-            format!("wizard-unavailable-{id}"),
-            "",
-            self.palette,
-            ButtonVariant::Outline,
-            ControlState {
-                disabled: true,
-                ..ControlState::default()
-            },
-            |&(), _, _| {},
-        )
-        .w_full()
-        .h_auto()
-        .min_w_0()
-        .min_h(px(96.))
-        .flex()
-        .flex_col()
-        .items_start()
-        .justify_between()
-        .gap_3()
-        .p_5()
-        .rounded(px(super::design::CARD_RADIUS))
-        .child(Icon::Info.render(20., self.palette.muted))
-        .child(
+        .track_focus(&self.shell.wizard.creation_focus(id, cx))
+        .description(
             div()
-                .w_full()
-                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(note(title.to_owned()))
-                .child(
+                .child({
+                    let debug_id = value_id.clone();
                     div()
+                        .id(value_id)
+                        .debug_selector(move || debug_id)
                         .w_full()
                         .min_w_0()
                         .text_sm()
                         .whitespace_normal()
-                        .child(tr!(self.language(), "wizard.setup.unavailable")),
-                )
-                .child(
+                        .child(value.to_owned())
+                })
+                .child({
+                    let debug_id = detail_id.clone();
                     div()
+                        .id(detail_id)
+                        .debug_selector(move || debug_id)
                         .w_full()
                         .min_w_0()
                         .text_xs()
                         .text_color(rgb(self.palette.muted))
                         .whitespace_normal()
-                        .child(reason.to_owned()),
+                        .child(detail.to_owned())
+                }),
+        )
+        .map_control(|control| {
+            super::tooltip::trigger(
+                control.aria_label(format!("{title}: {value}")),
+                text(
+                    self.language(),
+                    "wizard.card.tooltip",
+                    &[("title", title), ("value", value), ("detail", detail)],
                 ),
-        );
-        card.into_any_element()
+                Block::language,
+                cx,
+            )
+        })
     }
 
     fn matching_wizard_versions(

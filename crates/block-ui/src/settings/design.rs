@@ -132,6 +132,9 @@ pub(super) enum Icon {
     Stop,
     Folder,
     ExternalLink,
+    Browser,
+    DeviceCode,
+    Sliders,
     Edit,
     Copy,
     Refresh,
@@ -333,6 +336,21 @@ impl Icon {
             Self::ExternalLink,
             "icons/external-link.svg",
             include_bytes!("../../assets/icons/actions/external-link.svg"),
+        ),
+        (
+            Self::Browser,
+            "icons/browser.svg",
+            include_bytes!("../../assets/icons/actions/browser.svg"),
+        ),
+        (
+            Self::DeviceCode,
+            "icons/device-code.svg",
+            include_bytes!("../../assets/icons/actions/device-code.svg"),
+        ),
+        (
+            Self::Sliders,
+            "icons/sliders.svg",
+            include_bytes!("../../assets/icons/actions/sliders.svg"),
         ),
         (
             Self::Edit,

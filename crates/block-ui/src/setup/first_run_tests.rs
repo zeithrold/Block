@@ -26,6 +26,13 @@ fn label(cx: &mut gpui::VisualTestContext, selector: &'static str) -> Option<Str
     })
 }
 
+fn description(cx: &mut gpui::VisualTestContext, selector: &'static str) -> Option<String> {
+    cx.update(|window, _| {
+        gpui_base::test_support::find(window, &[], &selector.into())
+            .and_then(|node| node.description().map(str::to_owned))
+    })
+}
+
 fn candidate(id: &str, source: SourceKind, importable: bool) -> GameCandidate {
     GameCandidate {
         id: id.into(),
@@ -497,6 +504,10 @@ fn initialization_opens_the_setup_center_and_a_report_only_reports_a_count(
         assert_eq!(status_badge.size.height, import_badge.size.height);
         assert_eq!(status_badge.center().y, import_badge.center().y);
         assert!(import_badge.right() < status_badge.left());
+        let game_description = description(cx, "setup-game").context("Game row description")?;
+        let language = crate::Language::English;
+        assert!(game_description.contains(&tr!(language, "setup.import.badge", count = 3)));
+        assert!(game_description.contains(&tr!(language, "setup.status.notConfigured")));
         assert!(crate::test_support::control_bounds(cx, "setup-import-game").is_none());
         assert!(crate::test_support::control_bounds(cx, "setup-rescan").is_none());
         let game = bounds(cx, "setup-game")?;
@@ -532,8 +543,21 @@ fn initialization_opens_the_setup_center_and_a_report_only_reports_a_count(
                 && bounds(cx, "setup-custom")?.origin.y < bounds(cx, "setup-import-pack")?.origin.y
                 && bounds(cx, "setup-import-pack")?.origin.y
                     < bounds(cx, "setup-import-game")?.origin.y,
-            "three creation cards stay ordered and existing imports remain secondary"
+            "the four GameChoice rows stay in the accepted order"
         );
+        let import = bounds(cx, "setup-import-game")?.center();
+        cx.simulate_click(import, gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| matches!(
+            view.shell.surfaces.top().map(|layer| &layer.kind),
+            Some(crate::shell::Surface::Drawer(
+                crate::shell::Drawer::ImportGames
+            ))
+        )));
+        crate::test_support::press(cx, "escape");
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| !view.shell.surfaces.is_open()
+            && view.shell.first_run.stage == Stage::GameChoice));
         Ok(())
     })();
     assert!(result.is_ok(), "{result:?}");
@@ -971,7 +995,7 @@ fn explicit_import_from_the_overview_opens_the_drawer_immediately(cx: &mut gpui:
 }
 
 #[gpui::test]
-fn compact_setup_keeps_accounts_first_with_equal_cards_and_both_exit_actions_visible(
+fn compact_setup_groups_account_before_game_and_keeps_both_exit_actions_visible(
     cx: &mut gpui::TestAppContext,
 ) {
     for language in crate::Language::ALL {
@@ -1000,9 +1024,16 @@ fn compact_setup_keeps_accounts_first_with_equal_cards_and_both_exit_actions_vis
         assert!(body.zip(footer).is_some_and(|(body, footer)| {
             body.size.height >= gpui::px(120.) && body.bottom() <= footer.top()
         }));
-        assert!(account.zip(game).is_some_and(|(account, game)| {
-            game.top() - account.bottom() == gpui::px(12.) && account.size == game.size
-        }));
+        assert!(
+            account.zip(game).is_some_and(|(account, game)| {
+                game.top() - account.bottom() == gpui::px(1.)
+                    && game.left() == account.left()
+                    && game.size.width == account.size.width
+                    && account.size.height >= gpui::px(44.)
+                    && game.size.height >= gpui::px(44.)
+            }),
+            "{language:?}: both setup actions must be full-width list rows, account={account:?}, game={game:?}"
+        );
         for selector in ["setup-later", "setup-continue"] {
             let action = crate::test_support::control_bounds(cx, selector);
             assert!(
@@ -1590,41 +1621,136 @@ fn cancelled_game_wizard_releases_its_click_barrier_before_continue(cx: &mut gpu
 }
 
 #[gpui::test]
-fn recommended_game_uses_a_release_when_snapshots_are_enabled_and_listed_first(
+fn game_choice_disables_only_recommendation_while_versions_load(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = crate::test_support::window(cx, |window, cx| {
+        let mut view = crate::tests::test_view(window, cx);
+        view.preferences.reduce_motion = true;
+        view.version_load = crate::browser::CollectionLoad::Loading;
+        view.begin_first_run(cx);
+        view.handle_first_run(FirstRunAction::Game, window, cx);
+        view
+    });
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
+    cx.run_until_parked();
+    for (id, disabled) in [
+        ("setup-recommended", true),
+        ("setup-custom", false),
+        ("setup-import-pack", false),
+        ("setup-import-game", false),
+    ] {
+        assert_eq!(
+            cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &id.into())
+                    .map(|node| node.disabled() == Some(true))
+            }),
+            Some(disabled),
+            "{id}"
+        );
+    }
+    assert!(
+        crate::test_support::control_bounds(cx, "setup-recommended-wait").is_some(),
+        "the wait ring stays visible with reduced motion"
+    );
+    assert!(crate::test_support::control_bounds(cx, "setup-reload-versions").is_none());
+    assert_eq!(
+        description(cx, "setup-recommended"),
+        Some(tr!(
+            crate::Language::English,
+            "setup.game_choice.recommended_loading"
+        ))
+    );
+    let click = |cx: &mut gpui::VisualTestContext, id: &'static str| {
+        let target = bounds(cx, id);
+        assert!(target.is_ok(), "{id} must be rendered: {target:?}");
+        if let Ok(target) = target {
+            cx.simulate_click(target.center(), gpui::Modifiers::none());
+        }
+    };
+    click(cx, "setup-recommended");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.shell.first_run.stage
+        == Stage::GameChoice
+        && view.form.is_none()));
+    click(cx, "setup-custom");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.shell.first_run.stage
+        == Stage::GameWizard
+        && matches!(&view.form, Some(super::Form::Instance(_)))));
+}
+
+#[gpui::test]
+fn recommended_game_prefills_the_displayed_release_or_built_in_fallback(
     cx: &mut gpui::TestAppContext,
 ) {
-    let (view, cx) = crate::test_support::window(cx, crate::tests::test_view);
-    let snapshot = version_entry(
-        "24w14a",
-        block_launcher::manifest::model::VersionType::Snapshot,
-    );
-    let release = version_entry(
-        "1.20.6",
-        block_launcher::manifest::model::VersionType::Release,
-    );
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| {
+    use block_launcher::manifest::model::VersionType;
+    let language = crate::Language::English;
+    for (result, expected_version, description_key) in [
+        (
+            Ok(vec![
+                version_entry("24w14a", VersionType::Snapshot),
+                version_entry("1.20.6", VersionType::Release),
+            ]),
+            "1.20.6",
+            "setup.game_choice.recommended",
+        ),
+        (
+            Err("fixture network error".into()),
+            "1.21.1",
+            "setup.game_choice.recommended_fallback",
+        ),
+        (
+            Ok(vec![version_entry("24w14a", VersionType::Snapshot)]),
+            "1.21.1",
+            "setup.game_choice.recommended_fallback",
+        ),
+    ] {
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (view, cx) = crate::test_support::window(cx, move |window, cx| {
+            let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
+            view.messages = Some(receiver);
+            view.version_catalog.clear();
+            view.versions.clear();
+            view.version_load = crate::browser::CollectionLoad::Loading;
             view.begin_first_run(cx);
             view.saved_preferences.game.show_snapshots = true;
-            view.versions = vec![snapshot.id.clone(), release.id.clone()];
-            view.version_catalog = vec![snapshot, release];
             view.handle_first_run(FirstRunAction::Game, window, cx);
-            view.handle_first_run(FirstRunAction::Recommended, window, cx);
+            view
         });
-    });
-    assert!(
-        view.read_with(cx, |view, cx| {
-            view.shell.first_run.stage == Stage::GameWizard
-                && view.shell.wizard.step == super::game_wizard::WizardStep::Setup
-                && matches!(&view.form, Some(super::Form::Instance(form))
-                    if form.version.read(cx).value(cx) == "1.20.6")
-        }),
-        "Recommended pre-fills the same Setup page"
-    );
-    assert!(
-        view.read_with(cx, |view, _| !view.busy && view.pending_creation.is_none()),
-        "Recommended must not save on the user's behalf"
-    );
+        cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(720.)));
+        cx.run_until_parked();
+        assert!(sender.try_send(crate::Message::Versions(result)).is_ok());
+        view.update(cx, crate::Block::poll);
+        cx.run_until_parked();
+        assert_eq!(
+            description(cx, "setup-recommended"),
+            Some(tr!(language, description_key, version = expected_version))
+        );
+        assert!(crate::test_support::control_bounds(cx, "setup-recommended-wait").is_none());
+        let recommended = bounds(cx, "setup-recommended");
+        assert!(
+            recommended.is_ok(),
+            "missing recommended row: {recommended:?}"
+        );
+        if let Ok(target) = recommended {
+            cx.simulate_click(target.center(), gpui::Modifiers::none());
+        }
+        cx.run_until_parked();
+        assert!(
+            view.read_with(cx, |view, cx| {
+                view.shell.first_run.stage == Stage::GameWizard
+                    && view.shell.wizard.step == super::game_wizard::WizardStep::Setup
+                    && matches!(&view.form, Some(super::Form::Instance(form))
+                        if form.version.read(cx).value(cx) == expected_version
+                            && form.loader == block_launcher::catalog::LoaderKind::Vanilla)
+            }),
+            "Recommended pre-fills Setup with the displayed Minecraft version {expected_version}"
+        );
+        assert!(
+            view.read_with(cx, |view, _| !view.busy && view.pending_creation.is_none()),
+            "Recommended must not save on the user's behalf"
+        );
+    }
 }
 
 #[gpui::test]
@@ -1977,7 +2103,9 @@ fn install_chooser_failure_has_a_semantic_identity_and_clears_only_itself(
         assert!(view.shell.first_run.notice.is_none());
 
         // A different retained first-run failure is not cleared by identity.
-        view.shell.first_run.notice = Some(super::first_run::Notice::VersionsUnavailable);
+        view.shell.first_run.notice = Some(super::first_run::Notice::SetupProgress(
+            "other failure".into(),
+        ));
         assert!(!view.clear_install_chooser_failure());
         assert!(view.shell.first_run.notice.is_some());
     });

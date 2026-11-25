@@ -515,7 +515,7 @@ fn pack_rail_groups_inspection_review_and_install_results_into_three_steps(
 }
 
 #[gpui::test]
-fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppContext) {
+fn wizard_component_menu_rows_stack_and_grow_with_their_content(cx: &mut TestAppContext) {
     let (view, cx) = crate::test_support::window(cx, |window, cx| {
         let mut view = crate::tests::test_view(window, cx);
         view.preferences.reduce_motion = true;
@@ -537,23 +537,23 @@ fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppCont
         });
         cx.simulate_resize(size(px(width), px(900.)));
         cx.run_until_parked();
-        let grid = crate::test_support::control_bounds(cx, "wizard-components");
+        let menu = crate::test_support::control_bounds(cx, "wizard-components");
         let version = crate::test_support::control_bounds(cx, "wizard-component-version");
         let loader = crate::test_support::control_bounds(cx, "wizard-component-loader");
         let location = crate::test_support::control_bounds(cx, "wizard-component-location");
         let value = crate::test_support::control_bounds(cx, "wizard-component-version-value");
         let detail = crate::test_support::control_bounds(cx, "wizard-component-version-detail");
         assert!(
-            grid.is_some()
+            menu.is_some()
                 && version.is_some()
                 && loader.is_some()
                 && location.is_some()
                 && value.is_some()
                 && detail.is_some(),
-            "live wizard cards must be rendered at {width}"
+            "live wizard menu rows must be rendered at {width}"
         );
-        let (Some(grid), Some(version), Some(loader), Some(location), Some(value), Some(detail)) =
-            (grid, version, loader, location, value, detail)
+        let (Some(menu), Some(version), Some(loader), Some(location), Some(value), Some(detail)) =
+            (menu, version, loader, location, value, detail)
         else {
             return;
         };
@@ -565,29 +565,22 @@ fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppCont
         assert!(
             (version.size.width - loader.size.width).abs() <= px(1.)
                 && (loader.size.width - location.size.width).abs() <= px(1.),
-            "cards must fill the same column width at {width}"
+            "rows must fill the same column width at {width}"
         );
-        let first_row = version.size.height;
-        let loader_row = loader.size.height;
         let second_row = location.size.height;
         assert!(
-            (loader.top() - version.bottom() - px(12.)).abs() <= px(1.)
-                && (location.top() - loader.bottom() - px(12.)).abs() <= px(1.),
-            "cards must keep the 12 px grid gap at {width}"
+            (loader.top() - version.bottom()).abs() <= px(2.)
+                && (location.top() - loader.bottom()).abs() <= px(2.),
+            "the grouped rows must be contiguous apart from their divider at {width}"
         );
         assert!(
             version.top() < loader.top() && loader.top() < location.top(),
             "Version, Loader and Configuration must keep their reading order at {width}"
         );
-        for card in [version, loader, location] {
-            assert!(
-                card.size.height >= px(80.),
-                "summary rows must keep their 80 px minimum height at {width}: {card:?}"
-            );
-        }
         assert!(
-            (grid.size.height - (first_row + loader_row + second_row + px(24.))).abs() <= px(1.),
-            "the grid must reserve only its three content rows at {width}: grid={grid:?}, version={version:?}, location={location:?}"
+            (version.top() - menu.top()).abs() <= px(2.)
+                && (menu.bottom() - location.bottom()).abs() <= px(2.),
+            "the menu must enclose its three content rows at {width}: menu={menu:?}, version={version:?}, location={location:?}"
         );
         // The value and its detail sit inside the card instead of being clipped.
         assert!(
@@ -626,14 +619,15 @@ fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppCont
         else {
             return;
         };
+        let added_value_height = tall_value.size.height - value.size.height;
         assert!(
-            tall_value.size.height >= value.size.height + px(20.),
+            added_value_height >= value.size.height - px(1.),
             "a long value must wrap instead of staying one clipped line at {width}: before={:?}, after={:?}",
             value.size.height,
             tall_value.size.height
         );
         assert!(
-            tall_version.size.height >= version.size.height + px(20.),
+            tall_version.size.height - version.size.height >= added_value_height - px(1.),
             "the card must grow with the wrapped value at {width}: before={:?}, after={:?}",
             version.size.height,
             tall_version.size.height
@@ -649,6 +643,14 @@ fn wizard_component_cards_stack_and_grow_with_their_content(cx: &mut TestAppCont
         );
         assert!(view.read_with(cx, |view, _| view.shell.wizard.page.is_none()));
     }
+    let row = entry_bounds(cx, "wizard-component-version", "Setup");
+    cx.simulate_click(
+        point(row.right() - px(4.), row.center().y),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.shell.wizard.page
+        == Some(WizardPage::Version)));
 }
 
 #[gpui::test]
