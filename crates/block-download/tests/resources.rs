@@ -17,6 +17,7 @@ use sha2::Sha512;
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpListener,
+    sync::Notify,
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
@@ -32,6 +33,7 @@ struct Route {
 struct Fixture {
     base: String,
     counts: BTreeMap<String, Arc<AtomicUsize>>,
+    request_received: Arc<Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -62,6 +64,12 @@ impl Fixture {
             .map(|count| count.load(Ordering::SeqCst))
             .sum()
     }
+
+    async fn wait_for_request(&self, path: &str) {
+        while self.requests(path) == 0 {
+            self.request_received.notified().await;
+        }
+    }
 }
 
 /// A local HTTP fixture serving one fixed response per request path.
@@ -85,11 +93,14 @@ async fn fixture(
     }
     let table = Arc::new(table);
     let served = counts.clone();
+    let request_received = Arc::new(Notify::new());
+    let received = request_received.clone();
     let task = tokio::spawn(async move {
         let mut connections = JoinSet::new();
         while let Ok((mut socket, _)) = listener.accept().await {
             let table = table.clone();
             let served = served.clone();
+            let received = received.clone();
             connections.spawn(async move {
                 let mut request = [0; 4096];
                 let Ok(length) = socket.read(&mut request).await else {
@@ -100,6 +111,7 @@ async fn fixture(
                 let path = target.split('?').next().unwrap_or("/").to_owned();
                 if let Some(count) = served.get(&path) {
                     count.fetch_add(1, Ordering::SeqCst);
+                    received.notify_one();
                 }
                 let (status, body, delay) = table
                     .get(&path)
@@ -117,7 +129,12 @@ async fn fixture(
             });
         }
     });
-    Ok(Fixture { base, counts, task })
+    Ok(Fixture {
+        base,
+        counts,
+        request_received,
+        task,
+    })
 }
 
 fn digest512(body: &[u8]) -> String {
@@ -501,12 +518,14 @@ async fn cancellation_ends_the_fetch_without_trying_the_next_source() -> anyhow:
     let token = CancellationToken::new();
     let pending = token.clone();
     let handle = tokio::spawn(async move { store.fetch(&item, &pending).await });
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let received =
+        tokio::time::timeout(Duration::from_secs(5), fixture.wait_for_request("/stalled")).await;
     token.cancel();
     let error = tokio::time::timeout(Duration::from_secs(2), handle)
         .await??
         .err()
         .context("a cancelled download succeeded")?;
+    received.context("the primary request did not reach the fixture before cancellation")?;
     let text = format!("{error:#}");
     assert!(text.contains("download cancelled"), "{text}");
     assert_eq!(fixture.requests("/stalled"), 1);
