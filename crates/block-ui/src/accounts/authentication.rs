@@ -2138,42 +2138,40 @@ impl Block {
                 .child(note(tr!(language, "accounts.auth.complete.waiting")));
         };
         components::card(self.palette)
-            .items_center()
-            .text_center()
-            .child(
-                components::account_avatar(
-                    &account.player_name,
-                    state
-                        .prepared_avatar
-                        .as_ref()
-                        .or_else(|| self.account_avatars.get(&account.identity_key())),
-                    self.palette,
-                    super::design::PLAYER_AVATAR_SIZE,
-                    AvatarState::Fallback,
-                )
-                .rounded(px(0.)),
-            )
+            .p_3()
             .child(
                 div()
                     .flex()
-                    .flex_col()
                     .items_center()
-                    .gap(px(4.))
+                    .gap_3()
+                    .child(
+                        components::account_avatar(
+                            &account.player_name,
+                            state
+                                .prepared_avatar
+                                .as_ref()
+                                .or_else(|| self.account_avatars.get(&account.identity_key())),
+                            self.palette,
+                            44.,
+                            AvatarState::Fallback,
+                        )
+                        .rounded(px(0.)),
+                    )
                     .child(
                         div()
-                            .text_xl()
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .child(account.player_name.clone()),
-                    )
-                    .child(components::badge(
-                        self.account_authority(account),
-                        self.palette,
-                        BadgeVariant::Secondary,
-                    )),
-            )
-            .children(
-                self.account_provider(account)
-                    .map(|provider| note(provider.api_url.clone())),
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .text_base()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child(account.player_name.clone()),
+                            )
+                            .child(note(self.account_authority(account))),
+                    ),
             )
             .children((state.phase == Phase::Saved).then(|| {
                 components::badge(
