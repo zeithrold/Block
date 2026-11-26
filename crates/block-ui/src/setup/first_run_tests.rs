@@ -1495,9 +1495,9 @@ fn overview_footer_offers_one_exit_beside_the_later_choice(cx: &mut gpui::TestAp
     cx.run_until_parked();
     assert!(
         crate::test_support::control_bounds(cx, "setup-continue").is_some(),
-        "the primary exit stays in the footer"
+        "the skip action stays in the footer"
     );
-    assert_eq!(label(cx, "setup-continue").as_deref(), Some("Go to Home"));
+    assert_eq!(label(cx, "setup-continue").as_deref(), Some("Skip for now"));
     assert!(crate::test_support::control_bounds(cx, "setup-later").is_none());
     assert!(
         crate::test_support::control_bounds(cx, "setup-more-options").is_none(),
@@ -1892,16 +1892,16 @@ fn skip_persists_completion_without_fabricating_account_or_game(cx: &mut gpui::T
         let (engine, messages) = Engine::with_root(root.path().to_owned())?;
         let (view, cx) = crate::test_support::window(cx, move |window, cx| {
             let mut view = crate::tests::test_view(window, cx);
+            view.preferences.reduce_motion = true;
             view.engine = Some(engine);
             view.messages = Some(messages);
+            view.begin_first_run(cx);
             view
         });
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.begin_first_run(cx);
-                view.handle_first_run(FirstRunAction::Skip, window, cx);
-            });
-        });
+        cx.run_until_parked();
+        let skip = bounds(cx, "setup-continue")?;
+        cx.simulate_click(skip.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
         assert!(view.read_with(cx, |view, _| {
             view.preferences.onboarding_complete
                 && view.router.tab() == Tab::Home

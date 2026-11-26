@@ -566,14 +566,36 @@ impl Block {
             .into_any_element()
     }
 
-    /// The primary action names what happens to the selected game and where
-    /// setup goes next. Leaving without preparing remains an explicit choice.
+    /// Without a selected game, leaving setup is a quiet alternative to the tasks.
+    /// With a game selected, the actions describe what happens to that game.
     fn first_run_footer(&self, cx: &Context<'_, Self>) -> Option<gpui::Stateful<gpui::Div>> {
         if self.shell.first_run.stage != Stage::Overview {
             return None;
         }
         let state = self.first_run_game_state();
         let language = self.language();
+        let (label, variant) = match state {
+            GameState::None => ("setup.footer.skip_for_now", ButtonVariant::Ghost),
+            GameState::Ready => ("setup.footer.home", ButtonVariant::Primary),
+            GameState::Unprepared => ("setup.footer.prepare_home", ButtonVariant::Primary),
+            GameState::PendingPack => ("setup.game.continue_import", ButtonVariant::Primary),
+        };
+        let continue_action = self
+            .button_with_variant(
+                "setup-continue",
+                tr!(language, label),
+                UiAction::FirstRun(Action::Continue),
+                variant,
+                cx,
+            )
+            .h_auto()
+            .min_h(px(36.))
+            .whitespace_normal();
+        let continue_action = if state == GameState::None {
+            continue_action.self_center()
+        } else {
+            continue_action.w_full()
+        };
         let later = matches!(state, GameState::Unprepared | GameState::PendingPack).then(|| {
             self.button_with_variant(
                 "setup-later",
@@ -605,26 +627,7 @@ impl Block {
                         .justify_end()
                         .gap_3()
                         .children(later)
-                        .child(
-                            self.button_with_variant(
-                                "setup-continue",
-                                tr!(
-                                    language,
-                                    match state {
-                                        GameState::Unprepared => "setup.footer.prepare_home",
-                                        GameState::PendingPack => "setup.game.continue_import",
-                                        GameState::None | GameState::Ready => "setup.footer.home",
-                                    }
-                                ),
-                                UiAction::FirstRun(Action::Continue),
-                                ButtonVariant::Primary,
-                                cx,
-                            )
-                            .w_full()
-                            .h_auto()
-                            .min_h(px(36.))
-                            .whitespace_normal(),
-                        ),
+                        .child(continue_action),
                 ),
         )
     }

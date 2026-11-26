@@ -745,6 +745,11 @@
     "zh-Hans": "进入主页",
     "ja": "ホームへ"
   },
+  "setup.footer.skip_for_now": {
+    "en": "Skip for now",
+    "zh-Hans": "暂时跳过",
+    "ja": "今はスキップ"
+  },
   "setup.footer.home_later": {
     "en": "Go to Home without preparing",
     "zh-Hans": "暂不准备，进入主页",

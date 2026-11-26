@@ -86,7 +86,7 @@ class ScenarioContractsTest(unittest.TestCase):
         for name in ("auth-complete", "auth-authlib-complete"):
             with self.subTest(name=name):
                 self.assertIn("Save and use", contract(name)["required"])
-        self.assertIn("Go to Home", contract("setup-overview")["required"])
+        self.assertIn("Skip for now", contract("setup-overview")["required"])
 
     def test_first_run_scenarios_follow_their_page_titles_and_frames(self) -> None:
         for name in ("setup-import-sources", "setup-import-list"):
